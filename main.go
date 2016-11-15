@@ -1,13 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/absolute8511/gorocksdb"
 	"github.com/coreos/etcd/raft/raftpb"
 	"io/ioutil"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -15,11 +15,17 @@ var (
 	flagSet   = flag.NewFlagSet("zanredisdb", flag.ExitOnError)
 	cluster   = flagSet.String("cluster", "http://127.0.0.1:9021", "comma separated cluster peers")
 	id        = flagSet.Int("id", 1, "node ID")
+	raftAddr  = flagSet.String("raftaddr", "", "the raft address of local")
 	clusterID = flagSet.Uint64("cluster_id", 1000, "cluster id of raft")
 	kvport    = flagSet.Int("port", 9121, "key-value server port")
 	join      = flagSet.Bool("join", false, "join an existing cluster")
 	dataDir   = flagSet.String("data", "", "the data path")
 )
+
+type ClusterMemberInfo struct {
+	ID   int    `json:"id"`
+	Addr string `json:"addr"`
+}
 
 func main() {
 	flagSet.Parse(os.Args[1:])
@@ -40,8 +46,21 @@ func main() {
 	// raft provides a commit stream for the proposals from the http api
 	var kvs *kvstore
 	getSnapshot := func() ([]byte, error) { return kvs.getSnapshot() }
-	commitC, errorC, raftNode := newRaftNode(*clusterID, *id, *dataDir,
-		strings.Split(*cluster, ","), *join, getSnapshot, proposeC, confChangeC)
+	clusterInfo := make([]ClusterMemberInfo, 0)
+	err := json.Unmarshal([]byte(*cluster), &clusterInfo)
+	if err != nil {
+		panic(err)
+	}
+	clusterNodes := make(map[int]string)
+	for _, v := range clusterInfo {
+		clusterNodes[v.ID] = v.Addr
+	}
+	if *raftAddr == "" {
+		*raftAddr, _ = clusterNodes[*id]
+	}
+	fmt.Printf("local %v start with cluster: %v\n", *raftAddr, clusterNodes)
+	commitC, errorC, raftNode := newRaftNode(*clusterID, *id, *raftAddr, *dataDir,
+		clusterNodes, *join, getSnapshot, proposeC, confChangeC)
 
 	kvOpts := &KVOptions{
 		DataDir:          *dataDir,

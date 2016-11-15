@@ -54,14 +54,15 @@ type raftNode struct {
 	commitC     chan<- *applyCommitEntry // entries committed to log (k,v)
 	errorC      chan<- error             // errors from raft session
 
-	clusterID   uint64
-	id          int      // client ID for raft session
-	peers       []string // raft peer URLs
-	join        bool     // node is joining an existing cluster
-	waldir      string   // path to WAL directory
-	snapdir     string   // path to snapshot directory
-	getSnapshot func() ([]byte, error)
-	lastIndex   uint64 // index of log at start
+	clusterID     uint64
+	id            int // client ID for raft session
+	localRaftAddr string
+	peers         map[int]string // raft peer URLs
+	join          bool           // node is joining an existing cluster
+	waldir        string         // path to WAL directory
+	snapdir       string         // path to snapshot directory
+	getSnapshot   func() ([]byte, error)
+	lastIndex     uint64 // index of log at start
 
 	confState     raftpb.ConfState
 	snapshotIndex uint64
@@ -88,28 +89,29 @@ var defaultSnapCount uint64 = 10000
 // provided the proposal channel. All log entries are replayed over the
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries. To shutdown, close proposeC and read errorC.
-func newRaftNode(clusterID uint64, id int, raftDataDir string,
-	peers []string, join bool, getSnapshot func() ([]byte, error), proposeC <-chan []byte,
+func newRaftNode(clusterID uint64, id int, localRaftAddr string, raftDataDir string,
+	peers map[int]string, join bool, getSnapshot func() ([]byte, error), proposeC <-chan []byte,
 	confChangeC <-chan raftpb.ConfChange) (<-chan *applyCommitEntry, <-chan error, *raftNode) {
 
 	commitC := make(chan *applyCommitEntry)
 	errorC := make(chan error)
 
 	rc := &raftNode{
-		proposeC:    proposeC,
-		confChangeC: confChangeC,
-		commitC:     commitC,
-		errorC:      errorC,
-		clusterID:   clusterID,
-		id:          id,
-		peers:       peers,
-		join:        join,
-		getSnapshot: getSnapshot,
-		raftStorage: raft.NewMemoryStorage(),
-		snapCount:   defaultSnapCount,
-		stopc:       make(chan struct{}),
-		httpstopc:   make(chan struct{}),
-		httpdonec:   make(chan struct{}),
+		proposeC:      proposeC,
+		confChangeC:   confChangeC,
+		commitC:       commitC,
+		errorC:        errorC,
+		clusterID:     clusterID,
+		id:            id,
+		localRaftAddr: localRaftAddr,
+		peers:         peers,
+		join:          join,
+		getSnapshot:   getSnapshot,
+		raftStorage:   raft.NewMemoryStorage(),
+		snapCount:     defaultSnapCount,
+		stopc:         make(chan struct{}),
+		httpstopc:     make(chan struct{}),
+		httpdonec:     make(chan struct{}),
 
 		// rest of structure populated after WAL replay
 	}
@@ -169,6 +171,7 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) bool {
 			switch cc.Type {
 			case raftpb.ConfChangeAddNode:
 				if len(cc.Context) > 0 {
+					log.Printf("new node added to the cluster: %v-%v\n", cc.NodeID, string(cc.Context))
 					rc.transport.AddPeer(types.ID(cc.NodeID), []string{string(cc.Context)})
 				}
 			case raftpb.ConfChangeRemoveNode:
@@ -251,9 +254,9 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	oldwal := wal.Exist(rc.waldir)
 	rc.wal = rc.replayWAL()
 
-	rpeers := make([]raft.Peer, len(rc.peers))
-	for i := range rpeers {
-		rpeers[i] = raft.Peer{ID: uint64(i + 1)}
+	rpeers := make([]raft.Peer, 0, len(rc.peers))
+	for id, v := range rc.peers {
+		rpeers = append(rpeers, raft.Peer{ID: uint64(id), Context: []byte(v)})
 	}
 	c := &raft.Config{
 		ID:              uint64(rc.id),
@@ -300,9 +303,9 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	}
 
 	rc.transport.Start()
-	for i := range rc.peers {
-		if i+1 != rc.id {
-			rc.transport.AddPeer(types.ID(i+1), []string{rc.peers[i]})
+	for id, v := range rc.peers {
+		if id != rc.id {
+			rc.transport.AddPeer(types.ID(id), []string{v})
 		}
 	}
 
@@ -451,7 +454,7 @@ func (rc *raftNode) serveChannels() {
 }
 
 func (rc *raftNode) serveRaft() {
-	url, err := url.Parse(rc.peers[rc.id-1])
+	url, err := url.Parse(rc.localRaftAddr)
 	if err != nil {
 		log.Fatalf("Failed parsing URL (%v)", err)
 	}
