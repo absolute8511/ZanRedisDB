@@ -17,16 +17,21 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 
 	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/pkg/fileutil"
+	"github.com/coreos/etcd/pkg/idutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
@@ -47,6 +52,15 @@ type applyCommitEntry struct {
 	snapshot    raftpb.Snapshot
 }
 
+type MemberInfo struct {
+	ID        uint64   `json:"id"`
+	Name      string   `json:"name"`
+	Broadcast string   `json:"broadcast"`
+	RpcPort   int      `json:"rpc_port"`
+	RaftURLs  []string `json:"peer_urls"`
+	DataDir   string   `json:"data_dir"`
+}
+
 // A key-value stream backed by raft
 type raftNode struct {
 	proposeC    <-chan []byte            // proposed messages (k,v)
@@ -56,13 +70,17 @@ type raftNode struct {
 
 	clusterID     uint64
 	id            int // client ID for raft session
+	DataDir       string
 	localRaftAddr string
 	peers         map[int]string // raft peer URLs
-	join          bool           // node is joining an existing cluster
-	waldir        string         // path to WAL directory
-	snapdir       string         // path to snapshot directory
+	memMutex      sync.Mutex
+	members       map[uint64]*MemberInfo
+	join          bool   // node is joining an existing cluster
+	waldir        string // path to WAL directory
+	snapdir       string // path to snapshot directory
 	getSnapshot   func() ([]byte, error)
 	lastIndex     uint64 // index of log at start
+	lead          uint64
 
 	confState     raftpb.ConfState
 	snapshotIndex uint64
@@ -80,6 +98,7 @@ type raftNode struct {
 	stopc     chan struct{} // signals proposal channel closed
 	httpstopc chan struct{} // signals http server to shutdown
 	httpdonec chan struct{} // signals http server shutdown complete
+	reqIDGen  *idutil.Generator
 }
 
 var defaultSnapCount uint64 = 10000
@@ -105,6 +124,7 @@ func newRaftNode(clusterID uint64, id int, localRaftAddr string, raftDataDir str
 		id:            id,
 		localRaftAddr: localRaftAddr,
 		peers:         peers,
+		members:       make(map[uint64]*MemberInfo),
 		join:          join,
 		getSnapshot:   getSnapshot,
 		raftStorage:   raft.NewMemoryStorage(),
@@ -112,6 +132,8 @@ func newRaftNode(clusterID uint64, id int, localRaftAddr string, raftDataDir str
 		stopc:         make(chan struct{}),
 		httpstopc:     make(chan struct{}),
 		httpdonec:     make(chan struct{}),
+		DataDir:       raftDataDir,
+		reqIDGen:      idutil.NewGenerator(uint16(id), time.Now()),
 
 		// rest of structure populated after WAL replay
 	}
@@ -170,16 +192,47 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) bool {
 			rc.node.ApplyConfChange(cc)
 			switch cc.Type {
 			case raftpb.ConfChangeAddNode:
+				log.Printf("conf change : node add : %v\n", cc.NodeID)
 				if len(cc.Context) > 0 {
-					log.Printf("new node added to the cluster: %v-%v\n", cc.NodeID, string(cc.Context))
-					rc.transport.AddPeer(types.ID(cc.NodeID), []string{string(cc.Context)})
+					var m MemberInfo
+					err := json.Unmarshal(cc.Context, &m)
+					if err != nil {
+						log.Printf("error conf context: %v", err)
+					} else {
+						rc.memMutex.Lock()
+						if _, ok := rc.members[cc.NodeID]; ok {
+							log.Printf("node already exist in cluster: %v-%v\n", cc.NodeID, m)
+							rc.memMutex.Unlock()
+						} else {
+							rc.members[cc.NodeID] = &m
+							rc.memMutex.Unlock()
+							if cc.NodeID != uint64(rc.id) {
+								rc.transport.AddPeer(types.ID(cc.NodeID), m.RaftURLs)
+							}
+						}
+						log.Printf("node added to the cluster: %v-%v\n", cc.NodeID, m)
+					}
 				}
 			case raftpb.ConfChangeRemoveNode:
+				rc.memMutex.Lock()
+				delete(rc.members, cc.NodeID)
+				rc.memMutex.Unlock()
 				if cc.NodeID == uint64(rc.id) {
 					log.Println("I've been removed from the cluster! Shutting down.")
 					return false
 				}
 				rc.transport.RemovePeer(types.ID(cc.NodeID))
+			case raftpb.ConfChangeUpdateNode:
+				var m MemberInfo
+				json.Unmarshal(cc.Context, &m)
+				log.Printf("node updated to the cluster: %v-%v\n", cc.NodeID, m)
+				rc.memMutex.Lock()
+				rc.members[cc.NodeID] = &m
+				rc.memMutex.Unlock()
+
+				if cc.NodeID != uint64(rc.id) {
+					rc.transport.UpdatePeer(types.ID(cc.NodeID), m.RaftURLs)
+				}
 			}
 		}
 
@@ -256,7 +309,20 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 
 	rpeers := make([]raft.Peer, 0, len(rc.peers))
 	for id, v := range rc.peers {
-		rpeers = append(rpeers, raft.Peer{ID: uint64(id), Context: []byte(v)})
+		var m MemberInfo
+		if id == rc.id {
+			m.ID = uint64(id)
+			m.DataDir = rc.DataDir
+			u, err := url.Parse(rc.localRaftAddr)
+			if err != nil {
+			}
+			m.Broadcast, _, err = net.SplitHostPort(u.Host)
+			m.RaftURLs = append(m.RaftURLs, rc.localRaftAddr)
+		} else {
+			m.RaftURLs = append(m.RaftURLs, v)
+		}
+		d, _ := json.Marshal(m)
+		rpeers = append(rpeers, raft.Peer{ID: uint64(id), Context: d})
 	}
 	c := &raft.Config{
 		ID:              uint64(rc.id),
@@ -393,8 +459,6 @@ func (rc *raftNode) serveChannels() {
 
 	// send proposals over raft
 	go func() {
-		var confChangeCount uint64 = 0
-
 		for rc.proposeC != nil && rc.confChangeC != nil {
 			select {
 			case prop, ok := <-rc.proposeC:
@@ -409,9 +473,11 @@ func (rc *raftNode) serveChannels() {
 				if !ok {
 					rc.confChangeC = nil
 				} else {
-					confChangeCount += 1
-					cc.ID = confChangeCount
-					rc.node.ProposeConfChange(context.TODO(), cc)
+					cc.ID = rc.reqIDGen.Next()
+					err := rc.node.ProposeConfChange(context.TODO(), cc)
+					if err != nil {
+						log.Printf("failed to propose the conf change: %v", err)
+					}
 				}
 			}
 		}
@@ -427,6 +493,13 @@ func (rc *raftNode) serveChannels() {
 
 		// store raft entries to wal, then publish over commit channel
 		case rd := <-rc.node.Ready():
+			if rd.SoftState != nil {
+				if lead := atomic.LoadUint64(&rc.lead); rd.SoftState.Lead != raft.None && lead != rd.SoftState.Lead {
+					log.Printf("leader changed from %v to %v", lead, rd.SoftState)
+				}
+				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
+				//islead = rd.RaftState == raft.StateLeader
+			}
 			rc.wal.Save(rd.HardState, rd.Entries)
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				rc.saveSnap(rd.Snapshot)
@@ -471,6 +544,19 @@ func (rc *raftNode) serveRaft() {
 		log.Fatalf("Failed to serve rafthttp (%v)", err)
 	}
 	close(rc.httpdonec)
+}
+
+func (rc *raftNode) Lead() uint64 { return atomic.LoadUint64(&rc.lead) }
+func (rc *raftNode) isLead() bool { return atomic.LoadUint64(&rc.lead) == uint64(rc.id) }
+
+func (rc *raftNode) GetLeadMember() *MemberInfo {
+	rc.memMutex.Lock()
+	m, ok := rc.members[rc.Lead()]
+	rc.memMutex.Unlock()
+	if ok {
+		return m
+	}
+	return nil
 }
 
 func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {

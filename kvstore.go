@@ -17,6 +17,7 @@ package main
 import (
 	"bytes"
 	"encoding/gob"
+	"errors"
 	"log"
 	"os"
 	"path"
@@ -38,6 +39,7 @@ type kvstore struct {
 	mu       sync.RWMutex
 	DBEngine *gorocksdb.DB
 	opts     *KVOptions
+	raftNode *raftNode
 }
 
 type KVOptions struct {
@@ -47,16 +49,20 @@ type KVOptions struct {
 }
 
 type kv struct {
-	Key string
-	Val string
-	Err error
+	Key   string
+	Val   string
+	Err   error
+	ReqID int64
+	// the write operation describe
+	Op string
 }
 
-func newKVStore(kvopts *KVOptions, proposeC chan<- []byte,
+func newKVStore(kvopts *KVOptions, r *raftNode, proposeC chan<- []byte,
 	commitC <-chan *applyCommitEntry, errorC <-chan error) *kvstore {
 	s := &kvstore{
 		proposeC: proposeC,
 		opts:     kvopts,
+		raftNode: r,
 	}
 
 	err := s.openDB()
@@ -90,13 +96,21 @@ func (s *kvstore) Clear() error {
 	return s.openDB()
 }
 
-func (s *kvstore) Lookup(key string) (string, error) {
+func (s *kvstore) LocalLookup(key string) (string, error) {
 	value, err := s.DBEngine.GetBytes(s.opts.DefaultReadOpts, []byte(key))
 	return string(value), err
 }
 
-func (s *kvstore) Delete(key string) error {
+func (s *kvstore) LocalDelete(key string) error {
 	err := s.DBEngine.Delete(s.opts.DefaultWriteOpts, []byte(key))
+	return err
+}
+
+func (s *kvstore) LocalPut(key []byte, value []byte) error {
+	err := s.DBEngine.Put(s.opts.DefaultWriteOpts, key, value)
+	if err != nil {
+		log.Printf("failed to write key %v to db: %v\n", string(key), err)
+	}
 	return err
 }
 
@@ -123,7 +137,7 @@ func (s *kvstore) ReadRange(startKey string, endKey string, maxNum int) chan kv 
 	return retChan
 }
 
-func (s *kvstore) WriteBatch() error {
+func (s *kvstore) LocalWriteBatch() error {
 	wb := gorocksdb.NewWriteBatch()
 	// defer wb.Close or use wb.Clear and reuse.
 	wb.Delete([]byte("foo"))
@@ -136,11 +150,23 @@ func (s *kvstore) WriteBatch() error {
 	return err
 }
 
-func (s *kvstore) Propose(k string, v string) {
+func (s *kvstore) Lookup(key string) (string, error) {
+	// TODO: check master, determine the partition and the dest node
+	return s.LocalLookup(key)
+}
+
+func (s *kvstore) Put(k string, v string) error {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(kv{Key: k, Val: v}); err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return err
 	}
+	s.propose(buf)
+	// TODO: wait write done here
+	return nil
+}
+
+func (s *kvstore) propose(buf bytes.Buffer) {
 	s.proposeC <- buf.Bytes()
 }
 
@@ -160,10 +186,8 @@ func (s *kvstore) readCommits(commitC <-chan *applyCommitEntry, errorC <-chan er
 			if err := dec.Decode(&dataKv); err != nil {
 				log.Fatalf("could not decode message (%v)\n", err)
 			}
-			err := s.DBEngine.Put(s.opts.DefaultWriteOpts, []byte(dataKv.Key), []byte(dataKv.Val))
-			if err != nil {
-				log.Fatalf("failed to write to db: %v\n", err)
-			}
+			s.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
+			// TODO: notify the write client this write has been applied to cluster
 		}
 	}
 	if err, ok := <-errorC; ok {
@@ -196,19 +220,26 @@ func (s *kvstore) getSnapshot() ([]byte, error) {
 	be.PurgeOldBackups(s.DBEngine, 3)
 	beInfo.Destroy()
 	be.Close()
-	// copy the db files to the snapshot dir
 	return []byte(strconv.Itoa(int(lastID))), nil
 }
 
 func (s *kvstore) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 	snapshot := raftSnapshot.Data
 	log.Printf("should recovery from snapshot here: %v", string(snapshot))
+	remoteLeader := s.raftNode.GetLeadMember()
+	if remoteLeader == nil {
+		log.Printf("no leader found")
+		return errors.New("leader empty")
+	}
+	log.Printf("should recovery from leader: %v", remoteLeader)
 	// copy backup data from the remote leader node, and recovery backup from it
 	// if local has some old backup data, we should use rsync to sync the data file
 	// use the rocksdb backup/checkpoint interface to backup data
+	RunFileSync(remoteLeader.Broadcast, path.Join(remoteLeader.DataDir, "rocksdb_backup"), s.opts.DataDir)
 	opts := gorocksdb.NewDefaultOptions()
 	log.Printf("begin restore\n")
-	be, err := gorocksdb.OpenBackupEngine(opts, s.opts.DataDir+"/rocksdb_backup")
+	localBackupPath := path.Join(s.opts.DataDir, "rocksdb_backup")
+	be, err := gorocksdb.OpenBackupEngine(opts, localBackupPath)
 	if err != nil {
 		log.Printf("backup engine failed: %v\n", err)
 		return err

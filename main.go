@@ -68,10 +68,28 @@ func main() {
 		DefaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
 	}
 
-	kvs = newKVStore(kvOpts, proposeC, commitC, errorC)
+	kvs = newKVStore(kvOpts, raftNode, proposeC, commitC, errorC)
 	defer kvs.Close()
 	go raftNode.startRaft(kvs)
 
+	_, ok := clusterNodes[*id]
+	if ok {
+		var m MemberInfo
+		m.ID = uint64(*id)
+		m.DataDir = *dataDir
+		m.RaftURLs = append(m.RaftURLs, *raftAddr)
+		m.Broadcast = "127.0.0.1"
+		data, _ := json.Marshal(m)
+		go func() {
+			cc := raftpb.ConfChange{
+				Type:    raftpb.ConfChangeUpdateNode,
+				NodeID:  uint64(*id),
+				Context: data,
+			}
+			time.Sleep(time.Second)
+			confChangeC <- cc
+		}()
+	}
 	// the key-value http handler will propose updates to raft
 	serveHttpKVAPI(kvs, *kvport, confChangeC, errorC)
 }
