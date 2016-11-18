@@ -60,7 +60,12 @@ func Run(retries int, f func() error) error {
 }
 
 func RunFileSync(remote string, srcPath string, dstPath string) error {
-	cmd := exec.Command("scp", "-r", remote+":"+srcPath, dstPath)
+	var cmd *exec.Cmd
+	if remote == "" {
+		cmd = exec.Command("cp", "-rp", srcPath, dstPath)
+	} else {
+		cmd = exec.Command("scp", "-rp", remote+":"+srcPath, dstPath)
+	}
 	err := cmd.Run()
 	if err != nil {
 		log.Printf("cmd error: %v\n", err)

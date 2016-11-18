@@ -17,11 +17,13 @@ package main
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"path"
-	"strconv"
 	"sync"
 
 	"github.com/absolute8511/gorocksdb"
@@ -40,6 +42,12 @@ type kvstore struct {
 	DBEngine *gorocksdb.DB
 	opts     *KVOptions
 	raftNode *raftNode
+}
+
+type kvSnapInfo struct {
+	BackupID   int64         `json:"backup_id"`
+	LeaderInfo *MemberInfo   `json:"leader_info"`
+	Members    []*MemberInfo `json:"members"`
 }
 
 type KVOptions struct {
@@ -220,31 +228,85 @@ func (s *kvstore) getSnapshot() ([]byte, error) {
 	be.PurgeOldBackups(s.DBEngine, 3)
 	beInfo.Destroy()
 	be.Close()
-	return []byte(strconv.Itoa(int(lastID))), nil
+	var si kvSnapInfo
+	si.BackupID = lastID
+	si.LeaderInfo = s.raftNode.GetLeadMember()
+	si.Members = s.raftNode.GetMembers()
+	backData, _ := json.Marshal(si)
+	log.Printf("snapshot data : %v\n", backData)
+	return backData, nil
 }
 
 func (s *kvstore) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 	snapshot := raftSnapshot.Data
-	log.Printf("should recovery from snapshot here: %v", string(snapshot))
-	remoteLeader := s.raftNode.GetLeadMember()
-	if remoteLeader == nil {
-		log.Printf("no leader found")
-		return errors.New("leader empty")
+	var si kvSnapInfo
+	err := json.Unmarshal(snapshot, &si)
+	if err != nil {
+		return err
 	}
-	log.Printf("should recovery from leader: %v", remoteLeader)
-	// copy backup data from the remote leader node, and recovery backup from it
-	// if local has some old backup data, we should use rsync to sync the data file
-	// use the rocksdb backup/checkpoint interface to backup data
-	RunFileSync(remoteLeader.Broadcast, path.Join(remoteLeader.DataDir, "rocksdb_backup"), s.opts.DataDir)
+	s.raftNode.RestoreMembers(si.Members)
+	log.Printf("should recovery from snapshot here: %v", si)
 	opts := gorocksdb.NewDefaultOptions()
-	log.Printf("begin restore\n")
 	localBackupPath := path.Join(s.opts.DataDir, "rocksdb_backup")
 	be, err := gorocksdb.OpenBackupEngine(opts, localBackupPath)
 	if err != nil {
-		log.Printf("backup engine failed: %v\n", err)
+		log.Printf("backup engine open failed: %v", err)
 		return err
 	}
-	restoreOpts := &gorocksdb.RestoreOptions{}
+	beInfo := be.GetInfo()
+	lastID := int64(0)
+	if beInfo.GetCount() > 0 {
+		lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
+	}
+	log.Printf("local total backup : %v, last: %v\n", beInfo.GetCount(), lastID)
+	hasBackup := false
+	for i := 0; i < beInfo.GetCount(); i++ {
+		id := beInfo.GetBackupId(i)
+		log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
+			beInfo.GetSize(i))
+		if id == si.BackupID {
+			hasBackup = true
+			break
+		}
+	}
+	if !hasBackup {
+		log.Printf("local no backup for snapshot, copy from remote\n")
+		remoteLeader := si.LeaderInfo
+		if remoteLeader == nil {
+			log.Printf("no leader found")
+			// TODO: try find leader from cluster
+			return errors.New("leader empty")
+		}
+		log.Printf("should recovery from leader: %v", remoteLeader)
+		u, _ := url.Parse(s.raftNode.localRaftAddr)
+		h, _, _ := net.SplitHostPort(u.Host)
+		if remoteLeader.Broadcast == h {
+			remoteLeader.Broadcast = ""
+		}
+		// copy backup data from the remote leader node, and recovery backup from it
+		// if local has some old backup data, we should use rsync to sync the data file
+		// use the rocksdb backup/checkpoint interface to backup data
+		RunFileSync(remoteLeader.Broadcast, path.Join(remoteLeader.DataDir, "rocksdb_backup"), s.opts.DataDir)
+		be.Close()
+		be, err = gorocksdb.OpenBackupEngine(opts, localBackupPath)
+		if err != nil {
+			log.Printf("backup engine open failed: %v", err)
+			return err
+		}
+		beInfo = be.GetInfo()
+		lastID = int64(0)
+		if beInfo.GetCount() > 0 {
+			lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
+		}
+		log.Printf("after sync total backup : %v, last: %v\n", beInfo.GetCount(), lastID)
+		for i := 0; i < beInfo.GetCount(); i++ {
+			id := beInfo.GetBackupId(i)
+			log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
+				beInfo.GetSize(i))
+		}
+	}
+	log.Printf("begin restore\n")
+	restoreOpts := gorocksdb.NewRestoreOptions()
 	err = be.RestoreDBFromLatestBackup(s.opts.DataDir, s.opts.DataDir, restoreOpts)
 	if err != nil {
 		log.Printf("restore failed: %v\n", err)

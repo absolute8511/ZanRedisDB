@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -143,6 +144,7 @@ func newRaftNode(clusterID uint64, id int, localRaftAddr string, raftDataDir str
 }
 
 func (rc *raftNode) saveSnap(snap raftpb.Snapshot) error {
+	log.Printf("saving snapshot: %v\n", snap.String())
 	if err := rc.snapshotter.SaveSnap(snap); err != nil {
 		return err
 	}
@@ -189,7 +191,7 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) bool {
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange
 			cc.Unmarshal(ents[i].Data)
-			rc.node.ApplyConfChange(cc)
+			rc.confState = *rc.node.ApplyConfChange(cc)
 			switch cc.Type {
 			case raftpb.ConfChangeAddNode:
 				log.Printf("conf change : node add : %v\n", cc.NodeID)
@@ -199,6 +201,7 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) bool {
 					if err != nil {
 						log.Printf("error conf context: %v", err)
 					} else {
+						m.ID = cc.NodeID
 						rc.memMutex.Lock()
 						if _, ok := rc.members[cc.NodeID]; ok {
 							log.Printf("node already exist in cluster: %v-%v\n", cc.NodeID, m)
@@ -238,8 +241,6 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) bool {
 
 		// after commit, update appliedIndex
 		rc.appliedIndex = ents[i].Index
-
-		// special nil commit to signal replay has finished
 		if ents[i].Index == rc.lastIndex {
 			log.Printf("replay finished at index: %v\n", rc.lastIndex)
 		}
@@ -248,20 +249,28 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) bool {
 }
 
 // openWAL returns a WAL ready for reading.
-func (rc *raftNode) openWAL() *wal.WAL {
+func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	if !wal.Exist(rc.waldir) {
 		if err := os.MkdirAll(rc.waldir, DIR_PERM); err != nil {
 			log.Fatalf("cannot create dir for wal (%v)", err)
 		}
 
-		w, err := wal.Create(rc.waldir, nil)
+		var m MemberInfo
+		m.ID = uint64(rc.id)
+		m.Name = "test-cluster-part1"
+		d, _ := json.Marshal(m)
+		w, err := wal.Create(rc.waldir, d)
 		if err != nil {
 			log.Fatalf("create wal error (%v)", err)
 		}
-		w.Close()
+		return w
 	}
 
-	w, err := wal.Open(rc.waldir, walpb.Snapshot{})
+	var walsnap walpb.Snapshot
+	if snapshot != nil {
+		walsnap.Index, walsnap.Term = snapshot.Metadata.Index, snapshot.Metadata.Term
+	}
+	w, err := wal.Open(rc.waldir, walsnap)
 	if err != nil {
 		log.Fatalf("error loading wal (%v)", err)
 	}
@@ -270,12 +279,17 @@ func (rc *raftNode) openWAL() *wal.WAL {
 }
 
 // replayWAL replays WAL entries into the raft instance.
-func (rc *raftNode) replayWAL() *wal.WAL {
-	w := rc.openWAL()
-	_, st, ents, err := w.ReadAll()
+func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) *wal.WAL {
+	w := rc.openWAL(snapshot)
+	meta, st, ents, err := w.ReadAll()
 	if err != nil {
 		w.Close()
 		log.Fatalf("failed to read WAL (%v)", err)
+	}
+	log.Printf("wal meta: %v, restart with: %v", string(meta), st.String())
+
+	if snapshot != nil {
+		rc.raftStorage.ApplySnapshot(*snapshot)
 	}
 	// append to storage so raft starts at the right place in log
 	rc.raftStorage.Append(ents)
@@ -303,27 +317,8 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		}
 	}
 	rc.snapshotter = snap.New(rc.snapdir)
-
 	oldwal := wal.Exist(rc.waldir)
-	rc.wal = rc.replayWAL()
 
-	rpeers := make([]raft.Peer, 0, len(rc.peers))
-	for id, v := range rc.peers {
-		var m MemberInfo
-		if id == rc.id {
-			m.ID = uint64(id)
-			m.DataDir = rc.DataDir
-			u, err := url.Parse(rc.localRaftAddr)
-			if err != nil {
-			}
-			m.Broadcast, _, err = net.SplitHostPort(u.Host)
-			m.RaftURLs = append(m.RaftURLs, rc.localRaftAddr)
-		} else {
-			m.RaftURLs = append(m.RaftURLs, v)
-		}
-		d, _ := json.Marshal(m)
-		rpeers = append(rpeers, raft.Peer{ID: uint64(id), Context: d})
-	}
 	c := &raft.Config{
 		ID:              uint64(rc.id),
 		ElectionTick:    10,
@@ -331,24 +326,31 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		Storage:         rc.raftStorage,
 		MaxSizePerMsg:   1024 * 1024,
 		MaxInflightMsgs: 256,
+		CheckQuorum:     true,
 	}
 
 	if oldwal {
-		snapshot, err := rc.snapshotter.Load()
-		if err != nil && err != snap.ErrNoSnapshot {
-			log.Panic(err)
-		}
-		if err == snap.ErrNoSnapshot || raft.IsEmptySnap(*snapshot) {
-			log.Printf("loading no snapshot \n")
-			ds.Clear()
-		} else {
-			log.Printf("loading snapshot at term %d and index %d\n", snapshot.Metadata.Term, snapshot.Metadata.Index)
-			if err := ds.RestoreFromSnapshot(*snapshot); err != nil {
-				log.Panic(err)
-			}
-		}
-		rc.node = raft.RestartNode(c)
+		rc.restartNode(c, ds)
 	} else {
+		rc.wal = rc.openWAL(nil)
+		rpeers := make([]raft.Peer, 0, len(rc.peers))
+		for id, v := range rc.peers {
+			var m MemberInfo
+			m.ID = uint64(id)
+			if id == rc.id {
+				m.DataDir = rc.DataDir
+				u, err := url.Parse(rc.localRaftAddr)
+				if err != nil {
+				}
+				m.Broadcast, _, err = net.SplitHostPort(u.Host)
+				m.RaftURLs = append(m.RaftURLs, rc.localRaftAddr)
+			} else {
+				m.RaftURLs = append(m.RaftURLs, v)
+			}
+			d, _ := json.Marshal(m)
+			rpeers = append(rpeers, raft.Peer{ID: uint64(id), Context: d})
+		}
+
 		startPeers := rpeers
 		if rc.join {
 			startPeers = nil
@@ -375,8 +377,41 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		}
 	}
 
+	for _, m := range rc.members {
+		if m.ID != uint64(rc.id) {
+			rc.transport.AddPeer(types.ID(m.ID), m.RaftURLs)
+		}
+	}
+
 	go rc.serveRaft()
 	go rc.serveChannels()
+}
+
+func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) {
+	snapshot, err := rc.snapshotter.Load()
+	if err != nil && err != snap.ErrNoSnapshot {
+		log.Panic(err)
+	}
+	if err == snap.ErrNoSnapshot || raft.IsEmptySnap(*snapshot) {
+		log.Printf("loading no snapshot \n")
+		ds.Clear()
+	} else {
+		log.Printf("loading snapshot at term %d and index %d, snap: %v\n", snapshot.Metadata.Term,
+			snapshot.Metadata.Index, snapshot.Metadata.ConfState)
+		if err := ds.RestoreFromSnapshot(*snapshot); err != nil {
+			log.Panic(err)
+		}
+	}
+
+	rc.wal = rc.replayWAL(snapshot)
+	rc.node = raft.RestartNode(c)
+	advanceTicksForElection(rc.node, c.ElectionTick)
+}
+
+func advanceTicksForElection(n raft.Node, electionTicks int) {
+	for i := 0; i < electionTicks-1; i++ {
+		n.Tick()
+	}
 }
 
 // stop closes http, closes all channels, and stops raft.
@@ -398,7 +433,7 @@ func (rc *raftNode) publishSnapshot(snapshotToSave raftpb.Snapshot) {
 		return
 	}
 
-	log.Printf("publishing snapshot at index %d", rc.snapshotIndex)
+	log.Printf("publishing snapshot at index %d, snapshot: %v", rc.snapshotIndex, snapshotToSave.String())
 	defer log.Printf("finished publishing snapshot at index %d", rc.snapshotIndex)
 
 	if snapshotToSave.Metadata.Index <= rc.appliedIndex {
@@ -406,6 +441,14 @@ func (rc *raftNode) publishSnapshot(snapshotToSave raftpb.Snapshot) {
 	}
 	rc.commitC <- &applyCommitEntry{snapshot: snapshotToSave} // trigger kvstore to load snapshot
 
+	rc.transport.RemoveAllPeers()
+	rc.memMutex.Lock()
+	for _, m := range rc.members {
+		if m.ID != uint64(rc.id) {
+			rc.transport.AddPeer(types.ID(m.ID), m.RaftURLs)
+		}
+	}
+	rc.memMutex.Unlock()
 	rc.confState = snapshotToSave.Metadata.ConfState
 	rc.snapshotIndex = snapshotToSave.Metadata.Index
 	rc.appliedIndex = snapshotToSave.Metadata.Index
@@ -423,10 +466,12 @@ func (rc *raftNode) maybeTriggerSnapshot() {
 	if err != nil {
 		log.Panic(err)
 	}
+	log.Printf("create snapshot with conf : %v\n", rc.confState)
 	snap, err := rc.raftStorage.CreateSnapshot(rc.appliedIndex, &rc.confState, data)
 	if err != nil {
 		panic(err)
 	}
+	log.Printf("saving snapshot by trigger\n")
 	if err := rc.saveSnap(snap); err != nil {
 		panic(err)
 	}
@@ -451,10 +496,11 @@ func (rc *raftNode) serveChannels() {
 	rc.confState = snap.Metadata.ConfState
 	rc.snapshotIndex = snap.Metadata.Index
 	rc.appliedIndex = snap.Metadata.Index
+	log.Printf("starting conf state: %v\n", rc.confState)
 
 	defer rc.wal.Close()
 
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	// send proposals over raft
@@ -549,6 +595,30 @@ func (rc *raftNode) serveRaft() {
 func (rc *raftNode) Lead() uint64 { return atomic.LoadUint64(&rc.lead) }
 func (rc *raftNode) isLead() bool { return atomic.LoadUint64(&rc.lead) == uint64(rc.id) }
 
+type memberSorter []*MemberInfo
+
+func (self memberSorter) Less(i, j int) bool {
+	return self[i].ID < self[j].ID
+}
+func (self memberSorter) Swap(i, j int) {
+	self[i], self[j] = self[j], self[i]
+}
+func (self memberSorter) Len() int {
+	return len(self)
+}
+
+func (rc *raftNode) GetMembers() []*MemberInfo {
+	rc.memMutex.Lock()
+	mems := make(memberSorter, 0, len(rc.members))
+	for id, m := range rc.members {
+		m.ID = id
+		mems = append(mems, m)
+	}
+	rc.memMutex.Unlock()
+	sort.Sort(memberSorter(mems))
+	return mems
+}
+
 func (rc *raftNode) GetLeadMember() *MemberInfo {
 	rc.memMutex.Lock()
 	m, ok := rc.members[rc.Lead()]
@@ -557,6 +627,20 @@ func (rc *raftNode) GetLeadMember() *MemberInfo {
 		return m
 	}
 	return nil
+}
+
+func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
+	rc.memMutex.Lock()
+	for _, m := range mems {
+		if m.ID != uint64(rc.id) {
+			if _, ok := rc.members[m.ID]; ok {
+			} else {
+				rc.members[m.ID] = m
+				log.Printf("node added to the cluster: %v\n", m)
+			}
+		}
+	}
+	rc.memMutex.Unlock()
 }
 
 func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
