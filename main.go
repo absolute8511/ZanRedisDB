@@ -67,8 +67,6 @@ func main() {
 		DefaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
 		DefaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
 	}
-	// we use raft log, so the rocksdb wal can be disabled
-	kvOpts.DefaultWriteOpts.DisableWAL(true)
 
 	kvs = newKVStore(kvOpts, raftNode, proposeC, commitC, errorC)
 	defer kvs.Close()
