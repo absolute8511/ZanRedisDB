@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/absolute8511/gorocksdb"
 	"github.com/coreos/etcd/raft"
@@ -90,6 +91,7 @@ func (s *kvstore) openDB() error {
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)
 	opts.SetCreateIfMissing(true)
+	opts.SetMaxOpenFiles(1000000)
 
 	var err error
 	dir := path.Join(s.opts.DataDir, "rocksdb")
@@ -207,6 +209,7 @@ func (s *kvstore) getSnapshot() ([]byte, error) {
 	// use the rocksdb backup/checkpoint interface to backup data
 	opts := gorocksdb.NewDefaultOptions()
 	log.Printf("begin backup \n")
+	start := time.Now()
 	be, err := gorocksdb.OpenBackupEngine(opts, s.opts.DataDir+"/rocksdb_backup")
 	if err != nil {
 		log.Printf("backup engine failed: %v", err)
@@ -218,7 +221,8 @@ func (s *kvstore) getSnapshot() ([]byte, error) {
 		return nil, err
 	}
 	beInfo := be.GetInfo()
-	log.Printf("backup done, total backup : %v\n", beInfo.GetCount())
+	cost := time.Now().Sub(start)
+	log.Printf("backup done (cost %v), total backup : %v\n", cost.String(), beInfo.GetCount())
 	lastID := beInfo.GetBackupId(beInfo.GetCount() - 1)
 	for i := 0; i < beInfo.GetCount(); i++ {
 		id := beInfo.GetBackupId(i)
@@ -305,15 +309,19 @@ func (s *kvstore) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 				beInfo.GetSize(i))
 		}
 	}
+	start := time.Now()
 	log.Printf("begin restore\n")
+	s.DBEngine.Close()
 	restoreOpts := gorocksdb.NewRestoreOptions()
-	err = be.RestoreDBFromLatestBackup(s.opts.DataDir, s.opts.DataDir, restoreOpts)
+	dir := path.Join(s.opts.DataDir, "rocksdb")
+	err = be.RestoreDBFromLatestBackup(dir, dir, restoreOpts)
 	if err != nil {
 		log.Printf("restore failed: %v\n", err)
 		return err
 	}
-	log.Printf("restore done\n")
+	log.Printf("restore done, cost: %v\n", time.Now().Sub(start))
 	be.Close()
+	s.openDB()
 	return nil
 }
 
