@@ -54,12 +54,13 @@ type applyCommitEntry struct {
 }
 
 type MemberInfo struct {
-	ID        uint64   `json:"id"`
-	Name      string   `json:"name"`
-	Broadcast string   `json:"broadcast"`
-	RpcPort   int      `json:"rpc_port"`
-	RaftURLs  []string `json:"peer_urls"`
-	DataDir   string   `json:"data_dir"`
+	ID          uint64   `json:"id"`
+	ClusterName string   `json:"cluster_name"`
+	ClusterID   uint64   `json:"cluster_id"`
+	Broadcast   string   `json:"broadcast"`
+	RpcPort     int      `json:"rpc_port"`
+	RaftURLs    []string `json:"peer_urls"`
+	DataDir     string   `json:"data_dir"`
 }
 
 // A key-value stream backed by raft
@@ -257,7 +258,8 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 
 		var m MemberInfo
 		m.ID = uint64(rc.id)
-		m.Name = "test-cluster-part1"
+		m.ClusterName = "test-cluster-part1"
+		m.ClusterID = rc.clusterID
 		d, _ := json.Marshal(m)
 		w, err := wal.Create(rc.waldir, d)
 		if err != nil {
@@ -336,6 +338,8 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		rpeers := make([]raft.Peer, 0, len(rc.peers))
 		for id, v := range rc.peers {
 			var m MemberInfo
+			m.ClusterID = rc.clusterID
+			m.ClusterName = ""
 			m.ID = uint64(id)
 			if id == rc.id {
 				m.DataDir = rc.DataDir

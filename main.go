@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/absolute8511/gorocksdb"
 	"github.com/coreos/etcd/raft/raftpb"
 	"io/ioutil"
 	"os"
@@ -63,9 +62,8 @@ func main() {
 		clusterNodes, *join, getSnapshot, proposeC, confChangeC)
 
 	kvOpts := &KVOptions{
-		DataDir:          *dataDir,
-		DefaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
-		DefaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
+		DataDir: *dataDir,
+		EngType: "rocksdb",
 	}
 
 	kvs = newKVStore(kvOpts, raftNode, proposeC, commitC, errorC)

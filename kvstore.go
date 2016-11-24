@@ -25,36 +25,36 @@ import (
 	"os"
 	"path"
 	"sync"
-	"time"
 
-	"github.com/absolute8511/gorocksdb"
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 )
 
 const (
-	DIR_PERM = 0750
+	DIR_PERM  = 0755
+	FILE_PERM = 0744
 )
 
 // a key-value store backed by raft
 type kvstore struct {
 	proposeC chan<- []byte // channel for proposing updates
 	mu       sync.RWMutex
-	DBEngine *gorocksdb.DB
+	DBEngine *rockredis.RockDB
 	opts     *KVOptions
 	raftNode *raftNode
 }
 
 type kvSnapInfo struct {
-	BackupID   int64         `json:"backup_id"`
+	BackupMeta []byte        `json:"backup_meta"`
 	LeaderInfo *MemberInfo   `json:"leader_info"`
 	Members    []*MemberInfo `json:"members"`
 }
 
 type KVOptions struct {
-	DataDir          string
-	DefaultReadOpts  *gorocksdb.ReadOptions
-	DefaultWriteOpts *gorocksdb.WriteOptions
+	DataDir string
+	EngType string
 }
 
 type kv struct {
@@ -84,19 +84,16 @@ func newKVStore(kvopts *KVOptions, r *raftNode, proposeC chan<- []byte,
 }
 
 func (s *kvstore) openDB() error {
-	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
-	//bbto.SetBlockCache(gorocksdb.NewLRUCache(3 << 30))
-	filter := gorocksdb.NewBloomFilter(10)
-	bbto.SetFilterPolicy(filter)
-	opts := gorocksdb.NewDefaultOptions()
-	opts.SetBlockBasedTableFactory(bbto)
-	opts.SetCreateIfMissing(true)
-	opts.SetMaxOpenFiles(1000000)
-
 	var err error
-	dir := path.Join(s.opts.DataDir, "rocksdb")
-	os.MkdirAll(dir, DIR_PERM)
-	s.DBEngine, err = gorocksdb.OpenDb(opts, dir)
+	if s.opts.EngType == "rocksdb" {
+		dir := path.Join(s.opts.DataDir, "rocksdb")
+		os.MkdirAll(dir, DIR_PERM)
+		cfg := rockredis.NewRockConfig()
+		cfg.DataDir = dir
+		s.DBEngine, err = rockredis.OpenRockDB(cfg)
+	} else {
+		return errors.New("Not recognized engine type")
+	}
 	return err
 }
 
@@ -107,57 +104,28 @@ func (s *kvstore) Clear() error {
 }
 
 func (s *kvstore) LocalLookup(key string) (string, error) {
-	value, err := s.DBEngine.GetBytes(s.opts.DefaultReadOpts, []byte(key))
+	value, err := s.DBEngine.Get([]byte(key))
 	return string(value), err
 }
 
 func (s *kvstore) LocalDelete(key string) error {
-	err := s.DBEngine.Delete(s.opts.DefaultWriteOpts, []byte(key))
-	return err
+	return s.DBEngine.Delete([]byte(key))
 }
 
 func (s *kvstore) LocalPut(key []byte, value []byte) error {
-	err := s.DBEngine.Put(s.opts.DefaultWriteOpts, key, value)
+	err := s.DBEngine.Put(key, value)
 	if err != nil {
 		log.Printf("failed to write key %v to db: %v\n", string(key), err)
 	}
 	return err
 }
 
-func (s *kvstore) ReadRange(startKey string, endKey string, maxNum int) chan kv {
-	retChan := make(chan kv, 10)
-	go func() {
-		ro := gorocksdb.NewDefaultReadOptions()
-		ro.SetFillCache(false)
-		it := s.DBEngine.NewIterator(ro)
-		defer it.Close()
-		it.Seek([]byte(startKey))
-		for it = it; it.Valid(); it.Next() {
-			key := it.Key()
-			value := it.Value()
-			retChan <- kv{Key: string(key.Data()), Val: string(value.Data())}
-			key.Free()
-			value.Free()
-		}
-		if err := it.Err(); err != nil {
-			retChan <- kv{Err: err}
-		}
-		close(retChan)
-	}()
-	return retChan
+func (s *kvstore) ReadRange(startKey string, endKey string, maxNum int) chan common.KVRecord {
+	return s.DBEngine.ReadRange([]byte(startKey), []byte(endKey), maxNum)
 }
 
-func (s *kvstore) LocalWriteBatch() error {
-	wb := gorocksdb.NewWriteBatch()
-	// defer wb.Close or use wb.Clear and reuse.
-	wb.Delete([]byte("foo"))
-	wb.Put([]byte("foo"), []byte("bar"))
-	wb.Put([]byte("bar"), []byte("foo"))
-	err := s.DBEngine.Write(s.opts.DefaultWriteOpts, wb)
-	if err != nil {
-		log.Printf("batch write failed\n")
-	}
-	return err
+func (s *kvstore) LocalWriteBatch(cmd ...common.WriteCmd) error {
+	return nil
 }
 
 func (s *kvstore) Lookup(key string) (string, error) {
@@ -207,33 +175,12 @@ func (s *kvstore) readCommits(commitC <-chan *applyCommitEntry, errorC <-chan er
 
 func (s *kvstore) getSnapshot() ([]byte, error) {
 	// use the rocksdb backup/checkpoint interface to backup data
-	opts := gorocksdb.NewDefaultOptions()
-	log.Printf("begin backup \n")
-	start := time.Now()
-	be, err := gorocksdb.OpenBackupEngine(opts, s.opts.DataDir+"/rocksdb_backup")
-	if err != nil {
-		log.Printf("backup engine failed: %v", err)
-		return nil, err
-	}
-	err = be.CreateNewBackup(s.DBEngine)
-	if err != nil {
-		log.Printf("backup engine failed: %v", err)
-		return nil, err
-	}
-	beInfo := be.GetInfo()
-	cost := time.Now().Sub(start)
-	log.Printf("backup done (cost %v), total backup : %v\n", cost.String(), beInfo.GetCount())
-	lastID := beInfo.GetBackupId(beInfo.GetCount() - 1)
-	for i := 0; i < beInfo.GetCount(); i++ {
-		id := beInfo.GetBackupId(i)
-		log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
-			beInfo.GetSize(i))
-	}
-	be.PurgeOldBackups(s.DBEngine, 3)
-	beInfo.Destroy()
-	be.Close()
 	var si kvSnapInfo
-	si.BackupID = lastID
+	var err error
+	si.BackupMeta, err = s.DBEngine.Backup(s.opts.DataDir + "/rocksdb_backup")
+	if err != nil {
+		return nil, err
+	}
 	si.LeaderInfo = s.raftNode.GetLeadMember()
 	si.Members = s.raftNode.GetMembers()
 	backData, _ := json.Marshal(si)
@@ -250,28 +197,10 @@ func (s *kvstore) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 	}
 	s.raftNode.RestoreMembers(si.Members)
 	log.Printf("should recovery from snapshot here: %v", si)
-	opts := gorocksdb.NewDefaultOptions()
 	localBackupPath := path.Join(s.opts.DataDir, "rocksdb_backup")
-	be, err := gorocksdb.OpenBackupEngine(opts, localBackupPath)
+	hasBackup, err := s.DBEngine.IsLocalBackupOK(localBackupPath, si.BackupMeta)
 	if err != nil {
-		log.Printf("backup engine open failed: %v", err)
 		return err
-	}
-	beInfo := be.GetInfo()
-	lastID := int64(0)
-	if beInfo.GetCount() > 0 {
-		lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
-	}
-	log.Printf("local total backup : %v, last: %v\n", beInfo.GetCount(), lastID)
-	hasBackup := false
-	for i := 0; i < beInfo.GetCount(); i++ {
-		id := beInfo.GetBackupId(i)
-		log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
-			beInfo.GetSize(i))
-		if id == si.BackupID {
-			hasBackup = true
-			break
-		}
 	}
 	if !hasBackup {
 		log.Printf("local no backup for snapshot, copy from remote\n")
@@ -291,47 +220,11 @@ func (s *kvstore) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 		// if local has some old backup data, we should use rsync to sync the data file
 		// use the rocksdb backup/checkpoint interface to backup data
 		RunFileSync(remoteLeader.Broadcast, path.Join(remoteLeader.DataDir, "rocksdb_backup"), s.opts.DataDir)
-		be.Close()
-		be, err = gorocksdb.OpenBackupEngine(opts, localBackupPath)
-		if err != nil {
-			log.Printf("backup engine open failed: %v", err)
-			return err
-		}
-		beInfo = be.GetInfo()
-		lastID = int64(0)
-		if beInfo.GetCount() > 0 {
-			lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
-		}
-		log.Printf("after sync total backup : %v, last: %v\n", beInfo.GetCount(), lastID)
-		for i := 0; i < beInfo.GetCount(); i++ {
-			id := beInfo.GetBackupId(i)
-			log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
-				beInfo.GetSize(i))
-		}
 	}
-	start := time.Now()
-	log.Printf("begin restore\n")
-	s.DBEngine.Close()
-	restoreOpts := gorocksdb.NewRestoreOptions()
-	dir := path.Join(s.opts.DataDir, "rocksdb")
-	err = be.RestoreDBFromLatestBackup(dir, dir, restoreOpts)
-	if err != nil {
-		log.Printf("restore failed: %v\n", err)
-		return err
-	}
-	log.Printf("restore done, cost: %v\n", time.Now().Sub(start))
-	be.Close()
-	s.openDB()
-	return nil
+	return s.DBEngine.Restore(localBackupPath, si.BackupMeta)
 }
 
 func (s *kvstore) Close() {
-	if s.opts.DefaultReadOpts != nil {
-		s.opts.DefaultReadOpts.Destroy()
-	}
-	if s.opts.DefaultWriteOpts != nil {
-		s.opts.DefaultWriteOpts.Destroy()
-	}
 	if s.DBEngine != nil {
 		s.DBEngine.Close()
 		s.DBEngine = nil
