@@ -50,24 +50,31 @@ const (
 
 // for backend store
 const (
-	NoneType   byte = 0
-	KVType     byte = 1
-	HashType   byte = 2
-	HSizeType  byte = 3
-	ListType   byte = 4
-	LMetaType  byte = 5
-	ZSetType   byte = 6
-	ZSizeType  byte = 7
-	ZScoreType byte = 8
-	SetType    byte = 11
-	SSizeType  byte = 12
+	NoneType byte = 0
+	// for system usage
 
+	// table count, stats, index, schema, and etc.
+	TableMetaType byte = 10
+
+	// for data
+	KVType     byte = 21
+	HashType   byte = 22
+	HSizeType  byte = 23
+	ListType   byte = 24
+	LMetaType  byte = 25
+	ZSetType   byte = 26
+	ZSizeType  byte = 27
+	ZScoreType byte = 28
+	SetType    byte = 29
+	SSizeType  byte = 30
+
+	JSONType byte = 31
 	// this type has a custom partition key length
 	// to allow all the data store in the same partition
-	FixPartType byte = 20
+	FixPartType byte = 50
 	// this type allow the transaction in the same tx group,
 	// which will be stored in the same partition
-	TxGroupType byte = 21
+	TxGroupType byte = 51
 	maxDataType byte = 100
 
 	// use the exp table to store all the expire time for the key
@@ -109,6 +116,7 @@ const (
 	MaxDatabases int = 10240
 
 	MaxTableNameLen int = 255
+	MaxColumnLen    int = 255
 	//max key size
 	MaxKeySize int = 1024
 

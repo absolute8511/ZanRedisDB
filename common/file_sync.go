@@ -1,4 +1,4 @@
-package main
+package common
 
 import (
 	//"github.com/Redundancy/go-sync"

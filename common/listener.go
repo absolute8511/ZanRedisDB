@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package common
 
 import (
 	"errors"
@@ -22,20 +22,20 @@ import (
 
 // stoppableListener sets TCP keep-alive timeouts on accepted
 // connections and waits on stopc message
-type stoppableListener struct {
+type StoppableListener struct {
 	*net.TCPListener
 	stopc <-chan struct{}
 }
 
-func newStoppableListener(addr string, stopc <-chan struct{}) (*stoppableListener, error) {
+func NewStoppableListener(addr string, stopc <-chan struct{}) (*StoppableListener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	return &stoppableListener{ln.(*net.TCPListener), stopc}, nil
+	return &StoppableListener{ln.(*net.TCPListener), stopc}, nil
 }
 
-func (ln stoppableListener) Accept() (c net.Conn, err error) {
+func (ln StoppableListener) Accept() (c net.Conn, err error) {
 	connc := make(chan *net.TCPConn, 1)
 	errc := make(chan error, 1)
 	go func() {

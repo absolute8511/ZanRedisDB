@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/redisapi"
+	"github.com/absolute8511/ZanRedisDB/store"
 	"github.com/coreos/etcd/raft/raftpb"
 	"io/ioutil"
 	"os"
@@ -16,7 +19,8 @@ var (
 	id        = flagSet.Int("id", 1, "node ID")
 	raftAddr  = flagSet.String("raftaddr", "", "the raft address of local")
 	clusterID = flagSet.Uint64("cluster_id", 1000, "cluster id of raft")
-	kvport    = flagSet.Int("port", 9121, "key-value server port")
+	kvport    = flagSet.Int("port", 9121, "key-value http server port")
+	redisport = flagSet.Int("redis_port", 9131, "key-value redis server port")
 	join      = flagSet.Bool("join", false, "join an existing cluster")
 	dataDir   = flagSet.String("data", "", "the data path")
 )
@@ -29,8 +33,6 @@ type ClusterMemberInfo struct {
 func main() {
 	flagSet.Parse(os.Args[1:])
 
-	proposeC := make(chan []byte)
-	defer close(proposeC)
 	confChangeC := make(chan raftpb.ConfChange)
 	defer close(confChangeC)
 	if *dataDir == "" {
@@ -43,8 +45,6 @@ func main() {
 	fmt.Printf("open dir:%v\n", *dataDir)
 
 	// raft provides a commit stream for the proposals from the http api
-	var kvs *kvstore
-	getSnapshot := func() ([]byte, error) { return kvs.getSnapshot() }
 	clusterInfo := make([]ClusterMemberInfo, 0)
 	err := json.Unmarshal([]byte(*cluster), &clusterInfo)
 	if err != nil {
@@ -58,21 +58,18 @@ func main() {
 		*raftAddr, _ = clusterNodes[*id]
 	}
 	fmt.Printf("local %v start with cluster: %v\n", *raftAddr, clusterNodes)
-	commitC, errorC, raftNode := newRaftNode(*clusterID, *id, *raftAddr, *dataDir,
-		clusterNodes, *join, getSnapshot, proposeC, confChangeC)
-
-	kvOpts := &KVOptions{
+	kvOpts := &store.KVOptions{
 		DataDir: *dataDir,
 		EngType: "rocksdb",
 	}
 
-	kvs = newKVStore(kvOpts, raftNode, proposeC, commitC, errorC)
-	defer kvs.Close()
-	go raftNode.startRaft(kvs)
+	kvs, errorC := node.NewKVNode(kvOpts, *clusterID, *id, *raftAddr,
+		clusterNodes, *join, confChangeC)
+	defer kvs.Stop()
 
 	_, ok := clusterNodes[*id]
 	if ok {
-		var m MemberInfo
+		var m node.MemberInfo
 		m.ID = uint64(*id)
 		m.DataDir = *dataDir
 		m.RaftURLs = append(m.RaftURLs, *raftAddr)
@@ -88,6 +85,7 @@ func main() {
 			confChangeC <- cc
 		}()
 	}
+	go redisapi.ServeRedisAPI(*redisport, errorC)
 	// the key-value http handler will propose updates to raft
 	serveHttpKVAPI(kvs, *kvport, confChangeC, errorC)
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package node
 
 import (
 	"fmt"
@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"sync/atomic"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/idutil"
@@ -103,7 +104,7 @@ type raftNode struct {
 	reqIDGen  *idutil.Generator
 }
 
-var defaultSnapCount uint64 = 10000
+var defaultSnapCount uint64 = 100000
 
 // newRaftNode initiates a raft instance and returns a committed log entry
 // channel and error channel. Proposals for log updates are sent over the
@@ -252,7 +253,7 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) bool {
 // openWAL returns a WAL ready for reading.
 func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	if !wal.Exist(rc.waldir) {
-		if err := os.MkdirAll(rc.waldir, DIR_PERM); err != nil {
+		if err := os.MkdirAll(rc.waldir, common.DIR_PERM); err != nil {
 			log.Fatalf("cannot create dir for wal (%v)", err)
 		}
 
@@ -314,7 +315,7 @@ func (rc *raftNode) writeError(err error) {
 
 func (rc *raftNode) startRaft(ds DataStorage) {
 	if !fileutil.Exist(rc.snapdir) {
-		if err := os.MkdirAll(rc.snapdir, DIR_PERM); err != nil {
+		if err := os.MkdirAll(rc.snapdir, common.DIR_PERM); err != nil {
 			log.Fatalf("cannot create dir for snapshot (%v)", err)
 		}
 	}
@@ -443,7 +444,7 @@ func (rc *raftNode) publishSnapshot(snapshotToSave raftpb.Snapshot) {
 	if snapshotToSave.Metadata.Index <= rc.appliedIndex {
 		log.Fatalf("snapshot index [%d] should > progress.appliedIndex [%d] + 1", snapshotToSave.Metadata.Index, rc.appliedIndex)
 	}
-	rc.commitC <- &applyCommitEntry{snapshot: snapshotToSave} // trigger kvstore to load snapshot
+	rc.commitC <- &applyCommitEntry{snapshot: snapshotToSave} // trigger KVStore to load snapshot
 
 	rc.transport.RemoveAllPeers()
 	rc.memMutex.Lock()
@@ -582,7 +583,7 @@ func (rc *raftNode) serveRaft() {
 		log.Fatalf("Failed parsing URL (%v)", err)
 	}
 
-	ln, err := newStoppableListener(url.Host, rc.httpstopc)
+	ln, err := common.NewStoppableListener(url.Host, rc.httpstopc)
 	if err != nil {
 		log.Fatalf("Failed to listen rafthttp (%v)", err)
 	}

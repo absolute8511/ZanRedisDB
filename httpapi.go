@@ -21,12 +21,13 @@ import (
 	_ "net/http/pprof"
 	"strconv"
 
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/coreos/etcd/raft/raftpb"
 )
 
 // Handler for a http based key-value store backed by raft
 type httpKVAPI struct {
-	store       *kvstore
+	kvNode      *node.KVNode
 	confChangeC chan<- raftpb.ConfChange
 }
 
@@ -41,13 +42,13 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.store.Put(key, string(v))
+		h.kvNode.Put(key, string(v))
 
 		// Optimistic-- no waiting for ack from raft. Value is not yet
 		// committed so a subsequent GET on the key may return old value
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == "GET":
-		if v, err := h.store.Lookup(key); err == nil {
+		if v, err := h.kvNode.Lookup(key); err == nil {
 			w.Write([]byte(v))
 		} else {
 			http.Error(w, "Failed to GET", http.StatusNotFound)
@@ -102,12 +103,12 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
-func serveHttpKVAPI(kv *kvstore, port int, confChangeC chan<- raftpb.ConfChange, errorC <-chan error) {
+func serveHttpKVAPI(kv *node.KVNode, port int, confChangeC chan<- raftpb.ConfChange, errorC <-chan error) {
 	go http.ListenAndServe("localhost:6666", nil)
 	srv := http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: &httpKVAPI{
-			store:       kv,
+			kvNode:      kv,
 			confChangeC: confChangeC,
 		},
 	}
