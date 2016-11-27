@@ -53,7 +53,12 @@ func ServeRedisAPI(port int, errorC <-chan error) {
 			log.Printf("closed: %s, err: %v", conn.RemoteAddr(), err)
 		},
 	)
-	go redisS.ListenAndServe()
+	go func() {
+		err := redisS.ListenAndServe()
+		if err != nil {
+			log.Fatalf("failed to start the redis server: %v", err)
+		}
+	}()
 	<-errorC
 	redisS.Close()
 	log.Printf("redis api server exit\n")
