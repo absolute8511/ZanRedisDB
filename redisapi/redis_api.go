@@ -6,7 +6,6 @@ import (
 	"github.com/tidwall/redcon"
 	"log"
 	"strconv"
-	"strings"
 )
 
 var (
@@ -16,7 +15,12 @@ var (
 )
 
 func serverRedis(conn redcon.Conn, cmd redcon.Command) {
-	cmdName := strings.ToLower(string(cmd.Args[0]))
+	_, cmd, err := pipelineCommand(conn, cmd)
+	if err != nil {
+		conn.WriteError("pipeline error '" + err.Error() + "'")
+		return
+	}
+	cmdName := qcmdlower(cmd.Args[0])
 	switch cmdName {
 	case "detach":
 		hconn := conn.Detach()

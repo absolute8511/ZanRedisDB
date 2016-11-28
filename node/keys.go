@@ -45,13 +45,39 @@ func (self *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (self *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 2 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	val, _ := self.store.KVExists(cmd.Args[1])
+	if val != 1 {
+		conn.WriteInt(0)
+	} else {
+		conn.WriteInt(1)
+	}
+}
+
+func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) < 2 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+
+	vals, _ := self.store.MGet(cmd.Args[1:]...)
+	conn.WriteArray(len(vals))
+	for _, v := range vals {
+		conn.WriteBulk(v)
+	}
+}
+
 func (self *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 3 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
 	// insert future to wait response
-	err := self.Propose(cmd.Raw)
+	_, err := self.Propose(cmd.Raw)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -64,7 +90,7 @@ func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	err := self.Propose(cmd.Raw)
+	_, err := self.Propose(cmd.Raw)
 	if err != nil {
 		conn.WriteInt(0)
 	} else {

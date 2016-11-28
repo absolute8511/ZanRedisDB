@@ -354,12 +354,19 @@ func (db *RockDB) HIncrBy(key []byte, field []byte, delta int64) (int64, error) 
 	return n, err
 }
 
-func (db *RockDB) HGetAll(key []byte) (chan FVPairRec, error) {
+func (db *RockDB) HGetAll(key []byte) (int64, chan FVPairRec, error) {
 	if err := checkKeySize(key); err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 
 	v := make(chan FVPairRec, 16)
+	len, err := db.HLen(key)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len >= MAX_BATCH_NUM {
+		return len, nil, errTooMuchBatchSize
+	}
 
 	go func() {
 		start := hEncodeStartKey(key)
@@ -373,6 +380,7 @@ func (db *RockDB) HGetAll(key []byte) (chan FVPairRec, error) {
 		defer snap.Release()
 		defer close(v)
 		it.Seek(start)
+		num := 0
 		for ; it.Valid(); it.Next() {
 			rawk := it.Key().Data()
 			if bytes.Compare(rawk, stop) >= 0 {
@@ -383,17 +391,28 @@ func (db *RockDB) HGetAll(key []byte) (chan FVPairRec, error) {
 				FVPair{Field: f, Value: it.Value().Bytes()},
 				err,
 			}
+			num++
+			if num >= MAX_BATCH_NUM {
+				break
+			}
 		}
 	}()
 
-	return v, nil
+	return len, v, nil
 }
 
-func (db *RockDB) HKeys(key []byte) (chan FVPairRec, error) {
+func (db *RockDB) HKeys(key []byte) (int64, chan FVPairRec, error) {
 	if err := checkKeySize(key); err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 
+	len, err := db.HLen(key)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len >= MAX_BATCH_NUM {
+		return len, nil, errTooMuchBatchSize
+	}
 	v := make(chan FVPairRec, 16)
 
 	go func() {
@@ -421,12 +440,20 @@ func (db *RockDB) HKeys(key []byte) (chan FVPairRec, error) {
 		}
 	}()
 
-	return v, nil
+	return len, v, nil
 }
 
-func (db *RockDB) HValues(key []byte) (chan FVPairRec, error) {
+func (db *RockDB) HValues(key []byte) (int64, chan FVPairRec, error) {
 	if err := checkKeySize(key); err != nil {
-		return nil, err
+		return 0, nil, err
+	}
+
+	len, err := db.HLen(key)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len >= MAX_BATCH_NUM {
+		return len, nil, errTooMuchBatchSize
 	}
 
 	v := make(chan FVPairRec, 16)
@@ -455,5 +482,5 @@ func (db *RockDB) HValues(key []byte) (chan FVPairRec, error) {
 		}
 	}()
 
-	return v, nil
+	return len, v, nil
 }

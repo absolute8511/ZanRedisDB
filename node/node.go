@@ -76,19 +76,22 @@ func (self *KVNode) registerHandler() {
 	common.RegisterRedisHandler("get", self.getCommand)
 	common.RegisterRedisHandler("set", self.setCommand)
 	common.RegisterRedisHandler("del", self.delCommand)
+	common.RegisterRedisHandler("plget", self.plgetCommand)
+	common.RegisterRedisHandler("plset", self.plsetCommand)
 
 	// only write command need to be registered as internal
 	common.RegisterRedisInternalHandler("del", self.localDelCommand)
 	common.RegisterRedisInternalHandler("set", self.localSetCommand)
+	common.RegisterRedisInternalHandler("plset", self.localPlsetCommand)
 }
 
-func (self *KVNode) Propose(buf []byte) error {
+func (self *KVNode) Propose(buf []byte) (interface{}, error) {
 	ch := make(chan error)
 	self.proposeC <- buf
 	// save ch to waiting list
 	close(ch)
 	err := <-ch
-	return err
+	return nil, err
 }
 
 func (self *KVNode) propose(buf bytes.Buffer) {
