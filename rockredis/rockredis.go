@@ -252,3 +252,28 @@ func (r *RockDB) Restore(backupDir string, metaData []byte) error {
 	be.Close()
 	return r.reOpen()
 }
+
+func (r *RockDB) ClearBackup(backupDir string, metaData []byte) error {
+	var backupID int64
+	err := json.Unmarshal(metaData, &backupID)
+	if err != nil {
+		return err
+	}
+	opts := gorocksdb.NewDefaultOptions()
+	be, err := gorocksdb.OpenBackupEngine(opts, backupDir)
+	if err != nil {
+		log.Printf("backup engine open failed: %v", err)
+		return err
+	}
+	beInfo := be.GetInfo()
+	lastID := int64(0)
+	if beInfo.GetCount() > 0 {
+		lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
+	}
+	if lastID >= backupID {
+		be.PurgeOldBackups(r.eng, 0)
+	}
+	beInfo.Destroy()
+	be.Close()
+	return nil
+}

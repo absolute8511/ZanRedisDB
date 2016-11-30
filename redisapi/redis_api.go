@@ -15,13 +15,10 @@ var (
 )
 
 func serverRedis(conn redcon.Conn, cmd redcon.Command) {
-	pn, cmd, err := pipelineCommand(conn, cmd)
+	_, cmd, err := pipelineCommand(conn, cmd)
 	if err != nil {
 		conn.WriteError("pipeline error '" + err.Error() + "'")
 		return
-	}
-	if pn > 2 {
-		log.Printf("pipeline %v commands\n", pn)
 	}
 	cmdName := qcmdlower(cmd.Args[0])
 	switch cmdName {

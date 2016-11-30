@@ -62,8 +62,10 @@ func Run(retries int, f func() error) error {
 func RunFileSync(remote string, srcPath string, dstPath string) error {
 	var cmd *exec.Cmd
 	if remote == "" {
+		log.Printf("copy local :%v to %v\n", srcPath, dstPath)
 		cmd = exec.Command("cp", "-rp", srcPath, dstPath)
 	} else {
+		log.Printf("copy from remote \n")
 		cmd = exec.Command("scp", "-rp", remote+":"+srcPath, dstPath)
 	}
 	err := cmd.Run()

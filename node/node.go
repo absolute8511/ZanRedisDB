@@ -22,11 +22,11 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/store"
-	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/tidwall/redcon"
 )
@@ -53,9 +53,8 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 		store:    store.NewKVStore(kvopts),
 	}
 	s.registerHandler()
-	getSnapshot := func() ([]byte, error) { return s.GetSnapshot() }
 	commitC, errorC, raftNode := newRaftNode(clusterID, id, localRaftAddr, kvopts.DataDir,
-		peers, join, getSnapshot, proposeC, confChangeC)
+		peers, join, s, proposeC, confChangeC)
 	s.raftNode = raftNode
 
 	// read commits from raft into KVStore map until error
@@ -100,14 +99,6 @@ func (self *KVNode) propose(buf bytes.Buffer) {
 
 func (self *KVNode) readCommits(commitC <-chan *applyCommitEntry, errorC <-chan error) {
 	for data := range commitC {
-		// signaled to load snapshot
-		if !raft.IsEmptySnap(data.snapshot) {
-			log.Printf("loading snapshot at term %d and index %d\n", data.snapshot.Metadata.Term, data.snapshot.Metadata.Index)
-			if err := self.RestoreFromSnapshot(data.snapshot); err != nil {
-				log.Panic(err)
-			}
-		}
-
 		if data.commitEntry.Data != nil {
 			// try redis command
 			cmd, err := redcon.Parse(data.commitEntry.Data)
@@ -150,11 +141,11 @@ func (self *KVNode) GetSnapshot() ([]byte, error) {
 	si.LeaderInfo = self.raftNode.GetLeadMember()
 	si.Members = self.raftNode.GetMembers()
 	backData, _ := json.Marshal(si)
-	log.Printf("snapshot data : %v\n", backData)
+	log.Printf("snapshot data : %v\n", string(backData))
 	return backData, nil
 }
 
-func (self *KVNode) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
+func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
 	snapshot := raftSnapshot.Data
 	var si KVSnapInfo
 	err := json.Unmarshal(snapshot, &si)
@@ -162,10 +153,15 @@ func (self *KVNode) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 		return err
 	}
 	self.raftNode.RestoreMembers(si.Members)
-	log.Printf("should recovery from snapshot here: %v", si)
-	hasBackup, err := self.store.IsBackupOK(si.BackupMeta)
-	if err != nil {
-		return err
+	log.Printf("should recovery from snapshot here: %v, %v, %v", si.BackupMeta, si.LeaderInfo, si.Members)
+	// while startup we can use the local snapshot to restart,
+	// but while running, we should install the leader's snapshot,
+	// so we need remove local and sync from leader
+	hasBackup, _ := self.store.IsBackupOK(si.BackupMeta)
+	if !startup {
+		if hasBackup {
+			self.store.ClearStoreBackup(si.BackupMeta)
+		}
 	}
 	if !hasBackup {
 		log.Printf("local no backup for snapshot, copy from remote\n")
@@ -184,7 +180,7 @@ func (self *KVNode) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 		// copy backup data from the remote leader node, and recovery backup from it
 		// if local has some old backup data, we should use rsync to sync the data file
 		// use the rocksdb backup/checkpoint interface to backup data
-		common.RunFileSync(remoteLeader.Broadcast, self.store.GetBackupDir(),
+		common.RunFileSync(remoteLeader.Broadcast, path.Join(remoteLeader.DataDir, "rocksdb_backup"),
 			self.store.GetBackupBase())
 	}
 	return self.store.RestoreStore(si.BackupMeta)

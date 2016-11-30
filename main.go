@@ -71,6 +71,7 @@ func main() {
 	if ok {
 		var m node.MemberInfo
 		m.ID = uint64(*id)
+		m.ClusterID = *clusterID
 		m.DataDir = *dataDir
 		m.RaftURLs = append(m.RaftURLs, *raftAddr)
 		m.Broadcast = "127.0.0.1"

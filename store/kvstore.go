@@ -91,6 +91,7 @@ func (s *KVStore) LocalWriteBatch(cmd ...common.WriteCmd) error {
 func (s *KVStore) GetBackupBase() string {
 	return s.opts.DataDir
 }
+
 func (s *KVStore) GetBackupDir() string {
 	return path.Join(s.opts.DataDir, "rocksdb_backup")
 }
@@ -102,6 +103,10 @@ func (s *KVStore) BackupStore() ([]byte, error) {
 
 func (s *KVStore) IsBackupOK(meta []byte) (bool, error) {
 	return s.IsLocalBackupOK(s.GetBackupDir(), meta)
+}
+
+func (s *KVStore) ClearStoreBackup(meta []byte) error {
+	return s.ClearBackup(s.GetBackupDir(), meta)
 }
 
 func (s *KVStore) RestoreStore(meta []byte) error {
