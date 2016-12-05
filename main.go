@@ -63,7 +63,7 @@ func main() {
 		EngType: "rocksdb",
 	}
 
-	kvs, errorC := node.NewKVNode(kvOpts, *clusterID, *id, *raftAddr,
+	kvs, nodeStopC := node.NewKVNode(kvOpts, *clusterID, *id, *raftAddr,
 		clusterNodes, *join, confChangeC)
 	defer kvs.Stop()
 
@@ -86,7 +86,7 @@ func main() {
 			confChangeC <- cc
 		}()
 	}
-	go redisapi.ServeRedisAPI(*redisport, errorC)
+	go redisapi.ServeRedisAPI(*redisport, nodeStopC)
 	// the key-value http handler will propose updates to raft
-	serveHttpKVAPI(kvs, *kvport, confChangeC, errorC)
+	serveHttpKVAPI(kvs, *kvport, confChangeC, nodeStopC)
 }

@@ -45,7 +45,7 @@ func serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func ServeRedisAPI(port int, errorC <-chan error) {
+func ServeRedisAPI(port int, stopC <-chan struct{}) {
 	redisS := redcon.NewServer(
 		":"+strconv.Itoa(port),
 		serverRedis,
@@ -63,7 +63,7 @@ func ServeRedisAPI(port int, errorC <-chan error) {
 			log.Fatalf("failed to start the redis server: %v", err)
 		}
 	}()
-	<-errorC
+	<-stopC
 	redisS.Close()
 	log.Printf("redis api server exit\n")
 }
