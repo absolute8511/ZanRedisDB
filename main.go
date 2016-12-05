@@ -86,6 +86,8 @@ func main() {
 			confChangeC <- cc
 		}()
 	}
+	// TODO: we should start api server until replay log finished and
+	// also while we recovery we need to disable api.
 	go redisapi.ServeRedisAPI(*redisport, nodeStopC)
 	// the key-value http handler will propose updates to raft
 	serveHttpKVAPI(kvs, *kvport, confChangeC, nodeStopC)

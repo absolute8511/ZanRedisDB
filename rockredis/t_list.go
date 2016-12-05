@@ -9,6 +9,9 @@ import (
 
 // TODO: we can use ring buffer to allow the list pop and push many times
 // when the tail reach the end we roll to the start and check if full.
+// Note: to clean the huge list, we can set some meta for each list,
+// such as max elements or the max keep time, while insert we auto clean
+// the data old than the meta (by number or by keep time)
 const (
 	listHeadSeq int64 = 1
 	listTailSeq int64 = 2

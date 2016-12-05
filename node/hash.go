@@ -1,6 +1,7 @@
 package node
 
 import (
+	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/tidwall/redcon"
 	"log"
 	"strconv"
@@ -100,6 +101,34 @@ func (self *KVNode) hsetCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteString("OK")
 }
 
+func (self *KVNode) hmsetCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) < 4 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	// insert future to wait response
+	_, err := self.Propose(cmd.Raw)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteString("OK")
+}
+
+func (self *KVNode) hsetnxCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 4 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	// insert future to wait response
+	_, err := self.Propose(cmd.Raw)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteString("OK")
+}
+
 func (self *KVNode) hdelCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
@@ -130,18 +159,27 @@ func (self *KVNode) hincrbyCommand(conn redcon.Conn, cmd redcon.Command) {
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (self *KVNode) localhSetCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHSetCommand(cmd redcon.Command) (interface{}, error) {
 	v, err := self.store.HSet(cmd.Args[1], cmd.Args[2], cmd.Args[3])
 	return v, err
 }
 
-func (self *KVNode) localhIncrbyCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHMsetCommand(cmd redcon.Command) (interface{}, error) {
+	fvs := make([]rockredis.FVPair, 0, len(cmd.Args[2:])/2)
+	for i := 2; i < len(cmd.Args); i += 2 {
+		fvs = append(fvs, rockredis.FVPair{cmd.Args[i], cmd.Args[i+1]})
+	}
+	err := self.store.HMset(cmd.Args[1], fvs...)
+	return nil, err
+}
+
+func (self *KVNode) localHIncrbyCommand(cmd redcon.Command) (interface{}, error) {
 	v, _ := strconv.Atoi(string(cmd.Args[3]))
 	ret, err := self.store.HIncrBy(cmd.Args[1], cmd.Args[2], int64(v))
 	return ret, err
 }
 
-func (self *KVNode) localhDelCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHDelCommand(cmd redcon.Command) (interface{}, error) {
 	n, err := self.store.HDel(cmd.Args[1], cmd.Args[2])
 	if err != nil {
 		// leader write need response

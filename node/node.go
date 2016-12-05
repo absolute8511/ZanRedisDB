@@ -89,16 +89,50 @@ func (self *KVNode) Clear() error {
 }
 
 func (self *KVNode) registerHandler() {
+	// for kv
 	common.RegisterRedisHandler("get", self.getCommand)
+	common.RegisterRedisHandler("mget", self.mgetCommand)
+	common.RegisterRedisHandler("exists", self.existsCommand)
 	common.RegisterRedisHandler("set", self.setCommand)
 	common.RegisterRedisHandler("del", self.delCommand)
 	common.RegisterRedisHandler("plget", self.plgetCommand)
 	common.RegisterRedisHandler("plset", self.plsetCommand)
+	// for hash
+	common.RegisterRedisHandler("hget", self.hgetCommand)
+	common.RegisterRedisHandler("hgetall", self.hgetallCommand)
+	common.RegisterRedisHandler("hkeys", self.hkeysCommand)
+	common.RegisterRedisHandler("hexists", self.hexistsCommand)
+	common.RegisterRedisHandler("hmget", self.hmgetCommand)
+	common.RegisterRedisHandler("hlen", self.hlenCommand)
+	common.RegisterRedisHandler("hset", self.hsetCommand)
+	common.RegisterRedisHandler("hmset", self.hmsetCommand)
+	common.RegisterRedisHandler("hdel", self.hdelCommand)
+	common.RegisterRedisHandler("hincrby", self.hincrbyCommand)
+	// for list
+	common.RegisterRedisHandler("lindex", self.lindexCommand)
+	common.RegisterRedisHandler("llen", self.llenCommand)
+	common.RegisterRedisHandler("lrange", self.lrangeCommand)
+	common.RegisterRedisHandler("lpop", self.lpopCommand)
+	common.RegisterRedisHandler("lpush", self.lpushCommand)
+	common.RegisterRedisHandler("lset", self.lsetCommand)
+	common.RegisterRedisHandler("ltrim", self.ltrimCommand)
+	common.RegisterRedisHandler("rpop", self.rpopCommand)
+	common.RegisterRedisHandler("rpush", self.rpushCommand)
 
 	// only write command need to be registered as internal
 	common.RegisterRedisInternalHandler("del", self.localDelCommand)
 	common.RegisterRedisInternalHandler("set", self.localSetCommand)
 	common.RegisterRedisInternalHandler("plset", self.localPlsetCommand)
+	common.RegisterRedisInternalHandler("hset", self.localHSetCommand)
+	common.RegisterRedisInternalHandler("hmset", self.localHMsetCommand)
+	common.RegisterRedisInternalHandler("hdel", self.localHDelCommand)
+	common.RegisterRedisInternalHandler("hincrby", self.localHIncrbyCommand)
+	common.RegisterRedisInternalHandler("lpop", self.localLpopCommand)
+	common.RegisterRedisInternalHandler("lpush", self.localLpushCommand)
+	common.RegisterRedisInternalHandler("lset", self.localLsetCommand)
+	common.RegisterRedisInternalHandler("ltrim", self.localLtrimCommand)
+	common.RegisterRedisInternalHandler("rpop", self.localRpopCommand)
+	common.RegisterRedisInternalHandler("rpush", self.localRpushCommand)
 }
 
 func (self *KVNode) Propose(buf []byte) (interface{}, error) {
