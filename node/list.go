@@ -83,7 +83,7 @@ func (self *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
+	if len(cmd.Args) < 3 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -166,7 +166,7 @@ func (self *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
+	if len(cmd.Args) < 3 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}

@@ -123,7 +123,7 @@ func (self *KVNode) zscoreCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) zcountCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
+	if len(cmd.Args) != 4 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -172,7 +172,7 @@ func (self *KVNode) zlexcountCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) zrangeFunc(conn redcon.Conn, cmd redcon.Command, reverse bool) {
-	if len(cmd.Args) != 4 {
+	if len(cmd.Args) != 4 && len(cmd.Args) != 5 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -192,9 +192,18 @@ func (self *KVNode) zrangeFunc(conn redcon.Conn, cmd redcon.Command, reverse boo
 		conn.WriteError("Err: " + err.Error())
 		return
 	}
-	conn.WriteArray(len(vlist))
+	needScore := false
+	if len(cmd.Args) == 5 {
+		needScore = true
+		conn.WriteArray(len(vlist) * 2)
+	} else {
+		conn.WriteArray(len(vlist))
+	}
 	for _, d := range vlist {
 		conn.WriteBulk(d.Member)
+		if needScore {
+			conn.WriteBulkString(strconv.FormatInt(d.Score, 10))
+		}
 	}
 }
 

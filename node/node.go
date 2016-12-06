@@ -116,6 +116,9 @@ func (self *KVNode) registerHandler() {
 	common.RegisterRedisHandler("mget", self.mgetCommand)
 	common.RegisterRedisHandler("exists", self.existsCommand)
 	common.RegisterRedisHandler("set", self.setCommand)
+	common.RegisterRedisHandler("setnx", self.setnxCommand)
+	common.RegisterRedisHandler("mset", self.msetCommand)
+	common.RegisterRedisHandler("incr", self.incrCommand)
 	common.RegisterRedisHandler("del", self.delCommand)
 	common.RegisterRedisHandler("plget", self.plgetCommand)
 	common.RegisterRedisHandler("plset", self.plsetCommand)
@@ -164,6 +167,9 @@ func (self *KVNode) registerHandler() {
 	// kv
 	common.RegisterRedisInternalHandler("del", self.localDelCommand)
 	common.RegisterRedisInternalHandler("set", self.localSetCommand)
+	common.RegisterRedisInternalHandler("setnx", self.localSetnxCommand)
+	common.RegisterRedisInternalHandler("mset", self.localMSetCommand)
+	common.RegisterRedisInternalHandler("incr", self.localIncrCommand)
 	common.RegisterRedisInternalHandler("plset", self.localPlsetCommand)
 	// hash
 	common.RegisterRedisInternalHandler("hset", self.localHSetCommand)

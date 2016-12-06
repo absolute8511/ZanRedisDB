@@ -80,13 +80,63 @@ func (self *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	// insert future to wait response
 	_, err := self.Propose(cmd.Raw)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
 	}
 	conn.WriteString("OK")
+}
+
+func (self *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 3 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	v, err := self.Propose(cmd.Raw)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
+func (self *KVNode) msetCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) < 3 || len(cmd.Args[1:])%2 != 0 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	if len(cmd.Args[1:]) >= rockredis.MAX_BATCH_NUM {
+		conn.WriteError("too much batch size")
+		return
+	}
+	_, err := self.Propose(cmd.Raw)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteString("OK")
+}
+
+func (self *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 2 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	v, err := self.Propose(cmd.Raw)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
 }
 
 func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -108,6 +158,26 @@ func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command) {
 func (self *KVNode) localSetCommand(cmd redcon.Command) (interface{}, error) {
 	err := self.store.LocalPut(cmd.Args[1], cmd.Args[2])
 	return nil, err
+}
+
+func (self *KVNode) localSetnxCommand(cmd redcon.Command) (interface{}, error) {
+	v, err := self.store.SetNX(cmd.Args[1], cmd.Args[2])
+	return v, err
+}
+
+func (self *KVNode) localMSetCommand(cmd redcon.Command) (interface{}, error) {
+	args := cmd.Args[1:]
+	kvlist := make([]rockredis.KVPair, 0, len(args)/2)
+	for i := 0; i < len(args); i += 2 {
+		kvlist = append(kvlist, rockredis.KVPair{args[i], args[i+1]})
+	}
+	err := self.store.MSet(kvlist...)
+	return nil, err
+}
+
+func (self *KVNode) localIncrCommand(cmd redcon.Command) (interface{}, error) {
+	v, err := self.store.Incr(cmd.Args[1])
+	return v, err
 }
 
 func (self *KVNode) localDelCommand(cmd redcon.Command) (interface{}, error) {

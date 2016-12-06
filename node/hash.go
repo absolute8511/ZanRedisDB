@@ -130,7 +130,7 @@ func (self *KVNode) hsetnxCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) hdelCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
+	if len(cmd.Args) < 3 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -148,12 +148,16 @@ func (self *KVNode) hincrbyCommand(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 	// insert future to wait response
-	_, err := self.Propose(cmd.Raw)
+	v, err := self.Propose(cmd.Raw)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
 	}
-	conn.WriteString("OK")
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
 }
 
 // local write command execute only on follower or on the local commit of leader
