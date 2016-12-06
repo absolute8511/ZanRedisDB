@@ -275,6 +275,9 @@ func (db *RockDB) ZAdd(key []byte, args ...ScorePair) (int64, error) {
 	if len(args) == 0 {
 		return 0, nil
 	}
+	if len(args) >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
 
 	wb := gorocksdb.NewWriteBatch()
 
@@ -352,6 +355,9 @@ func (db *RockDB) ZScore(key []byte, member []byte) (int64, error) {
 func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 	if len(members) == 0 {
 		return 0, nil
+	}
+	if len(members) >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
 	}
 
 	wb := gorocksdb.NewWriteBatch()
@@ -433,7 +439,7 @@ func (db *RockDB) ZCount(key []byte, min int64, max int64) (int64, error) {
 	it.Seek(minKey)
 	var n int64 = 0
 	for ; it.Valid(); it.Next() {
-		if bytes.Compare(it.Key().Data(), maxKey) >= 0 {
+		if bytes.Compare(it.Key().Data(), maxKey) > 0 {
 			break
 		}
 		n++
@@ -533,6 +539,12 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 			it.Next()
 		}
 	}
+
+	// TODO: if count <=0 , maybe remove all?
+	if count >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
+
 	var num int64 = 0
 	for ; it.Valid(); it.Next() {
 		sk := it.Key().Data()
@@ -572,6 +584,9 @@ func (db *RockDB) zRange(key []byte, min int64, max int64, offset int, count int
 		return []ScorePair{}, nil
 	}
 
+	if count >= MAX_BATCH_NUM {
+		return nil, errTooMuchBatchSize
+	}
 	nv := count
 	// count may be very large, so we must limit it for below mem make.
 	if nv <= 0 || nv > 1024 {
@@ -827,6 +842,9 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 		max = zEncodeSetKey(key, max)
 	}
 	// TODO: rangeType means the close range or open range for start/end
+	if count >= MAX_BATCH_NUM {
+		return nil, errTooMuchBatchSize
+	}
 
 	it := db.eng.NewIterator(db.defaultReadOpts)
 	defer it.Close()

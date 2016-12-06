@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"encoding/gob"
+	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/tidwall/redcon"
 	"log"
 )
@@ -22,9 +23,8 @@ func (self *KVNode) Put(k string, v string) error {
 		log.Println(err)
 		return err
 	}
-	self.propose(buf)
-	// TODO: wait write done here
-	return nil
+	_, err := self.HTTPPropose(buf.Bytes())
+	return err
 }
 
 func (self *KVNode) Lookup(key string) (string, error) {
@@ -61,6 +61,10 @@ func (self *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
 func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	if len(cmd.Args[1:]) >= rockredis.MAX_BATCH_NUM {
+		conn.WriteError("batch size too much")
 		return
 	}
 

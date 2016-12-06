@@ -9,9 +9,7 @@ import (
 )
 
 var (
-	errInvalidCommand  = errors.New("invalid command")
-	errSyntaxError     = errors.New("syntax error")
-	errInvalidResponse = errors.New("invalid response")
+	errInvalidCommand = errors.New("invalid command")
 )
 
 func serverRedis(conn redcon.Conn, cmd redcon.Command) {
@@ -50,11 +48,13 @@ func ServeRedisAPI(port int, stopC <-chan struct{}) {
 		":"+strconv.Itoa(port),
 		serverRedis,
 		func(conn redcon.Conn) bool {
-			log.Printf("accept: %s", conn.RemoteAddr())
+			//log.Printf("accept: %s", conn.RemoteAddr())
 			return true
 		},
 		func(conn redcon.Conn, err error) {
-			log.Printf("closed: %s, err: %v", conn.RemoteAddr(), err)
+			if err != nil {
+				log.Printf("closed: %s, err: %v", conn.RemoteAddr(), err)
+			}
 		},
 	)
 	go func() {

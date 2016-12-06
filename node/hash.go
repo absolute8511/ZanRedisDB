@@ -130,7 +130,7 @@ func (self *KVNode) hsetnxCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) hdelCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
+	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -180,7 +180,7 @@ func (self *KVNode) localHIncrbyCommand(cmd redcon.Command) (interface{}, error)
 }
 
 func (self *KVNode) localHDelCommand(cmd redcon.Command) (interface{}, error) {
-	n, err := self.store.HDel(cmd.Args[1], cmd.Args[2])
+	n, err := self.store.HDel(cmd.Args[1], cmd.Args[2:]...)
 	if err != nil {
 		// leader write need response
 		return int(0), err

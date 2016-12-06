@@ -29,15 +29,35 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/store"
+	"github.com/coreos/etcd/pkg/wait"
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/tidwall/redcon"
+)
+
+var (
+	errInvalidResponse = errors.New("Invalid response type")
+	errInvalidCommand  = errors.New("invalid command")
+	errSyntaxError     = errors.New("syntax error")
+	errStopped         = errors.New("the node stopped")
+	errUnknownData     = errors.New("unknown request data type")
+)
+
+const (
+	RedisReq int8 = 0
+	HTTPReq  int8 = 1
 )
 
 type nodeProgress struct {
 	confState raftpb.ConfState
 	snapi     uint64
 	appliedi  uint64
+}
+
+type internalReq struct {
+	ID       uint64
+	DataType int8
+	Data     []byte
 }
 
 // a key-value node backed by raft
@@ -47,6 +67,7 @@ type KVNode struct {
 	store    *store.KVStore
 	stopping int32
 	stopChan chan struct{}
+	w        wait.Wait
 }
 
 type KVSnapInfo struct {
@@ -63,6 +84,7 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 		proposeC: proposeC,
 		store:    store.NewKVStore(kvopts),
 		stopChan: make(chan struct{}),
+		w:        wait.New(),
 	}
 	s.registerHandler()
 	commitC, errorC, raftNode := newRaftNode(clusterID, id, localRaftAddr, kvopts.DataDir,
@@ -118,34 +140,91 @@ func (self *KVNode) registerHandler() {
 	common.RegisterRedisHandler("ltrim", self.ltrimCommand)
 	common.RegisterRedisHandler("rpop", self.rpopCommand)
 	common.RegisterRedisHandler("rpush", self.rpushCommand)
+	// for zset
+	common.RegisterRedisHandler("zscore", self.zscoreCommand)
+	common.RegisterRedisHandler("zcount", self.zcountCommand)
+	common.RegisterRedisHandler("zcard", self.zcardCommand)
+	common.RegisterRedisHandler("zlexcount", self.zlexcountCommand)
+	common.RegisterRedisHandler("zrange", self.zrangeCommand)
+	common.RegisterRedisHandler("zrevrange", self.zrevrangeCommand)
+	common.RegisterRedisHandler("zrangebylex", self.zrangebylexCommand)
+	common.RegisterRedisHandler("zrangebyscore", self.zrangebyscoreCommand)
+	common.RegisterRedisHandler("zrevrangebyscore", self.zrevrangebyscoreCommand)
+	common.RegisterRedisHandler("zrank", self.zrankCommand)
+	common.RegisterRedisHandler("zrevrank", self.zrevrankCommand)
+	common.RegisterRedisHandler("zadd", self.zaddCommand)
+	common.RegisterRedisHandler("zincrby", self.zincrbyCommand)
+	common.RegisterRedisHandler("zrem", self.zremCommand)
+	common.RegisterRedisHandler("zremrangebyrank", self.zremrangebyrankCommand)
+	common.RegisterRedisHandler("zremrangebyscore", self.zremrangebyscoreCommand)
+	common.RegisterRedisHandler("zremrangebylex", self.zremrangebylexCommand)
+	common.RegisterRedisHandler("zclear", self.zclearCommand)
 
 	// only write command need to be registered as internal
+	// kv
 	common.RegisterRedisInternalHandler("del", self.localDelCommand)
 	common.RegisterRedisInternalHandler("set", self.localSetCommand)
 	common.RegisterRedisInternalHandler("plset", self.localPlsetCommand)
+	// hash
 	common.RegisterRedisInternalHandler("hset", self.localHSetCommand)
 	common.RegisterRedisInternalHandler("hmset", self.localHMsetCommand)
 	common.RegisterRedisInternalHandler("hdel", self.localHDelCommand)
 	common.RegisterRedisInternalHandler("hincrby", self.localHIncrbyCommand)
+	// list
 	common.RegisterRedisInternalHandler("lpop", self.localLpopCommand)
 	common.RegisterRedisInternalHandler("lpush", self.localLpushCommand)
 	common.RegisterRedisInternalHandler("lset", self.localLsetCommand)
 	common.RegisterRedisInternalHandler("ltrim", self.localLtrimCommand)
 	common.RegisterRedisInternalHandler("rpop", self.localRpopCommand)
 	common.RegisterRedisInternalHandler("rpush", self.localRpushCommand)
+	// zset
+	common.RegisterRedisInternalHandler("zadd", self.localZaddCommand)
+	common.RegisterRedisInternalHandler("zincrby", self.localZincrbyCommand)
+	common.RegisterRedisInternalHandler("zrem", self.localZremCommand)
+	common.RegisterRedisInternalHandler("zremrangebyrank", self.localZremrangebyrankCommand)
+	common.RegisterRedisInternalHandler("zremrangebyscore", self.localZremrangebyscoreCommand)
+	common.RegisterRedisInternalHandler("zremrangebylex", self.localZremrangebylexCommand)
+	common.RegisterRedisInternalHandler("zclear", self.localZclearCommand)
 }
 
 func (self *KVNode) Propose(buf []byte) (interface{}, error) {
-	ch := make(chan error)
-	self.proposeC <- buf
-	// save ch to waiting list
-	close(ch)
-	err := <-ch
-	return nil, err
+	req := &internalReq{
+		ID:       self.raftNode.reqIDGen.Next(),
+		DataType: 0,
+		Data:     buf,
+	}
+	ch := self.w.Register(req.ID)
+	d, _ := json.Marshal(req)
+	self.proposeC <- d
+	select {
+	case rsp := <-ch:
+		if err, ok := rsp.(error); ok {
+			return nil, err
+		}
+		return rsp, nil
+	case <-self.stopChan:
+		return nil, errStopped
+	}
 }
 
-func (self *KVNode) propose(buf bytes.Buffer) {
-	self.proposeC <- buf.Bytes()
+func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
+	req := &internalReq{
+		ID:       self.raftNode.reqIDGen.Next(),
+		DataType: HTTPReq,
+		Data:     buf,
+	}
+	ch := self.w.Register(req.ID)
+	d, _ := json.Marshal(req)
+	self.proposeC <- d
+	select {
+	case rsp := <-ch:
+		if err, ok := rsp.(error); ok {
+			return nil, err
+		}
+		return rsp, nil
+	case <-self.stopChan:
+		return nil, errStopped
+	}
 }
 
 func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
@@ -195,26 +274,41 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 		case raftpb.EntryNormal:
 			if evnt.Data != nil {
 				// try redis command
-				cmd, err := redcon.Parse(evnt.Data)
-				if err != nil {
+				var req internalReq
+				json.Unmarshal(evnt.Data, &req)
+				if req.DataType == 0 {
+					cmd, err := redcon.Parse(req.Data)
+					if err != nil {
+						self.w.Trigger(req.ID, err)
+					} else {
+						cmdName := strings.ToLower(string(cmd.Args[0]))
+						h, ok := common.GetInternalHandler(cmdName)
+						if !ok {
+							log.Printf("unsupported redis command: %v", cmd)
+							self.w.Trigger(req.ID, errInvalidCommand)
+						} else {
+							v, err := h(cmd)
+							// write the future response or error
+							if err != nil {
+								self.w.Trigger(req.ID, err)
+							} else {
+								self.w.Trigger(req.ID, v)
+							}
+						}
+					}
+				} else if req.DataType == HTTPReq {
 					// try other protocol command
 					var dataKv kv
-					dec := gob.NewDecoder(bytes.NewBuffer(evnt.Data))
-					if err := dec.Decode(&dataKv); err != nil {
+					dec := gob.NewDecoder(bytes.NewBuffer(req.Data))
+					var err error
+					if err = dec.Decode(&dataKv); err != nil {
 						log.Fatalf("could not decode message (%v)\n", err)
-					}
-					self.store.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
-				} else {
-					cmdName := strings.ToLower(string(cmd.Args[0]))
-					h, ok := common.GetInternalHandler(cmdName)
-					if !ok {
-						log.Printf("unsupported redis command: %v", cmd)
 					} else {
-						v, err := h(cmd)
-						_ = v
-						_ = err
-						// write the future response or error
+						err = self.store.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
 					}
+					self.w.Trigger(req.ID, err)
+				} else {
+					self.w.Trigger(req.ID, errUnknownData)
 				}
 				// TODO: notify the write client this write has been applied to cluster
 			}

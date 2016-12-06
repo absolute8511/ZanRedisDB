@@ -174,6 +174,9 @@ func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) 
 }
 
 func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
+	if len(args) >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
 	wb := gorocksdb.NewWriteBatch()
 	defer wb.Destroy()
 
@@ -308,6 +311,9 @@ func (db *RockDB) SClear(key []byte) (int64, error) {
 }
 
 func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
+	if len(keys) >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
 	wb := gorocksdb.NewWriteBatch()
 	for _, key := range keys {
 		if err := checkKeySize(key); err != nil {

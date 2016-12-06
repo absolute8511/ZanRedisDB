@@ -56,7 +56,7 @@ func lEncodeMaxKey() []byte {
 }
 
 func lEncodeListKey(key []byte, seq int64) []byte {
-	buf := make([]byte, len(key)+7)
+	buf := make([]byte, len(key)+1+2+8)
 
 	pos := 0
 	buf[pos] = ListType
@@ -89,7 +89,7 @@ func lDecodeListKey(ek []byte) (key []byte, seq int64, err error) {
 
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
-	if keyLen+pos+4 != len(ek) {
+	if keyLen+pos+8 != len(ek) {
 		err = errListKey
 		return
 	}
@@ -448,6 +448,9 @@ func (db *RockDB) LTrimBack(key []byte, trimSize int64) (int64, error) {
 }
 
 func (db *RockDB) LPush(key []byte, args ...[]byte) (int64, error) {
+	if len(args) >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
 	return db.lpush(key, listHeadSeq, args...)
 }
 func (db *RockDB) LSet(key []byte, index int64, value []byte) error {
@@ -514,6 +517,9 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	}
 
 	limit := (stop - start) + 1
+	if limit >= MAX_BATCH_NUM {
+		return nil, errTooMuchBatchSize
+	}
 	headSeq += start
 
 	v := make([][]byte, 0, limit)
@@ -536,6 +542,9 @@ func (db *RockDB) RPop(key []byte) ([]byte, error) {
 }
 
 func (db *RockDB) RPush(key []byte, args ...[]byte) (int64, error) {
+	if len(args) >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
 	return db.lpush(key, listTailSeq, args...)
 }
 
@@ -555,6 +564,10 @@ func (db *RockDB) LClear(key []byte) (int64, error) {
 }
 
 func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
+	if len(keys) >= MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
+
 	wb := gorocksdb.NewWriteBatch()
 	defer wb.Destroy()
 	for _, key := range keys {

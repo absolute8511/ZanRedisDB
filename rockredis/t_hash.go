@@ -187,6 +187,9 @@ func (db *RockDB) HSet(key []byte, field []byte, value []byte) (int64, error) {
 }
 
 func (db *RockDB) HMset(key []byte, args ...FVPair) error {
+	if len(args) >= MAX_BATCH_NUM {
+		return errTooMuchBatchSize
+	}
 	wb := gorocksdb.NewWriteBatch()
 	defer wb.Destroy()
 
@@ -228,6 +231,9 @@ func (db *RockDB) HKeyExists(key []byte) (int64, error) {
 }
 
 func (db *RockDB) HMget(key []byte, args ...[]byte) ([][]byte, error) {
+	if len(args) >= MAX_BATCH_NUM {
+		return nil, errTooMuchBatchSize
+	}
 	var err error
 	r := make([][]byte, len(args))
 	for i := 0; i < len(args); i++ {
@@ -240,7 +246,7 @@ func (db *RockDB) HMget(key []byte, args ...[]byte) ([][]byte, error) {
 }
 
 func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
-	if len(args) > MAX_BATCH_NUM {
+	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	wb := gorocksdb.NewWriteBatch()
