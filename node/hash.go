@@ -93,16 +93,20 @@ func (self *KVNode) hsetCommand(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 	// insert future to wait response
-	_, err := self.Propose(cmd.Raw)
+	v, err := self.Propose(cmd.Raw)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
 	}
-	conn.WriteString("OK")
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
 }
 
 func (self *KVNode) hmsetCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 4 {
+	if len(cmd.Args) < 4 || len(cmd.Args[2:])%2 != 0 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -169,9 +173,13 @@ func (self *KVNode) localHSetCommand(cmd redcon.Command) (interface{}, error) {
 }
 
 func (self *KVNode) localHMsetCommand(cmd redcon.Command) (interface{}, error) {
-	fvs := make([]rockredis.FVPair, 0, len(cmd.Args[2:])/2)
-	for i := 2; i < len(cmd.Args); i += 2 {
-		fvs = append(fvs, rockredis.FVPair{cmd.Args[i], cmd.Args[i+1]})
+	args := cmd.Args[2:]
+	if len(args)%2 != 0 {
+		return nil, errInvalidArgs
+	}
+	fvs := make([]rockredis.FVPair, 0, len(args)/2)
+	for i := 0; i < len(args); i += 2 {
+		fvs = append(fvs, rockredis.FVPair{args[i], args[i+1]})
 	}
 	err := self.store.HMset(cmd.Args[1], fvs...)
 	return nil, err
