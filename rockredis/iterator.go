@@ -129,7 +129,7 @@ func (it *RangeLimitedIterator) Valid() bool {
 	}
 	if !it.reverse {
 		if it.r.Max != nil {
-			r := bytes.Compare(it.Key(), it.r.Max)
+			r := bytes.Compare(it.Iterator.RefKey(), it.r.Max)
 			if it.r.Type&RangeROpen > 0 {
 				return !(r >= 0)
 			} else {
@@ -138,7 +138,7 @@ func (it *RangeLimitedIterator) Valid() bool {
 		}
 	} else {
 		if it.r.Min != nil {
-			r := bytes.Compare(it.Key(), it.r.Max)
+			r := bytes.Compare(it.Iterator.RefKey(), it.r.Min)
 			if it.r.Type&RangeLOpen > 0 {
 				return !(r <= 0)
 			} else {

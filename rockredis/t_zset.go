@@ -558,14 +558,10 @@ func (db *RockDB) zRange(key []byte, min int64, max int64, offset int, count int
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()
 		_, m, s, err := zDecodeScoreKey(rawk)
-		//may be we will check key equal?
 		if err != nil {
 			continue
 		}
 		v = append(v, ScorePair{Member: m, Score: s})
-		if count >= 0 && len(v) >= count {
-			break
-		}
 	}
 	it.Close()
 

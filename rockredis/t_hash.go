@@ -306,14 +306,14 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch) int64 {
 	return num
 }
 
-func (db *RockDB) HClear(hkey []byte) error {
+func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	if err := checkKeySize(hkey); err != nil {
-		return err
+		return 0, err
 	}
 
 	len, err := db.HLen(hkey)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len > RANGE_DELETE_NUM {
 		var r gorocksdb.Range
@@ -328,7 +328,7 @@ func (db *RockDB) HClear(hkey []byte) error {
 	defer wb.Destroy()
 	db.hDeleteAll(hkey, wb)
 	err = db.eng.Write(db.defaultWriteOpts, wb)
-	return err
+	return len, err
 }
 
 func (db *RockDB) HMclear(keys ...[]byte) {

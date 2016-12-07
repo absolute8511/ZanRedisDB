@@ -16,7 +16,7 @@ func (self *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 	val, err := self.store.LIndex(cmd.Args[1], index)
-	if err != nil {
+	if err != nil || val == nil {
 		conn.WriteNull()
 	} else {
 		conn.WriteBulk(val)

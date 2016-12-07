@@ -13,7 +13,7 @@ func (self *KVNode) hgetCommand(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 	val, err := self.store.HGet(cmd.Args[1], cmd.Args[2])
-	if err != nil {
+	if err != nil || val == nil {
 		conn.WriteNull()
 	} else {
 		conn.WriteBulk(val)
@@ -168,6 +168,24 @@ func (self *KVNode) hincrbyCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (self *KVNode) hclearCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 2 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	// insert future to wait response
+	v, err := self.Propose(cmd.Raw)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
@@ -203,4 +221,8 @@ func (self *KVNode) localHDelCommand(cmd redcon.Command) (interface{}, error) {
 	} else {
 		return n, nil
 	}
+}
+
+func (self *KVNode) localHclearCommand(cmd redcon.Command) (interface{}, error) {
+	return self.store.HClear(cmd.Args[1])
 }

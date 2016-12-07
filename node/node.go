@@ -133,6 +133,7 @@ func (self *KVNode) registerHandler() {
 	common.RegisterRedisHandler("hmset", self.hmsetCommand)
 	common.RegisterRedisHandler("hdel", self.hdelCommand)
 	common.RegisterRedisHandler("hincrby", self.hincrbyCommand)
+	common.RegisterRedisHandler("hclear", self.hclearCommand)
 	// for list
 	common.RegisterRedisHandler("lindex", self.lindexCommand)
 	common.RegisterRedisHandler("llen", self.llenCommand)
@@ -177,6 +178,7 @@ func (self *KVNode) registerHandler() {
 	common.RegisterRedisInternalHandler("hmset", self.localHMsetCommand)
 	common.RegisterRedisInternalHandler("hdel", self.localHDelCommand)
 	common.RegisterRedisInternalHandler("hincrby", self.localHIncrbyCommand)
+	common.RegisterRedisInternalHandler("hclear", self.localHclearCommand)
 	// list
 	common.RegisterRedisInternalHandler("lpop", self.localLpopCommand)
 	common.RegisterRedisInternalHandler("lpush", self.localLpushCommand)
