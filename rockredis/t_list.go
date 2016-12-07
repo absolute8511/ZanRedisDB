@@ -1,7 +1,6 @@
 package rockredis
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"github.com/absolute8511/gorocksdb"
@@ -343,15 +342,10 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 		db.eng.CompactRange(r)
 	}
 
-	rit := db.eng.NewIterator(db.defaultReadOpts)
+	rit := NewDBRangeIterator(db.eng, startKey, stopKey, RangeClose, false)
 	defer rit.Close()
-	rit.Seek(startKey)
 	for ; rit.Valid(); rit.Next() {
-		rawk := rit.Key().Data()
-		if bytes.Compare(rawk, stopKey) > 0 {
-			break
-		}
-		wb.Delete(rawk)
+		wb.Delete(rit.RefKey())
 		num++
 	}
 
@@ -525,14 +519,10 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	v := make([][]byte, 0, limit)
 
 	startKey := lEncodeListKey(key, headSeq)
-	rit := db.eng.NewIterator(db.defaultReadOpts)
+	rit := NewDBRangeLimitIterator(db.eng, startKey, nil, RangeClose, 0, int(limit), false)
 	defer rit.Close()
-	rit.Seek(startKey)
 	for ; rit.Valid(); rit.Next() {
-		v = append(v, rit.Value().Data())
-		if len(v) >= int(limit) {
-			break
-		}
+		v = append(v, rit.Value())
 	}
 	return v, nil
 }

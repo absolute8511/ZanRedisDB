@@ -1,7 +1,6 @@
 package rockredis
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -95,46 +94,29 @@ func (r *RockDB) Close() {
 func (r *RockDB) Get(key []byte) ([]byte, error) {
 	return r.KVGet(key)
 }
+
 func (r *RockDB) Exists(key []byte) (bool, error) {
 	ret, err := r.KVExists(key)
 	return ret != 0, err
 }
+
 func (r *RockDB) Delete(key []byte) error {
 	return r.KVDel(key)
 }
+
 func (r *RockDB) Put(key []byte, value []byte) error {
 	return r.KVSet(key, value)
 }
 
 func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {
-	retChan := make(chan common.KVRecord, 10)
+	retChan := make(chan common.KVRecord, 32)
 	go func() {
-		ro := gorocksdb.NewDefaultReadOptions()
-		ro.SetFillCache(false)
-		snap := r.eng.NewSnapshot()
-		ro.SetSnapshot(snap)
-		defer snap.Release()
-		it := r.eng.NewIterator(ro)
+		it := NewDBRangeLimitIterator(r.eng, sKey, eKey, RangeClose, 0, maxNum, false)
 		defer it.Close()
-		it.Seek(sKey)
-		num := 0
 		for it = it; it.Valid(); it.Next() {
-			if bytes.Compare(it.Key().Data(), eKey) >= 0 {
-				break
-			}
-			if num > maxNum {
-				break
-			}
 			key := it.Key()
 			value := it.Value()
-			retChan <- common.KVRecord{Key: key.Data(), Value: value.Data()}
-			key.Free()
-			value.Free()
-			num++
-		}
-		if err := it.Err(); err != nil {
-			// log error
-			log.Printf("read range error: %v\n", err)
+			retChan <- common.KVRecord{Key: key, Value: value}
 		}
 		close(retChan)
 	}()

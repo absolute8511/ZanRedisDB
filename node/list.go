@@ -184,6 +184,25 @@ func (self *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteInt64(rsp)
 }
 
+func (self *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 2 {
+		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	v, err := self.Propose(cmd.Raw)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	rsp, ok := v.(int64)
+	if !ok {
+		conn.WriteError("Invalid response type")
+		return
+	}
+	// wait response
+	conn.WriteInt64(rsp)
+}
+
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
@@ -223,4 +242,8 @@ func (self *KVNode) localRpopCommand(cmd redcon.Command) (interface{}, error) {
 
 func (self *KVNode) localRpushCommand(cmd redcon.Command) (interface{}, error) {
 	return self.store.RPush(cmd.Args[1], cmd.Args[2:]...)
+}
+
+func (self *KVNode) localLclearCommand(cmd redcon.Command) (interface{}, error) {
+	return self.store.LClear(cmd.Args[1])
 }

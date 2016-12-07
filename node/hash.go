@@ -62,7 +62,7 @@ func (self *KVNode) hexistsCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) hmgetCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
+	if len(cmd.Args) < 3 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -138,11 +138,15 @@ func (self *KVNode) hdelCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	_, err := self.Propose(cmd.Raw)
+	v, err := self.Propose(cmd.Raw)
 	if err != nil {
 		conn.WriteInt(0)
+		return
+	}
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
 	} else {
-		conn.WriteInt(1)
+		conn.WriteError(errInvalidResponse.Error())
 	}
 }
 
@@ -179,7 +183,7 @@ func (self *KVNode) localHMsetCommand(cmd redcon.Command) (interface{}, error) {
 	}
 	fvs := make([]rockredis.FVPair, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
-		fvs = append(fvs, rockredis.FVPair{args[i], args[i+1]})
+		fvs = append(fvs, rockredis.FVPair{Field: args[i], Value: args[i+1]})
 	}
 	err := self.store.HMset(cmd.Args[1], fvs...)
 	return nil, err
@@ -195,8 +199,8 @@ func (self *KVNode) localHDelCommand(cmd redcon.Command) (interface{}, error) {
 	n, err := self.store.HDel(cmd.Args[1], cmd.Args[2:]...)
 	if err != nil {
 		// leader write need response
-		return int(0), err
+		return int64(0), err
 	} else {
-		return int(n), nil
+		return n, nil
 	}
 }

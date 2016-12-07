@@ -7,7 +7,7 @@ import (
 
 const (
 	DIR_PERM  = 0755
-	FILE_PERM = 0744
+	FILE_PERM = 0644
 )
 
 type WriteCmd struct {

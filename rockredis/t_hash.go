@@ -194,16 +194,24 @@ func (db *RockDB) HMset(key []byte, args ...FVPair) error {
 	defer wb.Destroy()
 
 	var err error
+	var num int64 = 0
 	for i := 0; i < len(args); i++ {
 		if err = checkHashKFSize(key, args[i].Field); err != nil {
 			return err
 		} else if err = checkValueSize(args[i].Value); err != nil {
 			return err
 		}
-		_, err = db.hSetField(key, args[i].Field, args[i].Value, wb)
-		if err != nil {
+		ek := hEncodeHashKey(key, args[i].Field)
+
+		if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
 			return err
+		} else if v == nil {
+			num++
 		}
+		wb.Put(ek, args[i].Value)
+	}
+	if _, err := db.hIncrSize(key, num, wb); err != nil {
+		return err
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -285,15 +293,11 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch) int64 {
 	start := hEncodeStartKey(hkey)
 	stop := hEncodeStopKey(hkey)
 
-	it := db.eng.NewIterator(db.defaultReadOpts)
+	it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
 	defer it.Close()
-	it.Seek(start)
 	var num int64 = 0
 	for ; it.Valid(); it.Next() {
-		rawk := it.Key().Data()
-		if bytes.Compare(rawk, stop) >= 0 {
-			break
-		}
+		rawk := it.RefKey()
 		wb.Delete(rawk)
 		num++
 	}
@@ -377,29 +381,14 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan FVPairRec, error) {
 	go func() {
 		start := hEncodeStartKey(key)
 		stop := hEncodeStopKey(key)
-		it_opts := gorocksdb.NewDefaultReadOptions()
-		it_opts.SetFillCache(false)
-		snap := gorocksdb.NewSnapshot(db.eng)
-		it_opts.SetSnapshot(snap)
-		it := db.eng.NewIterator(it_opts)
+		it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
 		defer it.Close()
-		defer snap.Release()
 		defer close(v)
-		it.Seek(start)
-		num := 0
 		for ; it.Valid(); it.Next() {
-			rawk := it.Key().Data()
-			if bytes.Compare(rawk, stop) >= 0 {
-				break
-			}
-			_, f, err := hDecodeHashKey(it.Key().Bytes())
+			_, f, err := hDecodeHashKey(it.Key())
 			v <- FVPairRec{
-				FVPair{Field: f, Value: it.Value().Bytes()},
+				FVPair{Field: f, Value: it.Value()},
 				err,
-			}
-			num++
-			if num >= MAX_BATCH_NUM {
-				break
 			}
 		}
 	}()
@@ -424,21 +413,11 @@ func (db *RockDB) HKeys(key []byte) (int64, chan FVPairRec, error) {
 	go func() {
 		start := hEncodeStartKey(key)
 		stop := hEncodeStopKey(key)
-		it_opts := gorocksdb.NewDefaultReadOptions()
-		it_opts.SetFillCache(false)
-		snap := gorocksdb.NewSnapshot(db.eng)
-		it_opts.SetSnapshot(snap)
-		it := db.eng.NewIterator(it_opts)
+		it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
 		defer it.Close()
-		defer snap.Release()
 		defer close(v)
-		it.Seek(start)
 		for ; it.Valid(); it.Next() {
-			rawk := it.Key().Data()
-			if bytes.Compare(rawk, stop) >= 0 {
-				break
-			}
-			_, f, err := hDecodeHashKey(it.Key().Bytes())
+			_, f, err := hDecodeHashKey(it.Key())
 			v <- FVPairRec{
 				FVPair{Field: f, Value: nil},
 				err,
@@ -467,22 +446,12 @@ func (db *RockDB) HValues(key []byte) (int64, chan FVPairRec, error) {
 	go func() {
 		start := hEncodeStartKey(key)
 		stop := hEncodeStopKey(key)
-		it_opts := gorocksdb.NewDefaultReadOptions()
-		it_opts.SetFillCache(false)
-		snap := gorocksdb.NewSnapshot(db.eng)
-		it_opts.SetSnapshot(snap)
-		it := db.eng.NewIterator(it_opts)
+		it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
 		defer it.Close()
-		defer snap.Release()
 		defer close(v)
-		it.Seek(start)
 		for ; it.Valid(); it.Next() {
-			rawk := it.Key().Data()
-			if bytes.Compare(rawk, stop) >= 0 {
-				break
-			}
 			v <- FVPairRec{
-				FVPair{Field: nil, Value: it.Value().Bytes()},
+				FVPair{Field: nil, Value: it.Value()},
 				nil,
 			}
 		}

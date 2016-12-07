@@ -137,10 +137,3 @@ var (
 	ErrZScoreMiss   = errors.New("zset score miss")
 	ErrWriteInROnly = errors.New("write not support in readonly mode")
 )
-
-const (
-	RangeClose uint8 = 0x00
-	RangeLOpen uint8 = 0x01
-	RangeROpen uint8 = 0x10
-	RangeOpen  uint8 = 0x11
-)

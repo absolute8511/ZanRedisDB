@@ -1,7 +1,6 @@
 package rockredis
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 
@@ -121,15 +120,10 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	stop := sEncodeStopKey(key)
 
 	var num int64 = 0
-	it := db.eng.NewIterator(db.defaultReadOpts)
-	it.Seek(start)
+	it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
-		rawk := it.Key().Data()
-		if bytes.Compare(rawk, stop) >= 0 {
-			break
-		}
-		wb.Delete(rawk)
+		wb.Delete(it.RefKey())
 		num++
 	}
 
@@ -250,14 +244,10 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 
 	v := make([][]byte, 0, 16)
 
-	it := db.eng.NewIterator(db.defaultReadOpts)
+	it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
 	defer it.Close()
-	it.Seek(start)
 	for ; it.Valid(); it.Next() {
-		if bytes.Compare(it.Key().Data(), stop) >= 0 {
-			break
-		}
-		_, m, err := sDecodeSetKey(it.Key().Bytes())
+		_, m, err := sDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
 		}

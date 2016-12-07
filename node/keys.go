@@ -71,7 +71,11 @@ func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	vals, _ := self.store.MGet(cmd.Args[1:]...)
 	conn.WriteArray(len(vals))
 	for _, v := range vals {
-		conn.WriteBulk(v)
+		if v == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(v)
+		}
 	}
 }
 
@@ -140,15 +144,19 @@ func (self *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
+	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	_, err := self.Propose(cmd.Raw)
+	v, err := self.Propose(cmd.Raw)
 	if err != nil {
-		conn.WriteInt(0)
+		conn.WriteError(err.Error())
+		return
+	}
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
 	} else {
-		conn.WriteInt(1)
+		conn.WriteError(errInvalidResponse.Error())
 	}
 }
 
@@ -181,11 +189,6 @@ func (self *KVNode) localIncrCommand(cmd redcon.Command) (interface{}, error) {
 }
 
 func (self *KVNode) localDelCommand(cmd redcon.Command) (interface{}, error) {
-	err := self.store.LocalDelete(cmd.Args[1])
-	if err != nil {
-		// leader write need response
-		return int(0), err
-	} else {
-		return int(1), nil
-	}
+	self.store.DelKeys(cmd.Args[1:]...)
+	return int64(len(cmd.Args[1:])), nil
 }

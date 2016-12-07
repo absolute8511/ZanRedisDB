@@ -186,15 +186,22 @@ func (self *KVNode) zrangeFunc(conn redcon.Conn, cmd redcon.Command, reverse boo
 		conn.WriteError("Invalid index: " + err.Error())
 		return
 	}
+	needScore := false
+	if len(cmd.Args) == 5 {
+		if strings.ToLower(string(cmd.Args[4])) == "withscores" {
+			needScore = true
+		} else {
+			conn.WriteError(errSyntaxError.Error())
+			return
+		}
+	}
 
 	vlist, err := self.store.ZRangeGeneric(cmd.Args[1], int(start), int(end), reverse)
 	if err != nil {
 		conn.WriteError("Err: " + err.Error())
 		return
 	}
-	needScore := false
-	if len(cmd.Args) == 5 {
-		needScore = true
+	if needScore {
 		conn.WriteArray(len(vlist) * 2)
 	} else {
 		conn.WriteArray(len(vlist))
@@ -270,18 +277,31 @@ func (self *KVNode) zrangebyscoreFunc(conn redcon.Conn, cmd redcon.Command, reve
 		conn.WriteError("Err: " + err.Error())
 		return
 	}
+	args := cmd.Args[4:]
+	needScore := false
+	if len(args) > 0 {
+		if strings.ToLower(string(args[0])) == "withscores" {
+			needScore = true
+			args = args[1:]
+		}
+	}
+
 	offset := 0
 	count := -1
-	if len(cmd.Args) == 7 {
-		if strings.ToLower(string(cmd.Args[4])) != "limit" {
+	if len(args) > 0 {
+		if len(args) != 3 {
 			conn.WriteError(errInvalidArgs.Error())
 			return
 		}
-		if offset, err = strconv.Atoi(string(cmd.Args[5])); err != nil {
+		if strings.ToLower(string(args[0])) != "limit" {
 			conn.WriteError(errInvalidArgs.Error())
 			return
 		}
-		if count, err = strconv.Atoi(string(cmd.Args[6])); err != nil {
+		if offset, err = strconv.Atoi(string(args[1])); err != nil {
+			conn.WriteError(errInvalidArgs.Error())
+			return
+		}
+		if count, err = strconv.Atoi(string(args[2])); err != nil {
 			conn.WriteError(errInvalidArgs.Error())
 			return
 		}
@@ -292,9 +312,16 @@ func (self *KVNode) zrangebyscoreFunc(conn redcon.Conn, cmd redcon.Command, reve
 		conn.WriteError("Err: " + err.Error())
 		return
 	}
-	conn.WriteArray(len(vlist))
+	if needScore {
+		conn.WriteArray(len(vlist) * 2)
+	} else {
+		conn.WriteArray(len(vlist))
+	}
 	for _, d := range vlist {
 		conn.WriteBulk(d.Member)
+		if needScore {
+			conn.WriteBulkString(strconv.FormatInt(d.Score, 10))
+		}
 	}
 }
 
