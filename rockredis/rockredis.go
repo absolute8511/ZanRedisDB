@@ -40,8 +40,17 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	}
 
 	os.MkdirAll(cfg.DataDir, 0755)
+	// options need be adjust due to using hdd or sdd, please reference
+	// https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
-	//bbto.SetBlockCache(gorocksdb.NewLRUCache(3 << 30))
+	// use large block to reduce index block size for hdd
+	// if using ssd, should use the default value
+	bbto.SetBlockSize(1024 * 64)
+	// should about 20% less than host RAM
+	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
+	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 1024))
+	// for hdd , we nee cache index and filter blocks
+	bbto.SetCacheIndexAndFilterBlocks(true)
 	filter := gorocksdb.NewBloomFilter(10)
 	bbto.SetFilterPolicy(filter)
 	opts := gorocksdb.NewDefaultOptions()
@@ -50,9 +59,12 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetMaxOpenFiles(100000)
 	opts.SetWriteBufferSize(1024 * 1024 * 16)
 	opts.SetMaxWriteBufferNumber(3)
-	opts.SetMaxBytesForLevelBase(1024 * 1024 * 128)
-	opts.SetTargetFileSizeBase(1024 * 1024 * 32)
+	opts.SetMaxBytesForLevelBase(1024 * 1024 * 256)
+	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
 	opts.SetMaxBackgroundFlushes(4)
+	// we use table, so we use prefix seek feature
+	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
+	//opts.SetMemtablePrefixBloomSizeRatio(0.1)
 
 	eng, err := gorocksdb.OpenDb(opts, cfg.DataDir)
 	if err != nil {
