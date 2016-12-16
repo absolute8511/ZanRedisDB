@@ -40,6 +40,7 @@ var (
 	errInvalidCommand  = errors.New("invalid command")
 	errSyntaxError     = errors.New("syntax error")
 	errStopped         = errors.New("the node stopped")
+	errTimeout         = errors.New("queue request timeout")
 	errUnknownData     = errors.New("unknown request data type")
 )
 
@@ -58,16 +59,18 @@ type internalReq struct {
 	ID       uint64
 	DataType int8
 	Data     []byte
+	doneC    chan struct{}
 }
 
 // a key-value node backed by raft
 type KVNode struct {
-	proposeC chan<- []byte // channel for proposing updates
-	raftNode *raftNode
-	store    *store.KVStore
-	stopping int32
-	stopChan chan struct{}
-	w        wait.Wait
+	reqProposeC chan *internalReq
+	proposeC    chan<- []byte // channel for proposing updates
+	raftNode    *raftNode
+	store       *store.KVStore
+	stopping    int32
+	stopChan    chan struct{}
+	w           wait.Wait
 }
 
 type KVSnapInfo struct {
@@ -81,10 +84,11 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 	confChangeC <-chan raftpb.ConfChange) (*KVNode, <-chan struct{}) {
 	proposeC := make(chan []byte)
 	s := &KVNode{
-		proposeC: proposeC,
-		store:    store.NewKVStore(kvopts),
-		stopChan: make(chan struct{}),
-		w:        wait.New(),
+		reqProposeC: make(chan *internalReq, 200),
+		proposeC:    proposeC,
+		store:       store.NewKVStore(kvopts),
+		stopChan:    make(chan struct{}),
+		w:           wait.New(),
 	}
 	s.registerHandler()
 	commitC, errorC, raftNode := newRaftNode(clusterID, id, localRaftAddr, kvopts.DataDir,
@@ -94,6 +98,7 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 	raftNode.startRaft(s)
 	// read commits from raft into KVStore map until error
 	go s.applyCommits(commitC, errorC)
+	go s.handleProposeReq()
 	return s, s.stopChan
 }
 
@@ -197,17 +202,66 @@ func (self *KVNode) registerHandler() {
 	common.RegisterRedisInternalHandler("zclear", self.localZclearCommand)
 }
 
-func (self *KVNode) Propose(buf []byte) (interface{}, error) {
-	req := &internalReq{
-		ID:       self.raftNode.reqIDGen.Next(),
-		DataType: 0,
-		Data:     buf,
+func (self *KVNode) handleProposeReq() {
+	reqList := make([]*internalReq, 0, 100)
+	var lastReq *internalReq
+	defer func() {
+		for _, r := range reqList {
+			self.w.Trigger(r.ID, errStopped)
+		}
+		for {
+			select {
+			case r := <-self.reqProposeC:
+				self.w.Trigger(r.ID, errStopped)
+			default:
+				break
+			}
+		}
+	}()
+	for {
+		select {
+		case r := <-self.reqProposeC:
+			reqList = append(reqList, r)
+			lastReq = r
+		default:
+			if len(reqList) == 0 {
+				select {
+				case r := <-self.reqProposeC:
+					reqList = append(reqList, r)
+					lastReq = r
+				case <-self.stopChan:
+					return
+				}
+			}
+			d, _ := json.Marshal(reqList)
+			self.proposeC <- d
+			select {
+			case <-lastReq.doneC:
+			case <-self.stopChan:
+				return
+			}
+			reqList = reqList[:0]
+			lastReq = nil
+		}
 	}
+}
+
+func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	ch := self.w.Register(req.ID)
-	d, _ := json.Marshal(req)
-	self.proposeC <- d
+	select {
+	case self.reqProposeC <- req:
+	default:
+		select {
+		case self.reqProposeC <- req:
+		case <-self.stopChan:
+			self.w.Trigger(req.ID, errStopped)
+		case <-time.After(time.Second * 3):
+			self.w.Trigger(req.ID, errTimeout)
+		}
+	}
 	select {
 	case rsp := <-ch:
+		close(req.doneC)
 		if err, ok := rsp.(error); ok {
 			return nil, err
 		}
@@ -217,24 +271,24 @@ func (self *KVNode) Propose(buf []byte) (interface{}, error) {
 	}
 }
 
+func (self *KVNode) Propose(buf []byte) (interface{}, error) {
+	req := &internalReq{
+		ID:       self.raftNode.reqIDGen.Next(),
+		DataType: 0,
+		Data:     buf,
+		doneC:    make(chan struct{}),
+	}
+	return self.queueRequest(req)
+}
+
 func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	req := &internalReq{
 		ID:       self.raftNode.reqIDGen.Next(),
 		DataType: HTTPReq,
 		Data:     buf,
+		doneC:    make(chan struct{}),
 	}
-	ch := self.w.Register(req.ID)
-	d, _ := json.Marshal(req)
-	self.proposeC <- d
-	select {
-	case rsp := <-ch:
-		if err, ok := rsp.(error); ok {
-			return nil, err
-		}
-		return rsp, nil
-	case <-self.stopChan:
-		return nil, errStopped
-	}
+	return self.queueRequest(req)
 }
 
 func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
@@ -284,43 +338,47 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 		case raftpb.EntryNormal:
 			if evnt.Data != nil {
 				// try redis command
-				var req internalReq
-				json.Unmarshal(evnt.Data, &req)
-				if req.DataType == 0 {
-					cmd, err := redcon.Parse(req.Data)
-					if err != nil {
-						self.w.Trigger(req.ID, err)
-					} else {
-						cmdName := strings.ToLower(string(cmd.Args[0]))
-						h, ok := common.GetInternalHandler(cmdName)
-						if !ok {
-							log.Printf("unsupported redis command: %v", cmd)
-							self.w.Trigger(req.ID, errInvalidCommand)
+				var reqList []*internalReq
+				parseErr := json.Unmarshal(evnt.Data, &reqList)
+				if parseErr != nil {
+					log.Printf("parse request failed: %v", parseErr)
+				}
+				for _, req := range reqList {
+					if req.DataType == 0 {
+						cmd, err := redcon.Parse(req.Data)
+						if err != nil {
+							self.w.Trigger(req.ID, err)
 						} else {
-							v, err := h(cmd)
-							// write the future response or error
-							if err != nil {
-								self.w.Trigger(req.ID, err)
+							cmdName := strings.ToLower(string(cmd.Args[0]))
+							h, ok := common.GetInternalHandler(cmdName)
+							if !ok {
+								log.Printf("unsupported redis command: %v", cmd)
+								self.w.Trigger(req.ID, errInvalidCommand)
 							} else {
-								self.w.Trigger(req.ID, v)
+								v, err := h(cmd)
+								// write the future response or error
+								if err != nil {
+									self.w.Trigger(req.ID, err)
+								} else {
+									self.w.Trigger(req.ID, v)
+								}
 							}
 						}
-					}
-				} else if req.DataType == HTTPReq {
-					// try other protocol command
-					var dataKv kv
-					dec := gob.NewDecoder(bytes.NewBuffer(req.Data))
-					var err error
-					if err = dec.Decode(&dataKv); err != nil {
-						log.Fatalf("could not decode message (%v)\n", err)
+					} else if req.DataType == HTTPReq {
+						// try other protocol command
+						var dataKv kv
+						dec := gob.NewDecoder(bytes.NewBuffer(req.Data))
+						var err error
+						if err = dec.Decode(&dataKv); err != nil {
+							log.Fatalf("could not decode message (%v)\n", err)
+						} else {
+							err = self.store.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
+						}
+						self.w.Trigger(req.ID, err)
 					} else {
-						err = self.store.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
+						self.w.Trigger(req.ID, errUnknownData)
 					}
-					self.w.Trigger(req.ID, err)
-				} else {
-					self.w.Trigger(req.ID, errUnknownData)
 				}
-				// TODO: notify the write client this write has been applied to cluster
 			}
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange
@@ -369,6 +427,8 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 				return
 			}
 			log.Printf("error: %v", err)
+			return
+		case <-self.stopChan:
 			return
 		}
 	}
