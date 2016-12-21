@@ -9,20 +9,20 @@ func TestSetCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("key")
+	key := []byte("test:key")
 	member := []byte("member")
 
 	ek := sEncodeSizeKey(key)
 	if k, err := sDecodeSizeKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "key" {
+	} else if string(k) != "test:key" {
 		t.Fatal(string(k))
 	}
 
 	ek = sEncodeSetKey(key, member)
 	if k, m, err := sDecodeSetKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "key" {
+	} else if string(k) != "test:key" {
 		t.Fatal(string(k))
 	} else if string(m) != "member" {
 		t.Fatal(string(m))
@@ -33,10 +33,10 @@ func TestDBSet(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("testdb_set_a")
+	key := []byte("test:testdb_set_a")
 	member := []byte("member")
-	key1 := []byte("testdb_set_a1")
-	key2 := []byte("testdb_set_a2")
+	key1 := []byte("test:testdb_set_a1")
+	key2 := []byte("test:testdb_set_a2")
 	member1 := []byte("testdb_set_m1")
 	member2 := []byte("testdb_set_m2")
 
@@ -96,7 +96,7 @@ func TestDBSet(t *testing.T) {
 func TestSKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
-	key := []byte("skeyexists_test")
+	key := []byte("test:skeyexists_test")
 	if n, err := db.SKeyExists(key); err != nil {
 		t.Fatal(err.Error())
 	} else if n != 0 {

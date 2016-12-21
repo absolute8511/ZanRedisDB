@@ -10,19 +10,19 @@ func TestListCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("key")
+	key := []byte("test:key")
 
 	ek := lEncodeMetaKey(key)
 	if k, err := lDecodeMetaKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "key" {
+	} else if string(k) != "test:key" {
 		t.Fatal(string(k))
 	}
 
 	ek = lEncodeListKey(key, 1024)
 	if k, seq, err := lDecodeListKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "key" {
+	} else if string(k) != "test:key" {
 		t.Fatal(string(k))
 	} else if seq != 1024 {
 		t.Fatal(seq)
@@ -33,7 +33,7 @@ func TestListTrim(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("test_list_trim")
+	key := []byte("test:test_list_trim")
 
 	init := func() {
 		db.LClear(key)
@@ -65,7 +65,7 @@ func TestListTrim(t *testing.T) {
 	if l, _ := db.LLen(key); l != int64(51) {
 		t.Fatal("wrong len:", l)
 	}
-	for i := int32(0); i < 51; i++ {
+	for i := int64(0); i < 51; i++ {
 		v, err := db.LIndex(key, i)
 		if err != nil {
 			t.Fatal(err)
@@ -82,7 +82,7 @@ func TestListTrim(t *testing.T) {
 	if l, _ := db.LLen(key); l != int64(30-11+1) {
 		t.Fatal("wrong len:", l)
 	}
-	for i := int32(11); i < 31; i++ {
+	for i := int64(11); i < 31; i++ {
 		v, err := db.LIndex(key, i-11)
 		if err != nil {
 			t.Fatal(err)
@@ -122,7 +122,7 @@ func TestDBList(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("testdb_list_a")
+	key := []byte("test:testdb_list_a")
 
 	if n, err := db.RPush(key, []byte("1"), []byte("2"), []byte("3")); err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestDBList(t *testing.T) {
 func TestLKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
-	key := []byte("lkeyexists_test")
+	key := []byte("test:lkeyexists_test")
 	if n, err := db.LKeyExists(key); err != nil {
 		t.Fatal(err.Error())
 	} else if n != 0 {
@@ -193,7 +193,7 @@ func TestListPop(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("lpop_test")
+	key := []byte("test:lpop_test")
 
 	if v, err := db.LPop(key); err != nil {
 		t.Fatal(err)

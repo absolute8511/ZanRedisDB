@@ -30,6 +30,7 @@ type RockDB struct {
 	dbOpts           *gorocksdb.Options
 	defaultWriteOpts *gorocksdb.WriteOptions
 	defaultReadOpts  *gorocksdb.ReadOptions
+	wb               *gorocksdb.WriteBatch
 	quit             chan struct{}
 	wg               sync.WaitGroup
 }
@@ -77,6 +78,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		eng:              eng,
 		defaultReadOpts:  cfg.DefaultReadOpts,
 		defaultWriteOpts: cfg.DefaultWriteOpts,
+		wb:               gorocksdb.NewWriteBatch(),
 	}
 
 	db.quit = make(chan struct{})
@@ -101,23 +103,6 @@ func (r *RockDB) Close() {
 	if r.eng != nil {
 		r.eng.Close()
 	}
-}
-
-func (r *RockDB) Get(key []byte) ([]byte, error) {
-	return r.KVGet(key)
-}
-
-func (r *RockDB) Exists(key []byte) (bool, error) {
-	ret, err := r.KVExists(key)
-	return ret != 0, err
-}
-
-func (r *RockDB) Delete(key []byte) error {
-	return r.KVDel(key)
-}
-
-func (r *RockDB) Put(key []byte, value []byte) error {
-	return r.KVSet(key, value)
 }
 
 func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {

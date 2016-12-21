@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"fmt"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"os"
 	"reflect"
 	"testing"
@@ -15,28 +16,28 @@ func bin(sz string) []byte {
 	return []byte(sz)
 }
 
-func pair(memb string, score int) ScorePair {
-	return ScorePair{int64(score), bin(memb)}
+func pair(memb string, score int) common.ScorePair {
+	return common.ScorePair{int64(score), bin(memb)}
 }
 
 func TestZSetCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("key")
+	key := []byte("test:key")
 	member := []byte("member")
 
 	ek := zEncodeSizeKey(key)
 	if k, err := zDecodeSizeKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "key" {
+	} else if string(k) != "test:key" {
 		t.Fatal(string(k))
 	}
 
 	ek = zEncodeSetKey(key, member)
 	if k, m, err := zDecodeSetKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "key" {
+	} else if string(k) != "test:key" {
 		t.Fatal(string(k))
 	} else if string(m) != "member" {
 		t.Fatal(string(m))
@@ -45,7 +46,7 @@ func TestZSetCodec(t *testing.T) {
 	ek = zEncodeScoreKey(key, member, 100)
 	if k, m, s, err := zDecodeScoreKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "key" {
+	} else if string(k) != "test:key" {
 		t.Fatal(string(k))
 	} else if string(m) != "member" {
 		t.Fatal(string(m))
@@ -59,7 +60,7 @@ func TestDBZSet(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := bin("testdb_zset_a")
+	key := bin("test:testdb_zset_a")
 
 	// {'a':0, 'b':1, 'c':2, 'd':3}
 	if n, err := db.ZAdd(key, pair("a", 0), pair("b", 1),
@@ -122,7 +123,7 @@ func TestZSetOrder(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := bin("testdb_zset_order")
+	key := bin("test:testdb_zset_order")
 
 	// {'a':0, 'b':1, 'c':2, 'd':3, 'e':4, 'f':5}
 	membs := [...]string{"a", "b", "c", "d", "e", "f"}
@@ -228,14 +229,14 @@ func TestZLex(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("myzset")
-	if _, err := db.ZAdd(key, ScorePair{0, []byte("a")},
-		ScorePair{0, []byte("b")},
-		ScorePair{0, []byte("c")},
-		ScorePair{0, []byte("d")},
-		ScorePair{0, []byte("e")},
-		ScorePair{0, []byte("f")},
-		ScorePair{0, []byte("g")}); err != nil {
+	key := []byte("test:myzset")
+	if _, err := db.ZAdd(key, common.ScorePair{0, []byte("a")},
+		common.ScorePair{0, []byte("b")},
+		common.ScorePair{0, []byte("c")},
+		common.ScorePair{0, []byte("d")},
+		common.ScorePair{0, []byte("e")},
+		common.ScorePair{0, []byte("f")},
+		common.ScorePair{0, []byte("g")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -281,14 +282,14 @@ func TestZLex(t *testing.T) {
 func TestZKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
-	key := []byte("zkeyexists_test")
+	key := []byte("test:zkeyexists_test")
 	if n, err := db.ZKeyExists(key); err != nil {
 		t.Fatal(err.Error())
 	} else if n != 0 {
 		t.Fatal("invalid value ", n)
 	}
 
-	db.ZAdd(key, ScorePair{0, []byte("a")}, ScorePair{0, []byte("b")})
+	db.ZAdd(key, common.ScorePair{0, []byte("a")}, common.ScorePair{0, []byte("b")})
 
 	if n, err := db.ZKeyExists(key); err != nil {
 		t.Fatal(err.Error())

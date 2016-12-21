@@ -2,7 +2,7 @@ package node
 
 import (
 	"errors"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 )
 
@@ -45,9 +45,9 @@ func (self *KVNode) localPlsetCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, errors.New("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 	}
 
-	var kvpairs []rockredis.KVPair
+	var kvpairs []common.KVRecord
 	for i := 1; i < len(cmd.Args); i += 2 {
-		kvpairs = append(kvpairs, rockredis.KVPair{cmd.Args[i], cmd.Args[i+1]})
+		kvpairs = append(kvpairs, common.KVRecord{Key: cmd.Args[i], Value: cmd.Args[i+1]})
 	}
 	err := self.store.MSet(kvpairs...)
 	return nil, err

@@ -3,7 +3,7 @@ package node
 import (
 	"bytes"
 	"errors"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 	"strconv"
 	"strings"
@@ -24,7 +24,7 @@ func getScoreRange(left []byte, right []byte) (int64, int64, error) {
 	isLOpen := false
 	rangeD := left
 	if strings.ToLower(string(rangeD)) == "-inf" {
-		leftRange = rockredis.MinScore
+		leftRange = common.MinScore
 	} else {
 		if left[0] == '(' {
 			isLOpen = true
@@ -34,7 +34,7 @@ func getScoreRange(left []byte, right []byte) (int64, int64, error) {
 		if err != nil {
 			return leftRange, rightRange, err
 		}
-		if leftRange <= rockredis.MinScore || leftRange >= rockredis.MaxScore {
+		if leftRange <= common.MinScore || leftRange >= common.MaxScore {
 			return leftRange, rightRange, errInvalidRange
 		}
 		if isLOpen {
@@ -44,7 +44,7 @@ func getScoreRange(left []byte, right []byte) (int64, int64, error) {
 	rangeD = right
 	isROpen := false
 	if strings.ToLower(string(rangeD)) == "+inf" {
-		rightRange = rockredis.MaxScore
+		rightRange = common.MaxScore
 	} else {
 		if right[0] == '(' {
 			isROpen = true
@@ -54,7 +54,7 @@ func getScoreRange(left []byte, right []byte) (int64, int64, error) {
 		if err != nil {
 			return leftRange, rightRange, err
 		}
-		if rightRange <= rockredis.MinScore || rightRange >= rockredis.MaxScore {
+		if rightRange <= common.MinScore || rightRange >= common.MaxScore {
 			return leftRange, rightRange, errInvalidRange
 		}
 		if isROpen {
@@ -70,7 +70,7 @@ func getLexRange(left []byte, right []byte) ([]byte, []byte, uint8, error) {
 		return nil, nil, 0, errInvalidRange
 	}
 	var err error
-	rangeType := rockredis.RangeClose
+	rangeType := common.RangeClose
 	isLOpen := false
 	if bytes.Equal(left, []byte("-")) {
 		left = nil
@@ -100,11 +100,11 @@ func getLexRange(left []byte, right []byte) ([]byte, []byte, uint8, error) {
 		}
 	}
 	if isLOpen && isROpen {
-		rangeType = rockredis.RangeOpen
+		rangeType = common.RangeOpen
 	} else if isROpen {
-		rangeType = rockredis.RangeROpen
+		rangeType = common.RangeROpen
 	} else if isLOpen {
-		rangeType = rockredis.RangeLOpen
+		rangeType = common.RangeLOpen
 	}
 	return left, right, rangeType, err
 }
@@ -531,14 +531,14 @@ func (self *KVNode) zclearCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func getScorePairs(args [][]byte) ([]rockredis.ScorePair, error) {
-	mlist := make([]rockredis.ScorePair, 0, len(args)/2)
+func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
+	mlist := make([]common.ScorePair, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
 		s, err := strconv.ParseInt(string(args[i]), 10, 64)
 		if err != nil {
 			return nil, err
 		}
-		mlist = append(mlist, rockredis.ScorePair{Score: s, Member: args[i+1]})
+		mlist = append(mlist, common.ScorePair{Score: s, Member: args[i+1]})
 	}
 
 	return mlist, nil

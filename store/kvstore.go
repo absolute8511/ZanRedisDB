@@ -54,16 +54,16 @@ func (s *KVStore) Clear() error {
 }
 
 func (s *KVStore) LocalLookup(key []byte) ([]byte, error) {
-	value, err := s.Get(key)
+	value, err := s.KVGet(key)
 	return value, err
 }
 
 func (s *KVStore) LocalDelete(key []byte) error {
-	return s.Delete(key)
+	return s.KVDel(key)
 }
 
 func (s *KVStore) LocalPut(key []byte, value []byte) error {
-	err := s.Put(key, value)
+	err := s.KVSet(key, value)
 	if err != nil {
 		log.Printf("failed to write key %v to db: %v\n", string(key), err)
 	}

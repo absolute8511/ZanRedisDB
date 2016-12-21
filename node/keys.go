@@ -3,7 +3,7 @@ package node
 import (
 	"bytes"
 	"encoding/gob"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 	"log"
 )
@@ -63,7 +63,7 @@ func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	if len(cmd.Args[1:]) >= rockredis.MAX_BATCH_NUM {
+	if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
 		conn.WriteError("batch size too much")
 		return
 	}
@@ -114,7 +114,7 @@ func (self *KVNode) msetCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	if len(cmd.Args[1:]) >= rockredis.MAX_BATCH_NUM {
+	if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
 		conn.WriteError("too much batch size")
 		return
 	}
@@ -175,9 +175,9 @@ func (self *KVNode) localSetnxCommand(cmd redcon.Command) (interface{}, error) {
 
 func (self *KVNode) localMSetCommand(cmd redcon.Command) (interface{}, error) {
 	args := cmd.Args[1:]
-	kvlist := make([]rockredis.KVPair, 0, len(args)/2)
+	kvlist := make([]common.KVRecord, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
-		kvlist = append(kvlist, rockredis.KVPair{args[i], args[i+1]})
+		kvlist = append(kvlist, common.KVRecord{Key: args[i], Value: args[i+1]})
 	}
 	err := self.store.MSet(kvlist...)
 	return nil, err

@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"bytes"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"os"
 	"testing"
 )
@@ -23,13 +24,13 @@ func TestDBKV(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key1 := []byte("testdb_kv_a")
+	key1 := []byte("test:testdb_kv_a")
 
 	if err := db.KVSet(key1, []byte("hello world 1")); err != nil {
 		t.Fatal(err)
 	}
 
-	key2 := []byte("testdb_kv_b")
+	key2 := []byte("test:testdb_kv_b")
 
 	if err := db.KVSet(key2, []byte("hello world 2")); err != nil {
 		t.Fatal(err)
@@ -41,6 +42,12 @@ func TestDBKV(t *testing.T) {
 	v2, _ := db.KVGet(key2)
 	if string(v2) != "hello world 2" {
 		t.Error(v2)
+	}
+	num, err := db.GetTableKeyCount([]byte("test"))
+	if err != nil {
+		t.Error(err)
+	} else if num != 2 {
+		t.Errorf("table count not as expected: %v", num)
 	}
 
 	ay, errs := db.MGet(key1, key2)
@@ -56,7 +63,7 @@ func TestDBKV(t *testing.T) {
 		t.Errorf("%v, %v", ay[1], errs[1])
 	}
 
-	key3 := []byte("testdb_kv_range")
+	key3 := []byte("test:testdb_kv_range")
 
 	if n, err := db.Append(key3, []byte("Hello")); err != nil {
 		t.Fatal(err)
@@ -106,7 +113,7 @@ func TestDBKV(t *testing.T) {
 		t.Fatal(string(v))
 	}
 
-	key4 := []byte("testdb_kv_range_none")
+	key4 := []byte("test:testdb_kv_range_none")
 	if n, err := db.SetRange(key4, 6, []byte("Redis")); err != nil {
 		t.Fatal(err)
 	} else if n != 11 {
@@ -116,7 +123,7 @@ func TestDBKV(t *testing.T) {
 	if r == 0 {
 		t.Errorf("key should exist: %v", r)
 	}
-	r, err := db.SetNX(key3, []byte(""))
+	r, err = db.SetNX(key3, []byte(""))
 	if err != nil {
 		t.Errorf("setnx failed: %v", err)
 	}
@@ -128,16 +135,29 @@ func TestDBKV(t *testing.T) {
 	} else if string(v) != "Hello Redis" {
 		t.Error(string(v))
 	}
+	num, err = db.GetTableKeyCount([]byte("test"))
+	if err != nil {
+		t.Error(err)
+	} else if num != 4 {
+		t.Errorf("table count not as expected: %v", num)
+	}
 
 	db.KVDel(key3)
 	r, _ = db.KVExists(key3)
 	if r != 0 {
 		t.Errorf("key should not exist: %v", r)
 	}
-	key5 := []byte("test_kv_mset_key5")
-	key6 := []byte("test_kv_mset_key6")
-	err = db.MSet(KVPair{key3, []byte("key3")},
-		KVPair{key5, []byte("key5")}, KVPair{key6, []byte("key6")})
+	num, err = db.GetTableKeyCount([]byte("test"))
+	if err != nil {
+		t.Error(err)
+	} else if num != 3 {
+		t.Errorf("table count not as expected: %v", num)
+	}
+
+	key5 := []byte("test:test_kv_mset_key5")
+	key6 := []byte("test:test_kv_mset_key6")
+	err = db.MSet(common.KVRecord{key3, []byte("key3")},
+		common.KVRecord{key5, []byte("key5")}, common.KVRecord{key6, []byte("key6")})
 	if err != nil {
 		t.Errorf("fail mset: %v", err)
 	}
@@ -156,5 +176,63 @@ func TestDBKV(t *testing.T) {
 	} else if string(v) != "key6" {
 		t.Error(string(v))
 	}
+	num, err = db.GetTableKeyCount([]byte("test"))
+	if err != nil {
+		t.Error(err)
+	} else if num != 6 {
+		t.Errorf("table count not as expected: %v", num)
+	}
 
+}
+
+func TestDBKVWithNoTable(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+
+	key1 := []byte("testdb_kv_a")
+
+	if err := db.KVSet(key1, []byte("hello world 1")); err == nil {
+		t.Error("should error without table")
+	}
+
+	key2 := []byte("test:testdb_kv_b")
+
+	if err := db.KVSet(key2, []byte("hello world 2")); err != nil {
+		t.Fatal(err)
+	}
+	v1, _ := db.KVGet(key1)
+	if v1 != nil {
+		t.Error(v1)
+	}
+	v2, err := db.KVGet([]byte("testdb_kv_b"))
+	if err == nil {
+		t.Error("should be error while get without table")
+	}
+
+	v2, _ = db.KVGet(key2)
+	if string(v2) != "hello world 2" {
+		t.Error(v2)
+	}
+
+	key3 := []byte("testdb_kv_range")
+
+	if _, err := db.Append(key3, []byte("Hello")); err == nil {
+		t.Error("should failed")
+	}
+
+	key5 := []byte("test_kv_mset_key5")
+	key6 := []byte("test:test_kv_mset_key6")
+	err = db.MSet(common.KVRecord{key3, []byte("key3")},
+		common.KVRecord{key5, []byte("key5")}, common.KVRecord{key6, []byte("key6")})
+	if err == nil {
+		t.Error("should failed")
+	}
+	if _, err := db.KVGet(key5); err == nil {
+		t.Error("should failed")
+	}
+	if v, err := db.KVGet(key6); err != nil {
+		t.Error("failed to get no value")
+	} else if v != nil {
+		t.Error("should get no value")
+	}
 }

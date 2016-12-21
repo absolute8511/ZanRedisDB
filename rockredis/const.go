@@ -70,6 +70,7 @@ const (
 	SSizeType  byte = 30
 
 	JSONType byte = 31
+
 	// this type has a custom partition key length
 	// to allow all the data store in the same partition
 	// this type allow the transaction in the same tx group,
@@ -108,7 +109,6 @@ var (
 	errKeySize          = errors.New("invalid key size")
 	errValueSize        = errors.New("invalid value size")
 	errZSetMemberSize   = errors.New("invalid zset member size")
-	errListIndex        = errors.New("invalid list index")
 	errTooMuchBatchSize = errors.New("the batch size exceed the limit")
 )
 

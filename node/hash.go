@@ -1,7 +1,7 @@
 package node
 
 import (
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 	"log"
 	"strconv"
@@ -31,7 +31,7 @@ func (self *KVNode) hgetallCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 	conn.WriteArray(int(n) * 2)
 	for v := range valCh {
-		conn.WriteBulk(v.Rec.Field)
+		conn.WriteBulk(v.Rec.Key)
 		conn.WriteBulk(v.Rec.Value)
 	}
 }
@@ -44,7 +44,7 @@ func (self *KVNode) hkeysCommand(conn redcon.Conn, cmd redcon.Command) {
 	n, valCh, _ := self.store.HKeys(cmd.Args[1])
 	conn.WriteArray(int(n))
 	for v := range valCh {
-		conn.WriteBulk(v.Rec.Field)
+		conn.WriteBulk(v.Rec.Key)
 	}
 }
 
@@ -199,9 +199,9 @@ func (self *KVNode) localHMsetCommand(cmd redcon.Command) (interface{}, error) {
 	if len(args)%2 != 0 {
 		return nil, errInvalidArgs
 	}
-	fvs := make([]rockredis.FVPair, 0, len(args)/2)
+	fvs := make([]common.KVRecord, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
-		fvs = append(fvs, rockredis.FVPair{Field: args[i], Value: args[i+1]})
+		fvs = append(fvs, common.KVRecord{Key: args[i], Value: args[i+1]})
 	}
 	err := self.store.HMset(cmd.Args[1], fvs...)
 	return nil, err

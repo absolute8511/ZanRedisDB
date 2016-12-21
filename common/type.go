@@ -25,25 +25,27 @@ type KVRecordRet struct {
 	Err error
 }
 
-var redisRouter = NewCmdRouter()
+const (
+	MAX_BATCH_NUM       = 5000
+	MinScore      int64 = -1<<63 + 1
+	MaxScore      int64 = 1<<63 - 1
+	InvalidScore  int64 = -1 << 63
+)
+
+const (
+	RangeClose uint8 = 0x00
+	RangeLOpen uint8 = 0x01
+	RangeROpen uint8 = 0x10
+	RangeOpen  uint8 = 0x11
+)
+
+type ScorePair struct {
+	Score  int64
+	Member []byte
+}
 
 type CommandFunc func(redcon.Conn, redcon.Command)
 type InternalCommandFunc func(redcon.Command) (interface{}, error)
-
-func GetInternalHandler(name string) (InternalCommandFunc, bool) {
-	return redisRouter.GetInternalCmdHandler(name)
-}
-func GetHandler(name string) (CommandFunc, bool) {
-	return redisRouter.GetCmdHandler(name)
-}
-
-func RegisterRedisHandler(name string, f CommandFunc) {
-	redisRouter.Register(name, f)
-}
-
-func RegisterRedisInternalHandler(name string, f InternalCommandFunc) {
-	redisRouter.RegisterInternal(name, f)
-}
 
 type CmdRouter struct {
 	cmds         map[string]CommandFunc

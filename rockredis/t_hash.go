@@ -4,18 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
-
-type FVPair struct {
-	Field []byte
-	Value []byte
-}
-
-type FVPairRec struct {
-	Rec FVPair
-	Err error
-}
 
 var (
 	errHashKey       = errors.New("invalid hash key")
@@ -27,6 +18,19 @@ const (
 	hashStartSep byte = ':'
 	hashStopSep  byte = hashStartSep + 1
 )
+
+func convertRedisKeyToDBHKey(key []byte, field []byte) ([]byte, []byte, error) {
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return nil, nil, errTableName
+	}
+
+	if err := checkHashKFSize(key, field); err != nil {
+		return nil, nil, err
+	}
+	key = hEncodeHashKey(key, field)
+	return table, key, nil
+}
 
 func checkHashKFSize(key []byte, field []byte) error {
 	if len(key) > MaxKeySize || len(key) == 0 {
@@ -121,7 +125,10 @@ func hEncodeStopKey(key []byte) []byte {
 
 // return if we create the new field or override it
 func (db *RockDB) hSetField(hkey []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) (int64, error) {
-	ek := hEncodeHashKey(hkey, field)
+	table, ek, err := convertRedisKeyToDBHKey(hkey, field)
+	if err != nil {
+		return 0, err
+	}
 
 	created := int64(1)
 	if v, _ := db.eng.GetBytes(db.defaultReadOpts, ek); v != nil {
@@ -130,8 +137,13 @@ func (db *RockDB) hSetField(hkey []byte, field []byte, value []byte, wb *gorocks
 			return created, nil
 		}
 	} else {
-		if _, err := db.hIncrSize(hkey, 1, wb); err != nil {
+		if n, err := db.hIncrSize(hkey, 1, wb); err != nil {
 			return 0, err
+		} else if n == 1 {
+			_, err = db.IncrTableKeyCount(table, 1, wb)
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -168,53 +180,60 @@ func (db *RockDB) hIncrSize(hkey []byte, delta int64, wb *gorocksdb.WriteBatch) 
 }
 
 func (db *RockDB) HSet(key []byte, field []byte, value []byte) (int64, error) {
-	if err := checkHashKFSize(key, field); err != nil {
-		return 0, err
-	} else if err := checkValueSize(value); err != nil {
+	if err := checkValueSize(value); err != nil {
 		return 0, err
 	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	db.wb.Clear()
 
-	created, err := db.hSetField(key, field, value, wb)
+	created, err := db.hSetField(key, field, value, db.wb)
 	if err != nil {
 		return 0, err
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	return created, err
 }
 
-func (db *RockDB) HMset(key []byte, args ...FVPair) error {
+func (db *RockDB) HMset(key []byte, args ...common.KVRecord) error {
 	if len(args) >= MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	if len(args) == 0 {
+		return nil
+	}
+	table, _, err := convertRedisKeyToDBHKey(key, args[0].Key)
+	if err != nil {
+		return err
+	}
+	db.wb.Clear()
 
-	var err error
 	var num int64 = 0
 	for i := 0; i < len(args); i++ {
-		if err = checkHashKFSize(key, args[i].Field); err != nil {
+		if err = checkHashKFSize(key, args[i].Key); err != nil {
 			return err
 		} else if err = checkValueSize(args[i].Value); err != nil {
 			return err
 		}
-		ek := hEncodeHashKey(key, args[i].Field)
+		ek := hEncodeHashKey(key, args[i].Key)
 
 		if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
 			return err
 		} else if v == nil {
 			num++
 		}
-		wb.Put(ek, args[i].Value)
+		db.wb.Put(ek, args[i].Value)
 	}
-	if _, err := db.hIncrSize(key, num, wb); err != nil {
+	if newNum, err := db.hIncrSize(key, num, db.wb); err != nil {
 		return err
+	} else if newNum > 0 && newNum == num {
+		_, err = db.IncrTableKeyCount(table, 1, db.wb)
+		if err != nil {
+			return err
+		}
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	return err
 }
 
@@ -257,14 +276,22 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	if len(args) == 0 {
+		return 0, nil
+	}
+	table, _, err := convertRedisKeyToDBHKey(key, args[0])
+	if err != nil {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	wb := db.wb
 
 	var ek []byte
 	var v []byte
-	var err error
 
 	var num int64 = 0
+	var newNum int64 = -1
 	for i := 0; i < len(args); i++ {
 		if err := checkHashKFSize(key, args[i]); err != nil {
 			return 0, err
@@ -280,8 +307,13 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		}
 	}
 
-	if _, err = db.hIncrSize(key, -num, wb); err != nil {
+	if newNum, err = db.hIncrSize(key, -num, wb); err != nil {
 		return 0, err
+	} else if num > 0 && newNum == 0 {
+		_, err = db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -311,11 +343,16 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 		return 0, err
 	}
 
-	len, err := db.HLen(hkey)
+	hlen, err := db.HLen(hkey)
 	if err != nil {
 		return 0, err
 	}
-	if len > RANGE_DELETE_NUM {
+	table := extractTableFromRedisKey(hkey)
+	if len(table) == 0 {
+		return 0, errTableName
+	}
+
+	if hlen > RANGE_DELETE_NUM {
 		var r gorocksdb.Range
 		sk := hEncodeSizeKey(hkey)
 		r.Start = hEncodeStartKey(hkey)
@@ -324,11 +361,18 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 		db.eng.CompactRange(r)
 		db.eng.Delete(db.defaultWriteOpts, sk)
 	}
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 	db.hDeleteAll(hkey, wb)
+	if hlen > 0 {
+		_, err = db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	err = db.eng.Write(db.defaultWriteOpts, wb)
-	return len, err
+	return hlen, err
 }
 
 func (db *RockDB) HMclear(keys ...[]byte) {
@@ -364,12 +408,12 @@ func (db *RockDB) HIncrBy(key []byte, field []byte, delta int64) (int64, error) 
 	return n, err
 }
 
-func (db *RockDB) HGetAll(key []byte) (int64, chan FVPairRec, error) {
+func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
 
-	v := make(chan FVPairRec, 16)
+	v := make(chan common.KVRecordRet, 16)
 	len, err := db.HLen(key)
 	if err != nil {
 		return 0, nil, err
@@ -386,8 +430,8 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan FVPairRec, error) {
 		defer close(v)
 		for ; it.Valid(); it.Next() {
 			_, f, err := hDecodeHashKey(it.Key())
-			v <- FVPairRec{
-				FVPair{Field: f, Value: it.Value()},
+			v <- common.KVRecordRet{
+				common.KVRecord{Key: f, Value: it.Value()},
 				err,
 			}
 		}
@@ -396,7 +440,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan FVPairRec, error) {
 	return len, v, nil
 }
 
-func (db *RockDB) HKeys(key []byte) (int64, chan FVPairRec, error) {
+func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
@@ -408,7 +452,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan FVPairRec, error) {
 	if len >= MAX_BATCH_NUM {
 		return len, nil, errTooMuchBatchSize
 	}
-	v := make(chan FVPairRec, 16)
+	v := make(chan common.KVRecordRet, 16)
 
 	go func() {
 		start := hEncodeStartKey(key)
@@ -418,8 +462,8 @@ func (db *RockDB) HKeys(key []byte) (int64, chan FVPairRec, error) {
 		defer close(v)
 		for ; it.Valid(); it.Next() {
 			_, f, err := hDecodeHashKey(it.Key())
-			v <- FVPairRec{
-				FVPair{Field: f, Value: nil},
+			v <- common.KVRecordRet{
+				common.KVRecord{Key: f, Value: nil},
 				err,
 			}
 		}
@@ -428,7 +472,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan FVPairRec, error) {
 	return len, v, nil
 }
 
-func (db *RockDB) HValues(key []byte) (int64, chan FVPairRec, error) {
+func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
@@ -441,7 +485,7 @@ func (db *RockDB) HValues(key []byte) (int64, chan FVPairRec, error) {
 		return len, nil, errTooMuchBatchSize
 	}
 
-	v := make(chan FVPairRec, 16)
+	v := make(chan common.KVRecordRet, 16)
 
 	go func() {
 		start := hEncodeStartKey(key)
@@ -450,8 +494,8 @@ func (db *RockDB) HValues(key []byte) (int64, chan FVPairRec, error) {
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {
-			v <- FVPairRec{
-				FVPair{Field: nil, Value: it.Value()},
+			v <- common.KVRecordRet{
+				common.KVRecord{Key: nil, Value: it.Value()},
 				nil,
 			}
 		}

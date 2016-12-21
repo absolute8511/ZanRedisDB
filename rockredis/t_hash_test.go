@@ -1,6 +1,7 @@
 package rockredis
 
 import (
+	"github.com/absolute8511/ZanRedisDB/common"
 	"os"
 	"testing"
 )
@@ -30,7 +31,7 @@ func TestDBHash(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 
-	key := []byte("testdb_hash_a")
+	key := []byte("test:testdb_hash_a")
 
 	if n, err := db.HSet(key, []byte("a"), []byte("hello world 1")); err != nil {
 		t.Fatal(err)
@@ -69,18 +70,18 @@ func TestDBHash(t *testing.T) {
 	if len != 2 {
 		t.Errorf("length should be 2: %v", len)
 	}
-	ch, _ := db.HGetAll(key)
-	results := make([]FVPairRec, 0)
+	_, ch, _ := db.HGetAll(key)
+	results := make([]common.KVRecordRet, 0)
 	for r := range ch {
 		results = append(results, r)
 	}
-	if string(results[0].Rec.Field) != "a" {
+	if string(results[0].Rec.Key) != "a" {
 		t.Error(results)
 	}
 	if string(results[0].Rec.Value) != "hello world 1" {
 		t.Error(results)
 	}
-	if string(results[1].Rec.Field) != "b" {
+	if string(results[1].Rec.Key) != "b" {
 		t.Error(results)
 	}
 
@@ -88,19 +89,19 @@ func TestDBHash(t *testing.T) {
 		t.Error(results)
 	}
 
-	ch, _ = db.HKeys(key)
-	results = make([]FVPairRec, 0)
+	_, ch, _ = db.HKeys(key)
+	results = make([]common.KVRecordRet, 0)
 	for r := range ch {
 		results = append(results, r)
 	}
-	if string(results[0].Rec.Field) != "a" {
+	if string(results[0].Rec.Key) != "a" {
 		t.Error(results)
 	}
-	if string(results[1].Rec.Field) != "b" {
+	if string(results[1].Rec.Key) != "b" {
 		t.Error(results)
 	}
-	ch, _ = db.HValues(key)
-	results = make([]FVPairRec, 0)
+	_, ch, _ = db.HValues(key)
+	results = make([]common.KVRecordRet, 0)
 	for r := range ch {
 		results = append(results, r)
 	}
@@ -115,7 +116,7 @@ func TestDBHash(t *testing.T) {
 func TestHashKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
-	key := []byte("hkeyexists_test")
+	key := []byte("test:hkeyexists_test")
 	v, err := db.HKeyExists(key)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -159,7 +160,7 @@ func TestHashKeyExists(t *testing.T) {
 func TestHashKeyIncrBy(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
-	key := []byte("hkey_incr_test")
+	key := []byte("test:hkey_incr_test")
 	if _, err := db.HSet(key, []byte("hello"), []byte("0")); err != nil {
 		t.Fatal(err.Error())
 	}

@@ -2,15 +2,22 @@ package rockredis
 
 import (
 	"errors"
-	"github.com/absolute8511/gorocksdb"
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
-type KVPair struct {
-	Key   []byte
-	Value []byte
-}
-
 var errKVKey = errors.New("invalid encode kv key")
+
+func convertRedisKeyToDBKVKey(key []byte) ([]byte, []byte, error) {
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return nil, nil, errTableName
+	}
+	if err := checkKeySize(key); err != nil {
+		return nil, nil, err
+	}
+	key = encodeKVKey(key)
+	return table, key, nil
+}
 
 func checkKeySize(key []byte) error {
 	if len(key) > MaxKeySize || len(key) == 0 {
@@ -59,29 +66,46 @@ func encodeKVMaxKey() []byte {
 }
 
 func (db *RockDB) incr(key []byte, delta int64) (int64, error) {
-	if err := checkKeySize(key); err != nil {
-		return 0, err
-	}
-
-	var err error
-	key = encodeKVKey(key)
-
-	var n int64
-	n, err = StrInt64(db.eng.GetBytes(db.defaultReadOpts, key))
+	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
 		return 0, err
 	}
+	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
+	created := false
+	if v == nil {
+		created = true
+	}
+	var n int64
+	n, err = StrInt64(v, err)
+	if err != nil {
+		return 0, err
+	}
+	db.wb.Clear()
 	n += delta
+	db.wb.Put(key, FormatInt64ToSlice(n))
+	if created {
+		db.IncrTableKeyCount(table, 1, db.wb)
+	}
 
-	err = db.eng.Put(db.defaultWriteOpts, key, FormatInt64ToSlice(n))
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	return n, err
 }
 
 //	ps : here just focus on deleting the key-value data,
 //		 any other likes expire is ignore.
 func (db *RockDB) KVDel(key []byte) error {
-	key = encodeKVKey(key)
-	return db.eng.Delete(db.defaultWriteOpts, key)
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return err
+	}
+	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
+
+	db.wb.Clear()
+	if v != nil {
+		db.IncrTableKeyCount(table, -1, db.wb)
+	}
+	db.wb.Delete(key)
+	return db.eng.Write(db.defaultWriteOpts, db.wb)
 }
 
 func (db *RockDB) Decr(key []byte) (int64, error) {
@@ -103,12 +127,10 @@ func (db *RockDB) DelKeys(keys ...[]byte) {
 }
 
 func (db *RockDB) KVExists(key []byte) (int64, error) {
-	if err := checkKeySize(key); err != nil {
+	_, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
 		return 0, err
 	}
-
-	var err error
-	key = encodeKVKey(key)
 
 	var v []byte
 	v, err = db.eng.GetBytes(db.defaultReadOpts, key)
@@ -119,11 +141,10 @@ func (db *RockDB) KVExists(key []byte) (int64, error) {
 }
 
 func (db *RockDB) KVGet(key []byte) ([]byte, error) {
-	if err := checkKeySize(key); err != nil {
+	_, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
 		return nil, err
 	}
-
-	key = encodeKVKey(key)
 
 	return db.eng.GetBytes(db.defaultReadOpts, key)
 }
@@ -140,11 +161,11 @@ func (db *RockDB) MGet(keys ...[]byte) ([][]byte, []error) {
 	keyList := make([][]byte, len(keys))
 	errs := make([]error, len(keys))
 	for i, k := range keys {
-		if err := checkKeySize(k); err != nil {
+		_, kk, err := convertRedisKeyToDBKVKey(k)
+		if err != nil {
 			keyList[i] = nil
 			errs[i] = err
 		} else {
-			kk := encodeKVKey(k)
 			keyList[i] = kk
 		}
 	}
@@ -152,7 +173,7 @@ func (db *RockDB) MGet(keys ...[]byte) ([][]byte, []error) {
 	return keyList, errs
 }
 
-func (db *RockDB) MSet(args ...KVPair) error {
+func (db *RockDB) MSet(args ...common.KVRecord) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -160,21 +181,35 @@ func (db *RockDB) MSet(args ...KVPair) error {
 		return errTooMuchBatchSize
 	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 
 	var err error
 	var key []byte
 	var value []byte
+	tableCnt := make(map[string]int)
+	var table []byte
 	for i := 0; i < len(args); i++ {
-		if err := checkKeySize(args[i].Key); err != nil {
+		table, key, err = convertRedisKeyToDBKVKey(args[i].Key)
+		if err != nil {
 			return err
-		} else if err := checkValueSize(args[i].Value); err != nil {
+		} else if err = checkValueSize(args[i].Value); err != nil {
 			return err
 		}
-		key = encodeKVKey(args[i].Key)
 		value = args[i].Value
+		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		if v == nil {
+			n := tableCnt[string(table)]
+			n++
+			tableCnt[string(table)] = n
+		}
 		wb.Put(key, value)
+	}
+	for t, num := range tableCnt {
+		_, err = db.IncrTableKeyCount([]byte(t), int64(num), wb)
+		if err != nil {
+			return err
+		}
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -182,33 +217,48 @@ func (db *RockDB) MSet(args ...KVPair) error {
 }
 
 func (db *RockDB) KVSet(key []byte, value []byte) error {
-	if err := checkKeySize(key); err != nil {
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
 		return err
-	} else if err := checkValueSize(value); err != nil {
+	} else if err = checkValueSize(value); err != nil {
 		return err
 	}
-	key = encodeKVKey(key)
-	err := db.eng.Put(db.defaultWriteOpts, key, value)
+	db.wb.Clear()
+	v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+	if v == nil {
+		_, err = db.IncrTableKeyCount(table, 1, db.wb)
+		if err != nil {
+			return err
+		}
+	}
+	db.wb.Put(key, value)
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	return err
 }
 
 func (db *RockDB) SetNX(key []byte, value []byte) (int64, error) {
-	if err := checkKeySize(key); err != nil {
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
 		return 0, err
 	} else if err := checkValueSize(value); err != nil {
 		return 0, err
 	}
 
-	var err error
-	key = encodeKVKey(key)
+	var v []byte
 	var n int64 = 1
 
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, key); err != nil {
+	if v, err = db.eng.GetBytes(db.defaultReadOpts, key); err != nil {
 		return 0, err
 	} else if v != nil {
 		n = 0
 	} else {
-		db.eng.Put(db.defaultWriteOpts, key, value)
+		db.wb.Clear()
+		_, err = db.IncrTableKeyCount(table, 1, db.wb)
+		if err != nil {
+			return 0, err
+		}
+		db.wb.Put(key, value)
+		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	}
 	return n, err
 }
@@ -218,17 +268,23 @@ func (db *RockDB) SetRange(key []byte, offset int, value []byte) (int64, error) 
 		return 0, nil
 	}
 
-	if err := checkKeySize(key); err != nil {
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
 		return 0, err
 	} else if len(value)+offset > MaxValueSize {
 		return 0, errValueSize
 	}
 
-	key = encodeKVKey(key)
-
 	oldValue, err := db.eng.GetBytes(db.defaultReadOpts, key)
 	if err != nil {
 		return 0, err
+	}
+	db.wb.Clear()
+	if oldValue == nil {
+		_, err = db.IncrTableKeyCount(table, 1, db.wb)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	extra := offset + len(value) - len(oldValue)
@@ -236,8 +292,9 @@ func (db *RockDB) SetRange(key []byte, offset int, value []byte) (int64, error) 
 		oldValue = append(oldValue, make([]byte, extra)...)
 	}
 	copy(oldValue[offset:], value)
+	db.wb.Put(key, oldValue)
 
-	err = db.eng.Put(db.defaultWriteOpts, key, oldValue)
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
 
 	if err != nil {
 		return 0, err
@@ -299,10 +356,10 @@ func (db *RockDB) Append(key []byte, value []byte) (int64, error) {
 		return 0, nil
 	}
 
-	if err := checkKeySize(key); err != nil {
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
 		return 0, err
 	}
-	key = encodeKVKey(key)
 
 	oldValue, err := db.eng.GetBytes(db.defaultReadOpts, key)
 	if err != nil {
@@ -312,10 +369,18 @@ func (db *RockDB) Append(key []byte, value []byte) (int64, error) {
 	if len(oldValue)+len(value) > MaxValueSize {
 		return 0, errValueSize
 	}
+	db.wb.Clear()
+	if oldValue == nil {
+		_, err = db.IncrTableKeyCount(table, 1, db.wb)
+		if err != nil {
+			return 0, err
+		}
+	}
 
 	oldValue = append(oldValue, value...)
 
-	err = db.eng.Put(db.defaultWriteOpts, key, oldValue)
+	db.wb.Put(key, oldValue)
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	if err != nil {
 		return 0, err
 	}

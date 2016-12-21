@@ -1,12 +1,20 @@
 package rockredis
 
 import (
+	"bytes"
 	"errors"
+	"github.com/absolute8511/gorocksdb"
+	"log"
 )
+
+// Note: since different data structure has different prefix,
+// the table with same data type can be scanned, but for different data type,
+// we need scan all data types to get all the data in the same table
 
 var (
 	errTableNameLen = errors.New("invalid table name length")
 	errTableName    = errors.New("invalid table name")
+	errTableMetaKey = errors.New("invalid table meta key")
 )
 
 const (
@@ -17,41 +25,67 @@ const (
 )
 
 // only KV data type need a table name as prefix to allow scan by table
-func checkTableName(table string) error {
+func checkTableName(table []byte) error {
 	if len(table) >= MaxTableNameLen || len(table) == 0 {
 		return errTableNameLen
 	}
 	return nil
 }
 
-func getTableEncodeLen(table string) int {
-	return 1 + len(table) + 1
+func extractTableFromRedisKey(key []byte) []byte {
+	index := bytes.IndexByte(key, tableStartSep)
+	if index == -1 {
+		return nil
+	}
+	return key[:index]
 }
 
-func encodeTableName(table string, buf []byte) []byte {
-	tlen := byte(len(table))
+func encodeTableMetaKey(table []byte) []byte {
+	tmkey := make([]byte, 1+len(table))
 	pos := 0
-	buf[pos] = tlen
+	tmkey[pos] = TableMetaType
 	pos++
-	copy(buf[pos:], []byte(table))
-	pos += len(table)
-	buf[pos] = tableStartSep
-	return buf
+	copy(tmkey[pos:], table)
+	return tmkey
 }
 
-func decodeTableName(d []byte) (string, []byte, error) {
+func decodeTableMetaKey(tk []byte) ([]byte, error) {
 	pos := 0
-	tlen := int(d[0])
-	if tlen >= MaxTableNameLen {
-		return "", d, errTableNameLen
+	if len(tk) < pos+1 || tk[pos] != TableMetaType {
+		return nil, errTableMetaKey
 	}
 	pos++
-	table := string(d[pos : pos+tlen])
-	pos += tlen
-	if d[pos] != tableStartSep {
-		return "", d, errTableName
+	return tk[pos:], nil
+}
+
+func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+	tm := encodeTableMetaKey(table)
+	var size int64
+	v, err := db.eng.GetBytes(db.defaultReadOpts, tm)
+	if err != nil {
+		log.Printf("get table size error: %v", err)
+		return 0, err
 	}
-	pos++
-	d = d[pos:]
-	return table, d, nil
+	if size, err = Int64(v, err); err != nil {
+		log.Printf("convert table size error: %v, set size to init: %v", err, delta)
+		size = delta
+	} else {
+		size += delta
+	}
+	if size < 0 {
+		size = 0
+	}
+
+	wb.Put(tm, PutInt64(size))
+	return size, nil
+}
+
+func (db *RockDB) GetTableKeyCount(table []byte) (int64, error) {
+	tm := encodeTableMetaKey(table)
+	var err error
+	var size int64
+	if size, err = Int64(db.eng.GetBytes(db.defaultReadOpts, tm)); err != nil {
+		log.Printf("get table size error: %v", err)
+	}
+	return size, err
 }

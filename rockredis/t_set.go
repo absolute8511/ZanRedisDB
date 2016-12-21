@@ -115,6 +115,11 @@ func sEncodeStopKey(key []byte) []byte {
 }
 
 func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return 0
+	}
+
 	sk := sEncodeSizeKey(key)
 	start := sEncodeStartKey(key)
 	stop := sEncodeStopKey(key)
@@ -125,6 +130,12 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	for ; it.Valid(); it.Next() {
 		wb.Delete(it.RefKey())
 		num++
+	}
+	if num > 0 {
+		_, err := db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return 0
+		}
 	}
 
 	wb.Delete(sk)
@@ -152,14 +163,24 @@ func (db *RockDB) sIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (
 }
 
 func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) (int64, error) {
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return 0, errTableName
+	}
+
 	ek := sEncodeSetKey(key, member)
 
 	var n int64 = 1
 	if v, _ := db.eng.GetBytes(db.defaultReadOpts, ek); v != nil {
 		n = 0
 	} else {
-		if _, err := db.sIncrSize(key, 1, wb); err != nil {
+		if newNum, err := db.sIncrSize(key, 1, wb); err != nil {
 			return 0, err
+		} else if newNum == 1 {
+			_, err = db.IncrTableKeyCount(table, 1, wb)
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -171,8 +192,13 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return 0, errTableName
+	}
+
+	wb := db.wb
+	wb.Clear()
 
 	var err error
 	var ek []byte
@@ -192,8 +218,13 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 		wb.Put(ek, nil)
 	}
 
-	if _, err = db.sIncrSize(key, num, wb); err != nil {
+	if newNum, err := db.sIncrSize(key, num, wb); err != nil {
 		return 0, err
+	} else if newNum > 0 && newNum == num {
+		_, err = db.IncrTableKeyCount(table, 1, wb)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -258,6 +289,11 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 }
 
 func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return 0, errTableName
+	}
+
 	wb := gorocksdb.NewWriteBatch()
 	defer wb.Destroy()
 
@@ -281,8 +317,13 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 		}
 	}
 
-	if _, err = db.sIncrSize(key, -num, wb); err != nil {
+	if newNum, err := db.sIncrSize(key, -num, wb); err != nil {
 		return 0, err
+	} else if num > 0 && newNum == 0 {
+		_, err = db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)

@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"fmt"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -30,19 +31,19 @@ func TestDB(t *testing.T) {
 func TestRockDB(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
-	key := []byte("test_kv_key")
+	key := []byte("test:test_kv_key")
 	value := []byte("value")
 	if err := db.KVSet(key, value); err != nil {
 		t.Fatal(err)
 	}
 
-	if v, err := db.Get(key); err != nil {
+	if v, err := db.KVGet(key); err != nil {
 		t.Fatal(err)
 	} else if string(v) != string(value) {
 		t.Fatal(string(v))
 	}
 
-	key = []byte("test_list_key")
+	key = []byte("test:test_list_key")
 	if _, err := db.LPush(key, value); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func TestRockDB(t *testing.T) {
 		t.Fatal(string(v))
 	}
 
-	key = []byte("test_hash_key")
+	key = []byte("test:test_hash_key")
 	if _, err := db.HSet(key, []byte("a"), value); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestRockDB(t *testing.T) {
 		t.Fatal(string(v))
 	}
 
-	key = []byte("test_set_key")
+	key = []byte("test:test_set_key")
 	if _, err := db.SAdd(key, []byte("a"), []byte("b")); err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +80,8 @@ func TestRockDB(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	key = []byte("test_zset_key")
-	if _, err := db.ZAdd(key, ScorePair{1, []byte("a")}, ScorePair{2, []byte("b")}); err != nil {
+	key = []byte("test:test_zset_key")
+	if _, err := db.ZAdd(key, common.ScorePair{1, []byte("a")}, common.ScorePair{2, []byte("b")}); err != nil {
 		t.Fatal(err)
 	}
 

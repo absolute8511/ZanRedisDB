@@ -59,25 +59,27 @@ func TestKV(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	if ok, err := goredis.String(c.Do("set", "a", "1234")); err != nil {
+	key1 := "test:a"
+	key2 := "test:b"
+	if ok, err := goredis.String(c.Do("set", key1, "1234")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
 		t.Fatal(ok)
 	}
 
-	if n, err := goredis.Int(c.Do("setnx", "a", "123")); err != nil {
+	if n, err := goredis.Int(c.Do("setnx", key1, "123")); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
 	}
 
-	if n, err := goredis.Int(c.Do("setnx", "b", "123")); err != nil {
+	if n, err := goredis.Int(c.Do("setnx", key2, "123")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
 
-	if v, err := goredis.String(c.Do("get", "a")); err != nil {
+	if v, err := goredis.String(c.Do("get", key1)); err != nil {
 		t.Fatal(err)
 	} else if v != "1234" {
 		t.Fatal(v)
@@ -95,29 +97,29 @@ func TestKV(t *testing.T) {
 	//	t.Fatal(v)
 	//}
 
-	if n, err := goredis.Int(c.Do("exists", "a")); err != nil {
+	if n, err := goredis.Int(c.Do("exists", key1)); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
 
-	if n, err := goredis.Int(c.Do("exists", "empty_key_test")); err != nil {
+	if n, err := goredis.Int(c.Do("exists", "test:empty_key_test")); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
 	}
 
-	if _, err := goredis.Int(c.Do("del", "a", "b")); err != nil {
+	if _, err := goredis.Int(c.Do("del", key1, key2)); err != nil {
 		t.Fatal(err)
 	}
 
-	if n, err := goredis.Int(c.Do("exists", "a")); err != nil {
+	if n, err := goredis.Int(c.Do("exists", key1)); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
 	}
 
-	if n, err := goredis.Int(c.Do("exists", "b")); err != nil {
+	if n, err := goredis.Int(c.Do("exists", key2)); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
@@ -128,13 +130,16 @@ func TestKVM(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	if ok, err := goredis.String(c.Do("mset", "a", "1", "b", "2")); err != nil {
+	key1 := "test:a"
+	key2 := "test:b"
+	key3 := "test:c"
+	if ok, err := goredis.String(c.Do("mset", key1, "1", key2, "2")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
 		t.Fatal(ok)
 	}
 
-	if v, err := goredis.MultiBulk(c.Do("mget", "a", "b", "c")); err != nil {
+	if v, err := goredis.MultiBulk(c.Do("mget", key1, key2, key3)); err != nil {
 		t.Fatal(err)
 	} else if len(v) != 3 {
 		t.Fatal(len(v))
@@ -157,13 +162,14 @@ func TestKVIncrDecr(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	if n, err := goredis.Int64(c.Do("incr", "n")); err != nil {
+	key := "test:kv_n"
+	if n, err := goredis.Int64(c.Do("incr", key)); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
 
-	if n, err := goredis.Int64(c.Do("incr", "n")); err != nil {
+	if n, err := goredis.Int64(c.Do("incr", key)); err != nil {
 		t.Fatal(err)
 	} else if n != 2 {
 		t.Fatal(n)
@@ -186,35 +192,38 @@ func TestKVErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	if _, err := c.Do("get", "a", "b", "c"); err == nil {
+	key1 := "test:a"
+	key2 := "test:b"
+	key3 := "test:c"
+	if _, err := c.Do("get", key1, key2, key3); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
-	if _, err := c.Do("set", "a", "b", "c"); err == nil {
+	if _, err := c.Do("set", key1, key2, key3); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
-	if _, err := c.Do("getset", "a", "b", "c"); err == nil {
+	if _, err := c.Do("getset", key1, key2, key3); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
-	if _, err := c.Do("setnx", "a", "b", "c"); err == nil {
+	if _, err := c.Do("setnx", key1, key2, key3); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
-	if _, err := c.Do("exists", "a", "b"); err == nil {
+	if _, err := c.Do("exists", key1, key2); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
-	if _, err := c.Do("incr", "a", "b"); err == nil {
+	if _, err := c.Do("incr", key1, key2); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
-	if _, err := c.Do("incrby", "a"); err == nil {
+	if _, err := c.Do("incrby", key1); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
-	if _, err := c.Do("decrby", "a"); err == nil {
+	if _, err := c.Do("decrby", key1); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
 
@@ -226,7 +235,7 @@ func TestKVErrorParams(t *testing.T) {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("mset", "a", "b", "c"); err == nil {
+	if _, err := c.Do("mset", key1, key2, key3); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -240,7 +249,7 @@ func TestHash(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("a")
+	key := []byte("test:a")
 	//if n, err := goredis.Int(c.Do("hkeyexists", key)); err != nil {
 	//	t.Fatal(err)
 	//} else if n != 0 {
@@ -323,7 +332,7 @@ func TestHashM(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("msetb")
+	key := []byte("test:msetb")
 	if ok, err := goredis.String(c.Do("hmset", key, 1, 1, 2, 2, 3, 3)); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
@@ -375,7 +384,7 @@ func TestHashIncr(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("c")
+	key := []byte("test:c")
 	if n, err := goredis.Int(c.Do("hincrby", key, 1, 1)); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
@@ -411,7 +420,7 @@ func TestHashGetAll(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("hgetalld")
+	key := []byte("test:hgetalld")
 
 	if ok, err := goredis.String(c.Do("hmset", key, 1, 1, 2, 2, 3, 3)); err != nil {
 		t.Fatal(err)
@@ -460,39 +469,40 @@ func TestHashErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	if _, err := c.Do("hset", "test_hset"); err == nil {
+	key := "test:hash_err_param"
+	if _, err := c.Do("hset", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hget", "test_hget"); err == nil {
+	if _, err := c.Do("hget", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hexists", "test_hexists"); err == nil {
+	if _, err := c.Do("hexists", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hdel", "test_hdel"); err == nil {
+	if _, err := c.Do("hdel", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hlen", "test_hlen", "a"); err == nil {
+	if _, err := c.Do("hlen", key, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hincrby", "test_hincrby"); err == nil {
+	if _, err := c.Do("hincrby", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hmset", "test_hmset"); err == nil {
+	if _, err := c.Do("hmset", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hmset", "test_hmset", "f1", "v1", "f2"); err == nil {
+	if _, err := c.Do("hmset", key, "f1", "v1", "f2"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hmget", "test_hget"); err == nil {
+	if _, err := c.Do("hmget", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -512,7 +522,7 @@ func TestHashErrorParams(t *testing.T) {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("hclear", "test_hclear", "a"); err == nil {
+	if _, err := c.Do("hclear", key, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -571,7 +581,7 @@ func TestList(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("a")
+	key := []byte("test:a")
 	//if n, err := goredis.Int(c.Do("lkeyexists", key)); err != nil {
 	//	t.Fatal(err)
 	//} else if n != 0 {
@@ -725,7 +735,7 @@ func TestListMPush(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("b")
+	key := []byte("test:b")
 	if n, err := goredis.Int(c.Do("rpush", key, 1, 2, 3)); err != nil {
 		t.Fatal(err)
 	} else if n != 3 {
@@ -751,7 +761,7 @@ func TestPop(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("c")
+	key := []byte("test:c")
 	if n, err := goredis.Int(c.Do("rpush", key, 1, 2, 3, 4, 5, 6)); err != nil {
 		t.Fatal(err)
 	} else if n != 6 {
@@ -814,7 +824,7 @@ func disableTestTrim(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("d")
+	key := []byte("test:d")
 	if n, err := goredis.Int(c.Do("rpush", key, 1, 2, 3, 4, 5, 6)); err != nil {
 		t.Fatal(err)
 	} else if n != 6 {
@@ -880,31 +890,32 @@ func TestListErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	if _, err := c.Do("lpush", "test_lpush"); err == nil {
+	key := "test:list_err_param"
+	if _, err := c.Do("lpush", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("rpush", "test_rpush"); err == nil {
+	if _, err := c.Do("rpush", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("lpop", "test_lpop", "a"); err == nil {
+	if _, err := c.Do("lpop", key, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("rpop", "test_rpop", "a"); err == nil {
+	if _, err := c.Do("rpop", key, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("llen", "test_llen", "a"); err == nil {
+	if _, err := c.Do("llen", key, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("lindex", "test_lindex"); err == nil {
+	if _, err := c.Do("lindex", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("lrange", "test_lrange"); err == nil {
+	if _, err := c.Do("lrange", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -916,11 +927,11 @@ func TestListErrorParams(t *testing.T) {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("ltrim_front", "test_ltrimfront", "-1"); err == nil {
+	if _, err := c.Do("ltrim_front", key, "-1"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("ltrim_back", "test_ltrimback", "a"); err == nil {
+	if _, err := c.Do("ltrim_back", key, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 }
@@ -929,8 +940,8 @@ func disableTestSet(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key1 := "testdb_cmd_set_1"
-	key2 := "testdb_cmd_set_2"
+	key1 := "test:testdb_cmd_set_1"
+	key2 := "test:testdb_cmd_set_2"
 
 	//if n, err := goredis.Int(c.Do("skeyexists", key1)); err != nil {
 	//	t.Fatal(err)
@@ -993,7 +1004,8 @@ func TestSetErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	if _, err := c.Do("sadd", "test_sadd"); err == nil {
+	key := "test:set_error_param"
+	if _, err := c.Do("sadd", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -1001,15 +1013,15 @@ func TestSetErrorParams(t *testing.T) {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("scard", "k1", "k2"); err == nil {
+	if _, err := c.Do("scard", key, key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("sismember", "k1"); err == nil {
+	if _, err := c.Do("sismember", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("sismember", "k1", "m1", "m2"); err == nil {
+	if _, err := c.Do("sismember", key, "m1", "m2"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -1017,7 +1029,7 @@ func TestSetErrorParams(t *testing.T) {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("smembers", "k1", "k2"); err == nil {
+	if _, err := c.Do("smembers", key, key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -1025,7 +1037,7 @@ func TestSetErrorParams(t *testing.T) {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("srem", "key"); err == nil {
+	if _, err := c.Do("srem", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -1033,7 +1045,7 @@ func TestSetErrorParams(t *testing.T) {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("sclear", "k1", "k2"); err == nil {
+	if _, err := c.Do("sclear", key, key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -1047,7 +1059,7 @@ func TestZSet(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("myzset")
+	key := []byte("test:myzset")
 
 	//if n, err := goredis.Int(c.Do("zkeyexists", key)); err != nil {
 	//	t.Fatal(err)
@@ -1157,7 +1169,7 @@ func TestZSetCount(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("myzset")
+	key := []byte("test:myzset")
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1219,7 +1231,7 @@ func TestZSetRank(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("myzset")
+	key := []byte("test:myzset")
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1276,7 +1288,7 @@ func TestZSetRangeScore(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("myzset_range")
+	key := []byte("test:myzset_range")
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1370,7 +1382,7 @@ func TestZSetRange(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("myzset_range_rank")
+	key := []byte("test:myzset_range_rank")
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1483,20 +1495,21 @@ func TestZsetErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
+	key := "test:zset_error_param"
 	//zadd
-	if _, err := c.Do("zadd", "test_zadd"); err == nil {
+	if _, err := c.Do("zadd", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zadd", "test_zadd", "a", "b", "c"); err == nil {
+	if _, err := c.Do("zadd", key, "a", "b", "c"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zadd", "test_zadd", "-a", "a"); err == nil {
+	if _, err := c.Do("zadd", key, "-a", "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zadd", "test_zad", "0.1", "a"); err == nil {
+	if _, err := c.Do("zadd", key, "0.1", "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -1506,114 +1519,115 @@ func TestZsetErrorParams(t *testing.T) {
 	}
 
 	//zscore
-	if _, err := c.Do("zscore", "test_zscore"); err == nil {
+	if _, err := c.Do("zscore", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zrem
-	if _, err := c.Do("zrem", "test_zrem"); err == nil {
+	if _, err := c.Do("zrem", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zincrby
-	if _, err := c.Do("zincrby", "test_zincrby"); err == nil {
+	if _, err := c.Do("zincrby", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zincrby", "test_zincrby", 0.1, "a"); err == nil {
+	if _, err := c.Do("zincrby", key, 0.1, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zcount
-	if _, err := c.Do("zcount", "test_zcount"); err == nil {
+	if _, err := c.Do("zcount", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zcount", "test_zcount", "-inf", "=inf"); err == nil {
+	if _, err := c.Do("zcount", key, "-inf", "=inf"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zcount", "test_zcount", 0.1, 0.1); err == nil {
+	if _, err := c.Do("zcount", key, 0.1, 0.1); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zrank
-	if _, err := c.Do("zrank", "test_zrank"); err == nil {
+	if _, err := c.Do("zrank", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zrevzrank
-	if _, err := c.Do("zrevrank", "test_zrevrank"); err == nil {
+	if _, err := c.Do("zrevrank", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zremrangebyrank
-	if _, err := c.Do("zremrangebyrank", "test_zremrangebyrank"); err == nil {
+	if _, err := c.Do("zremrangebyrank", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zremrangebyrank", "test_zremrangebyrank", 0.1, 0.1); err == nil {
+	if _, err := c.Do("zremrangebyrank", key, 0.1, 0.1); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zremrangebyscore
-	if _, err := c.Do("zremrangebyscore", "test_zremrangebyscore"); err == nil {
+	if _, err := c.Do("zremrangebyscore", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zremrangebyscore", "test_zremrangebyscore", "-inf", "a"); err == nil {
+	if _, err := c.Do("zremrangebyscore", key, "-inf", "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zremrangebyscore", "test_zremrangebyscore", 0, "a"); err == nil {
+	if _, err := c.Do("zremrangebyscore", key, 0, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zrange
-	if _, err := c.Do("zrange", "test_zrange"); err == nil {
+	if _, err := c.Do("zrange", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zrange", "test_zrange", 0, 1, "withscore"); err == nil {
+	if _, err := c.Do("zrange", key, 0, 1, "withscore"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zrange", "test_zrange", 0, 1, "withscores", "a"); err == nil {
+	if _, err := c.Do("zrange", key, 0, 1, "withscores", "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zrevrange, almost same as zrange
-	if _, err := c.Do("zrevrange", "test_zrevrange"); err == nil {
+	if _, err := c.Do("zrevrange", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zrangebyscore
-	if _, err := c.Do("zrangebyscore", "test_zrangebyscore"); err == nil {
+
+	if _, err := c.Do("zrangebyscore", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zrangebyscore", "test_zrangebyscore", 0, 1, "withscore"); err == nil {
+	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscore"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zrangebyscore", "test_zrangebyscore", 0, 1, "withscores", "limit"); err == nil {
+	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limit"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zrangebyscore", "test_zrangebyscore", 0, 1, "withscores", "limi", 1, 1); err == nil {
+	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limi", 1, 1); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zrangebyscore", "test_zrangebyscore", 0, 1, "withscores", "limit", "a", 1); err == nil {
+	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limit", "a", 1); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zrangebyscore", "test_zrangebyscore", 0, 1, "withscores", "limit", 1, "a"); err == nil {
+	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limit", 1, "a"); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
 	//zrevrangebyscore, almost same as zrangebyscore
-	if _, err := c.Do("zrevrangebyscore", "test_zrevrangebyscore"); err == nil {
+	if _, err := c.Do("zrevrangebyscore", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 
@@ -1632,7 +1646,7 @@ func TestZSetLex(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("myzlexset")
+	key := []byte("test:myzlexset")
 	if _, err := c.Do("zadd", key,
 		0, "a", 0, "b", 0, "c", 0, "d", 0, "e", 0, "f", 0, "g"); err != nil {
 		t.Fatal(err)

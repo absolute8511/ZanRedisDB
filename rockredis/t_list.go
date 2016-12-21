@@ -23,6 +23,7 @@ const (
 var errLMetaKey = errors.New("invalid lmeta key")
 var errListKey = errors.New("invalid list key")
 var errListSeq = errors.New("invalid list sequence, overflow")
+var errListIndex = errors.New("invalid list index")
 
 func lEncodeMetaKey(key []byte) []byte {
 	buf := make([]byte, len(key)+1)
@@ -103,13 +104,18 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		return 0, err
 	}
 
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return 0, errTableName
+	}
+
 	var headSeq int64
 	var tailSeq int64
 	var size int64
 	var err error
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 	metaKey := lEncodeMetaKey(key)
 	headSeq, tailSeq, size, err = db.lGetMeta(metaKey)
 	if err != nil {
@@ -141,6 +147,12 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		ek := lEncodeListKey(key, seq+int64(i)*delta)
 		wb.Put(ek, args[i])
 	}
+	if size == 0 && pushCnt > 0 {
+		_, err := db.IncrTableKeyCount(table, 1, wb)
+		if err != nil {
+			return 0, err
+		}
+	}
 	seq += int64(pushCnt-1) * delta
 	//	set meta info
 	if whereSeq == listHeadSeq {
@@ -158,9 +170,13 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	if err := checkKeySize(key); err != nil {
 		return nil, err
 	}
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return nil, errTableName
+	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 
 	var headSeq int64
 	var tailSeq int64
@@ -201,6 +217,10 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	}
 	if size == 0 {
 		// list is empty after delete
+		_, err := db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return nil, err
+		}
 	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return value, err
@@ -210,9 +230,13 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 	if err := checkKeySize(key); err != nil {
 		return err
 	}
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return errTableName
+	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 
 	var headSeq int64
 	var llen int64
@@ -254,7 +278,13 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 		}
 	}
 
-	db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
+	newLen, _ := db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
+	if llen > 0 && newLen == 0 {
+		_, err := db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return err
+		}
+	}
 
 	return db.eng.Write(db.defaultWriteOpts, wb)
 }
@@ -267,9 +297,13 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	if trimSize == 0 {
 		return 0, nil
 	}
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return 0, errTableName
+	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 
 	var headSeq int64
 	var tailSeq int64
@@ -310,6 +344,10 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	}
 	if size == 0 {
 		// list is empty after trim
+		_, err := db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -319,6 +357,11 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 //	ps : here just focus on deleting the list data,
 //		 any other likes expire is ignore.
 func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
+	table := extractTableFromRedisKey(key)
+	if len(table) == 0 {
+		return 0
+	}
+
 	mk := lEncodeMetaKey(key)
 
 	var headSeq int64
@@ -347,6 +390,12 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	for ; rit.Valid(); rit.Next() {
 		wb.Delete(rit.RefKey())
 		num++
+	}
+	if size > 0 {
+		_, err := db.IncrTableKeyCount(table, -1, wb)
+		if err != nil {
+			return 0
+		}
 	}
 
 	wb.Delete(mk)
@@ -455,13 +504,16 @@ func (db *RockDB) LSet(key []byte, index int64, value []byte) error {
 	var seq int64
 	var headSeq int64
 	var tailSeq int64
-	//var size int64
+	var size int64
 	var err error
 	metaKey := lEncodeMetaKey(key)
 
-	headSeq, tailSeq, _, err = db.lGetMeta(metaKey)
+	headSeq, tailSeq, size, err = db.lGetMeta(metaKey)
 	if err != nil {
 		return err
+	}
+	if size == 0 {
+		return errListIndex
 	}
 
 	if index >= 0 {
@@ -542,10 +594,9 @@ func (db *RockDB) LClear(key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
-	num := db.lDelete(key, wb)
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	db.wb.Clear()
+	num := db.lDelete(key, db.wb)
+	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	if err != nil {
 		// TODO: log here , the list maybe corrupt
 	}
@@ -558,15 +609,14 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 		return 0, errTooMuchBatchSize
 	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	db.wb.Clear()
 	for _, key := range keys {
 		if err := checkKeySize(key); err != nil {
 			return 0, err
 		}
-		db.lDelete(key, wb)
+		db.lDelete(key, db.wb)
 	}
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	if err != nil {
 		// TODO: log here , the list maybe corrupt
 	}
