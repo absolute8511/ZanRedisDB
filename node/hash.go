@@ -197,7 +197,7 @@ func (self *KVNode) localHSetCommand(cmd redcon.Command) (interface{}, error) {
 func (self *KVNode) localHMsetCommand(cmd redcon.Command) (interface{}, error) {
 	args := cmd.Args[2:]
 	if len(args)%2 != 0 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 	fvs := make([]common.KVRecord, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {

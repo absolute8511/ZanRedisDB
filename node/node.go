@@ -23,10 +23,7 @@ import (
 
 var (
 	errInvalidResponse = errors.New("Invalid response type")
-	errInvalidCommand  = errors.New("invalid command")
 	errSyntaxError     = errors.New("syntax error")
-	errStopped         = errors.New("the node stopped")
-	errTimeout         = errors.New("queue request timeout")
 	errUnknownData     = errors.New("unknown request data type")
 )
 
@@ -68,7 +65,7 @@ type KVSnapInfo struct {
 
 func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr string,
 	peers map[int]string, join bool,
-	confChangeC <-chan raftpb.ConfChange) (*KVNode, <-chan struct{}) {
+	confChangeC <-chan raftpb.ConfChange) *KVNode {
 	proposeC := make(chan []byte)
 	s := &KVNode{
 		reqProposeC: make(chan *internalReq, 200),
@@ -87,7 +84,7 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 	// read commits from raft into KVStore map until error
 	go s.applyCommits(commitC, errorC)
 	go s.handleProposeReq()
-	return s, s.stopChan
+	return s
 }
 
 func (self *KVNode) Stop() {
@@ -199,12 +196,12 @@ func (self *KVNode) handleProposeReq() {
 	var lastReq *internalReq
 	defer func() {
 		for _, r := range reqList {
-			self.w.Trigger(r.ID, errStopped)
+			self.w.Trigger(r.ID, common.ErrStopped)
 		}
 		for {
 			select {
 			case r := <-self.reqProposeC:
-				self.w.Trigger(r.ID, errStopped)
+				self.w.Trigger(r.ID, common.ErrStopped)
 			default:
 				break
 			}
@@ -246,9 +243,9 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		select {
 		case self.reqProposeC <- req:
 		case <-self.stopChan:
-			self.w.Trigger(req.ID, errStopped)
+			self.w.Trigger(req.ID, common.ErrStopped)
 		case <-time.After(time.Second * 3):
-			self.w.Trigger(req.ID, errTimeout)
+			self.w.Trigger(req.ID, common.ErrTimeout)
 		}
 	}
 	select {
@@ -259,7 +256,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		}
 		return rsp, nil
 	case <-self.stopChan:
-		return nil, errStopped
+		return nil, common.ErrStopped
 	}
 }
 
@@ -345,7 +342,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 							h, ok := self.router.GetInternalCmdHandler(cmdName)
 							if !ok {
 								log.Printf("unsupported redis command: %v", cmd)
-								self.w.Trigger(req.ID, errInvalidCommand)
+								self.w.Trigger(req.ID, common.ErrInvalidCommand)
 							} else {
 								v, err := h(cmd)
 								// write the future response or error

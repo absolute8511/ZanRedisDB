@@ -11,7 +11,6 @@ import (
 
 var (
 	errInvalidRange = errors.New("Invalid range string")
-	errInvalidArgs  = errors.New("Invalid arguments")
 )
 
 func getScoreRange(left []byte, right []byte) (int64, int64, error) {
@@ -236,15 +235,15 @@ func (self *KVNode) zrangebylexCommand(conn redcon.Conn, cmd redcon.Command) {
 	count := -1
 	if len(cmd.Args) == 7 {
 		if strings.ToLower(string(cmd.Args[4])) != "limit" {
-			conn.WriteError(errInvalidArgs.Error())
+			conn.WriteError(common.ErrInvalidArgs.Error())
 			return
 		}
 		if offset, err = strconv.Atoi(string(cmd.Args[5])); err != nil {
-			conn.WriteError(errInvalidArgs.Error())
+			conn.WriteError(common.ErrInvalidArgs.Error())
 			return
 		}
 		if count, err = strconv.Atoi(string(cmd.Args[6])); err != nil {
-			conn.WriteError(errInvalidArgs.Error())
+			conn.WriteError(common.ErrInvalidArgs.Error())
 			return
 		}
 	}
@@ -290,19 +289,19 @@ func (self *KVNode) zrangebyscoreFunc(conn redcon.Conn, cmd redcon.Command, reve
 	count := -1
 	if len(args) > 0 {
 		if len(args) != 3 {
-			conn.WriteError(errInvalidArgs.Error())
+			conn.WriteError(common.ErrInvalidArgs.Error())
 			return
 		}
 		if strings.ToLower(string(args[0])) != "limit" {
-			conn.WriteError(errInvalidArgs.Error())
+			conn.WriteError(common.ErrInvalidArgs.Error())
 			return
 		}
 		if offset, err = strconv.Atoi(string(args[1])); err != nil {
-			conn.WriteError(errInvalidArgs.Error())
+			conn.WriteError(common.ErrInvalidArgs.Error())
 			return
 		}
 		if count, err = strconv.Atoi(string(args[2])); err != nil {
-			conn.WriteError(errInvalidArgs.Error())
+			conn.WriteError(common.ErrInvalidArgs.Error())
 			return
 		}
 	}
@@ -546,7 +545,7 @@ func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
 
 func (self *KVNode) localZaddCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 4 || len(cmd.Args)%2 != 0 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 
 	mlist, err := getScorePairs(cmd.Args[2:])
@@ -562,7 +561,7 @@ func (self *KVNode) localZaddCommand(cmd redcon.Command) (interface{}, error) {
 
 func (self *KVNode) localZincrbyCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 
 	delta, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
@@ -574,7 +573,7 @@ func (self *KVNode) localZincrbyCommand(cmd redcon.Command) (interface{}, error)
 
 func (self *KVNode) localZremCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 3 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 
 	return self.store.ZRem(cmd.Args[1], cmd.Args[2:]...)
@@ -582,7 +581,7 @@ func (self *KVNode) localZremCommand(cmd redcon.Command) (interface{}, error) {
 
 func (self *KVNode) localZremrangebyrankCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 	start, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
@@ -598,7 +597,7 @@ func (self *KVNode) localZremrangebyrankCommand(cmd redcon.Command) (interface{}
 
 func (self *KVNode) localZremrangebyscoreCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 
 	min, max, err := getScoreRange(cmd.Args[2], cmd.Args[3])
@@ -610,7 +609,7 @@ func (self *KVNode) localZremrangebyscoreCommand(cmd redcon.Command) (interface{
 
 func (self *KVNode) localZremrangebylexCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 
 	min, max, rt, err := getLexRange(cmd.Args[2], cmd.Args[3])
@@ -622,7 +621,7 @@ func (self *KVNode) localZremrangebylexCommand(cmd redcon.Command) (interface{},
 
 func (self *KVNode) localZclearCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 2 {
-		return nil, errInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 	return self.store.ZClear(cmd.Args[1])
 }

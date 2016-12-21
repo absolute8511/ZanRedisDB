@@ -1,4 +1,4 @@
-package redisapi
+package server
 
 import (
 	"fmt"

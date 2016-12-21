@@ -1,8 +1,7 @@
-package redisapi
+package server
 
 import (
 	"errors"
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 	"log"
 	"strconv"
@@ -12,7 +11,7 @@ var (
 	errInvalidCommand = errors.New("invalid command")
 )
 
-func serverRedis(conn redcon.Conn, cmd redcon.Command) {
+func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	_, cmd, err := pipelineCommand(conn, cmd)
 	if err != nil {
 		conn.WriteError("pipeline error '" + err.Error() + "'")
@@ -34,19 +33,19 @@ func serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteString("OK")
 		conn.Close()
 	default:
-		h, ok := common.GetHandler(cmdName)
-		if ok {
+		h, cmd, err := self.GetHandler(cmdName, cmd)
+		if err == nil {
 			h(conn, cmd)
 		} else {
-			conn.WriteError("ERR unknown command '" + string(cmd.Args[0]) + "'")
+			conn.WriteError("ERR handle command '" + string(cmd.Args[0]) + "' : " + err.Error())
 		}
 	}
 }
 
-func ServeRedisAPI(port int, stopC <-chan struct{}) {
+func (self *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
 	redisS := redcon.NewServer(
 		":"+strconv.Itoa(port),
-		serverRedis,
+		self.serverRedis,
 		func(conn redcon.Conn) bool {
 			//log.Printf("accept: %s", conn.RemoteAddr())
 			return true

@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"io/ioutil"
@@ -7,35 +7,26 @@ import (
 	_ "net/http/pprof"
 	"strconv"
 
-	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/coreos/etcd/raft/raftpb"
 )
 
-// Handler for a http based key-value store backed by raft
-type httpKVAPI struct {
-	kvNode      *node.KVNode
-	confChangeC chan<- raftpb.ConfChange
-}
-
-func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := r.RequestURI
 	switch {
-	case r.Method == "PUT":
-		v, err := ioutil.ReadAll(r.Body)
+	case r.Method == "GET":
+		ns, realKey, err := extractNamesapce([]byte(key))
 		if err != nil {
-			log.Printf("Failed to read on PUT (%v)\n", err)
-			http.Error(w, "Failed on PUT", http.StatusBadRequest)
+			http.Error(w, "Failed:"+err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		h.kvNode.Put(key, string(v))
-
-		// Optimistic-- no waiting for ack from raft. Value is not yet
-		// committed so a subsequent GET on the key may return old value
-		w.WriteHeader(http.StatusNoContent)
-	case r.Method == "GET":
-		if v, err := h.kvNode.Lookup(key); err == nil {
-			w.Write([]byte(v))
+		kv, ok := self.kvNodes[ns]
+		if !ok || kv == nil {
+			http.Error(w, "Namespace not found:"+ns, http.StatusNotFound)
+			return
+		}
+		if v, err := kv.Lookup(realKey); err == nil {
+			w.Write(v)
 		} else {
 			http.Error(w, "Failed to GET", http.StatusNotFound)
 		}
@@ -59,7 +50,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			NodeID:  nodeId,
 			Context: data,
 		}
-		h.confChangeC <- cc
+		self.ProposeConfChange(cc)
 
 		// As above, optimistic that raft will apply the conf change
 		w.WriteHeader(http.StatusNoContent)
@@ -75,7 +66,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Type:   raftpb.ConfChangeRemoveNode,
 			NodeID: nodeId,
 		}
-		h.confChangeC <- cc
+		self.ProposeConfChange(cc)
 
 		// As above, optimistic that raft will apply the conf change
 		w.WriteHeader(http.StatusNoContent)
@@ -89,22 +80,17 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
-func serveHttpKVAPI(kv *node.KVNode, port int, confChangeC chan<- raftpb.ConfChange, stopC <-chan struct{}) {
+func (self *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
 	go http.ListenAndServe("localhost:6666", nil)
 	srv := http.Server{
-		Addr: ":" + strconv.Itoa(port),
-		Handler: &httpKVAPI{
-			kvNode:      kv,
-			confChangeC: confChangeC,
-		},
+		Addr:    ":" + strconv.Itoa(port),
+		Handler: self,
 	}
-	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			log.Fatal(err)
-		}
-	}()
-
-	<-stopC
+	l, err := common.NewStoppableListener(srv.Addr, stopC)
+	if err != nil {
+		panic(err)
+	}
+	err = srv.Serve(l)
 	// exit when raft goes down
-	log.Printf("http server stopped")
+	log.Printf("http server stopped: %v", err)
 }

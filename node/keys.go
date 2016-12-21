@@ -27,9 +27,9 @@ func (self *KVNode) Put(k string, v string) error {
 	return err
 }
 
-func (self *KVNode) Lookup(key string) (string, error) {
-	v, err := self.store.LocalLookup([]byte(key))
-	return string(v), err
+func (self *KVNode) Lookup(key []byte) ([]byte, error) {
+	v, err := self.store.LocalLookup(key)
+	return v, err
 }
 
 func (self *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"github.com/tidwall/redcon"
 	"strings"
 )
@@ -8,6 +9,13 @@ import (
 const (
 	DIR_PERM  = 0755
 	FILE_PERM = 0644
+)
+
+var (
+	ErrInvalidCommand = errors.New("invalid command")
+	ErrStopped        = errors.New("the node stopped")
+	ErrTimeout        = errors.New("queue request timeout")
+	ErrInvalidArgs    = errors.New("Invalid arguments")
 )
 
 type WriteCmd struct {
