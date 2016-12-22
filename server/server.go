@@ -22,6 +22,7 @@ type NamespaceNode struct {
 }
 
 type Server struct {
+	mutex   sync.Mutex
 	kvNodes map[string]*NamespaceNode
 	conf    ServerConfig
 	stopC   chan struct{}
@@ -38,10 +39,12 @@ func NewServer(conf ServerConfig) *Server {
 }
 
 func (self *Server) Stop() {
+	self.mutex.Lock()
 	for k, n := range self.kvNodes {
 		n.node.Stop()
 		log.Printf("kv namespace stopped: %v", k)
 	}
+	self.mutex.Unlock()
 	close(self.stopC)
 	self.wg.Wait()
 	log.Printf("server stopped")
@@ -49,11 +52,13 @@ func (self *Server) Stop() {
 
 func (self *Server) onNamespaceDeleted(ns string) func() {
 	return func() {
+		self.mutex.Lock()
 		_, ok := self.kvNodes[ns]
 		if ok {
 			log.Printf("namespace deleted: %v", ns)
 			delete(self.kvNodes, ns)
 		}
+		self.mutex.Unlock()
 	}
 }
 
@@ -70,12 +75,16 @@ func (self *Server) InitKVNamespace(clusterID uint64, id int,
 		conf:        conf,
 		confChangeC: confC,
 	}
+	self.mutex.Lock()
 	self.kvNodes[conf.Name] = n
+	self.mutex.Unlock()
 	return nil
 }
 
 func (self *Server) ProposeConfChange(ns string, cc raftpb.ConfChange) {
+	self.mutex.Lock()
 	nsNode, ok := self.kvNodes[ns]
+	self.mutex.Unlock()
 	if ok {
 		nsNode.confChangeC <- cc
 	} else {
@@ -107,7 +116,9 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	if err != nil {
 		return nil, cmd, err
 	}
+	self.mutex.Lock()
 	n, ok := self.kvNodes[namespace]
+	self.mutex.Unlock()
 	if !ok || n == nil {
 		return nil, cmd, errNamespaceNotFound
 	}
