@@ -16,24 +16,23 @@ var (
 )
 
 type NamespaceNode struct {
-	node *node.KVNode
-	conf *NamespaceConfig
+	node        *node.KVNode
+	conf        *NamespaceConfig
+	confChangeC chan raftpb.ConfChange
 }
 
 type Server struct {
-	kvNodes     map[string]*NamespaceNode
-	conf        ServerConfig
-	stopC       chan struct{}
-	wg          sync.WaitGroup
-	confChangeC chan raftpb.ConfChange
+	kvNodes map[string]*NamespaceNode
+	conf    ServerConfig
+	stopC   chan struct{}
+	wg      sync.WaitGroup
 }
 
 func NewServer(conf ServerConfig) *Server {
 	s := &Server{
-		kvNodes:     make(map[string]*NamespaceNode),
-		conf:        conf,
-		confChangeC: make(chan raftpb.ConfChange),
-		stopC:       make(chan struct{}),
+		kvNodes: make(map[string]*NamespaceNode),
+		conf:    conf,
+		stopC:   make(chan struct{}),
 	}
 	return s
 }
@@ -48,24 +47,40 @@ func (self *Server) Stop() {
 	log.Printf("server stopped")
 }
 
+func (self *Server) onNamespaceDeleted(ns string) func() {
+	return func() {
+		_, ok := self.kvNodes[ns]
+		if ok {
+			log.Printf("namespace deleted: %v", ns)
+			delete(self.kvNodes, ns)
+		}
+	}
+}
+
 func (self *Server) InitKVNamespace(clusterID uint64, id int,
 	clusterNodes map[int]string, join bool, conf *NamespaceConfig) error {
 	kvOpts := &store.KVOptions{
 		DataDir: self.conf.DataDir,
 		EngType: conf.EngType,
 	}
-	kv := node.NewKVNode(kvOpts, clusterID, id, conf.LocalRaftAddr,
-		clusterNodes, join, self.confChangeC)
+	kv, confC := node.NewKVNode(kvOpts, clusterID, id, conf.LocalRaftAddr,
+		clusterNodes, join, self.onNamespaceDeleted(conf.Name))
 	n := &NamespaceNode{
-		node: kv,
-		conf: conf,
+		node:        kv,
+		conf:        conf,
+		confChangeC: confC,
 	}
 	self.kvNodes[conf.Name] = n
 	return nil
 }
 
-func (self *Server) ProposeConfChange(cc raftpb.ConfChange) {
-	self.confChangeC <- cc
+func (self *Server) ProposeConfChange(ns string, cc raftpb.ConfChange) {
+	nsNode, ok := self.kvNodes[ns]
+	if ok {
+		nsNode.confChangeC <- cc
+	} else {
+		log.Printf("namespace not found: %v", ns)
+	}
 }
 
 func (self *Server) ServeAPI() {

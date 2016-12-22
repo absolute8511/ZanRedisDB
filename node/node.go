@@ -56,6 +56,7 @@ type KVNode struct {
 	stopChan    chan struct{}
 	w           wait.Wait
 	router      *common.CmdRouter
+	deleteCb    func()
 }
 
 type KVSnapInfo struct {
@@ -65,9 +66,9 @@ type KVSnapInfo struct {
 }
 
 func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr string,
-	peers map[int]string, join bool,
-	confChangeC <-chan raftpb.ConfChange) *KVNode {
+	peers map[int]string, join bool, deleteCb func()) (*KVNode, chan raftpb.ConfChange) {
 	proposeC := make(chan []byte)
+	confChangeC := make(chan raftpb.ConfChange)
 	s := &KVNode{
 		reqProposeC: make(chan *internalReq, 200),
 		proposeC:    proposeC,
@@ -75,6 +76,7 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 		stopChan:    make(chan struct{}),
 		w:           wait.New(),
 		router:      common.NewCmdRouter(),
+		deleteCb:    deleteCb,
 	}
 	s.registerHandler()
 	commitC, errorC, raftNode := newRaftNode(clusterID, id, localRaftAddr, kvopts.DataDir,
@@ -85,7 +87,7 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 	// read commits from raft into KVStore map until error
 	go s.applyCommits(commitC, errorC)
 	go s.handleProposeReq()
-	return s
+	return s, confChangeC
 }
 
 func (self *KVNode) Stop() {
@@ -95,6 +97,7 @@ func (self *KVNode) Stop() {
 	self.raftNode.StopNode()
 	self.store.Close()
 	close(self.stopChan)
+	go self.deleteCb()
 }
 
 func (self *KVNode) Clear() error {

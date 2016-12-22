@@ -73,6 +73,7 @@ type applyInfo struct {
 type MemberInfo struct {
 	ID          uint64   `json:"id"`
 	ClusterName string   `json:"cluster_name"`
+	Namespace   string   `json:"namespace"`
 	ClusterID   uint64   `json:"cluster_id"`
 	Broadcast   string   `json:"broadcast"`
 	RpcPort     int      `json:"rpc_port"`

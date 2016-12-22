@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/coreos/etcd/raft/raftpb"
 )
 
@@ -45,12 +47,19 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var m node.MemberInfo
+		err = json.Unmarshal(data, &m)
+		if err != nil {
+			http.Error(w, "POST data decode failed", http.StatusBadRequest)
+			return
+		}
+
 		cc := raftpb.ConfChange{
 			Type:    raftpb.ConfChangeAddNode,
 			NodeID:  nodeId,
 			Context: data,
 		}
-		self.ProposeConfChange(cc)
+		self.ProposeConfChange(m.Namespace, cc)
 
 		// As above, optimistic that raft will apply the conf change
 		w.WriteHeader(http.StatusNoContent)
@@ -61,12 +70,14 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed on DELETE", http.StatusBadRequest)
 			return
 		}
+		q := r.URL.Query()
+		ns := q.Get("ns")
 
 		cc := raftpb.ConfChange{
 			Type:   raftpb.ConfChangeRemoveNode,
 			NodeID: nodeId,
 		}
-		self.ProposeConfChange(cc)
+		self.ProposeConfChange(ns, cc)
 
 		// As above, optimistic that raft will apply the conf change
 		w.WriteHeader(http.StatusNoContent)

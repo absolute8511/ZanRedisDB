@@ -110,7 +110,7 @@ func (p *program) Start() error {
 				Context: data,
 			}
 			time.Sleep(time.Second)
-			server.ProposeConfChange(cc)
+			server.ProposeConfChange(nsConf.Name, cc)
 		}()
 	}
 	server.ServeAPI()
