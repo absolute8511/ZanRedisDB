@@ -58,6 +58,36 @@ func decodeTableMetaKey(tk []byte) ([]byte, error) {
 	return tk[pos:], nil
 }
 
+func encodeTableMetaStartKey() []byte {
+	return encodeTableMetaKey(nil)
+}
+
+func encodeTableMetaStopKey() []byte {
+	t := encodeTableMetaKey(nil)
+	t[len(t)-1] = TableMetaType + 1
+	return t
+}
+
+func (db *RockDB) GetTables() chan []byte {
+	ch := make(chan []byte, 10)
+	go func() {
+		s := encodeTableMetaStartKey()
+		e := encodeTableMetaStopKey()
+		it := NewDBRangeIterator(db.eng, s, e, RangeOpen, false)
+		defer it.Close()
+		for ; it.Valid(); it.Next() {
+			rk := it.Key()
+			table, err := decodeTableMetaKey(rk)
+			if err != nil {
+				continue
+			}
+			ch <- table
+		}
+		close(ch)
+	}()
+	return ch
+}
+
 func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	tm := encodeTableMetaKey(table)
 	var size int64

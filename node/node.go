@@ -100,6 +100,23 @@ func (self *KVNode) Stop() {
 	go self.deleteCb()
 }
 
+func (self *KVNode) GetStats() common.NamespaceStats {
+	tbs := self.store.GetTables()
+	var ns common.NamespaceStats
+
+	for t := range tbs {
+		cnt, err := self.store.GetTableKeyCount(t)
+		if err != nil {
+			continue
+		}
+		var ts common.TableStats
+		ts.Name = string(t)
+		ts.KeyNum = cnt
+		ns.TStats = append(ns.TStats, ts)
+	}
+	return ns
+}
+
 func (self *KVNode) Clear() error {
 	return self.store.Clear()
 }

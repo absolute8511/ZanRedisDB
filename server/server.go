@@ -50,6 +50,19 @@ func (self *Server) Stop() {
 	log.Printf("server stopped")
 }
 
+func (self *Server) GetStats() common.ServerStats {
+	var ss common.ServerStats
+	self.mutex.Lock()
+	for k, n := range self.kvNodes {
+		ns := n.node.GetStats()
+		ns.Name = k
+		ns.EngType = n.conf.EngType
+		ss.NSStats = append(ss.NSStats, ns)
+	}
+	self.mutex.Unlock()
+	return ss
+}
+
 func (self *Server) onNamespaceDeleted(ns string) func() {
 	return func() {
 		self.mutex.Lock()

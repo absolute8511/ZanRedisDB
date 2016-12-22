@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/tidwall/redcon"
 	"log"
@@ -32,6 +33,10 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	case "quit":
 		conn.WriteString("OK")
 		conn.Close()
+	case "info":
+		s := self.GetStats()
+		d, _ := json.MarshalIndent(s, "", " ")
+		conn.WriteBulkString(string(d))
 	default:
 		h, cmd, err := self.GetHandler(cmdName, cmd)
 		if err == nil {
