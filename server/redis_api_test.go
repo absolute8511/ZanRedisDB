@@ -28,12 +28,16 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	clusterNodes[1] = raftAddr
 	kvOpts := ServerConfig{
 		DataDir:      tmpDir,
-		EngType:      "rocksdb",
 		RedisAPIPort: redisport,
 	}
+	nsConf := &NamespaceConfig{
+		Name:          "default",
+		EngType:       "rocksdb",
+		LocalRaftAddr: raftAddr,
+	}
 	kv := NewServer(kvOpts)
-	kv.InitKVNamespace(1000, 1, raftAddr,
-		clusterNodes, false)
+	kv.InitKVNamespace(1000, 1,
+		clusterNodes, false, nsConf)
 
 	kv.ServeAPI()
 	time.Sleep(time.Millisecond * 10)
