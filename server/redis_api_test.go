@@ -2,9 +2,6 @@ package server
 
 import (
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/store"
-	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/siddontang/goredis"
 	"io/ioutil"
 	"reflect"
@@ -15,12 +12,11 @@ import (
 )
 
 var testOnce sync.Once
-var kvs *node.KVNode
+var kvs *Server
 var redisport int
 var OK = "OK"
 
-func startTestServer(t *testing.T) (*node.KVNode, int, string) {
-	confChangeC := make(chan raftpb.ConfChange)
+func startTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatal(err)
@@ -30,15 +26,18 @@ func startTestServer(t *testing.T) (*node.KVNode, int, string) {
 	redisport := 22345
 	clusterNodes := make(map[int]string)
 	clusterNodes[1] = raftAddr
-	kvOpts := &store.KVOptions{
-		DataDir: tmpDir,
-		EngType: "rocksdb",
+	kvOpts := ServerConfig{
+		DataDir:      tmpDir,
+		EngType:      "rocksdb",
+		RedisAPIPort: redisport,
 	}
-	kvs, nodeStopC := node.NewKVNode(kvOpts, 1000, 1, raftAddr,
-		clusterNodes, false, confChangeC)
-	go ServeRedisAPI(redisport, nodeStopC)
+	kv := NewServer(kvOpts)
+	kv.InitKVNamespace(1000, 1, raftAddr,
+		clusterNodes, false)
+
+	kv.ServeAPI()
 	time.Sleep(time.Millisecond * 10)
-	return kvs, redisport, tmpDir
+	return kv, redisport, tmpDir
 }
 
 func getTestConn(t *testing.T) *goredis.PoolConn {
@@ -59,8 +58,8 @@ func TestKV(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key1 := "test:a"
-	key2 := "test:b"
+	key1 := "default:test:a"
+	key2 := "default:test:b"
 	if ok, err := goredis.String(c.Do("set", key1, "1234")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
@@ -103,7 +102,7 @@ func TestKV(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	if n, err := goredis.Int(c.Do("exists", "test:empty_key_test")); err != nil {
+	if n, err := goredis.Int(c.Do("exists", "default:test:empty_key_test")); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
@@ -130,9 +129,9 @@ func TestKVM(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key1 := "test:a"
-	key2 := "test:b"
-	key3 := "test:c"
+	key1 := "default:test:kvma"
+	key2 := "default:test:kvmb"
+	key3 := "default:test:kvmc"
 	if ok, err := goredis.String(c.Do("mset", key1, "1", key2, "2")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
@@ -162,7 +161,7 @@ func TestKVIncrDecr(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := "test:kv_n"
+	key := "default:test:kv_n"
 	if n, err := goredis.Int64(c.Do("incr", key)); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
@@ -192,9 +191,9 @@ func TestKVErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key1 := "test:a"
-	key2 := "test:b"
-	key3 := "test:c"
+	key1 := "default:test:kv_erra"
+	key2 := "default:test:kv_errb"
+	key3 := "default:test:kv_errc"
 	if _, err := c.Do("get", key1, key2, key3); err == nil {
 		t.Fatalf("invalid err %v", err)
 	}
@@ -249,7 +248,7 @@ func TestHash(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:a")
+	key := "default:test:hasha"
 	//if n, err := goredis.Int(c.Do("hkeyexists", key)); err != nil {
 	//	t.Fatal(err)
 	//} else if n != 0 {
@@ -332,7 +331,7 @@ func TestHashM(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:msetb")
+	key := "default:test:msetb"
 	if ok, err := goredis.String(c.Do("hmset", key, 1, 1, 2, 2, 3, 3)); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
@@ -384,7 +383,7 @@ func TestHashIncr(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:c")
+	key := "default:test:hashincr-c"
 	if n, err := goredis.Int(c.Do("hincrby", key, 1, 1)); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
@@ -420,7 +419,7 @@ func TestHashGetAll(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:hgetalld")
+	key := "default:test:hgetalld"
 
 	if ok, err := goredis.String(c.Do("hmset", key, 1, 1, 2, 2, 3, 3)); err != nil {
 		t.Fatal(err)
@@ -469,7 +468,7 @@ func TestHashErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := "test:hash_err_param"
+	key := "default:test:hash_err_param"
 	if _, err := c.Do("hset", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
@@ -531,7 +530,7 @@ func TestHashErrorParams(t *testing.T) {
 	}
 }
 
-func testListIndex(t *testing.T, key []byte, index int64, v int) error {
+func testListIndex(t *testing.T, key string, index int64, v int) error {
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -547,7 +546,7 @@ func testListIndex(t *testing.T, key []byte, index int64, v int) error {
 	return nil
 }
 
-func testListRange(t *testing.T, key []byte, start int64, stop int64, checkValues ...int) error {
+func testListRange(t *testing.T, key string, start int64, stop int64, checkValues ...int) error {
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -581,7 +580,7 @@ func TestList(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:a")
+	key := "default:test:lista"
 	//if n, err := goredis.Int(c.Do("lkeyexists", key)); err != nil {
 	//	t.Fatal(err)
 	//} else if n != 0 {
@@ -688,7 +687,7 @@ func TestList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := testListRange(t, []byte("empty list"), 0, 100); err != nil {
+	if err := testListRange(t, "default:test:empty list", 0, 100); err != nil {
 		t.Fatal(err)
 	}
 
@@ -735,7 +734,7 @@ func TestListMPush(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:b")
+	key := "default:test:listmpushb"
 	if n, err := goredis.Int(c.Do("rpush", key, 1, 2, 3)); err != nil {
 		t.Fatal(err)
 	} else if n != 3 {
@@ -761,7 +760,7 @@ func TestPop(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:c")
+	key := "default:test:c"
 	if n, err := goredis.Int(c.Do("rpush", key, 1, 2, 3, 4, 5, 6)); err != nil {
 		t.Fatal(err)
 	} else if n != 6 {
@@ -824,7 +823,7 @@ func disableTestTrim(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:d")
+	key := "default:test:d"
 	if n, err := goredis.Int(c.Do("rpush", key, 1, 2, 3, 4, 5, 6)); err != nil {
 		t.Fatal(err)
 	} else if n != 6 {
@@ -890,7 +889,7 @@ func TestListErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := "test:list_err_param"
+	key := "default:test:list_err_param"
 	if _, err := c.Do("lpush", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
@@ -940,8 +939,8 @@ func disableTestSet(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key1 := "test:testdb_cmd_set_1"
-	key2 := "test:testdb_cmd_set_2"
+	key1 := "default:test:testdb_cmd_set_1"
+	key2 := "default:test:testdb_cmd_set_2"
 
 	//if n, err := goredis.Int(c.Do("skeyexists", key1)); err != nil {
 	//	t.Fatal(err)
@@ -1004,7 +1003,7 @@ func TestSetErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := "test:set_error_param"
+	key := "default:test:set_error_param"
 	if _, err := c.Do("sadd", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
@@ -1059,7 +1058,7 @@ func TestZSet(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:myzset")
+	key := "default:test:myzset"
 
 	//if n, err := goredis.Int(c.Do("zkeyexists", key)); err != nil {
 	//	t.Fatal(err)
@@ -1169,7 +1168,7 @@ func TestZSetCount(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:myzset")
+	key := "default:test:myzset"
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1231,7 +1230,7 @@ func TestZSetRank(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:myzset")
+	key := "default:test:myzset"
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1288,7 +1287,7 @@ func TestZSetRangeScore(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:myzset_range")
+	key := "default:test:myzset_range"
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1382,7 +1381,7 @@ func TestZSetRange(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:myzset_range_rank")
+	key := "default:test:myzset_range_rank"
 	if _, err := goredis.Int(c.Do("zadd", key, 1, "a", 2, "b", 3, "c", 4, "d")); err != nil {
 		t.Fatal(err)
 	}
@@ -1495,7 +1494,7 @@ func TestZsetErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := "test:zset_error_param"
+	key := "default:test:zset_error_param"
 	//zadd
 	if _, err := c.Do("zadd", key); err == nil {
 		t.Fatal("invalid err of %v", err)
@@ -1646,7 +1645,7 @@ func TestZSetLex(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := []byte("test:myzlexset")
+	key := "default:test:myzlexset"
 	if _, err := c.Do("zadd", key,
 		0, "a", 0, "b", 0, "c", 0, "d", 0, "e", 0, "f", 0, "g"); err != nil {
 		t.Fatal(err)

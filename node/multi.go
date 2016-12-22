@@ -12,6 +12,15 @@ func (self *KVNode) plgetCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	for i := 1; i < len(cmd.Args); i++ {
+		_, key, err := common.ExtractNamesapce(cmd.Args[i])
+		if err != nil {
+			conn.WriteError(err.Error())
+			return
+		}
+		cmd.Args[i] = key
+	}
+
 	vals, _ := self.store.MGet(cmd.Args[1:]...)
 	for _, v := range vals {
 		if v == nil {
@@ -27,6 +36,21 @@ func (self *KVNode) plsetCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	args := cmd.Args[1:]
+	for i, v := range args {
+		if i%2 != 0 {
+			continue
+		}
+		_, key, err := common.ExtractNamesapce(v)
+		if err != nil {
+			conn.WriteError(err.Error())
+			return
+		}
+		args[i] = key
+	}
+	ncmd := buildCommand(cmd.Args)
+	copy(cmd.Raw[0:], ncmd.Raw[:])
+	cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
 	_, err := self.Propose(cmd.Raw)
 	if err != nil {

@@ -87,8 +87,10 @@ func (p *program) Start() error {
 	fmt.Printf("local %v start with cluster: %v\n", *raftAddr, clusterNodes)
 
 	kvOpts := server.ServerConfig{
-		DataDir: *dataDir,
-		EngType: "rocksdb",
+		DataDir:      *dataDir,
+		EngType:      "rocksdb",
+		RedisAPIPort: *redisport,
+		HTTPAPIPort:  *kvport,
 	}
 
 	server := server.NewServer(kvOpts)

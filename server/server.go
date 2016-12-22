@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
@@ -13,19 +12,8 @@ import (
 )
 
 var (
-	errInvalidRedisKey   = errors.New("invalid redis key")
 	errNamespaceNotFound = errors.New("namespace not found")
 )
-
-func extractNamesapce(rawKey []byte) (string, []byte, error) {
-	index := bytes.IndexByte(rawKey, ':')
-	if index <= 0 {
-		return "", nil, errInvalidRedisKey
-	}
-	namespace := string(rawKey[:index])
-	realKey := rawKey[index+1:]
-	return namespace, realKey, nil
-}
 
 type Server struct {
 	kvNodes     map[string]*node.KVNode
@@ -91,11 +79,10 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	}
 	rawKey := cmd.Args[1]
 
-	namespace, realKey, err := extractNamesapce(rawKey)
+	namespace, _, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
 		return nil, cmd, err
 	}
-	cmd.Args[1] = realKey
 	n, ok := self.kvNodes[namespace]
 	if !ok || n == nil {
 		return nil, cmd, errNamespaceNotFound

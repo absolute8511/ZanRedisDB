@@ -15,7 +15,7 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := r.RequestURI
 	switch {
 	case r.Method == "GET":
-		ns, realKey, err := extractNamesapce([]byte(key))
+		ns, realKey, err := common.ExtractNamesapce([]byte(key))
 		if err != nil {
 			http.Error(w, "Failed:"+err.Error(), http.StatusBadRequest)
 			return

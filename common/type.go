@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"errors"
 	"github.com/tidwall/redcon"
 	"strings"
@@ -12,10 +13,11 @@ const (
 )
 
 var (
-	ErrInvalidCommand = errors.New("invalid command")
-	ErrStopped        = errors.New("the node stopped")
-	ErrTimeout        = errors.New("queue request timeout")
-	ErrInvalidArgs    = errors.New("Invalid arguments")
+	ErrInvalidCommand  = errors.New("invalid command")
+	ErrStopped         = errors.New("the node stopped")
+	ErrTimeout         = errors.New("queue request timeout")
+	ErrInvalidArgs     = errors.New("Invalid arguments")
+	ErrInvalidRedisKey = errors.New("invalid redis key")
 )
 
 type WriteCmd struct {
@@ -47,12 +49,23 @@ const (
 	RangeOpen  uint8 = 0x11
 )
 
+func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
+	index := bytes.IndexByte(rawKey, ':')
+	if index <= 0 {
+		return "", nil, ErrInvalidRedisKey
+	}
+	namespace := string(rawKey[:index])
+	realKey := rawKey[index+1:]
+	return namespace, realKey, nil
+}
+
 type ScorePair struct {
 	Score  int64
 	Member []byte
 }
 
 type CommandFunc func(redcon.Conn, redcon.Command)
+type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
 type InternalCommandFunc func(redcon.Command) (interface{}, error)
 
 type CmdRouter struct {

@@ -19,24 +19,30 @@ type kv struct {
 
 func (self *KVNode) Put(k string, v string) error {
 	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(kv{Key: k, Val: v}); err != nil {
+	_, key, err := common.ExtractNamesapce([]byte(k))
+	if err != nil {
+		return err
+	}
+
+	if err := gob.NewEncoder(&buf).Encode(kv{Key: string(key), Val: v}); err != nil {
 		log.Println(err)
 		return err
 	}
-	_, err := self.HTTPPropose(buf.Bytes())
+	_, err = self.HTTPPropose(buf.Bytes())
 	return err
 }
 
 func (self *KVNode) Lookup(key []byte) ([]byte, error) {
+	_, key, err := common.ExtractNamesapce(key)
+	if err != nil {
+		return nil, err
+	}
+
 	v, err := self.store.LocalLookup(key)
 	return v, err
 }
 
 func (self *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
 	val, err := self.store.LocalLookup(cmd.Args[1])
 	if err != nil {
 		conn.WriteNull()
@@ -46,10 +52,6 @@ func (self *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
 	val, _ := self.store.KVExists(cmd.Args[1])
 	if val != 1 {
 		conn.WriteInt(0)
@@ -59,15 +61,6 @@ func (self *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
-		conn.WriteError("batch size too much")
-		return
-	}
-
 	vals, _ := self.store.MGet(cmd.Args[1:]...)
 	conn.WriteArray(len(vals))
 	for _, v := range vals {
@@ -79,29 +72,11 @@ func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	_, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -109,33 +84,11 @@ func (self *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) msetCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 3 || len(cmd.Args[1:])%2 != 0 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
-		conn.WriteError("too much batch size")
-		return
-	}
-	_, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) msetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -143,16 +96,7 @@ func (self *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {

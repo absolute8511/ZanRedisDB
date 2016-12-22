@@ -6,10 +6,6 @@ import (
 )
 
 func (self *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
 	index, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		conn.WriteError("Invalid index: " + err.Error())
@@ -24,10 +20,6 @@ func (self *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) llenCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
 	n, err := self.store.LLen(cmd.Args[1])
 	if err != nil {
 		conn.WriteError("Err: " + err.Error())
@@ -63,16 +55,7 @@ func (self *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.([]byte)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -82,16 +65,7 @@ func (self *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteBulk(rsp)
 }
 
-func (self *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.(int64)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -102,7 +76,7 @@ func (self *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
+	if len(cmd.Args) != 4 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -111,10 +85,8 @@ func (self *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("Invalid index: " + err.Error())
 		return
 	}
-
-	_, err = self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
+	_, _, ok := rebuildFirstKeyAndPropose(self, conn, cmd)
+	if !ok {
 		return
 	}
 	// wait response
@@ -122,7 +94,7 @@ func (self *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (self *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 3 {
+	if len(cmd.Args) != 4 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
@@ -137,25 +109,15 @@ func (self *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 
-	_, err = self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
+	_, _, ok := rebuildFirstKeyAndPropose(self, conn, cmd)
+	if !ok {
 		return
 	}
 	// wait response
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.([]byte)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -165,16 +127,7 @@ func (self *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteBulk(rsp)
 }
 
-func (self *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.(int64)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -184,16 +137,7 @@ func (self *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteInt64(rsp)
 }
 
-func (self *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) != 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
-	v, err := self.Propose(cmd.Raw)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
+func (self *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.(int64)
 	if !ok {
 		conn.WriteError("Invalid response type")
