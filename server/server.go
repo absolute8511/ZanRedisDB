@@ -15,8 +15,13 @@ var (
 	errNamespaceNotFound = errors.New("namespace not found")
 )
 
+type NamespaceNode struct {
+	node *node.KVNode
+	conf *NamespaceConfig
+}
+
 type Server struct {
-	kvNodes     map[string]*node.KVNode
+	kvNodes     map[string]*NamespaceNode
 	conf        ServerConfig
 	stopC       chan struct{}
 	wg          sync.WaitGroup
@@ -25,7 +30,7 @@ type Server struct {
 
 func NewServer(conf ServerConfig) *Server {
 	s := &Server{
-		kvNodes:     make(map[string]*node.KVNode),
+		kvNodes:     make(map[string]*NamespaceNode),
 		conf:        conf,
 		confChangeC: make(chan raftpb.ConfChange),
 		stopC:       make(chan struct{}),
@@ -35,7 +40,7 @@ func NewServer(conf ServerConfig) *Server {
 
 func (self *Server) Stop() {
 	for k, n := range self.kvNodes {
-		n.Stop()
+		n.node.Stop()
 		log.Printf("kv namespace stopped: %v", k)
 	}
 	close(self.stopC)
@@ -43,15 +48,19 @@ func (self *Server) Stop() {
 	log.Printf("server stopped")
 }
 
-func (self *Server) InitKVNamespace(clusterID uint64, id int, raftAddr string,
-	clusterNodes map[int]string, join bool) error {
+func (self *Server) InitKVNamespace(clusterID uint64, id int,
+	clusterNodes map[int]string, join bool, conf *NamespaceConfig) error {
 	kvOpts := &store.KVOptions{
 		DataDir: self.conf.DataDir,
-		EngType: self.conf.EngType,
+		EngType: conf.EngType,
 	}
-	kv := node.NewKVNode(kvOpts, clusterID, id, raftAddr,
+	kv := node.NewKVNode(kvOpts, clusterID, id, conf.LocalRaftAddr,
 		clusterNodes, join, self.confChangeC)
-	self.kvNodes["default"] = kv
+	n := &NamespaceNode{
+		node: kv,
+		conf: conf,
+	}
+	self.kvNodes[conf.Name] = n
 	return nil
 }
 
@@ -87,7 +96,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	if !ok || n == nil {
 		return nil, cmd, errNamespaceNotFound
 	}
-	h, ok := n.GetHandler(cmdName)
+	h, ok := n.node.GetHandler(cmdName)
 	if !ok {
 		return nil, cmd, common.ErrInvalidCommand
 	}

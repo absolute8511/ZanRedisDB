@@ -18,22 +18,12 @@ import (
 )
 
 var (
-	flagSet     = flag.NewFlagSet("zanredisdb", flag.ExitOnError)
-	cluster     = flagSet.String("cluster", "http://127.0.0.1:9021", "comma separated cluster peers")
-	id          = flagSet.Int("id", 1, "node ID")
-	raftAddr    = flagSet.String("raftaddr", "", "the raft address of local")
-	clusterID   = flagSet.Uint64("cluster_id", 1000, "cluster id of raft")
-	kvport      = flagSet.Int("port", 9121, "key-value http server port")
-	redisport   = flagSet.Int("redis_port", 9131, "key-value redis server port")
-	join        = flagSet.Bool("join", false, "join an existing cluster")
-	dataDir     = flagSet.String("data", "", "the data path")
-	showVersion = flagSet.Bool("version", false, "print version string and exit")
+	flagSet        = flag.NewFlagSet("zanredisdb", flag.ExitOnError)
+	configFilePath = flagSet.String("config", "", "the config file path to read")
+	raftAddr       = flagSet.String("raftaddr", "", "the raft address of local")
+	join           = flagSet.Bool("join", false, "join an existing cluster")
+	showVersion    = flagSet.Bool("version", false, "print version string and exit")
 )
-
-type ClusterMemberInfo struct {
-	ID   int    `json:"id"`
-	Addr string `json:"addr"`
-}
 
 type program struct {
 	server *server.Server
@@ -62,52 +52,61 @@ func (p *program) Start() error {
 		fmt.Println(common.String("ZanRedisDB"))
 		os.Exit(0)
 	}
-	if *dataDir == "" {
+	var configFile server.ConfigFile
+	if *configFilePath != "" {
+		d, err := ioutil.ReadFile(*configFilePath)
+		if err != nil {
+			panic(err)
+		}
+		err = json.Unmarshal(d, &configFile)
+		if err != nil {
+			panic(err)
+		}
+	}
+	if configFile.ServerConf.DataDir == "" {
 		tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 		if err != nil {
 			panic(err)
 		}
-		*dataDir = tmpDir
+		configFile.ServerConf.DataDir = tmpDir
 	}
-	fmt.Printf("open dir:%v\n", *dataDir)
 
 	// raft provides a commit stream for the proposals from the http api
-	clusterInfo := make([]ClusterMemberInfo, 0)
-	err := json.Unmarshal([]byte(*cluster), &clusterInfo)
-	if err != nil {
-		panic(err)
-	}
 	clusterNodes := make(map[int]string)
-	for _, v := range clusterInfo {
+	for _, v := range configFile.ClusterConf.SeedNodes {
 		clusterNodes[v.ID] = v.Addr
 	}
 	if *raftAddr == "" {
-		*raftAddr, _ = clusterNodes[*id]
+		*raftAddr, _ = clusterNodes[configFile.ClusterConf.LocalNodeID]
 	}
 	fmt.Printf("local %v start with cluster: %v\n", *raftAddr, clusterNodes)
 
-	kvOpts := server.ServerConfig{
-		DataDir:      *dataDir,
-		EngType:      "rocksdb",
-		RedisAPIPort: *redisport,
-		HTTPAPIPort:  *kvport,
+	kvOpts := configFile.ServerConf
+	nsConf := &server.NamespaceConfig{
+		Name:          "default",
+		EngType:       "rocksdb",
+		LocalRaftAddr: *raftAddr,
 	}
 
+	id := configFile.ClusterConf.LocalNodeID
+	clusterID := configFile.ClusterConf.ClusterID
+	loadConf, _ := json.MarshalIndent(configFile, "", " ")
+	fmt.Printf("loading with conf:%v\n", string(loadConf))
 	server := server.NewServer(kvOpts)
-	server.InitKVNamespace(*clusterID, *id, *raftAddr, clusterNodes, *join)
-	_, ok := clusterNodes[*id]
+	server.InitKVNamespace(clusterID, id, clusterNodes, *join, nsConf)
+	_, ok := clusterNodes[id]
 	if ok {
 		var m node.MemberInfo
-		m.ID = uint64(*id)
-		m.ClusterID = *clusterID
-		m.DataDir = *dataDir
+		m.ID = uint64(id)
+		m.ClusterID = clusterID
+		m.DataDir = kvOpts.DataDir
 		m.RaftURLs = append(m.RaftURLs, *raftAddr)
 		m.Broadcast = "127.0.0.1"
 		data, _ := json.Marshal(m)
 		go func() {
 			cc := raftpb.ConfChange{
 				Type:    raftpb.ConfChangeUpdateNode,
-				NodeID:  uint64(*id),
+				NodeID:  uint64(id),
 				Context: data,
 			}
 			time.Sleep(time.Second)

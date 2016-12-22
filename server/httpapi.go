@@ -25,7 +25,7 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Namespace not found:"+ns, http.StatusNotFound)
 			return
 		}
-		if v, err := kv.Lookup(realKey); err == nil {
+		if v, err := kv.node.Lookup(realKey); err == nil {
 			w.Write(v)
 		} else {
 			http.Error(w, "Failed to GET", http.StatusNotFound)
