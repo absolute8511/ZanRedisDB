@@ -75,6 +75,11 @@ func (p *program) Start() error {
 
 	loadConf, _ := json.MarshalIndent(configFile, "", " ")
 	fmt.Printf("loading with conf:%v\n", string(loadConf))
+	bip := server.GetIPv4ForInterfaceName(kvOpts.BroadcastInterface)
+	if bip == "" || bip == "0.0.0.0" {
+		panic("broadcast ip can not be found")
+	}
+	fmt.Printf("broadcast ip is :%v\n", bip)
 	app := server.NewServer(kvOpts)
 	for _, nsNodeConf := range kvOpts.Namespaces {
 		nsFile := path.Join(configDir, nsNodeConf.Name)
@@ -116,7 +121,7 @@ func (p *program) Start() error {
 			m.ClusterID = clusterID
 			m.DataDir = kvOpts.DataDir
 			m.RaftURLs = append(m.RaftURLs, raftAddr)
-			m.Broadcast = "127.0.0.1"
+			m.Broadcast = bip
 			data, _ := json.Marshal(m)
 			go func() {
 				cc := raftpb.ConfChange{

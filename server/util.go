@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"github.com/tidwall/redcon"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -14,6 +15,26 @@ var (
 	ErrWrongNumberOfArguments = errors.New("wrong number of arguments")
 	ErrDisabled               = errors.New("disabled")
 )
+
+func GetIPv4ForInterfaceName(ifname string) string {
+	interfaces, _ := net.Interfaces()
+	for _, inter := range interfaces {
+		//log.Printf("found interface: %s\n", inter.Name)
+		if inter.Name == ifname {
+			if addrs, err := inter.Addrs(); err == nil {
+				for _, addr := range addrs {
+					switch ip := addr.(type) {
+					case *net.IPNet:
+						if ip.IP.DefaultMask() != nil {
+							return ip.IP.String()
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
 
 // pipelineCommand creates a single command from a pipeline.
 func pipelineCommand(conn redcon.Conn, cmd redcon.Command) (int, redcon.Command, error) {
