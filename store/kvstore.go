@@ -42,7 +42,7 @@ func (s *KVStore) openDB() error {
 		cfg.DataDir = dir
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
 	} else {
-		return errors.New("Not recognized engine type")
+		return errors.New("Not recognized engine type:" + s.opts.EngType)
 	}
 	return err
 }

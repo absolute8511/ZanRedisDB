@@ -75,13 +75,13 @@ func (self *Server) onNamespaceDeleted(ns string) func() {
 	}
 }
 
-func (self *Server) InitKVNamespace(clusterID uint64, id int,
+func (self *Server) InitKVNamespace(clusterID uint64, id int, localRaftAddr string,
 	clusterNodes map[int]string, join bool, conf *NamespaceConfig) error {
 	kvOpts := &store.KVOptions{
 		DataDir: self.conf.DataDir,
 		EngType: conf.EngType,
 	}
-	kv, confC := node.NewKVNode(kvOpts, clusterID, id, conf.LocalRaftAddr,
+	kv, confC := node.NewKVNode(kvOpts, clusterID, id, localRaftAddr,
 		clusterNodes, join, self.onNamespaceDeleted(conf.Name))
 	n := &NamespaceNode{
 		node:        kv,

@@ -1,0 +1,16 @@
+{
+    "name":"yz_cp_simple",
+    "eng_type": "rocksdb",
+    "cluster_conf":{
+        "cluster_id": 1000,
+        "seed_nodes":[
+        { 
+            "id":1,
+            "addr":"http://127.0.0.1:12379"
+        },
+        {
+            "id":2,
+            "addr":"http://127.0.0.1:22379"
+        }]
+    }
+}

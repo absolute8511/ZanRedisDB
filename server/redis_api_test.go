@@ -31,12 +31,11 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		RedisAPIPort: redisport,
 	}
 	nsConf := &NamespaceConfig{
-		Name:          "default",
-		EngType:       "rocksdb",
-		LocalRaftAddr: raftAddr,
+		Name:    "default",
+		EngType: "rocksdb",
 	}
 	kv := NewServer(kvOpts)
-	kv.InitKVNamespace(1000, 1,
+	kv.InitKVNamespace(1000, 1, raftAddr,
 		clusterNodes, false, nsConf)
 
 	kv.ServeAPI()

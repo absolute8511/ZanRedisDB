@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -20,8 +21,6 @@ import (
 var (
 	flagSet        = flag.NewFlagSet("zanredisdb", flag.ExitOnError)
 	configFilePath = flagSet.String("config", "", "the config file path to read")
-	raftAddr       = flagSet.String("raftaddr", "", "the raft address of local")
-	join           = flagSet.Bool("join", false, "join an existing cluster")
 	showVersion    = flagSet.Bool("version", false, "print version string and exit")
 )
 
@@ -53,6 +52,7 @@ func (p *program) Start() error {
 		os.Exit(0)
 	}
 	var configFile server.ConfigFile
+	configDir := filepath.Dir(*configFilePath)
 	if *configFilePath != "" {
 		d, err := ioutil.ReadFile(*configFilePath)
 		if err != nil {
@@ -71,50 +71,66 @@ func (p *program) Start() error {
 		configFile.ServerConf.DataDir = tmpDir
 	}
 
-	// raft provides a commit stream for the proposals from the http api
-	clusterNodes := make(map[int]string)
-	for _, v := range configFile.ClusterConf.SeedNodes {
-		clusterNodes[v.ID] = v.Addr
-	}
-	if *raftAddr == "" {
-		*raftAddr, _ = clusterNodes[configFile.ClusterConf.LocalNodeID]
-	}
-	fmt.Printf("local %v start with cluster: %v\n", *raftAddr, clusterNodes)
-
 	kvOpts := configFile.ServerConf
-	nsConf := &server.NamespaceConfig{
-		Name:          "default",
-		EngType:       "rocksdb",
-		LocalRaftAddr: *raftAddr,
-	}
 
-	id := configFile.ClusterConf.LocalNodeID
-	clusterID := configFile.ClusterConf.ClusterID
 	loadConf, _ := json.MarshalIndent(configFile, "", " ")
 	fmt.Printf("loading with conf:%v\n", string(loadConf))
-	server := server.NewServer(kvOpts)
-	server.InitKVNamespace(clusterID, id, clusterNodes, *join, nsConf)
-	_, ok := clusterNodes[id]
-	if ok {
-		var m node.MemberInfo
-		m.ID = uint64(id)
-		m.ClusterID = clusterID
-		m.DataDir = kvOpts.DataDir
-		m.RaftURLs = append(m.RaftURLs, *raftAddr)
-		m.Broadcast = "127.0.0.1"
-		data, _ := json.Marshal(m)
-		go func() {
-			cc := raftpb.ConfChange{
-				Type:    raftpb.ConfChangeUpdateNode,
-				NodeID:  uint64(id),
-				Context: data,
-			}
-			time.Sleep(time.Second)
-			server.ProposeConfChange(nsConf.Name, cc)
-		}()
+	app := server.NewServer(kvOpts)
+	for _, nsNodeConf := range kvOpts.Namespaces {
+		nsFile := path.Join(configDir, nsNodeConf.Name)
+		d, err := ioutil.ReadFile(nsFile)
+		if err != nil {
+			panic(err)
+		}
+		var nsConf server.NamespaceConfig
+		err = json.Unmarshal(d, &nsConf)
+		if err != nil {
+			panic(err)
+		}
+		if nsConf.Name != nsNodeConf.Name {
+			panic("namespace name not match the config file")
+		}
+
+		id := nsNodeConf.LocalNodeID
+		clusterID := nsConf.ClusterConf.ClusterID
+		// raft provides a commit stream for the proposals from the http api
+		clusterNodes := make(map[int]string)
+		for _, v := range nsConf.ClusterConf.SeedNodes {
+			clusterNodes[v.ID] = v.Addr
+		}
+		raftAddr, ok := clusterNodes[id]
+		if !ok {
+			nsNodeConf.Join = true
+		} else {
+			nsNodeConf.LocalRaftAddr = raftAddr
+		}
+		raftAddr = nsNodeConf.LocalRaftAddr
+		d, _ = json.MarshalIndent(&nsConf, "", " ")
+		fmt.Printf("namespace load config: %v \n", string(d))
+		fmt.Printf("local %v start with cluster: %v\n", raftAddr, clusterNodes)
+		app.InitKVNamespace(clusterID, id, raftAddr, clusterNodes, nsNodeConf.Join, &nsConf)
+
+		if ok {
+			var m node.MemberInfo
+			m.ID = uint64(id)
+			m.ClusterID = clusterID
+			m.DataDir = kvOpts.DataDir
+			m.RaftURLs = append(m.RaftURLs, raftAddr)
+			m.Broadcast = "127.0.0.1"
+			data, _ := json.Marshal(m)
+			go func() {
+				cc := raftpb.ConfChange{
+					Type:    raftpb.ConfChangeUpdateNode,
+					NodeID:  uint64(id),
+					Context: data,
+				}
+				time.Sleep(time.Second)
+				app.ProposeConfChange(nsConf.Name, cc)
+			}()
+		}
 	}
-	server.ServeAPI()
-	p.server = server
+	app.ServeAPI()
+	p.server = app
 	return nil
 }
 
