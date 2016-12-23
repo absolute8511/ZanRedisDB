@@ -23,6 +23,7 @@ var valueSize = flag.Int("vsize", 100, "kv value size")
 var tests = flag.String("t", "set,get,randget,del,lpush,lrange,lpop,hset,hget,hdel,zadd,zincr,zrange,zrevrange,zdel", "only run the comma separated list of tests")
 var primaryKeyCnt = flag.Int("pkn", 100, "primary key count for hash,list,set,zset")
 var namespace = flag.String("namespace", "default", "the prefix namespace")
+var table = flag.String("table", "test", "the table to write")
 var wg sync.WaitGroup
 
 var client *goredis.Client
@@ -30,7 +31,7 @@ var loop int = 0
 
 func waitBench(c *goredis.PoolConn, cmd string, args ...interface{}) error {
 	v := args[0]
-	prefix := *namespace + ":test:"
+	prefix := *namespace + ":" + *table + ":"
 	switch vt := v.(type) {
 	case string:
 		args[0] = prefix + vt
