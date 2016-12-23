@@ -92,7 +92,7 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
 func (self *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
-	go http.ListenAndServe("localhost:6666", nil)
+	go http.ListenAndServe("*:6666", nil)
 	srv := http.Server{
 		Addr:    ":" + strconv.Itoa(port),
 		Handler: self,
