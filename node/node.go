@@ -244,11 +244,16 @@ func (self *KVNode) handleProposeReq() {
 				}
 			}
 			d, _ := json.Marshal(reqList)
+			start := time.Now()
 			self.proposeC <- d
 			select {
 			case <-lastReq.doneC:
 			case <-self.stopChan:
 				return
+			}
+			cost := time.Since(start)
+			if len(reqList) >= 100 && cost >= time.Second || (cost >= time.Second*2) {
+				log.Printf("slow for batch: %v, %v", len(reqList), cost)
 			}
 			reqList = reqList[:0]
 			lastReq = nil
@@ -347,6 +352,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 		switch evnt.Type {
 		case raftpb.EntryNormal:
 			if evnt.Data != nil {
+				start := time.Now()
 				// try redis command
 				var reqList []*internalReq
 				parseErr := json.Unmarshal(evnt.Data, &reqList)
@@ -389,6 +395,11 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 						self.w.Trigger(req.ID, errUnknownData)
 					}
 				}
+				cost := time.Since(start)
+				if len(reqList) >= 100 && cost > time.Second || (cost > time.Second*2) {
+					log.Printf("slow for batch write db: %v, %v", len(reqList), cost)
+				}
+
 			}
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange
