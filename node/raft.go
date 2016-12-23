@@ -377,6 +377,11 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		defer rc.wg.Done()
 		rc.serveChannels()
 	}()
+	rc.wg.Add(1)
+	go func() {
+		defer rc.wg.Done()
+		rc.purgeFile()
+	}()
 }
 
 func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) {
@@ -700,4 +705,18 @@ func (rc *raftNode) ReportUnreachable(id uint64) { rc.node.ReportUnreachable(id)
 func (rc *raftNode) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
 	log.Printf("send to %v snapshot status: %v", id, status)
 	rc.node.ReportSnapshot(id, status)
+}
+
+func (rc *raftNode) purgeFile() {
+	var serrc, werrc <-chan error
+	serrc = fileutil.PurgeFile(rc.snapdir, "snap", 10, time.Minute*10, rc.stopc)
+	werrc = fileutil.PurgeFile(rc.waldir, "wal", 10, time.Minute*10, rc.stopc)
+	select {
+	case e := <-werrc:
+		log.Printf("failed to purge wal file %v", e)
+	case e := <-serrc:
+		log.Printf("failed to purge snap file %v", e)
+	case <-rc.stopc:
+		return
+	}
 }
