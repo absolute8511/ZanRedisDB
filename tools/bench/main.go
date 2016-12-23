@@ -20,7 +20,7 @@ var number = flag.Int("n", 1000, "request number")
 var clients = flag.Int("c", 50, "number of clients")
 var round = flag.Int("r", 1, "benchmark round number")
 var valueSize = flag.Int("vsize", 100, "kv value size")
-var tests = flag.String("t", "set,get,randget,del,lpush,lrange,lpop,hset,hget,hdel,zadd,zincr,zrange,zrevrange,zdel", "only run the comma separated list of tests")
+var tests = flag.String("t", "set,get,randget,del,lpush,lrange,lpop,hset,hget,hdel,zadd,zrange,zrevrange,zdel", "only run the comma separated list of tests")
 var primaryKeyCnt = flag.Int("pkn", 100, "primary key count for hash,list,set,zset")
 var namespace = flag.String("namespace", "default", "the prefix namespace")
 var table = flag.String("table", "test", "the table to write")
@@ -50,23 +50,23 @@ func waitBench(c *goredis.PoolConn, cmd string, args ...interface{}) error {
 	return nil
 }
 
-func bench(cmd string, f func(c *goredis.PoolConn) error) {
+func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) error) {
 	wg.Add(*clients)
 
 	t1 := time.Now()
 	for i := 0; i < *clients; i++ {
-		go func() {
+		go func(clientIndex int) {
 			var err error
 			c, _ := client.Get()
 			for j := 0; j < loop; j++ {
-				err = f(c)
+				err = f(c, clientIndex, j)
 				if err != nil {
 					break
 				}
 			}
 			c.Close()
 			wg.Done()
-		}()
+		}(i)
 	}
 
 	wg.Wait()
@@ -88,9 +88,10 @@ var kvIncrBase int64 = 0
 var kvDelBase int64 = 0
 
 func benchSet() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		value := make([]byte, *valueSize)
 		n := atomic.AddInt64(&kvSetBase, 1)
+		copy(value[0:], strconv.Itoa(int(n)))
 		return waitBench(c, "SET", n, value)
 	}
 
@@ -98,7 +99,7 @@ func benchSet() {
 }
 
 func benchGet() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&kvGetBase, 1)
 		return waitBench(c, "GET", n)
 	}
@@ -107,7 +108,7 @@ func benchGet() {
 }
 
 func benchRandGet() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := rand.Int() % *number
 		return waitBench(c, "GET", n)
 	}
@@ -116,7 +117,7 @@ func benchRandGet() {
 }
 
 func benchDel() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&kvDelBase, 1)
 		return waitBench(c, "DEL", n)
 	}
@@ -131,9 +132,10 @@ var listRange100Base int64 = 0
 var listPopBase int64 = 0
 
 func benchPushList() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		value := make([]byte, 100)
 		n := atomic.AddInt64(&listPushBase, 1) % int64(*primaryKeyCnt)
+		copy(value[0:], strconv.Itoa(int(n)))
 		return waitBench(c, "RPUSH", "mytestlist"+strconv.Itoa(int(n)), value)
 	}
 
@@ -141,7 +143,7 @@ func benchPushList() {
 }
 
 func benchRangeList10() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&listRange10Base, 1) % int64(*primaryKeyCnt)
 		return waitBench(c, "LRANGE", "mytestlist"+strconv.Itoa(int(n)), 0, 10)
 	}
@@ -150,7 +152,7 @@ func benchRangeList10() {
 }
 
 func benchRangeList50() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&listRange50Base, 1) % int64(*primaryKeyCnt)
 		return waitBench(c, "LRANGE", "mytestlist"+strconv.Itoa(int(n)), 0, 50)
 	}
@@ -159,7 +161,7 @@ func benchRangeList50() {
 }
 
 func benchRangeList100() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&listRange100Base, 1) % int64(*primaryKeyCnt)
 		return waitBench(c, "LRANGE", "mytestlist"+strconv.Itoa(int(n)), 0, 100)
 	}
@@ -168,7 +170,7 @@ func benchRangeList100() {
 }
 
 func benchPopList() {
-	f := func(c *goredis.PoolConn) error {
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&listPopBase, 1) % int64(*primaryKeyCnt)
 		return waitBench(c, "LPOP", "mytestlist"+strconv.Itoa(int(n)))
 	}
@@ -184,12 +186,15 @@ var hashDelBase int64 = 0
 
 func benchHset() {
 	atomic.StoreInt64(&hashPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		value := make([]byte, 100)
 
 		n := atomic.AddInt64(&hashSetBase, 1)
-		pk := atomic.AddInt64(&hashPKBase, 1) % int64(*primaryKeyCnt)
-		return waitBench(c, "HSET", "myhashkey"+strconv.Itoa(int(pk)), n, value)
+		pk := n / subKeyCnt
+		subkey := n - pk*subKeyCnt
+		copy(value[0:], strconv.Itoa(int(n)))
+		return waitBench(c, "HSET", "myhashkey"+strconv.Itoa(int(pk)), subkey, value)
 	}
 
 	bench("hset", f)
@@ -197,10 +202,12 @@ func benchHset() {
 
 func benchHGet() {
 	atomic.StoreInt64(&hashPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&hashGetBase, 1)
-		pk := atomic.AddInt64(&hashPKBase, 1) % int64(*primaryKeyCnt)
-		return waitBench(c, "HGET", "myhashkey"+strconv.Itoa(int(pk)), n)
+		pk := n / subKeyCnt
+		subkey := n - pk*subKeyCnt
+		return waitBench(c, "HGET", "myhashkey"+strconv.Itoa(int(pk)), subkey)
 	}
 
 	bench("hget", f)
@@ -208,10 +215,12 @@ func benchHGet() {
 
 func benchHRandGet() {
 	atomic.StoreInt64(&hashPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
-		n := rand.Int() % *number
-		pk := atomic.AddInt64(&hashPKBase, 1) % int64(*primaryKeyCnt)
-		return waitBench(c, "HGET", "myhashkey"+strconv.Itoa(int(pk)), n)
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
+		n := int64(rand.Int() % *number)
+		pk := n / subKeyCnt
+		subkey := n - pk*subKeyCnt
+		return waitBench(c, "HGET", "myhashkey"+strconv.Itoa(int(pk)), subkey)
 	}
 
 	bench("hrandget", f)
@@ -219,10 +228,12 @@ func benchHRandGet() {
 
 func benchHDel() {
 	atomic.StoreInt64(&hashPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&hashDelBase, 1)
-		pk := atomic.AddInt64(&hashPKBase, 1) % int64(*primaryKeyCnt)
-		return waitBench(c, "HDEL", "myhashkey"+strconv.Itoa(int(pk)), n)
+		pk := n / subKeyCnt
+		subkey := n - pk*subKeyCnt
+		return waitBench(c, "HDEL", "myhashkey"+strconv.Itoa(int(pk)), subkey)
 	}
 
 	bench("hdel", f)
@@ -231,15 +242,16 @@ func benchHDel() {
 var zsetPKBase int64 = 0
 var zsetAddBase int64 = 0
 var zsetDelBase int64 = 0
-var zsetIncrBase int64 = 0
 
 func benchZAdd() {
 	atomic.StoreInt64(&zsetPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
-		member := make([]byte, 16)
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&zsetAddBase, 1)
-		pk := atomic.AddInt64(&zsetPKBase, 1) % int64(*primaryKeyCnt)
-		return waitBench(c, "ZADD", "myzsetkey"+strconv.Itoa(int(pk)), n, member)
+		pk := n / subKeyCnt
+		subkey := n - pk*subKeyCnt
+		member := strconv.Itoa(int(subkey))
+		return waitBench(c, "ZADD", "myzsetkey"+strconv.Itoa(int(pk)), subkey, member)
 	}
 
 	bench("zadd", f)
@@ -247,30 +259,23 @@ func benchZAdd() {
 
 func benchZDel() {
 	atomic.StoreInt64(&zsetPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&zsetDelBase, 1)
-		pk := atomic.AddInt64(&zsetPKBase, 1) % int64(*primaryKeyCnt)
-		return waitBench(c, "ZREM", "myzsetkey"+strconv.Itoa(int(pk)), n)
+		pk := n / subKeyCnt
+		subkey := n - pk*subKeyCnt
+		return waitBench(c, "ZREM", "myzsetkey"+strconv.Itoa(int(pk)), subkey)
 	}
 
 	bench("zrem", f)
 }
 
-func benchZIncr() {
-	atomic.StoreInt64(&zsetPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
-		n := atomic.AddInt64(&zsetIncrBase, 1)
-		pk := atomic.AddInt64(&zsetPKBase, 1) % int64(*primaryKeyCnt)
-		return waitBench(c, "ZINCRBY", "myzsetkey"+strconv.Itoa(int(pk)), 1, n)
-	}
-
-	bench("zincrby", f)
-}
-
 func benchZRangeByScore() {
 	atomic.StoreInt64(&zsetPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
-		pk := atomic.AddInt64(&zsetPKBase, 1) % int64(*primaryKeyCnt)
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
+		n := atomic.AddInt64(&zsetPKBase, 1)
+		pk := n / subKeyCnt
 		return waitBench(c, "ZRANGEBYSCORE", "myzsetkey"+strconv.Itoa(int(pk)), 0, rand.Int(), "limit", rand.Int()%100, 100)
 	}
 
@@ -279,8 +284,10 @@ func benchZRangeByScore() {
 
 func benchZRangeByRank() {
 	atomic.StoreInt64(&zsetPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
-		pk := atomic.AddInt64(&zsetPKBase, 1) % int64(*primaryKeyCnt)
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
+		n := atomic.AddInt64(&zsetPKBase, 1)
+		pk := n / subKeyCnt
 		return waitBench(c, "ZRANGE", "myzsetkey"+strconv.Itoa(int(pk)), 0, rand.Int()%100)
 	}
 
@@ -289,8 +296,10 @@ func benchZRangeByRank() {
 
 func benchZRevRangeByScore() {
 	atomic.StoreInt64(&zsetPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
-		pk := atomic.AddInt64(&zsetPKBase, 1) % int64(*primaryKeyCnt)
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
+		n := atomic.AddInt64(&zsetPKBase, 1)
+		pk := n / subKeyCnt
 		return waitBench(c, "ZREVRANGEBYSCORE", "myzsetkey"+strconv.Itoa(int(pk)), 0, rand.Int(), "limit", rand.Int()%100, 100)
 	}
 
@@ -299,8 +308,10 @@ func benchZRevRangeByScore() {
 
 func benchZRevRangeByRank() {
 	atomic.StoreInt64(&zsetPKBase, 0)
-	f := func(c *goredis.PoolConn) error {
-		pk := atomic.AddInt64(&zsetPKBase, 1) % int64(*primaryKeyCnt)
+	subKeyCnt := int64(*number / (*primaryKeyCnt))
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
+		n := atomic.AddInt64(&zsetPKBase, 1)
+		pk := n / subKeyCnt
 		return waitBench(c, "ZREVRANGE", "myzsetkey"+strconv.Itoa(int(pk)), 0, rand.Int()%100)
 	}
 
@@ -370,8 +381,6 @@ func main() {
 				benchHDel()
 			case "zadd":
 				benchZAdd()
-			case "zincr":
-				benchZIncr()
 			case "zrange":
 				benchZRangeByRank()
 				benchZRangeByScore()
