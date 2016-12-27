@@ -88,8 +88,13 @@ var kvIncrBase int64 = 0
 var kvDelBase int64 = 0
 
 func benchSet() {
+	valueSample := make([]byte, *valueSize)
+	for i := 0; i < len(valueSample); i++ {
+		valueSample[i] = byte(i % 255)
+	}
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		value := make([]byte, *valueSize)
+		copy(value, valueSample)
 		n := atomic.AddInt64(&kvSetBase, 1)
 		copy(value[0:], strconv.Itoa(int(n)))
 		return waitBench(c, "SET", n, value)
@@ -132,8 +137,14 @@ var listRange100Base int64 = 0
 var listPopBase int64 = 0
 
 func benchPushList() {
+	valueSample := make([]byte, *valueSize)
+	for i := 0; i < len(valueSample); i++ {
+		valueSample[i] = byte(i % 255)
+	}
+
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
-		value := make([]byte, 100)
+		value := make([]byte, *valueSize)
+		copy(value, valueSample)
 		n := atomic.AddInt64(&listPushBase, 1) % int64(*primaryKeyCnt)
 		copy(value[0:], strconv.Itoa(int(n)))
 		return waitBench(c, "RPUSH", "mytestlist"+strconv.Itoa(int(n)), value)
@@ -185,10 +196,16 @@ var hashGetBase int64 = 0
 var hashDelBase int64 = 0
 
 func benchHset() {
+	valueSample := make([]byte, *valueSize)
+	for i := 0; i < len(valueSample); i++ {
+		valueSample[i] = byte(i % 255)
+	}
+
 	atomic.StoreInt64(&hashPKBase, 0)
 	subKeyCnt := int64(*number / (*primaryKeyCnt))
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
-		value := make([]byte, 100)
+		value := make([]byte, *valueSize)
+		copy(value, valueSample)
 
 		n := atomic.AddInt64(&hashSetBase, 1)
 		pk := n / subKeyCnt
