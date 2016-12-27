@@ -137,17 +137,19 @@ func (r *RockDB) Backup(backupDir string) ([]byte, error) {
 		log.Printf("backup failed: %v", err)
 		return nil, err
 	}
-	beInfo := be.GetInfo()
 	cost := time.Now().Sub(start)
+	beInfo := be.GetInfo()
+
 	log.Printf("backup done (cost %v), total backup : %v\n", cost.String(), beInfo.GetCount())
+
 	lastID := beInfo.GetBackupId(beInfo.GetCount() - 1)
 	for i := 0; i < beInfo.GetCount(); i++ {
 		id := beInfo.GetBackupId(i)
 		log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
 			beInfo.GetSize(i))
 	}
-	be.PurgeOldBackups(r.eng, 3)
 	beInfo.Destroy()
+	be.PurgeOldBackups(r.eng, 3)
 	be.Close()
 	d, _ := json.Marshal(lastID)
 	return d, nil

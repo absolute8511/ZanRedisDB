@@ -46,7 +46,7 @@ import (
 )
 
 const (
-	DefaultSnapCount = 100000
+	DefaultSnapCount = 500000
 
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
@@ -57,7 +57,7 @@ const (
 	releaseDelayAfterSnapshot = 30 * time.Second
 )
 
-var snapshotCatchUpEntriesN uint64 = 100000
+var snapshotCatchUpEntriesN uint64 = 500000
 
 type DataStorage interface {
 	Clear() error
@@ -129,7 +129,7 @@ func newRaftNode(clusterID uint64, id int, localRaftAddr string, raftDataDir str
 	peers map[int]string, join bool, ds DataStorage, proposeC <-chan []byte,
 	confChangeC <-chan raftpb.ConfChange) (<-chan applyInfo, <-chan error, *raftNode) {
 
-	commitC := make(chan applyInfo)
+	commitC := make(chan applyInfo, 1000)
 	errorC := make(chan error)
 
 	rc := &raftNode{
