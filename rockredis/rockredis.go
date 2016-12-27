@@ -58,9 +58,12 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetBlockBasedTableFactory(bbto)
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(100000)
-	opts.SetWriteBufferSize(1024 * 1024 * 16)
-	opts.SetMaxWriteBufferNumber(3)
+	// keep level0_file_num_compaction_trigger * write_buffer_size = max_bytes_for_level_base to minimize write amplification
+	opts.SetWriteBufferSize(1024 * 1024 * 64)
+	opts.SetMaxWriteBufferNumber(8)
+	opts.SetLevel0FileNumCompactionTrigger(4)
 	opts.SetMaxBytesForLevelBase(1024 * 1024 * 256)
+	opts.SetMinWriteBufferNumberToMerge(2)
 	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
 	opts.SetMaxBackgroundFlushes(4)
 	// we use table, so we use prefix seek feature
