@@ -69,6 +69,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	// we use table, so we use prefix seek feature
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
 	//opts.SetMemtablePrefixBloomSizeRatio(0.1)
+	opts.EnableStatistics()
 
 	eng, err := gorocksdb.OpenDb(opts, cfg.DataDir)
 	if err != nil {
@@ -106,6 +107,10 @@ func (r *RockDB) Close() {
 	if r.eng != nil {
 		r.eng.Close()
 	}
+}
+
+func (r *RockDB) GetStatistics() string {
+	return r.dbOpts.GetStatistics()
 }
 
 func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {

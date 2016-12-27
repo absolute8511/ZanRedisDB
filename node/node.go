@@ -118,6 +118,7 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 		ts.KeyNum = cnt
 		ns.TStats = append(ns.TStats, ts)
 	}
+	log.Println(self.store.GetStatistics())
 	return ns
 }
 
