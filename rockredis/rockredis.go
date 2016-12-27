@@ -46,7 +46,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	// use large block to reduce index block size for hdd
 	// if using ssd, should use the default value
-	bbto.SetBlockSize(1024 * 64)
+	bbto.SetBlockSize(1024 * 16)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 1024))
@@ -57,19 +57,22 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)
 	opts.SetCreateIfMissing(true)
-	opts.SetMaxOpenFiles(100000)
+	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size = max_bytes_for_level_base to minimize write amplification
-	opts.SetWriteBufferSize(1024 * 1024 * 64)
+	opts.SetWriteBufferSize(1024 * 1024 * 128)
 	opts.SetMaxWriteBufferNumber(8)
 	opts.SetLevel0FileNumCompactionTrigger(4)
-	opts.SetMaxBytesForLevelBase(1024 * 1024 * 256)
+	opts.SetMaxBytesForLevelBase(1024 * 1024 * 1024)
 	opts.SetMinWriteBufferNumberToMerge(2)
 	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
-	opts.SetMaxBackgroundFlushes(4)
+	opts.SetMaxBackgroundFlushes(2)
+	opts.SetMaxBackgroundCompactions(4)
 	// we use table, so we use prefix seek feature
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
 	//opts.SetMemtablePrefixBloomSizeRatio(0.1)
 	opts.EnableStatistics()
+	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
+	// rate limiter need to reduce the compaction io
 
 	eng, err := gorocksdb.OpenDb(opts, cfg.DataDir)
 	if err != nil {
