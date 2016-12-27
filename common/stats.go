@@ -26,11 +26,11 @@ func (self *WriteStats) UpdateSizeStats(vSize int64) {
 	atomic.AddInt64(&self.ValueSizeStats[bucket], 1)
 }
 
-func (self *WriteStats) UpdateLatencyStats(latency int64) {
+func (self *WriteStats) UpdateLatencyStats(latencyUs int64) {
 	bucket := 0
-	if latency < 1024 {
+	if latencyUs < 1024 {
 	} else {
-		bucket = int(math.Log2(float64(latency/1024))) + 1
+		bucket = int(math.Log2(float64(latencyUs/1000))) + 1
 	}
 	if bucket >= len(self.WriteLatencyStats) {
 		bucket = len(self.WriteLatencyStats) - 1
@@ -38,9 +38,9 @@ func (self *WriteStats) UpdateLatencyStats(latency int64) {
 	atomic.AddInt64(&self.WriteLatencyStats[bucket], 1)
 }
 
-func (self *WriteStats) UpdateWriteStats(vSize int64, latency int64) {
+func (self *WriteStats) UpdateWriteStats(vSize int64, latencyUs int64) {
 	self.UpdateSizeStats(vSize)
-	self.UpdateLatencyStats(latency)
+	self.UpdateLatencyStats(latencyUs)
 }
 
 func (self *WriteStats) Copy() *WriteStats {

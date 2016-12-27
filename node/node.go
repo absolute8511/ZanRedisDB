@@ -294,7 +294,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		rsp = nil
 		err = common.ErrStopped
 	}
-	self.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), time.Since(start).Nanoseconds())
+	self.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), time.Since(start).Nanoseconds()/1000)
 	return rsp, err
 }
 
@@ -389,7 +389,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 								if cmdCost >= time.Millisecond*500 {
 									log.Printf("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 								}
-								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds())
+								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 								// write the future response or error
 								if err != nil {
 									self.w.Trigger(req.ID, err)
