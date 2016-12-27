@@ -48,15 +48,17 @@ type internalReq struct {
 
 // a key-value node backed by raft
 type KVNode struct {
-	reqProposeC chan *internalReq
-	proposeC    chan<- []byte // channel for proposing updates
-	raftNode    *raftNode
-	store       *store.KVStore
-	stopping    int32
-	stopChan    chan struct{}
-	w           wait.Wait
-	router      *common.CmdRouter
-	deleteCb    func()
+	reqProposeC       chan *internalReq
+	proposeC          chan<- []byte // channel for proposing updates
+	raftNode          *raftNode
+	store             *store.KVStore
+	stopping          int32
+	stopChan          chan struct{}
+	w                 wait.Wait
+	router            *common.CmdRouter
+	deleteCb          func()
+	dbWriteStats      common.WriteStats
+	clusterWriteStats common.WriteStats
 }
 
 type KVSnapInfo struct {
@@ -103,6 +105,8 @@ func (self *KVNode) Stop() {
 func (self *KVNode) GetStats() common.NamespaceStats {
 	tbs := self.store.GetTables()
 	var ns common.NamespaceStats
+	ns.DBWriteStats = self.dbWriteStats.Copy()
+	ns.ClusterWriteStats = self.clusterWriteStats.Copy()
 
 	for t := range tbs {
 		cnt, err := self.store.GetTableKeyCount(t)
@@ -262,6 +266,7 @@ func (self *KVNode) handleProposeReq() {
 }
 
 func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
+	start := time.Now()
 	ch := self.w.Register(req.ID)
 	select {
 	case self.reqProposeC <- req:
@@ -274,16 +279,23 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 			self.w.Trigger(req.ID, common.ErrTimeout)
 		}
 	}
+	var err error
+	var rsp interface{}
+	var ok bool
 	select {
-	case rsp := <-ch:
+	case rsp = <-ch:
 		close(req.doneC)
-		if err, ok := rsp.(error); ok {
-			return nil, err
+		if err, ok = rsp.(error); ok {
+			rsp = nil
+		} else {
+			err = nil
 		}
-		return rsp, nil
 	case <-self.stopChan:
-		return nil, common.ErrStopped
+		rsp = nil
+		err = common.ErrStopped
 	}
+	self.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), time.Since(start).Nanoseconds())
+	return rsp, err
 }
 
 func (self *KVNode) Propose(buf []byte) (interface{}, error) {
@@ -371,7 +383,13 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 								log.Printf("unsupported redis command: %v", cmd)
 								self.w.Trigger(req.ID, common.ErrInvalidCommand)
 							} else {
+								cmdStart := time.Now()
 								v, err := h(cmd)
+								cmdCost := time.Since(cmdStart)
+								if cmdCost >= time.Millisecond*500 {
+									log.Printf("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
+								}
+								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds())
 								// write the future response or error
 								if err != nil {
 									self.w.Trigger(req.ID, err)
