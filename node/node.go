@@ -102,6 +102,10 @@ func (self *KVNode) Stop() {
 	go self.deleteCb()
 }
 
+func (self *KVNode) OptimizeDB() {
+	self.store.CompactRange()
+}
+
 func (self *KVNode) GetStats() common.NamespaceStats {
 	tbs := self.store.GetTables()
 	var ns common.NamespaceStats

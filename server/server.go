@@ -63,6 +63,18 @@ func (self *Server) GetStats() common.ServerStats {
 	return ss
 }
 
+func (self *Server) OptimizeDB() {
+	self.mutex.Lock()
+	nodeList := make([]*NamespaceNode, 0, len(self.kvNodes))
+	for _, n := range self.kvNodes {
+		nodeList = append(nodeList, n)
+	}
+	self.mutex.Unlock()
+	for _, n := range nodeList {
+		n.node.OptimizeDB()
+	}
+}
+
 func (self *Server) onNamespaceDeleted(ns string) func() {
 	return func() {
 		self.mutex.Lock()

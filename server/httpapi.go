@@ -33,6 +33,11 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to GET", http.StatusNotFound)
 		}
 	case r.Method == "POST":
+		if r.URL.Path == "/optimize" || r.URL.Path == "optimize" {
+			self.OptimizeDB()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		data, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			log.Printf("Failed to read on POST (%v)\n", err)

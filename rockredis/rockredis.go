@@ -98,6 +98,11 @@ func (r *RockDB) reOpen() error {
 	return err
 }
 
+func (r *RockDB) CompactRange() {
+	var rg gorocksdb.Range
+	r.eng.CompactRange(rg)
+}
+
 func (r *RockDB) Close() {
 	close(r.quit)
 	r.wg.Wait()
