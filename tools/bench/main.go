@@ -96,7 +96,9 @@ func benchSet() {
 		value := make([]byte, *valueSize)
 		copy(value, valueSample)
 		n := atomic.AddInt64(&kvSetBase, 1)
-		copy(value[0:], strconv.Itoa(int(n)))
+		ts := time.Now().String()
+		copy(value[0:], ts)
+		copy(value[len(ts):], strconv.Itoa(int(n)))
 		return waitBench(c, "SET", n, value)
 	}
 
@@ -146,7 +148,9 @@ func benchPushList() {
 		value := make([]byte, *valueSize)
 		copy(value, valueSample)
 		n := atomic.AddInt64(&listPushBase, 1) % int64(*primaryKeyCnt)
-		copy(value[0:], strconv.Itoa(int(n)))
+		ts := time.Now().String()
+		copy(value[0:], ts)
+		copy(value[len(ts):], strconv.Itoa(int(n)))
 		return waitBench(c, "RPUSH", "mytestlist"+strconv.Itoa(int(n)), value)
 	}
 
@@ -210,7 +214,9 @@ func benchHset() {
 		n := atomic.AddInt64(&hashSetBase, 1)
 		pk := n / subKeyCnt
 		subkey := n - pk*subKeyCnt
-		copy(value[0:], strconv.Itoa(int(n)))
+		ts := time.Now().String()
+		copy(value[0:], ts)
+		copy(value[len(ts):], strconv.Itoa(int(n)))
 		return waitBench(c, "HSET", "myhashkey"+strconv.Itoa(int(pk)), subkey, value)
 	}
 
@@ -268,6 +274,8 @@ func benchZAdd() {
 		pk := n / subKeyCnt
 		subkey := n - pk*subKeyCnt
 		member := strconv.Itoa(int(subkey))
+		ts := time.Now().String()
+		member = member + ts
 		return waitBench(c, "ZADD", "myzsetkey"+strconv.Itoa(int(pk)), subkey, member)
 	}
 
