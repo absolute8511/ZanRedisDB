@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"path"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
@@ -36,10 +35,8 @@ func NewKVStore(kvopts *KVOptions) *KVStore {
 func (s *KVStore) openDB() error {
 	var err error
 	if s.opts.EngType == "rocksdb" {
-		dir := path.Join(s.opts.DataDir, "rocksdb")
-		os.MkdirAll(dir, common.DIR_PERM)
 		cfg := rockredis.NewRockConfig()
-		cfg.DataDir = dir
+		cfg.DataDir = s.opts.DataDir
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
 	} else {
 		return errors.New("Not recognized engine type:" + s.opts.EngType)
@@ -49,7 +46,7 @@ func (s *KVStore) openDB() error {
 
 func (s *KVStore) Clear() error {
 	s.Close()
-	os.RemoveAll(path.Join(s.opts.DataDir, "rocksdb"))
+	os.RemoveAll(s.GetDataDir())
 	return s.openDB()
 }
 

@@ -42,7 +42,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, errors.New("config error")
 	}
 
-	os.MkdirAll(cfg.DataDir, 0755)
+	os.MkdirAll(cfg.DataDir, common.DIR_PERM)
 	// options need be adjust due to using hdd or sdd, please reference
 	// https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
@@ -76,21 +76,20 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
 
-	eng, err := gorocksdb.OpenDb(opts, cfg.DataDir)
-	if err != nil {
-		return nil, err
-	}
-
 	db := &RockDB{
 		cfg:              cfg,
 		dbOpts:           opts,
-		eng:              eng,
 		defaultReadOpts:  cfg.DefaultReadOpts,
 		defaultWriteOpts: cfg.DefaultWriteOpts,
 		wb:               gorocksdb.NewWriteBatch(),
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
 	}
+	eng, err := gorocksdb.OpenDb(opts, db.GetDataDir())
+	if err != nil {
+		return nil, err
+	}
+	db.eng = eng
 
 	db.wg.Add(1)
 	go func() {
@@ -112,9 +111,13 @@ func (r *RockDB) GetBackupDir() string {
 	return GetBackupDir(r.cfg.DataDir)
 }
 
+func (r *RockDB) GetDataDir() string {
+	return path.Join(r.cfg.DataDir, "rocksdb")
+}
+
 func (r *RockDB) reOpen() error {
 	var err error
-	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.cfg.DataDir)
+	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	return err
 }
 
@@ -345,7 +348,7 @@ func (r *RockDB) Restore(metaData []byte) error {
 	log.Printf("begin restore\n")
 	r.eng.Close()
 	restoreOpts := gorocksdb.NewRestoreOptions()
-	err = be.RestoreDBFromLatestBackup(r.cfg.DataDir, r.cfg.DataDir, restoreOpts)
+	err = be.RestoreDBFromLatestBackup(r.GetDataDir(), r.GetDataDir(), restoreOpts)
 	if err != nil {
 		log.Printf("restore failed: %v\n", err)
 		return err
