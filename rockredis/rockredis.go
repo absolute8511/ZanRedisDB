@@ -19,10 +19,12 @@ type RockConfig struct {
 }
 
 func NewRockConfig() *RockConfig {
-	return &RockConfig{
+	c := &RockConfig{
 		DefaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
 		DefaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
 	}
+	c.DefaultReadOpts.SetVerifyChecksums(false)
+	return c
 }
 
 type RockDB struct {
@@ -69,6 +71,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
 	opts.SetMaxBackgroundFlushes(2)
 	opts.SetMaxBackgroundCompactions(4)
+	opts.SetMinLevelToCompress(2)
 	// we use table, so we use prefix seek feature
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
 	//opts.SetMemtablePrefixBloomSizeRatio(0.1)
