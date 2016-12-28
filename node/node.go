@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -40,10 +41,8 @@ type nodeProgress struct {
 }
 
 type internalReq struct {
-	ID       uint64
-	DataType int8
-	Data     []byte
-	doneC    chan struct{}
+	reqData InternalRaftRequest
+	done    chan struct{}
 }
 
 // a key-value node backed by raft
@@ -234,16 +233,25 @@ func (self *KVNode) registerHandler() {
 }
 
 func (self *KVNode) handleProposeReq() {
-	reqList := make([]*internalReq, 0, 100)
+	var reqList BatchInternalRaftRequest
+	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
+	buffer := make([]byte, 1024*1024)
 	var lastReq *internalReq
 	defer func() {
-		for _, r := range reqList {
-			self.w.Trigger(r.ID, common.ErrStopped)
+		if e := recover(); e != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			log.Printf("handle propose loop panic: %s:%v", buf, e)
+		}
+		log.Printf("handle propose loop exit")
+		for _, r := range reqList.Reqs {
+			self.w.Trigger(r.Header.ID, common.ErrStopped)
 		}
 		for {
 			select {
 			case r := <-self.reqProposeC:
-				self.w.Trigger(r.ID, common.ErrStopped)
+				self.w.Trigger(r.reqData.Header.ID, common.ErrStopped)
 			default:
 				break
 			}
@@ -252,31 +260,46 @@ func (self *KVNode) handleProposeReq() {
 	for {
 		select {
 		case r := <-self.reqProposeC:
-			reqList = append(reqList, r)
+			reqList.Reqs = append(reqList.Reqs, &r.reqData)
 			lastReq = r
 		default:
-			if len(reqList) == 0 {
+			if len(reqList.Reqs) == 0 {
 				select {
 				case r := <-self.reqProposeC:
-					reqList = append(reqList, r)
+					reqList.Reqs = append(reqList.Reqs, &r.reqData)
 					lastReq = r
 				case <-self.stopChan:
 					return
 				}
 			}
-			d, _ := json.Marshal(reqList)
+			n := reqList.Size()
+			if n > len(buffer) {
+				buffer = make([]byte, n)
+			}
+			realN, err := reqList.MarshalTo(buffer)
+			//log.Printf("handle req %v, marshal buffer: %v", len(reqList.Reqs), realN)
+			if err != nil {
+				log.Printf("failed to marshal request: %v", err)
+				for _, r := range reqList.Reqs {
+					self.w.Trigger(r.Header.ID, err)
+				}
+				reqList.Reqs = reqList.Reqs[:0]
+				continue
+			}
+			lastReq.done = make(chan struct{})
+			buffer = buffer[:realN]
 			start := time.Now()
-			self.proposeC <- d
+			self.proposeC <- buffer
 			select {
-			case <-lastReq.doneC:
+			case <-lastReq.done:
 			case <-self.stopChan:
 				return
 			}
 			cost := time.Since(start)
-			if len(reqList) >= 100 && cost >= time.Second || (cost >= time.Second*2) {
-				log.Printf("slow for batch: %v, %v", len(reqList), cost)
+			if len(reqList.Reqs) >= 100 && cost >= time.Second || (cost >= time.Second*2) {
+				log.Printf("slow for batch: %v, %v", len(reqList.Reqs), cost)
 			}
-			reqList = reqList[:0]
+			reqList.Reqs = reqList.Reqs[:0]
 			lastReq = nil
 		}
 	}
@@ -284,24 +307,27 @@ func (self *KVNode) handleProposeReq() {
 
 func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	start := time.Now()
-	ch := self.w.Register(req.ID)
+	ch := self.w.Register(req.reqData.Header.ID)
 	select {
 	case self.reqProposeC <- req:
 	default:
 		select {
 		case self.reqProposeC <- req:
 		case <-self.stopChan:
-			self.w.Trigger(req.ID, common.ErrStopped)
+			self.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
 		case <-time.After(time.Second * 3):
-			self.w.Trigger(req.ID, common.ErrTimeout)
+			self.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
 		}
 	}
+	//log.Printf("queue request: %v", req.reqData.String())
 	var err error
 	var rsp interface{}
 	var ok bool
 	select {
 	case rsp = <-ch:
-		close(req.doneC)
+		if req.done != nil {
+			close(req.done)
+		}
 		if err, ok = rsp.(error); ok {
 			rsp = nil
 		} else {
@@ -311,26 +337,36 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		rsp = nil
 		err = common.ErrStopped
 	}
-	self.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), time.Since(start).Nanoseconds()/1000)
+	self.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), time.Since(start).Nanoseconds()/1000)
 	return rsp, err
 }
 
 func (self *KVNode) Propose(buf []byte) (interface{}, error) {
-	req := &internalReq{
+	h := &RequestHeader{
 		ID:       self.raftNode.reqIDGen.Next(),
 		DataType: 0,
-		Data:     buf,
-		doneC:    make(chan struct{}),
+	}
+	raftReq := InternalRaftRequest{
+		Header: h,
+		Data:   buf,
+	}
+	req := &internalReq{
+		reqData: raftReq,
 	}
 	return self.queueRequest(req)
 }
 
 func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
-	req := &internalReq{
+	h := &RequestHeader{
 		ID:       self.raftNode.reqIDGen.Next(),
-		DataType: HTTPReq,
-		Data:     buf,
-		doneC:    make(chan struct{}),
+		DataType: int32(HTTPReq),
+	}
+	raftReq := InternalRaftRequest{
+		Header: h,
+		Data:   buf,
+	}
+	req := &internalReq{
+		reqData: raftReq,
 	}
 	return self.queueRequest(req)
 }
@@ -376,6 +412,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 		return
 	}
 	var shouldStop bool
+	var reqList BatchInternalRaftRequest
 	for i := range ents {
 		evnt := ents[i]
 		switch evnt.Type {
@@ -383,22 +420,23 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 			if evnt.Data != nil {
 				start := time.Now()
 				// try redis command
-				var reqList []*internalReq
-				parseErr := json.Unmarshal(evnt.Data, &reqList)
+				reqList.Reset()
+				parseErr := reqList.Unmarshal(evnt.Data)
 				if parseErr != nil {
 					log.Printf("parse request failed: %v", parseErr)
 				}
-				for _, req := range reqList {
-					if req.DataType == 0 {
+				for _, req := range reqList.Reqs {
+					reqID := req.Header.ID
+					if req.Header.DataType == 0 {
 						cmd, err := redcon.Parse(req.Data)
 						if err != nil {
-							self.w.Trigger(req.ID, err)
+							self.w.Trigger(reqID, err)
 						} else {
 							cmdName := strings.ToLower(string(cmd.Args[0]))
 							h, ok := self.router.GetInternalCmdHandler(cmdName)
 							if !ok {
 								log.Printf("unsupported redis command: %v", cmd)
-								self.w.Trigger(req.ID, common.ErrInvalidCommand)
+								self.w.Trigger(reqID, common.ErrInvalidCommand)
 							} else {
 								cmdStart := time.Now()
 								v, err := h(cmd)
@@ -409,13 +447,13 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 								// write the future response or error
 								if err != nil {
-									self.w.Trigger(req.ID, err)
+									self.w.Trigger(reqID, err)
 								} else {
-									self.w.Trigger(req.ID, v)
+									self.w.Trigger(reqID, v)
 								}
 							}
 						}
-					} else if req.DataType == HTTPReq {
+					} else if req.Header.DataType == int32(HTTPReq) {
 						// try other protocol command
 						var dataKv kv
 						dec := gob.NewDecoder(bytes.NewBuffer(req.Data))
@@ -425,14 +463,14 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 						} else {
 							err = self.store.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
 						}
-						self.w.Trigger(req.ID, err)
+						self.w.Trigger(reqID, err)
 					} else {
-						self.w.Trigger(req.ID, errUnknownData)
+						self.w.Trigger(reqID, errUnknownData)
 					}
 				}
 				cost := time.Since(start)
-				if len(reqList) >= 100 && cost > time.Second || (cost > time.Second*2) {
-					log.Printf("slow for batch write db: %v, %v", len(reqList), cost)
+				if len(reqList.Reqs) >= 100 && cost > time.Second || (cost > time.Second*2) {
+					log.Printf("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
 				}
 
 			}
@@ -491,7 +529,7 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 }
 
 func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress) {
-	if np.appliedi-np.snapi <= self.raftNode.snapCount {
+	if np.appliedi-np.snapi <= DefaultSnapCount {
 		return
 	}
 	if np.appliedi <= self.raftNode.lastIndex {

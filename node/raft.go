@@ -46,7 +46,7 @@ import (
 )
 
 const (
-	DefaultSnapCount = 500000
+	DefaultSnapCount = 100000
 
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
@@ -57,7 +57,7 @@ const (
 	releaseDelayAfterSnapshot = 30 * time.Second
 )
 
-var snapshotCatchUpEntriesN uint64 = 500000
+var snapshotCatchUpEntriesN uint64 = 100000
 
 type Snapshot interface {
 	GetData() ([]byte, error)
@@ -112,7 +112,6 @@ type raftNode struct {
 
 	snapshotter *snap.Snapshotter
 
-	snapCount         uint64
 	transport         *rafthttp.Transport
 	stopc             chan struct{} // signals proposal channel closed
 	httpstopc         chan struct{} // signals http server to shutdown
@@ -148,7 +147,6 @@ func newRaftNode(clusterID uint64, id int, localRaftAddr string, raftDataDir str
 		members:       make(map[uint64]*MemberInfo),
 		join:          join,
 		raftStorage:   raft.NewMemoryStorage(),
-		snapCount:     DefaultSnapCount,
 		stopc:         make(chan struct{}),
 		httpstopc:     make(chan struct{}),
 		httpdonec:     make(chan struct{}),
@@ -459,7 +457,7 @@ func (rc *raftNode) handleSendSnapshot() {
 	select {
 	case m := <-rc.msgSnapC:
 		snapData, err := rc.snapshotter.Load()
-		if err != nil || (int64(m.Index)-int64(snapData.Metadata.Index) > int64(rc.snapCount)) {
+		if err != nil || (int64(m.Index)-int64(snapData.Metadata.Index) > int64(DefaultSnapCount)) {
 			// new snapshot needed
 			if err != nil {
 				log.Printf("load snapshot error, need new snapshot: %v", err)
