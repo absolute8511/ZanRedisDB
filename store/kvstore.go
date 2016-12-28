@@ -73,28 +73,3 @@ func (s *KVStore) LocalPut(key []byte, value []byte) error {
 func (s *KVStore) LocalWriteBatch(cmd ...common.WriteCmd) error {
 	return nil
 }
-
-func (s *KVStore) GetBackupBase() string {
-	return s.opts.DataDir
-}
-
-func (s *KVStore) GetBackupDir() string {
-	return path.Join(s.opts.DataDir, "rocksdb_backup")
-}
-
-func (s *KVStore) BackupStore() ([]byte, error) {
-	// use the rocksdb backup/checkpoint interface to backup data
-	return s.Backup(s.GetBackupDir())
-}
-
-func (s *KVStore) IsBackupOK(meta []byte) (bool, error) {
-	return s.IsLocalBackupOK(s.GetBackupDir(), meta)
-}
-
-func (s *KVStore) ClearStoreBackup(meta []byte) error {
-	return s.ClearBackup(s.GetBackupDir(), meta)
-}
-
-func (s *KVStore) RestoreStore(meta []byte) error {
-	return s.Restore(s.GetBackupDir(), meta)
-}

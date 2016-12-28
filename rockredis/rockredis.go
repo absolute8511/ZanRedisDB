@@ -7,6 +7,7 @@ import (
 	"github.com/absolute8511/gorocksdb"
 	"log"
 	"os"
+	"path"
 	"sync"
 	"time"
 )
@@ -33,6 +34,7 @@ type RockDB struct {
 	wb               *gorocksdb.WriteBatch
 	quit             chan struct{}
 	wg               sync.WaitGroup
+	backupC          chan *BackupInfo
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -86,10 +88,28 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		defaultReadOpts:  cfg.DefaultReadOpts,
 		defaultWriteOpts: cfg.DefaultWriteOpts,
 		wb:               gorocksdb.NewWriteBatch(),
+		backupC:          make(chan *BackupInfo),
+		quit:             make(chan struct{}),
 	}
 
-	db.quit = make(chan struct{})
+	db.wg.Add(1)
+	go func() {
+		defer db.wg.Done()
+		db.backupLoop()
+	}()
 	return db, nil
+}
+
+func GetBackupDir(base string) string {
+	return path.Join(base, "rocksdb_backup")
+}
+
+func (r *RockDB) GetBackupBase() string {
+	return r.cfg.DataDir
+}
+
+func (r *RockDB) GetBackupDir() string {
+	return GetBackupDir(r.cfg.DataDir)
 }
 
 func (r *RockDB) reOpen() error {
@@ -121,6 +141,30 @@ func (r *RockDB) GetStatistics() string {
 	return r.dbOpts.GetStatistics()
 }
 
+func (r *RockDB) GetInternalStatus() map[string]interface{} {
+	status := make(map[string]interface{})
+	bbt := r.dbOpts.GetBlockBasedTableFactory()
+	if bbt != nil {
+		bc := bbt.GetBlockCache()
+		if bc != nil {
+			status["block-cache-usage"] = bc.GetUsage()
+			status["block-cache-pinned-usage"] = bc.GetPinnedUsage()
+		}
+	}
+
+	memStr := r.eng.GetProperty("rocksdb.estimate-table-readers-mem")
+	status["estimate-table-readers-mem"] = memStr
+	memStr = r.eng.GetProperty("rocksdb.cur-size-all-mem-tables")
+	status["cur-size-all-mem-tables"] = memStr
+	memStr = r.eng.GetProperty("rocksdb.cur-size-active-mem-table")
+	status["cur-size-active-mem-tables"] = memStr
+	return status
+}
+
+func (r *RockDB) GetInternalPropertyStatus(p string) string {
+	return r.eng.GetProperty(p)
+}
+
 func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {
 	retChan := make(chan common.KVRecord, 32)
 	go func() {
@@ -136,39 +180,99 @@ func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {
 	return retChan
 }
 
-func (r *RockDB) Backup(backupDir string) ([]byte, error) {
-	opts := gorocksdb.NewDefaultOptions()
-	log.Printf("begin backup \n")
-	start := time.Now()
-	be, err := gorocksdb.OpenBackupEngine(opts, backupDir)
-	if err != nil {
-		log.Printf("backup engine failed: %v", err)
-		return nil, err
-	}
-	err = be.CreateNewBackup(r.eng)
-	if err != nil {
-		log.Printf("backup failed: %v", err)
-		return nil, err
-	}
-	cost := time.Now().Sub(start)
-	beInfo := be.GetInfo()
-
-	log.Printf("backup done (cost %v), total backup : %v\n", cost.String(), beInfo.GetCount())
-
-	lastID := beInfo.GetBackupId(beInfo.GetCount() - 1)
-	for i := 0; i < beInfo.GetCount(); i++ {
-		id := beInfo.GetBackupId(i)
-		log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
-			beInfo.GetSize(i))
-	}
-	beInfo.Destroy()
-	be.PurgeOldBackups(r.eng, 3)
-	be.Close()
-	d, _ := json.Marshal(lastID)
-	return d, nil
+type BackupInfo struct {
+	backupDir string
+	started   chan struct{}
+	done      chan struct{}
+	rsp       []byte
+	err       error
 }
 
-func (r *RockDB) IsLocalBackupOK(backupDir string, metaData []byte) (bool, error) {
+func newBackupInfo(dir string) *BackupInfo {
+	return &BackupInfo{
+		backupDir: dir,
+		started:   make(chan struct{}),
+		done:      make(chan struct{}),
+	}
+}
+
+func (self *BackupInfo) WaitReady() {
+	select {
+	case <-self.started:
+	case <-self.done:
+	}
+}
+
+func (self *BackupInfo) GetResult() ([]byte, error) {
+	select {
+	case <-self.done:
+	}
+	return self.rsp, self.err
+}
+
+func (r *RockDB) backupLoop() {
+	for {
+		select {
+		case rsp, ok := <-r.backupC:
+			if !ok {
+				return
+			}
+
+			func() {
+				defer close(rsp.done)
+				opts := gorocksdb.NewDefaultOptions()
+				log.Printf("begin backup \n")
+				start := time.Now()
+				be, err := gorocksdb.OpenBackupEngine(opts, rsp.backupDir)
+				if err != nil {
+					log.Printf("backup engine failed: %v", err)
+					rsp.err = err
+					return
+				}
+				time.AfterFunc(time.Second*2, func() {
+					close(rsp.started)
+				})
+				err = be.CreateNewBackup(r.eng)
+				if err != nil {
+					log.Printf("backup failed: %v", err)
+					rsp.err = err
+					return
+				}
+				cost := time.Now().Sub(start)
+				beInfo := be.GetInfo()
+
+				log.Printf("backup done (cost %v), total backup : %v\n", cost.String(), beInfo.GetCount())
+
+				lastID := beInfo.GetBackupId(beInfo.GetCount() - 1)
+				for i := 0; i < beInfo.GetCount(); i++ {
+					id := beInfo.GetBackupId(i)
+					log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
+						beInfo.GetSize(i))
+				}
+				beInfo.Destroy()
+				be.PurgeOldBackups(r.eng, 3)
+				be.Close()
+				d, _ := json.Marshal(lastID)
+				rsp.rsp = d
+			}()
+		case <-r.quit:
+			return
+		}
+	}
+}
+
+func (r *RockDB) Backup() *BackupInfo {
+	bi := newBackupInfo(r.GetBackupDir())
+	select {
+	case r.backupC <- bi:
+	default:
+		return nil
+	}
+	return bi
+}
+
+func (r *RockDB) IsLocalBackupOK(metaData []byte) (bool, error) {
+	backupDir := r.GetBackupDir()
 	var backupID int64
 	err := json.Unmarshal(metaData, &backupID)
 	if err != nil {
@@ -199,8 +303,9 @@ func (r *RockDB) IsLocalBackupOK(backupDir string, metaData []byte) (bool, error
 	return hasBackup, nil
 }
 
-func (r *RockDB) Restore(backupDir string, metaData []byte) error {
-	hasBackup, _ := r.IsLocalBackupOK(backupDir, metaData)
+func (r *RockDB) Restore(metaData []byte) error {
+	backupDir := r.GetBackupDir()
+	hasBackup, _ := r.IsLocalBackupOK(metaData)
 	if !hasBackup {
 		return errors.New("no backup for restore")
 	}
@@ -250,7 +355,8 @@ func (r *RockDB) Restore(backupDir string, metaData []byte) error {
 	return r.reOpen()
 }
 
-func (r *RockDB) ClearBackup(backupDir string, metaData []byte) error {
+func (r *RockDB) ClearBackup(metaData []byte) error {
+	backupDir := r.GetBackupDir()
 	var backupID int64
 	err := json.Unmarshal(metaData, &backupID)
 	if err != nil {

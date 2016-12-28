@@ -60,11 +60,12 @@ type TableStats struct {
 }
 
 type NamespaceStats struct {
-	Name              string       `json:"name"`
-	TStats            []TableStats `json:"table_stats"`
-	DBWriteStats      *WriteStats  `json:"db_write_stats"`
-	ClusterWriteStats *WriteStats  `json:"cluster_write_stats"`
-	EngType           string       `json:"eng_type"`
+	Name              string                 `json:"name"`
+	TStats            []TableStats           `json:"table_stats"`
+	DBWriteStats      *WriteStats            `json:"db_write_stats"`
+	ClusterWriteStats *WriteStats            `json:"cluster_write_stats"`
+	InternalStats     map[string]interface{} `json:"internal_stats"`
+	EngType           string                 `json:"eng_type"`
 }
 
 type ServerStats struct {

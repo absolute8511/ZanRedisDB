@@ -59,10 +59,14 @@ const (
 
 var snapshotCatchUpEntriesN uint64 = 500000
 
+type Snapshot interface {
+	GetData() ([]byte, error)
+}
+
 type DataStorage interface {
 	Clear() error
 	RestoreFromSnapshot(bool, raftpb.Snapshot) error
-	GetSnapshot() ([]byte, error)
+	GetSnapshot() (Snapshot, error)
 }
 
 type applyInfo struct {
@@ -494,19 +498,26 @@ func (rc *raftNode) handleSendSnapshot() {
 	}
 }
 
-func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) {
+func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) error {
 	// here we can just begin snapshot, to freeze the state of storage
 	// and we can copy data async below
 	// TODO: do we need the snapshot while we already make our data stable on disk?
 	// maybe we can just same some meta data.
-	data, err := rc.ds.GetSnapshot()
+	log.Printf("begin get snapshot at: %v", snapi)
+	sn, err := rc.ds.GetSnapshot()
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
+	log.Printf("get snapshot object done: %v", snapi)
 
 	rc.wg.Add(1)
 	go func() {
 		defer rc.wg.Done()
+		data, err := sn.GetData()
+		if err != nil {
+			panic(err)
+		}
+		log.Printf("snapshot data : %v\n", string(data))
 		log.Printf("create snapshot with conf : %v\n", confState)
 		// TODO: now we can do the actually snapshot for copy
 		snap, err := rc.raftStorage.CreateSnapshot(snapi, &confState, data)
@@ -533,6 +544,7 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) {
 		}
 		log.Printf("compacted log at index %d", compactIndex)
 	}()
+	return nil
 }
 
 func (rc *raftNode) serveChannels() {
