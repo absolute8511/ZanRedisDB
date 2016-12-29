@@ -386,8 +386,8 @@ func (db *RockDB) HIncrBy(key []byte, field []byte, delta int64) (int64, error) 
 		return 0, err
 	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 	var ek []byte
 	var err error
 

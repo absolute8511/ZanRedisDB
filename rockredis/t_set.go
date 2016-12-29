@@ -126,11 +126,11 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 
 	var num int64 = 0
 	it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
-	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		wb.Delete(it.RefKey())
 		num++
 	}
+	it.Close()
 	if num > 0 {
 		_, err := db.IncrTableKeyCount(table, -1, wb)
 		if err != nil {
@@ -294,8 +294,8 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 		return 0, errTableName
 	}
 
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
+	wb := db.wb
+	wb.Clear()
 
 	var ek []byte
 	var v []byte

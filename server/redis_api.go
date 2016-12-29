@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/tidwall/redcon"
 	"log"
+	"runtime"
 	"strconv"
 )
 
@@ -13,6 +14,15 @@ var (
 )
 
 func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
+	defer func() {
+		if e := recover(); e != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			log.Printf("handle redis command panic: %s:%v", buf, e)
+		}
+	}()
+
 	_, cmd, err := pipelineCommand(conn, cmd)
 	if err != nil {
 		conn.WriteError("pipeline error '" + err.Error() + "'")

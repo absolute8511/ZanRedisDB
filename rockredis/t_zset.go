@@ -866,11 +866,11 @@ func (db *RockDB) ZLexCount(key []byte, min []byte, max []byte, rangeType uint8)
 	}
 
 	it := NewDBRangeIterator(db.eng, min, max, rangeType, false)
-	defer it.Close()
 	var n int64 = 0
 	for ; it.Valid(); it.Next() {
 		n++
 	}
+	it.Close()
 	return n, nil
 }
 

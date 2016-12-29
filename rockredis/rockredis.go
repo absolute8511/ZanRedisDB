@@ -74,7 +74,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetMinLevelToCompress(2)
 	// we use table, so we use prefix seek feature
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
-	//opts.SetMemtablePrefixBloomSizeRatio(0.1)
+	opts.SetMemtablePrefixBloomSizeRatio(0.1)
 	opts.EnableStatistics()
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io

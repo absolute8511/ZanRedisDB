@@ -386,11 +386,11 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	}
 
 	rit := NewDBRangeIterator(db.eng, startKey, stopKey, RangeClose, false)
-	defer rit.Close()
 	for ; rit.Valid(); rit.Next() {
 		wb.Delete(rit.RefKey())
 		num++
 	}
+	rit.Close()
 	if size > 0 {
 		_, err := db.IncrTableKeyCount(table, -1, wb)
 		if err != nil {
@@ -572,10 +572,10 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 
 	startKey := lEncodeListKey(key, headSeq)
 	rit := NewDBRangeLimitIterator(db.eng, startKey, nil, RangeClose, 0, int(limit), false)
-	defer rit.Close()
 	for ; rit.Valid(); rit.Next() {
 		v = append(v, rit.Value())
 	}
+	rit.Close()
 	return v, nil
 }
 
