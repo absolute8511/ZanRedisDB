@@ -226,10 +226,9 @@ func (r *RockDB) backupLoop() {
 
 			func() {
 				defer close(rsp.done)
-				opts := gorocksdb.NewDefaultOptions()
 				log.Printf("begin backup \n")
 				start := time.Now()
-				be, err := gorocksdb.OpenBackupEngine(opts, rsp.backupDir)
+				be, err := gorocksdb.OpenBackupEngine(r.dbOpts, rsp.backupDir)
 				if err != nil {
 					log.Printf("backup engine failed: %v", err)
 					rsp.err = err
@@ -284,8 +283,7 @@ func (r *RockDB) IsLocalBackupOK(metaData []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	opts := gorocksdb.NewDefaultOptions()
-	be, err := gorocksdb.OpenBackupEngine(opts, backupDir)
+	be, err := gorocksdb.OpenBackupEngine(r.dbOpts, backupDir)
 	if err != nil {
 		log.Printf("backup engine open failed: %v", err)
 		return false, err
