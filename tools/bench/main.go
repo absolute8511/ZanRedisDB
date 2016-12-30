@@ -400,8 +400,8 @@ func main() {
 			case "hset":
 				benchHset()
 			case "hget":
-				benchHGet()
 				benchHRandGet()
+				benchHGet()
 			case "hdel":
 				benchHDel()
 			case "zadd":
