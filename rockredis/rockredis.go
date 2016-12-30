@@ -71,7 +71,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
 	opts.SetMaxBackgroundFlushes(2)
 	opts.SetMaxBackgroundCompactions(4)
-	opts.SetMinLevelToCompress(2)
+	opts.SetMinLevelToCompress(3)
 	// we use table, so we use prefix seek feature
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
 	opts.SetMemtablePrefixBloomSizeRatio(0.1)
