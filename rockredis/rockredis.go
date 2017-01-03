@@ -143,6 +143,10 @@ func (r *RockDB) Close() {
 	}
 }
 
+func (r *RockDB) SetPerfLevel(level int) {
+	// TODO:
+}
+
 func (r *RockDB) GetStatistics() string {
 	return r.dbOpts.GetStatistics()
 }

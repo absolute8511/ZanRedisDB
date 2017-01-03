@@ -576,9 +576,11 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 	if !startup {
 		if hasBackup {
 			self.store.ClearBackup(si.BackupMeta)
+			hasBackup = false
 		}
 	}
 	if !hasBackup {
+		// TODO: get leader from cluster
 		log.Printf("local no backup for snapshot, copy from remote\n")
 		remoteLeader := si.LeaderInfo
 		if remoteLeader == nil {
