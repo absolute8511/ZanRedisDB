@@ -590,7 +590,7 @@ func (rc *raftNode) serveChannels() {
 				isLeader = rd.RaftState == raft.StateLeader
 			}
 			raftDone := make(chan struct{}, 1)
-			rc.publishEntries(rd.CommittedEntries, rd.Snapshot)
+			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, raftDone)
 			if isLeader {
 				rc.sendMessages(rd.Messages)
 			}
