@@ -458,6 +458,11 @@ func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 	select {
 	case m := <-rc.msgSnapC:
 		snapData, err := rc.snapshotter.Load()
+		if err != nil {
+			log.Printf("load snapshot error : %v", err)
+			rc.ReportSnapshot(m.To, raft.SnapshotFailure)
+			return
+		}
 		if snapData.Metadata.Index > np.appliedi {
 			log.Printf("load snapshot error, snapshot index should not great than applied: %v", snapData.Metadata, np)
 			rc.ReportSnapshot(m.To, raft.SnapshotFailure)
