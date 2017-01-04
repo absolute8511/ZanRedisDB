@@ -276,6 +276,7 @@ func (self *KVNode) handleProposeReq() {
 			if n > len(buffer) {
 				buffer = make([]byte, n)
 			}
+			reqList.ReqNum = int32(len(reqList.Reqs))
 			realN, err := reqList.MarshalTo(buffer)
 			//log.Printf("handle req %v, marshal buffer: %v", len(reqList.Reqs), realN)
 			if err != nil {
@@ -377,7 +378,7 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	}
 	// signaled to load snapshot
 	log.Printf("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
-	defer log.Printf("finished applying snapshot at index %d\n", np.snapi)
+	defer log.Printf("finished applying snapshot at index %d\n", np)
 
 	if applyEvent.snapshot.Metadata.Index <= np.appliedi {
 		log.Fatalf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
@@ -425,6 +426,10 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 					log.Printf("parse request failed: %v, data len %v, entry: %v, raw:%v",
 						parseErr, len(evnt.Data), evnt,
 						string(evnt.Data))
+				}
+				if len(reqList.Reqs) != int(reqList.ReqNum) {
+					log.Printf("request check failed %v, real len:%v",
+						reqList, len(reqList.Reqs))
 				}
 				for _, req := range reqList.Reqs {
 					reqID := req.Header.ID

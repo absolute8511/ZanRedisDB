@@ -39,9 +39,9 @@ func (m *RequestHeader) String() string { return proto.CompactTextString(m) }
 func (*RequestHeader) ProtoMessage()    {}
 
 type InternalRaftRequest struct {
-	Header           *RequestHeader `protobuf:"bytes,100,opt,name=header" json:"header,omitempty"`
-	Data             []byte         `protobuf:"bytes,1,opt,name=data" json:"data,omitempty"`
-	XXX_unrecognized []byte         `json:"-"`
+	Header           RequestHeader `protobuf:"bytes,1,opt,name=header" json:"header"`
+	Data             []byte        `protobuf:"bytes,2,opt,name=data" json:"data,omitempty"`
+	XXX_unrecognized []byte        `json:"-"`
 }
 
 func (m *InternalRaftRequest) Reset()         { *m = InternalRaftRequest{} }
@@ -49,7 +49,8 @@ func (m *InternalRaftRequest) String() string { return proto.CompactTextString(m
 func (*InternalRaftRequest) ProtoMessage()    {}
 
 type BatchInternalRaftRequest struct {
-	Reqs             []*InternalRaftRequest `protobuf:"bytes,1,rep,name=reqs" json:"reqs,omitempty"`
+	ReqNum           int32                  `protobuf:"varint,1,opt,name=req_num" json:"req_num"`
+	Reqs             []*InternalRaftRequest `protobuf:"bytes,2,rep,name=reqs" json:"reqs,omitempty"`
 	XXX_unrecognized []byte                 `json:"-"`
 }
 
@@ -150,7 +151,7 @@ func (m *InternalRaftRequest) Unmarshal(data []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		switch fieldNum {
-		case 100:
+		case 1:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Header", wireType)
 			}
@@ -170,14 +171,11 @@ func (m *InternalRaftRequest) Unmarshal(data []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.Header == nil {
-				m.Header = &RequestHeader{}
-			}
 			if err := m.Header.Unmarshal(data[index:postIndex]); err != nil {
 				return err
 			}
 			index = postIndex
-		case 1:
+		case 2:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Data", wireType)
 			}
@@ -242,6 +240,21 @@ func (m *BatchInternalRaftRequest) Unmarshal(data []byte) error {
 		wireType := int(wire & 0x7)
 		switch fieldNum {
 		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ReqNum", wireType)
+			}
+			for shift := uint(0); ; shift += 7 {
+				if index >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[index]
+				index++
+				m.ReqNum |= (int32(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Reqs", wireType)
 			}
@@ -303,10 +316,8 @@ func (m *RequestHeader) Size() (n int) {
 func (m *InternalRaftRequest) Size() (n int) {
 	var l int
 	_ = l
-	if m.Header != nil {
-		l = m.Header.Size()
-		n += 2 + l + sovRaftInternal(uint64(l))
-	}
+	l = m.Header.Size()
+	n += 1 + l + sovRaftInternal(uint64(l))
 	if m.Data != nil {
 		l = len(m.Data)
 		n += 1 + l + sovRaftInternal(uint64(l))
@@ -320,6 +331,7 @@ func (m *InternalRaftRequest) Size() (n int) {
 func (m *BatchInternalRaftRequest) Size() (n int) {
 	var l int
 	_ = l
+	n += 1 + sovRaftInternal(uint64(m.ReqNum))
 	if len(m.Reqs) > 0 {
 		for _, e := range m.Reqs {
 			l = e.Size()
@@ -387,20 +399,16 @@ func (m *InternalRaftRequest) MarshalTo(data []byte) (n int, err error) {
 	_ = i
 	var l int
 	_ = l
-	if m.Header != nil {
-		data[i] = 0xa2
-		i++
-		data[i] = 0x6
-		i++
-		i = encodeVarintRaftInternal(data, i, uint64(m.Header.Size()))
-		n1, err := m.Header.MarshalTo(data[i:])
-		if err != nil {
-			return 0, err
-		}
-		i += n1
+	data[i] = 0xa
+	i++
+	i = encodeVarintRaftInternal(data, i, uint64(m.Header.Size()))
+	n1, err := m.Header.MarshalTo(data[i:])
+	if err != nil {
+		return 0, err
 	}
+	i += n1
 	if m.Data != nil {
-		data[i] = 0xa
+		data[i] = 0x12
 		i++
 		i = encodeVarintRaftInternal(data, i, uint64(len(m.Data)))
 		i += copy(data[i:], m.Data)
@@ -426,9 +434,12 @@ func (m *BatchInternalRaftRequest) MarshalTo(data []byte) (n int, err error) {
 	_ = i
 	var l int
 	_ = l
+	data[i] = 0x8
+	i++
+	i = encodeVarintRaftInternal(data, i, uint64(m.ReqNum))
 	if len(m.Reqs) > 0 {
 		for _, msg := range m.Reqs {
-			data[i] = 0xa
+			data[i] = 0x12
 			i++
 			i = encodeVarintRaftInternal(data, i, uint64(msg.Size()))
 			n, err := msg.MarshalTo(data[i:])

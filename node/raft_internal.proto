@@ -14,10 +14,11 @@ message RequestHeader {
 }
 
 message InternalRaftRequest {
-    RequestHeader header = 100;
-    bytes data = 1;
+    RequestHeader header = 1 [(gogoproto.nullable) = false];
+    bytes data = 2;
 }
 
 message BatchInternalRaftRequest {
-    repeated InternalRaftRequest reqs = 1;
+    int32 req_num = 1 [(gogoproto.nullable) = false];
+    repeated InternalRaftRequest reqs = 2;
 }
