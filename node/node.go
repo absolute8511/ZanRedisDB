@@ -273,9 +273,10 @@ func (self *KVNode) handleProposeReq() {
 				}
 			}
 			n := reqList.Size()
-			if n > len(buffer) {
+			if n > cap(buffer) {
 				buffer = make([]byte, n)
 			}
+			buffer = buffer[:n]
 			reqList.ReqNum = int32(len(reqList.Reqs))
 			realN, err := reqList.MarshalTo(buffer)
 			//log.Printf("handle req %v, marshal buffer: %v", len(reqList.Reqs), realN)
@@ -520,8 +521,9 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 		select {
 		case ent := <-commitC:
 			self.applyAll(&np, &ent)
+			<-ent.raftDone
 			self.maybeTriggerSnapshot(&np)
-			self.raftNode.handleSendSnapshot()
+			self.raftNode.handleSendSnapshot(&np)
 		case err, ok := <-errorC:
 			if !ok {
 				return

@@ -46,7 +46,7 @@ import (
 )
 
 const (
-	DefaultSnapCount = 100000
+	DefaultSnapCount = 50000
 
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
@@ -57,7 +57,7 @@ const (
 	releaseDelayAfterSnapshot = 30 * time.Second
 )
 
-var snapshotCatchUpEntriesN uint64 = 100000
+var snapshotCatchUpEntriesN uint64 = 10000
 
 type Snapshot interface {
 	GetData() ([]byte, error)
@@ -72,6 +72,7 @@ type DataStorage interface {
 type applyInfo struct {
 	ents     []raftpb.Entry
 	snapshot raftpb.Snapshot
+	raftDone chan struct{}
 }
 
 type MemberInfo struct {
@@ -163,9 +164,6 @@ func newRaftNode(clusterID uint64, id int, localRaftAddr string, raftDataDir str
 }
 
 func (rc *raftNode) saveSnap(snap raftpb.Snapshot) error {
-	if err := rc.snapshotter.SaveSnap(snap); err != nil {
-		return err
-	}
 	walSnap := walpb.Snapshot{
 		Index: snap.Metadata.Index,
 		Term:  snap.Metadata.Term,
@@ -173,14 +171,17 @@ func (rc *raftNode) saveSnap(snap raftpb.Snapshot) error {
 	if err := rc.wal.SaveSnapshot(walSnap); err != nil {
 		return err
 	}
+	if err := rc.snapshotter.SaveSnap(snap); err != nil {
+		return err
+	}
 	return rc.wal.ReleaseLockTo(snap.Metadata.Index)
 }
 
 // publishEntries writes committed log entries to commit channel and returns
 // whether all entries could be published.
-func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot) {
+func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot, raftDone chan struct{}) {
 	select {
-	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot}:
+	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot, raftDone: raftDone}:
 	case <-rc.stopc:
 		return
 	}
@@ -453,21 +454,14 @@ func newSnapshotReaderCloser() io.ReadCloser {
 	return pr
 }
 
-func (rc *raftNode) handleSendSnapshot() {
+func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 	select {
 	case m := <-rc.msgSnapC:
 		snapData, err := rc.snapshotter.Load()
-		if err != nil || (int64(m.Index)-int64(snapData.Metadata.Index) > int64(DefaultSnapCount)) {
-			// new snapshot needed
-			if err != nil {
-				log.Printf("load snapshot error, need new snapshot: %v", err)
-			} else {
-				log.Printf("snapshot old, need new snapshot: %v, %v", snapData.String(), m.String())
-			}
+		if snapData.Metadata.Index > np.appliedi {
+			log.Printf("load snapshot error, snapshot index should not great than applied: %v", snapData.Metadata, np)
 			rc.ReportSnapshot(m.To, raft.SnapshotFailure)
 			return
-		} else {
-			// no need new snapshot
 		}
 		atomic.AddInt64(&rc.inflightSnapshots, 1)
 		m.Snapshot = *snapData
@@ -580,6 +574,7 @@ func (rc *raftNode) serveChannels() {
 	}()
 
 	// event loop on raft state machine updates
+	isLeader := false
 	for {
 		select {
 		case <-ticker.C:
@@ -592,18 +587,29 @@ func (rc *raftNode) serveChannels() {
 					log.Printf("leader changed from %v to %v", lead, rd.SoftState)
 				}
 				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
-				//islead = rd.RaftState == raft.StateLeader
+				isLeader = rd.RaftState == raft.StateLeader
 			}
-			rc.wal.Save(rd.HardState, rd.Entries)
+			raftDone := make(chan struct{}, 1)
+			rc.publishEntries(rd.CommittedEntries, rd.Snapshot)
+			if isLeader {
+				rc.sendMessages(rd.Messages)
+			}
+			if err := rc.wal.Save(rd.HardState, rd.Entries); err != nil {
+				log.Fatalf("raft save wal error: %v", err)
+			}
 			if !raft.IsEmptySnap(rd.Snapshot) {
-				rc.saveSnap(rd.Snapshot)
+				if err := rc.saveSnap(rd.Snapshot); err != nil {
+					log.Fatalf("raft save snap error: %v", err)
+				}
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
+				log.Fatalf("raft applied incoming snapshot at index: %v", rd.Snapshot)
 			}
 			rc.raftStorage.Append(rd.Entries)
-			rc.sendMessages(rd.Messages)
-			rc.publishEntries(rd.CommittedEntries, rd.Snapshot)
+			if !isLeader {
+				rc.sendMessages(rd.Messages)
+			}
+			raftDone <- struct{}{}
 			rc.node.Advance()
-
 		case <-rc.stopc:
 			rc.stop()
 			return
