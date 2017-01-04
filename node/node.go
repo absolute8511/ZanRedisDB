@@ -348,7 +348,7 @@ func (self *KVNode) Propose(buf []byte) (interface{}, error) {
 		DataType: 0,
 	}
 	raftReq := InternalRaftRequest{
-		Header: h,
+		Header: *h,
 		Data:   buf,
 	}
 	req := &internalReq{
@@ -363,7 +363,7 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 		DataType: int32(HTTPReq),
 	}
 	raftReq := InternalRaftRequest{
-		Header: h,
+		Header: *h,
 		Data:   buf,
 	}
 	req := &internalReq{
