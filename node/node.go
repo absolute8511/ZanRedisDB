@@ -412,7 +412,6 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 		return
 	}
 	var shouldStop bool
-	var reqList BatchInternalRaftRequest
 	for i := range ents {
 		evnt := ents[i]
 		switch evnt.Type {
@@ -420,10 +419,12 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) {
 			if evnt.Data != nil {
 				start := time.Now()
 				// try redis command
-				reqList.Reset()
+				var reqList BatchInternalRaftRequest
 				parseErr := reqList.Unmarshal(evnt.Data)
 				if parseErr != nil {
-					log.Printf("parse request failed: %v", parseErr)
+					log.Printf("parse request failed: %v, data len %v, entry: %v, raw:%v",
+						parseErr, len(evnt.Data), evnt,
+						string(evnt.Data))
 				}
 				for _, req := range reqList.Reqs {
 					reqID := req.Header.ID
@@ -581,6 +582,9 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 	}
 	if !hasBackup {
 		// TODO: get leader from cluster
+		// if leader is changed, and no snapshot during this,
+		// old leader start from snapshot will failed to find the
+		// old leader.
 		log.Printf("local no backup for snapshot, copy from remote\n")
 		remoteLeader := si.LeaderInfo
 		if remoteLeader == nil {
