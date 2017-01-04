@@ -92,14 +92,35 @@ func benchSet() {
 	for i := 0; i < len(valueSample); i++ {
 		valueSample[i] = byte(i % 255)
 	}
+	magicIdentify := make([]byte, 9+3+3)
+	for i := 0; i < len(magicIdentify); i++ {
+		if i < 3 || i > len(magicIdentify)-3 {
+			magicIdentify[i] = 0
+		} else {
+			magicIdentify[i] = byte(i % 3)
+		}
+	}
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		value := make([]byte, *valueSize)
 		copy(value, valueSample)
 		n := atomic.AddInt64(&kvSetBase, 1)
+		tmp := fmt.Sprintf("%010d", int(n))
 		ts := time.Now().String()
-		copy(value[0:], ts)
-		copy(value[len(ts):], strconv.Itoa(int(n)))
-		return waitBench(c, "SET", n, value)
+		index := 0
+		copy(value[index:], magicIdentify)
+		index += len(magicIdentify)
+		if index < *valueSize {
+			copy(value[index:], ts)
+			index += len(ts)
+		}
+		if index < *valueSize {
+			copy(value[index:], tmp)
+			index += len(tmp)
+		}
+		if *valueSize > len(magicIdentify) {
+			copy(value[len(value)-len(magicIdentify):], magicIdentify)
+		}
+		return waitBench(c, "SET", tmp, value)
 	}
 
 	bench("set", f)
