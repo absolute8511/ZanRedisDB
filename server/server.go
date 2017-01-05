@@ -8,6 +8,7 @@ import (
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/tidwall/redcon"
 	"log"
+	"net/http"
 	"sync"
 )
 
@@ -27,6 +28,7 @@ type Server struct {
 	conf    ServerConfig
 	stopC   chan struct{}
 	wg      sync.WaitGroup
+	router  http.Handler
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -48,6 +50,13 @@ func (self *Server) Stop() {
 	close(self.stopC)
 	self.wg.Wait()
 	log.Printf("server stopped")
+}
+
+func (self *Server) GetNamespace(ns string) *NamespaceNode {
+	self.mutex.Lock()
+	v, _ := self.kvNodes[ns]
+	self.mutex.Unlock()
+	return v
 }
 
 func (self *Server) GetStats() common.ServerStats {
@@ -93,7 +102,7 @@ func (self *Server) InitKVNamespace(clusterID uint64, id int, localRaftAddr stri
 		DataDir: self.conf.DataDir,
 		EngType: conf.EngType,
 	}
-	kv, confC := node.NewKVNode(kvOpts, clusterID, id, localRaftAddr,
+	kv, confC := node.NewKVNode(kvOpts, conf.Name, clusterID, id, localRaftAddr,
 		clusterNodes, join, self.onNamespaceDeleted(conf.Name))
 	n := &NamespaceNode{
 		node:        kv,

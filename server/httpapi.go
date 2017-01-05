@@ -11,93 +11,142 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/coreos/etcd/raft/raftpb"
+	"github.com/julienschmidt/httprouter"
 )
 
-func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	key := r.RequestURI
-	switch {
-	case r.Method == "GET":
-		ns, realKey, err := common.ExtractNamesapce([]byte(key))
-		if err != nil {
-			http.Error(w, "Failed:"+err.Error(), http.StatusBadRequest)
-			return
-		}
-		kv, ok := self.kvNodes[ns]
-		if !ok || kv == nil {
-			http.Error(w, "Namespace not found:"+ns, http.StatusNotFound)
-			return
-		}
-		if v, err := kv.node.Lookup(realKey); err == nil {
-			w.Write(v)
-		} else {
-			http.Error(w, "Failed to GET", http.StatusNotFound)
-		}
-	case r.Method == "POST":
-		if r.URL.Path == "/optimize" || r.URL.Path == "optimize" {
-			self.OptimizeDB()
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		data, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			log.Printf("Failed to read on POST (%v)\n", err)
-			http.Error(w, "Failed on POST", http.StatusBadRequest)
-			return
-		}
+func (self *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	self.router.ServeHTTP(w, req)
+}
 
-		nodeId, err := strconv.ParseUint(key[1:], 0, 64)
-		if err != nil {
-			log.Printf("Failed to convert ID for conf change (%v)\n", err)
-			http.Error(w, "Failed on POST", http.StatusBadRequest)
-			return
-		}
-
-		var m node.MemberInfo
-		err = json.Unmarshal(data, &m)
-		if err != nil {
-			http.Error(w, "POST data decode failed", http.StatusBadRequest)
-			return
-		}
-
-		cc := raftpb.ConfChange{
-			Type:    raftpb.ConfChangeAddNode,
-			NodeID:  nodeId,
-			Context: data,
-		}
-		self.ProposeConfChange(m.Namespace, cc)
-
-		// As above, optimistic that raft will apply the conf change
-		w.WriteHeader(http.StatusNoContent)
-	case r.Method == "DELETE":
-		nodeId, err := strconv.ParseUint(key[1:], 0, 64)
-		if err != nil {
-			log.Printf("Failed to convert ID for conf change (%v)\n", err)
-			http.Error(w, "Failed on DELETE", http.StatusBadRequest)
-			return
-		}
-		q := r.URL.Query()
-		ns := q.Get("ns")
-
-		cc := raftpb.ConfChange{
-			Type:   raftpb.ConfChangeRemoveNode,
-			NodeID: nodeId,
-		}
-		self.ProposeConfChange(ns, cc)
-
-		// As above, optimistic that raft will apply the conf change
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		w.Header().Set("Allow", "PUT")
-		w.Header().Add("Allow", "GET")
-		w.Header().Add("Allow", "POST")
-		w.Header().Add("Allow", "DELETE")
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	key := req.RequestURI
+	ns, realKey, err := common.ExtractNamesapce([]byte(key))
+	if err != nil {
+		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
+	kv, ok := self.kvNodes[ns]
+	if !ok || kv == nil {
+		return nil, Err{Code: http.StatusNotFound, Text: "Namespace not found:" + ns}
+	}
+	if v, err := kv.node.Lookup(realKey); err == nil {
+		if v == nil {
+			v = []byte("")
+		}
+		return v, nil
+	} else {
+		return nil, Err{Code: http.StatusNotFound, Text: err.Error()}
+	}
+}
+
+func (self *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	self.OptimizeDB()
+	return nil, nil
+}
+
+func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	key := req.RequestURI
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		log.Printf("Failed to read on POST (%v)\n", err)
+		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+
+	nodeId, err := strconv.ParseUint(key[1:], 0, 64)
+	if err != nil {
+		log.Printf("Failed to convert ID for conf change (%v)\n", err)
+		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+
+	var m node.MemberInfo
+	err = json.Unmarshal(data, &m)
+	if err != nil {
+		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+
+	cc := raftpb.ConfChange{
+		Type:    raftpb.ConfChangeAddNode,
+		NodeID:  nodeId,
+		Context: data,
+	}
+	self.ProposeConfChange(m.Namespace, cc)
+
+	return nil, nil
+}
+
+func (self *Server) doRemoveNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	key := req.RequestURI
+	nodeId, err := strconv.ParseUint(key[1:], 0, 64)
+	if err != nil {
+		log.Printf("Failed to convert ID for conf change (%v)\n", err)
+		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	ns := ps.ByName("namespace")
+
+	cc := raftpb.ConfChange{
+		Type:   raftpb.ConfChangeRemoveNode,
+		NodeID: nodeId,
+	}
+	self.ProposeConfChange(ns, cc)
+	return nil, nil
+}
+
+func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	v := self.GetNamespace(ns)
+	if v == nil {
+		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
+	}
+	l := v.node.GetLeadMember()
+	if l == nil {
+		return nil, Err{Code: http.StatusSeeOther, Text: "no leader found"}
+	}
+	return l, nil
+}
+
+func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	v := self.GetNamespace(ns)
+	if v == nil {
+		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
+	}
+	return v.node.GetMembers(), nil
+}
+
+func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	v := self.GetNamespace(ns)
+	if v == nil {
+		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
+	}
+	meta, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		log.Printf("Failed to read (%v)\n", err)
+		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	ok, err := v.node.IsLocalBackupOK(meta)
+	if err != nil || !ok {
+		return nil, Err{Code: http.StatusNotFound, Text: "no backup found"}
+	}
+	return nil, nil
+}
+
+func (self *Server) initHttpHandler() {
+	log := Log(1)
+	router := httprouter.New()
+	router.Handle("GET", "/cluster/leader/:namespace", Decorate(self.getLeader, V1))
+	router.Handle("GET", "/cluster/members/:namespace", Decorate(self.getMembers, V1))
+	router.Handle("GET", "/cluster/checkbackup/:namespace", Decorate(self.checkNodeBackup, V1))
+	router.Handle("GET", "/kv/get/:namespace", Decorate(self.getKey, PlainText))
+	router.Handle("POST", "/kv/optimize", Decorate(self.doOptimize, log, V1))
+	router.Handle("POST", "/cluster/node/add", Decorate(self.doAddNode, log, V1))
+	router.Handle("DELETE", "/cluster/node/remove/:namespace", Decorate(self.doRemoveNode, log, V1))
+	self.router = router
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
 func (self *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
 	go http.ListenAndServe(":6666", nil)
+	self.initHttpHandler()
 	srv := http.Server{
 		Addr:    ":" + strconv.Itoa(port),
 		Handler: self,

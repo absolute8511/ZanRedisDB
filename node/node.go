@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"runtime"
 	"strings"
@@ -58,6 +59,7 @@ type KVNode struct {
 	deleteCb          func()
 	dbWriteStats      common.WriteStats
 	clusterWriteStats common.WriteStats
+	ns                string
 }
 
 type KVSnapInfo struct {
@@ -77,7 +79,7 @@ func (self *KVSnapInfo) GetData() ([]byte, error) {
 	return d, nil
 }
 
-func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr string,
+func NewKVNode(kvopts *store.KVOptions, ns string, clusterID uint64, id int, localRaftAddr string,
 	peers map[int]string, join bool, deleteCb func()) (*KVNode, chan raftpb.ConfChange) {
 	proposeC := make(chan []byte)
 	confChangeC := make(chan raftpb.ConfChange)
@@ -89,6 +91,7 @@ func NewKVNode(kvopts *store.KVOptions, clusterID uint64, id int, localRaftAddr 
 		w:           wait.New(),
 		router:      common.NewCmdRouter(),
 		deleteCb:    deleteCb,
+		ns:          ns,
 	}
 	s.registerHandler()
 	commitC, errorC, raftNode := newRaftNode(clusterID, id, localRaftAddr, kvopts.DataDir,
@@ -114,6 +117,13 @@ func (self *KVNode) Stop() {
 
 func (self *KVNode) OptimizeDB() {
 	self.store.CompactRange()
+}
+
+func (self *KVNode) GetLeadMember() *MemberInfo {
+	return self.raftNode.GetLeadMember()
+}
+func (self *KVNode) GetMembers() []*MemberInfo {
+	return self.raftNode.GetMembers()
 }
 
 func (self *KVNode) GetStats() common.NamespaceStats {
@@ -235,7 +245,6 @@ func (self *KVNode) registerHandler() {
 func (self *KVNode) handleProposeReq() {
 	var reqList BatchInternalRaftRequest
 	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
-	buffer := make([]byte, 1024*1024)
 	var lastReq *internalReq
 	defer func() {
 		if e := recover(); e != nil {
@@ -272,14 +281,8 @@ func (self *KVNode) handleProposeReq() {
 					return
 				}
 			}
-			n := reqList.Size()
-			if n > cap(buffer) {
-				buffer = make([]byte, n)
-			}
-			buffer = buffer[:n]
 			reqList.ReqNum = int32(len(reqList.Reqs))
-			realN, err := reqList.MarshalTo(buffer)
-			//log.Printf("handle req %v, marshal buffer: %v", len(reqList.Reqs), realN)
+			buffer, err := reqList.Marshal()
 			if err != nil {
 				log.Printf("failed to marshal request: %v", err)
 				for _, r := range reqList.Reqs {
@@ -289,7 +292,8 @@ func (self *KVNode) handleProposeReq() {
 				continue
 			}
 			lastReq.done = make(chan struct{})
-			buffer = buffer[:realN]
+			//log.Printf("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
+			//	realN, buffer, reqList.Reqs)
 			start := time.Now()
 			self.proposeC <- buffer
 			select {
@@ -349,7 +353,7 @@ func (self *KVNode) Propose(buf []byte) (interface{}, error) {
 		DataType: 0,
 	}
 	raftReq := InternalRaftRequest{
-		Header: *h,
+		Header: h,
 		Data:   buf,
 	}
 	req := &internalReq{
@@ -364,7 +368,7 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 		DataType: int32(HTTPReq),
 	}
 	raftReq := InternalRaftRequest{
-		Header: *h,
+		Header: h,
 		Data:   buf,
 	}
 	req := &internalReq{
@@ -612,4 +616,77 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 			self.store.GetBackupBase())
 	}
 	return self.store.Restore(si.BackupMeta)
+}
+
+func (self *KVNode) IsLocalBackupOK(meta []byte) (bool, error) {
+	return self.store.IsLocalBackupOK(meta)
+}
+
+type deadlinedConn struct {
+	Timeout time.Duration
+	net.Conn
+}
+
+func (c *deadlinedConn) Read(b []byte) (n int, err error) {
+	c.Conn.SetReadDeadline(time.Now().Add(c.Timeout))
+	return c.Conn.Read(b)
+}
+
+func (c *deadlinedConn) Write(b []byte) (n int, err error) {
+	c.Conn.SetWriteDeadline(time.Now().Add(c.Timeout))
+	return c.Conn.Write(b)
+}
+
+func newDeadlineTransport(timeout time.Duration) *http.Transport {
+	transport := &http.Transport{
+		Dial: func(netw, addr string) (net.Conn, error) {
+			c, err := net.DialTimeout(netw, addr, timeout)
+			if err != nil {
+				return nil, err
+			}
+			return &deadlinedConn{timeout, c}, nil
+		},
+	}
+	return transport
+}
+
+func (self *KVNode) GetValidBackupNode(si KVSnapInfo) (string, string) {
+	remoteLeader := si.LeaderInfo
+	members := make([]*MemberInfo, 0)
+	members = append(members, remoteLeader)
+	members = append(members, si.Members...)
+	syncAddr := ""
+	syncDir := ""
+	u, _ := url.Parse(self.raftNode.localRaftAddr)
+	h, _, _ := net.SplitHostPort(u.Host)
+	for _, n := range members {
+		if n == nil {
+			continue
+		}
+		// TODO: get the member list from cluster
+
+		c := http.Client{Transport: newDeadlineTransport(time.Second)}
+		req, _ := http.NewRequest("GET", "http://"+n.Broadcast+":12380/cluster/checkbackup/"+self.ns, nil)
+		rsp, err := c.Do(req)
+		if err != nil {
+			log.Printf("request error: %v", err)
+			continue
+		}
+		rsp.Body.Close()
+		if n.Broadcast == h {
+			if si.LeaderInfo.DataDir == self.store.GetBackupBase() {
+				// the leader is old mine, try find another leader
+				continue
+			}
+			// check if remote has the backup id
+			// local node with different directory
+			syncAddr = ""
+		} else {
+			syncAddr = n.Broadcast
+		}
+		syncDir = n.DataDir
+		break
+	}
+	log.Printf("should recovery from leader: %v", syncAddr, syncDir)
+	return syncAddr, syncDir
 }

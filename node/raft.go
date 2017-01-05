@@ -82,6 +82,7 @@ type MemberInfo struct {
 	ClusterID   uint64   `json:"cluster_id"`
 	Broadcast   string   `json:"broadcast"`
 	RpcPort     int      `json:"rpc_port"`
+	HttpAPIPort int      `json:"http_api_port"`
 	RaftURLs    []string `json:"peer_urls"`
 	DataDir     string   `json:"data_dir"`
 }
@@ -310,6 +311,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		MaxSizePerMsg:   1024 * 1024,
 		MaxInflightMsgs: 256,
 		CheckQuorum:     true,
+		Logger:          &raft.DefaultLogger{Logger: log.New(os.Stderr, "raft", log.LstdFlags|log.Lmicroseconds)},
 	}
 
 	if oldwal {
@@ -607,7 +609,7 @@ func (rc *raftNode) serveChannels() {
 					log.Fatalf("raft save snap error: %v", err)
 				}
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
-				log.Fatalf("raft applied incoming snapshot at index: %v", rd.Snapshot)
+				log.Printf("raft applied incoming snapshot at index: %v", rd.Snapshot.String())
 			}
 			rc.raftStorage.Append(rd.Entries)
 			if !isLeader {

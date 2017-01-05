@@ -14,7 +14,7 @@ message RequestHeader {
 }
 
 message InternalRaftRequest {
-    RequestHeader header = 1 [(gogoproto.nullable) = false];
+    RequestHeader header = 1;
     bytes data = 2;
 }
 

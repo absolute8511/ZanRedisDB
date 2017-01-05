@@ -39,9 +39,9 @@ func (m *RequestHeader) String() string { return proto.CompactTextString(m) }
 func (*RequestHeader) ProtoMessage()    {}
 
 type InternalRaftRequest struct {
-	Header           RequestHeader `protobuf:"bytes,1,opt,name=header" json:"header"`
-	Data             []byte        `protobuf:"bytes,2,opt,name=data" json:"data,omitempty"`
-	XXX_unrecognized []byte        `json:"-"`
+	Header           *RequestHeader `protobuf:"bytes,1,opt,name=header" json:"header,omitempty"`
+	Data             []byte         `protobuf:"bytes,2,opt,name=data" json:"data,omitempty"`
+	XXX_unrecognized []byte         `json:"-"`
 }
 
 func (m *InternalRaftRequest) Reset()         { *m = InternalRaftRequest{} }
@@ -170,6 +170,9 @@ func (m *InternalRaftRequest) Unmarshal(data []byte) error {
 			postIndex := index + msglen
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
+			}
+			if m.Header == nil {
+				m.Header = &RequestHeader{}
 			}
 			if err := m.Header.Unmarshal(data[index:postIndex]); err != nil {
 				return err
@@ -316,8 +319,10 @@ func (m *RequestHeader) Size() (n int) {
 func (m *InternalRaftRequest) Size() (n int) {
 	var l int
 	_ = l
-	l = m.Header.Size()
-	n += 1 + l + sovRaftInternal(uint64(l))
+	if m.Header != nil {
+		l = m.Header.Size()
+		n += 1 + l + sovRaftInternal(uint64(l))
+	}
 	if m.Data != nil {
 		l = len(m.Data)
 		n += 1 + l + sovRaftInternal(uint64(l))
@@ -399,14 +404,16 @@ func (m *InternalRaftRequest) MarshalTo(data []byte) (n int, err error) {
 	_ = i
 	var l int
 	_ = l
-	data[i] = 0xa
-	i++
-	i = encodeVarintRaftInternal(data, i, uint64(m.Header.Size()))
-	n1, err := m.Header.MarshalTo(data[i:])
-	if err != nil {
-		return 0, err
+	if m.Header != nil {
+		data[i] = 0xa
+		i++
+		i = encodeVarintRaftInternal(data, i, uint64(m.Header.Size()))
+		n1, err := m.Header.MarshalTo(data[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n1
 	}
-	i += n1
 	if m.Data != nil {
 		data[i] = 0x12
 		i++
