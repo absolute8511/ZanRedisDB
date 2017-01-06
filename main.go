@@ -5,9 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/server"
-	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/judwhite/go-svc/svc"
 	"io/ioutil"
 	"log"
@@ -71,17 +69,19 @@ func (p *program) Start() error {
 		configFile.ServerConf.DataDir = tmpDir
 	}
 
-	kvOpts := configFile.ServerConf
+	serverConf := configFile.ServerConf
 
 	loadConf, _ := json.MarshalIndent(configFile, "", " ")
 	fmt.Printf("loading with conf:%v\n", string(loadConf))
-	bip := server.GetIPv4ForInterfaceName(kvOpts.BroadcastInterface)
+	bip := server.GetIPv4ForInterfaceName(serverConf.BroadcastInterface)
 	if bip == "" || bip == "0.0.0.0" {
 		panic("broadcast ip can not be found")
+	} else {
+		serverConf.BroadcastAddr = bip
 	}
 	fmt.Printf("broadcast ip is :%v\n", bip)
-	app := server.NewServer(kvOpts)
-	for _, nsNodeConf := range kvOpts.Namespaces {
+	app := server.NewServer(serverConf)
+	for _, nsNodeConf := range serverConf.Namespaces {
 		nsFile := path.Join(configDir, nsNodeConf.Name)
 		d, err := ioutil.ReadFile(nsFile)
 		if err != nil {
@@ -114,25 +114,6 @@ func (p *program) Start() error {
 		fmt.Printf("namespace load config: %v \n", string(d))
 		fmt.Printf("local %v start with cluster: %v\n", raftAddr, clusterNodes)
 		app.InitKVNamespace(clusterID, id, raftAddr, clusterNodes, nsNodeConf.Join, &nsConf)
-
-		if ok {
-			var m node.MemberInfo
-			m.ID = uint64(id)
-			m.ClusterID = clusterID
-			m.DataDir = kvOpts.DataDir
-			m.RaftURLs = append(m.RaftURLs, raftAddr)
-			m.Broadcast = bip
-			data, _ := json.Marshal(m)
-			go func() {
-				cc := raftpb.ConfChange{
-					Type:    raftpb.ConfChangeUpdateNode,
-					NodeID:  uint64(id),
-					Context: data,
-				}
-				time.Sleep(time.Second)
-				app.ProposeConfChange(nsConf.Name, cc)
-			}()
-		}
 	}
 	app.ServeAPI()
 	p.server = app

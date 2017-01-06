@@ -16,8 +16,10 @@ type KVStore struct {
 }
 
 type KVOptions struct {
-	DataDir string
-	EngType string
+	DataDir     string
+	EngType     string
+	SnapCount   int
+	SnapCatchup int
 }
 
 func NewKVStore(kvopts *KVOptions) *KVStore {

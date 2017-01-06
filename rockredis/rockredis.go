@@ -259,7 +259,7 @@ func (r *RockDB) backupLoop() {
 						beInfo.GetSize(i))
 				}
 				beInfo.Destroy()
-				be.PurgeOldBackups(r.eng, 3)
+				be.PurgeOldBackups(r.eng, 2)
 				be.Close()
 				d, _ := json.Marshal(lastID)
 				rsp.rsp = d
@@ -312,6 +312,7 @@ func (r *RockDB) IsLocalBackupOK(metaData []byte) (bool, error) {
 }
 
 func (r *RockDB) Restore(metaData []byte) error {
+	// TODO: maybe write meta (snap term and index) and check the meta data in the backup
 	backupDir := r.GetBackupDir()
 	hasBackup, _ := r.IsLocalBackupOK(metaData)
 	if !hasBackup {
@@ -345,6 +346,7 @@ func (r *RockDB) Restore(metaData []byte) error {
 				beInfo.GetSize(i))
 			if int64(i) > backupID {
 				// TODO: delete the backup with new id
+				return errors.New("local has the newer backup")
 			}
 		}
 	}

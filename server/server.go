@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
@@ -9,7 +10,9 @@ import (
 	"github.com/tidwall/redcon"
 	"log"
 	"net/http"
+	"path"
 	"sync"
+	"time"
 )
 
 var (
@@ -99,10 +102,16 @@ func (self *Server) onNamespaceDeleted(ns string) func() {
 func (self *Server) InitKVNamespace(clusterID uint64, id int, localRaftAddr string,
 	clusterNodes map[int]string, join bool, conf *NamespaceConfig) error {
 	kvOpts := &store.KVOptions{
-		DataDir: self.conf.DataDir,
-		EngType: conf.EngType,
+		DataDir:     path.Join(self.conf.DataDir, conf.Name),
+		EngType:     conf.EngType,
+		SnapCount:   conf.SnapCount,
+		SnapCatchup: conf.SnapCatchup,
 	}
-	kv, confC := node.NewKVNode(kvOpts, conf.Name, clusterID, id, localRaftAddr,
+	nc := &node.NodeConfig{
+		BroadcastAddr: self.conf.BroadcastAddr,
+		HttpAPIPort:   self.conf.HttpAPIPort,
+	}
+	kv, confC := node.NewKVNode(kvOpts, nc, conf.Name, clusterID, id, localRaftAddr,
 		clusterNodes, join, self.onNamespaceDeleted(conf.Name))
 	n := &NamespaceNode{
 		node:        kv,
@@ -112,6 +121,26 @@ func (self *Server) InitKVNamespace(clusterID uint64, id int, localRaftAddr stri
 	self.mutex.Lock()
 	self.kvNodes[conf.Name] = n
 	self.mutex.Unlock()
+	_, ok := clusterNodes[id]
+	if ok {
+		var m node.MemberInfo
+		m.ID = uint64(id)
+		m.ClusterID = clusterID
+		m.DataDir = kvOpts.DataDir
+		m.RaftURLs = append(m.RaftURLs, localRaftAddr)
+		m.Broadcast = self.conf.BroadcastAddr
+		m.HttpAPIPort = self.conf.HttpAPIPort
+		data, _ := json.Marshal(m)
+		go func() {
+			cc := raftpb.ConfChange{
+				Type:    raftpb.ConfChangeUpdateNode,
+				NodeID:  uint64(id),
+				Context: data,
+			}
+			time.Sleep(time.Second)
+			self.ProposeConfChange(conf.Name, cc)
+		}()
+	}
 	return nil
 }
 
@@ -136,7 +165,7 @@ func (self *Server) ServeAPI() {
 	}()
 	go func() {
 		defer self.wg.Done()
-		self.serveHttpAPI(self.conf.HTTPAPIPort, self.stopC)
+		self.serveHttpAPI(self.conf.HttpAPIPort, self.stopC)
 	}()
 }
 

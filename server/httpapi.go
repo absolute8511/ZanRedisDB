@@ -123,8 +123,9 @@ func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps
 		log.Printf("Failed to read (%v)\n", err)
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	ok, err := v.node.IsLocalBackupOK(meta)
+	ok, err := v.node.CheckLocalBackup(meta)
 	if err != nil || !ok {
+		log.Printf("Failed to find backup (%v)\n", meta)
 		return nil, Err{Code: http.StatusNotFound, Text: "no backup found"}
 	}
 	return nil, nil

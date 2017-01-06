@@ -2,8 +2,9 @@ package server
 
 type ServerConfig struct {
 	BroadcastInterface string                `json:"broadcast_interface"`
+	BroadcastAddr      string                `json:"broadcast_addr"`
 	RedisAPIPort       int                   `json:"redis_api_port"`
-	HTTPAPIPort        int                   `json:"httpapi_port"`
+	HttpAPIPort        int                   `json:"http_api_port"`
 	DataDir            string                `json:"data_dir"`
 	Namespaces         []NamespaceNodeConfig `json:"namespaces"`
 }
@@ -11,6 +12,8 @@ type ServerConfig struct {
 type NamespaceConfig struct {
 	Name        string        `json:"name"`
 	EngType     string        `json:"eng_type"`
+	SnapCount   int           `json:"snap_count"`
+	SnapCatchup int           `json:"snap_catchup"`
 	ClusterConf ClusterConfig `json:"cluster_conf"`
 }
 

@@ -1,6 +1,8 @@
 {
     "name":"yz_cp_simple",
     "eng_type": "rocksdb",
+    "snap_count": 50000,
+    "snap_catchup": 10000,
     "cluster_conf":{
         "cluster_id": 1000,
         "seed_nodes":[
