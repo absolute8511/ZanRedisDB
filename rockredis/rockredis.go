@@ -388,6 +388,10 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 		os.RemoveAll(fn)
 	}
 	for _, fn := range ckNameList {
+		if strings.HasPrefix(path.Base(fn), "LOG") {
+			log.Printf("ignore copy LOG file: %v", fn)
+			continue
+		}
 		dst := path.Join(r.GetDataDir(), path.Base(fn))
 		err := copyFile(fn, dst, false)
 		if err != nil {
