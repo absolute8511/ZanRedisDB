@@ -248,7 +248,7 @@ func (r *RockDB) backupLoop() {
 					rsp.err = err
 					return
 				}
-				_, err := os.Stat(rsp.backupDir)
+				_, err = os.Stat(rsp.backupDir)
 				if !os.IsNotExist(err) {
 					log.Printf("checkpoint exist: %v, remove it", rsp.backupDir)
 					os.RemoveAll(rsp.backupDir)
@@ -290,7 +290,7 @@ func (r *RockDB) IsLocalBackupOK(term uint64, index uint64) (bool, error) {
 	checkpointDir := GetCheckpointDir(term, index)
 	ro := *r.dbOpts
 	ro.SetCreateIfMissing(false)
-	db, err := gorocksdb.OpenDb(&ro, path.Join(backupDir, checkpointDir))
+	db, err := gorocksdb.OpenDbForReadOnly(&ro, path.Join(backupDir, checkpointDir), false)
 	if err != nil {
 		log.Printf("checkpoint open failed: %v", err)
 		return false, err
@@ -394,7 +394,7 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 			log.Printf("copy %v to %v failed: %v", fn, dst, err)
 			return err
 		} else {
-			log.Printf("copy %v to %v done", fn, dst, err)
+			log.Printf("copy %v to %v done", fn, dst)
 		}
 	}
 
