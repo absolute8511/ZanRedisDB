@@ -563,6 +563,9 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 }
 
 func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
+	if np.appliedi-np.snapi <= 1 {
+		return
+	}
 	if !confChanged && np.appliedi-np.snapi <= uint64(self.raftNode.config.SnapCount) {
 		return
 	}
@@ -581,10 +584,10 @@ func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
 	np.snapi = np.appliedi
 }
 
-func (self *KVNode) GetSnapshot() (Snapshot, error) {
+func (self *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 	// use the rocksdb backup/checkpoint interface to backup data
 	var si KVSnapInfo
-	si.BackupInfo = self.store.Backup()
+	si.BackupInfo = self.store.Backup(term, index)
 	if si.BackupInfo == nil {
 		return nil, errors.New("failed to begin backup: maybe too much backup running")
 	}
@@ -615,10 +618,9 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		// In order to avoid this, we need write some meta to backup,
 		// such as write snap term and index to backup, or name the backup id
 		// using the snap term+index
-		hasBackup = false
+		// hasBackup = false
 	}
 	if !hasBackup {
-		self.store.ClearBackup(si.BackupMeta)
 		log.Printf("local no backup for snapshot, copy from remote\n")
 		syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
 		if syncAddr == "" && syncDir == "" {
@@ -630,7 +632,7 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		common.RunFileSync(syncAddr, rockredis.GetBackupDir(syncDir),
 			self.store.GetBackupBase())
 	}
-	return self.store.Restore(si.BackupMeta)
+	return self.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 }
 
 func (self *KVNode) CheckLocalBackup(snapData []byte) (bool, error) {
@@ -643,37 +645,13 @@ func (self *KVNode) CheckLocalBackup(snapData []byte) (bool, error) {
 }
 
 func (self *KVNode) checkLocalBackup(rs raftpb.Snapshot) (bool, error) {
-	snap, err := self.raftNode.snapshotter.Load()
-	if err != nil {
-		log.Printf("failed to load local snapshotter: %v", err)
-		return false, err
-	}
-	if snap.Metadata.Term != rs.Metadata.Term ||
-		snap.Metadata.Index != rs.Metadata.Index {
-		log.Printf("local snapshotter mismatch: %v, %v", snap.String(), rs.String())
-		return false, nil
-	}
 	var si KVSnapInfo
-	err = json.Unmarshal(rs.Data, &si)
+	err := json.Unmarshal(rs.Data, &si)
 	if err != nil {
 		log.Printf("unmarshal snap meta failed: %v", string(rs.Data))
 		return false, err
 	}
-	var localSi KVSnapInfo
-	err = json.Unmarshal(snap.Data, &localSi)
-	if err != nil {
-		log.Printf("unmarshal snap meta failed: %v", string(snap.Data))
-		return false, err
-	}
-	if !bytes.Equal(si.BackupMeta, localSi.BackupMeta) {
-		log.Printf("local snapshotter mismatch: %v, %v", si, localSi)
-		return false, nil
-	}
-	return self.store.IsLocalBackupOK(si.BackupMeta)
-}
-
-func (self *KVNode) IsLocalBackupOK(meta []byte) (bool, error) {
-	return self.store.IsLocalBackupOK(meta)
+	return self.store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
 }
 
 type deadlinedConn struct {

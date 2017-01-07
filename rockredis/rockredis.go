@@ -1,16 +1,23 @@
 package rockredis
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
+	"io"
 	"log"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+func GetCheckpointDir(term uint64, index uint64) string {
+	return fmt.Sprintf("%016x-%016x", term, index)
+}
 
 type RockConfig struct {
 	DataDir          string
@@ -76,6 +83,8 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
 	opts.SetMemtablePrefixBloomSizeRatio(0.1)
 	opts.EnableStatistics()
+	opts.SetMaxLogFileSize(1024 * 1024 * 32)
+	opts.SetLogFileTimeToRoll(3600 * 24 * 3)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
 
@@ -93,6 +102,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, err
 	}
 	db.eng = eng
+	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
 
 	db.wg.Add(1)
 	go func() {
@@ -230,39 +240,32 @@ func (r *RockDB) backupLoop() {
 
 			func() {
 				defer close(rsp.done)
-				log.Printf("begin backup \n")
+				log.Printf("begin backup to:%v \n", rsp.backupDir)
 				start := time.Now()
-				be, err := gorocksdb.OpenBackupEngine(r.dbOpts, rsp.backupDir)
+				ck, err := gorocksdb.NewCheckpoint(r.eng)
 				if err != nil {
-					log.Printf("backup engine failed: %v", err)
+					log.Printf("init checkpoint failed: %v", err)
 					rsp.err = err
 					return
+				}
+				_, err := os.Stat(rsp.backupDir)
+				if !os.IsNotExist(err) {
+					log.Printf("checkpoint exist: %v, remove it", rsp.backupDir)
+					os.RemoveAll(rsp.backupDir)
 				}
 				time.AfterFunc(time.Second*2, func() {
 					close(rsp.started)
 				})
-				err = be.CreateNewBackup(r.eng)
+				err = ck.Save(rsp.backupDir)
 				if err != nil {
-					log.Printf("backup failed: %v", err)
+					log.Printf("save checkpoint failed: %v", err)
 					rsp.err = err
 					return
 				}
 				cost := time.Now().Sub(start)
-				beInfo := be.GetInfo()
-
-				log.Printf("backup done (cost %v), total backup : %v\n", cost.String(), beInfo.GetCount())
-
-				lastID := beInfo.GetBackupId(beInfo.GetCount() - 1)
-				for i := 0; i < beInfo.GetCount(); i++ {
-					id := beInfo.GetBackupId(i)
-					log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
-						beInfo.GetSize(i))
-				}
-				beInfo.Destroy()
-				be.PurgeOldBackups(r.eng, 2)
-				be.Close()
-				d, _ := json.Marshal(lastID)
-				rsp.rsp = d
+				log.Printf("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
+				// TODO: purge some old checkpoint
+				rsp.rsp = []byte(rsp.backupDir)
 			}()
 		case <-r.quit:
 			return
@@ -270,8 +273,10 @@ func (r *RockDB) backupLoop() {
 	}
 }
 
-func (r *RockDB) Backup() *BackupInfo {
-	bi := newBackupInfo(r.GetBackupDir())
+func (r *RockDB) Backup(term uint64, index uint64) *BackupInfo {
+	fname := GetCheckpointDir(term, index)
+	checkpointDir := path.Join(r.GetBackupDir(), fname)
+	bi := newBackupInfo(checkpointDir)
 	select {
 	case r.backupC <- bi:
 	default:
@@ -280,113 +285,129 @@ func (r *RockDB) Backup() *BackupInfo {
 	return bi
 }
 
-func (r *RockDB) IsLocalBackupOK(metaData []byte) (bool, error) {
+func (r *RockDB) IsLocalBackupOK(term uint64, index uint64) (bool, error) {
 	backupDir := r.GetBackupDir()
-	var backupID int64
-	err := json.Unmarshal(metaData, &backupID)
+	checkpointDir := GetCheckpointDir(term, index)
+	ro := *r.dbOpts
+	ro.SetCreateIfMissing(false)
+	db, err := gorocksdb.OpenDb(&ro, path.Join(backupDir, checkpointDir))
 	if err != nil {
+		log.Printf("checkpoint open failed: %v", err)
 		return false, err
 	}
-	be, err := gorocksdb.OpenBackupEngine(r.dbOpts, backupDir)
-	if err != nil {
-		log.Printf("backup engine open failed: %v", err)
-		return false, err
-	}
-	beInfo := be.GetInfo()
-	lastID := int64(0)
-	if beInfo.GetCount() > 0 {
-		lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
-	}
-	log.Printf("local total backup : %v, last: %v\n", beInfo.GetCount(), lastID)
-	hasBackup := false
-	for i := 0; i < beInfo.GetCount(); i++ {
-		id := beInfo.GetBackupId(i)
-		log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
-			beInfo.GetSize(i))
-		if id == backupID {
-			hasBackup = true
-			break
-		}
-	}
-	return hasBackup, nil
+	db.Close()
+	return true, nil
 }
 
-func (r *RockDB) Restore(metaData []byte) error {
+func copyFile(src, dst string, override bool) error {
+	sfi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !sfi.Mode().IsRegular() {
+		return fmt.Errorf("copyfile: non-regular source file %v (%v)", sfi.Name(), sfi.Mode().String())
+	}
+	_, err = os.Stat(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else {
+		if !override {
+			return nil
+		}
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if err != nil {
+		out.Close()
+		return err
+	}
+	err = out.Sync()
+	if err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func (r *RockDB) Restore(term uint64, index uint64) error {
 	// TODO: maybe write meta (snap term and index) and check the meta data in the backup
 	backupDir := r.GetBackupDir()
-	hasBackup, _ := r.IsLocalBackupOK(metaData)
+	hasBackup, _ := r.IsLocalBackupOK(term, index)
 	if !hasBackup {
 		return errors.New("no backup for restore")
 	}
-	var backupID int64
-	err := json.Unmarshal(metaData, &backupID)
-	if err != nil {
-		return err
-	}
 
-	opts := gorocksdb.NewDefaultOptions()
-	be, err := gorocksdb.OpenBackupEngine(opts, backupDir)
+	checkpointDir := GetCheckpointDir(term, index)
+	start := time.Now()
+	log.Printf("begin restore from checkpoint: %v\n", checkpointDir)
+	r.eng.Close()
+	// 1. remove all files in current db except sst files
+	// 2. get the list of sst in checkpoint
+	// 3. remove all the sst files not in the checkpoint list
+	// 4. copy all files from checkpoint to current db and do not override sst
+	matchName := path.Join(r.GetDataDir(), "*")
+	nameList, err := filepath.Glob(matchName)
 	if err != nil {
-		log.Printf("backup engine open failed: %v", err)
+		log.Printf("list files failed:  %v\n", err)
 		return err
 	}
-	beInfo := be.GetInfo()
-	lastID := int64(0)
-	if beInfo.GetCount() > 0 {
-		lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
+	ckNameList, err := filepath.Glob(path.Join(backupDir, checkpointDir, "*"))
+	if err != nil {
+		log.Printf("list checkpoint files failed:  %v\n", err)
+		return err
 	}
-	log.Printf("after sync total backup : %v, last: %v\n", beInfo.GetCount(), lastID)
-	if lastID < backupID {
-		return errors.New("no backup for restore")
-	}
-	if lastID > backupID {
-		for i := 0; i < beInfo.GetCount(); i++ {
-			id := beInfo.GetBackupId(i)
-			log.Printf("backup data :%v, timestamp: %v, files: %v, size: %v", id, beInfo.GetTimestamp(i), beInfo.GetNumFiles(i),
-				beInfo.GetSize(i))
-			if int64(i) > backupID {
-				// TODO: delete the backup with new id
-				return errors.New("local has the newer backup")
-			}
+	ckSstNameMap := make(map[string]bool)
+	for _, fn := range ckNameList {
+		if strings.HasSuffix(fn, ".sst") {
+			ckSstNameMap[fn] = true
 		}
 	}
 
-	start := time.Now()
-	log.Printf("begin restore\n")
-	r.eng.Close()
-	restoreOpts := gorocksdb.NewRestoreOptions()
-	err = be.RestoreDBFromLatestBackup(r.GetDataDir(), r.GetDataDir(), restoreOpts)
-	if err != nil {
-		log.Printf("restore failed: %v\n", err)
-		return err
+	for _, fn := range nameList {
+		shortName := path.Base(fn)
+		if strings.HasPrefix(shortName, "LOG") {
+			continue
+		}
+		if strings.HasSuffix(fn, ".sst") {
+			if _, ok := ckSstNameMap[fn]; ok {
+				log.Printf("keeping sst file: %v", fn)
+				continue
+			}
+		}
+		log.Printf("removing: %v", fn)
+		os.RemoveAll(fn)
 	}
+	for _, fn := range ckNameList {
+		dst := path.Join(r.GetDataDir(), path.Base(fn))
+		err := copyFile(fn, dst, false)
+		if err != nil {
+			log.Printf("copy %v to %v failed: %v", fn, dst, err)
+			return err
+		} else {
+			log.Printf("copy %v to %v done", fn, dst, err)
+		}
+	}
+
+	err = r.reOpen()
 	log.Printf("restore done, cost: %v\n", time.Now().Sub(start))
-	be.Close()
-	return r.reOpen()
+	if err != nil {
+		log.Printf("reopen the restored db failed:  %v\n", err)
+	}
+	return err
 }
 
-func (r *RockDB) ClearBackup(metaData []byte) error {
+func (r *RockDB) ClearBackup(term uint64, index uint64) error {
 	backupDir := r.GetBackupDir()
-	var backupID int64
-	err := json.Unmarshal(metaData, &backupID)
-	if err != nil {
-		return err
-	}
-	opts := gorocksdb.NewDefaultOptions()
-	be, err := gorocksdb.OpenBackupEngine(opts, backupDir)
-	if err != nil {
-		log.Printf("backup engine open failed: %v", err)
-		return err
-	}
-	beInfo := be.GetInfo()
-	lastID := int64(0)
-	if beInfo.GetCount() > 0 {
-		lastID = beInfo.GetBackupId(beInfo.GetCount() - 1)
-	}
-	if lastID >= backupID {
-		be.PurgeOldBackups(r.eng, 0)
-	}
-	beInfo.Destroy()
-	be.Close()
-	return nil
+	checkpointDir := GetCheckpointDir(term, index)
+	return os.RemoveAll(path.Join(backupDir, checkpointDir))
 }

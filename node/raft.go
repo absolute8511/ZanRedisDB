@@ -61,7 +61,7 @@ type Snapshot interface {
 type DataStorage interface {
 	Clear() error
 	RestoreFromSnapshot(bool, raftpb.Snapshot) error
-	GetSnapshot() (Snapshot, error)
+	GetSnapshot(term uint64, index uint64) (Snapshot, error)
 }
 
 type applyInfo struct {
@@ -489,8 +489,12 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 	// and we can copy data async below
 	// TODO: do we need the snapshot while we already make our data stable on disk?
 	// maybe we can just same some meta data.
-	log.Printf("begin get snapshot at: %v", snapi)
-	sn, err := rc.ds.GetSnapshot()
+	snapTerm, err := rc.raftStorage.Term(snapi)
+	if err != nil {
+		log.Panicf("failed to get term from apply index: %v", err)
+	}
+	log.Printf("begin get snapshot at: %v-%v", snapTerm, snapi)
+	sn, err := rc.ds.GetSnapshot(snapTerm, snapi)
 	if err != nil {
 		return err
 	}
