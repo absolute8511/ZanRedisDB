@@ -369,7 +369,7 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 	ckSstNameMap := make(map[string]bool)
 	for _, fn := range ckNameList {
 		if strings.HasSuffix(fn, ".sst") {
-			ckSstNameMap[fn] = true
+			ckSstNameMap[path.Base(fn)] = true
 		}
 	}
 
@@ -378,8 +378,8 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 		if strings.HasPrefix(shortName, "LOG") {
 			continue
 		}
-		if strings.HasSuffix(fn, ".sst") {
-			if _, ok := ckSstNameMap[fn]; ok {
+		if strings.HasSuffix(shortName, ".sst") {
+			if _, ok := ckSstNameMap[shortName]; ok {
 				log.Printf("keeping sst file: %v", fn)
 				continue
 			}
