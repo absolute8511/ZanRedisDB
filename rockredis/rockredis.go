@@ -71,6 +71,26 @@ func (self CheckpointSortNames) Less(i, j int) bool {
 	return lterm < rterm
 }
 
+func purgeOldCheckpoint(keepNum int, checkpointDir string) {
+	defer func() {
+		if e := recover(); e != nil {
+			log.Printf("purge old checkpoint failed: %v", e)
+		}
+	}()
+	checkpointList, err := filepath.Glob(path.Join(checkpointDir, "*-*"))
+	if err != nil {
+		return
+	}
+	if len(checkpointList) > keepNum {
+		sortedNameList := CheckpointSortNames(checkpointList)
+		sort.Sort(sortedNameList)
+		for i := 0; i < len(sortedNameList)-keepNum; i++ {
+			os.RemoveAll(sortedNameList[i])
+			log.Printf("clean checkpoint : %v", sortedNameList[i])
+		}
+	}
+}
+
 type RockDB struct {
 	cfg              *RockConfig
 	eng              *gorocksdb.DB
@@ -303,18 +323,7 @@ func (r *RockDB) backupLoop() {
 				log.Printf("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
 				// purge some old checkpoint
 				rsp.rsp = []byte(rsp.backupDir)
-				checkpointList, err := filepath.Glob(path.Join(r.GetBackupDir(), "*"))
-				if err != nil {
-					return
-				}
-				if len(checkpointList) > MAX_CHECKPOINT_NUM {
-					sortedNameList := CheckpointSortNames(checkpointList)
-					sort.Sort(sortedNameList)
-					for i := 0; i < len(sortedNameList)-MAX_CHECKPOINT_NUM; i++ {
-						os.RemoveAll(sortedNameList[i])
-						log.Printf("clean checkpoint : %v", sortedNameList[i])
-					}
-				}
+				purgeOldCheckpoint(MAX_CHECKPOINT_NUM, r.GetBackupDir())
 			}()
 		case <-r.quit:
 			return
