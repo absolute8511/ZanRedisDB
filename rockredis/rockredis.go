@@ -10,9 +10,15 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+)
+
+const (
+	MAX_CHECKPOINT_NUM = 3
 )
 
 func GetCheckpointDir(term uint64, index uint64) string {
@@ -32,6 +38,37 @@ func NewRockConfig() *RockConfig {
 	}
 	c.DefaultReadOpts.SetVerifyChecksums(false)
 	return c
+}
+
+type CheckpointSortNames []string
+
+func (self CheckpointSortNames) Len() int {
+	return len(self)
+}
+
+func (self CheckpointSortNames) Swap(i, j int) {
+	self[i], self[j] = self[j], self[i]
+}
+
+func (self CheckpointSortNames) Less(i, j int) bool {
+	left := path.Base(self[i])
+	right := path.Base(self[j])
+	lsplit := strings.SplitN(left, "-", 2)
+	rsplit := strings.SplitN(right, "-", 2)
+	if len(lsplit) != 2 || len(rsplit) != 2 {
+		log.Panicf("the checkpoint name is not valid: %v, %v", left, right)
+	}
+	lterm, err := strconv.ParseUint(lsplit[0], 16, 64)
+	if err != nil {
+		log.Panicf("the checkpoint name is not valid: %v, %v, %v", left, right, err)
+	}
+	lindex, _ := strconv.ParseUint(lsplit[1], 16, 64)
+	rterm, _ := strconv.ParseUint(rsplit[0], 16, 64)
+	rindex, _ := strconv.ParseUint(rsplit[1], 16, 64)
+	if lterm == rterm {
+		return lindex < rindex
+	}
+	return lterm < rterm
 }
 
 type RockDB struct {
@@ -264,8 +301,20 @@ func (r *RockDB) backupLoop() {
 				}
 				cost := time.Now().Sub(start)
 				log.Printf("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
-				// TODO: purge some old checkpoint
+				// purge some old checkpoint
 				rsp.rsp = []byte(rsp.backupDir)
+				checkpointList, err := filepath.Glob(path.Join(r.GetBackupDir(), "*"))
+				if err != nil {
+					return
+				}
+				if len(checkpointList) > MAX_CHECKPOINT_NUM {
+					sortedNameList := CheckpointSortNames(checkpointList)
+					sort.Sort(sortedNameList)
+					for i := 0; i < len(sortedNameList)-MAX_CHECKPOINT_NUM; i++ {
+						os.RemoveAll(sortedNameList[i])
+						log.Printf("clean checkpoint : %v", sortedNameList[i])
+					}
+				}
 			}()
 		case <-r.quit:
 			return
@@ -340,7 +389,7 @@ func copyFile(src, dst string, override bool) error {
 }
 
 func (r *RockDB) Restore(term uint64, index uint64) error {
-	// TODO: maybe write meta (snap term and index) and check the meta data in the backup
+	// write meta (snap term and index) and check the meta data in the backup
 	backupDir := r.GetBackupDir()
 	hasBackup, _ := r.IsLocalBackupOK(term, index)
 	if !hasBackup {
