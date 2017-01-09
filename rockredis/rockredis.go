@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	MAX_CHECKPOINT_NUM = 3
+	MAX_CHECKPOINT_NUM = 10
 )
 
 func GetCheckpointDir(term uint64, index uint64) string {

@@ -629,8 +629,10 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		// copy backup data from the remote leader node, and recovery backup from it
 		// if local has some old backup data, we should use rsync to sync the data file
 		// use the rocksdb backup/checkpoint interface to backup data
-		common.RunFileSync(syncAddr, rockredis.GetBackupDir(syncDir),
-			self.store.GetBackupBase())
+		common.RunFileSync(syncAddr,
+			path.Join(rockredis.GetBackupDir(syncDir),
+				rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
+			self.store.GetBackupDir())
 	}
 	return self.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 }
