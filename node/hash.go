@@ -3,7 +3,6 @@ package node
 import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
-	"log"
 	"strconv"
 )
 
@@ -19,7 +18,7 @@ func (self *KVNode) hgetCommand(conn redcon.Conn, cmd redcon.Command) {
 func (self *KVNode) hgetallCommand(conn redcon.Conn, cmd redcon.Command) {
 	n, valCh, err := self.store.HGetAll(cmd.Args[1])
 	if err != nil {
-		log.Printf("error command %v: %v\n", string(cmd.Args[0]), cmd.Args[1])
+		conn.WriteError("ERR for " + string(cmd.Args[0]) + " command: " + err.Error())
 	}
 	conn.WriteArray(int(n) * 2)
 	for v := range valCh {

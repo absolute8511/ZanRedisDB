@@ -8,7 +8,6 @@ import (
 	"github.com/absolute8511/ZanRedisDB/store"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/tidwall/redcon"
-	"log"
 	"net/http"
 	"path"
 	"sync"
@@ -18,6 +17,17 @@ import (
 var (
 	errNamespaceNotFound = errors.New("namespace not found")
 )
+
+var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("server"))
+
+func SetLogger(level int32, logger common.Logger) {
+	sLog.SetLevel(level)
+	sLog.Logger = logger
+}
+
+func SLogger() *common.LevelLogger {
+	return sLog
+}
 
 type NamespaceNode struct {
 	node        *node.KVNode
@@ -47,12 +57,12 @@ func (self *Server) Stop() {
 	self.mutex.Lock()
 	for k, n := range self.kvNodes {
 		n.node.Stop()
-		log.Printf("kv namespace stopped: %v", k)
+		sLog.Infof("kv namespace stopped: %v", k)
 	}
 	self.mutex.Unlock()
 	close(self.stopC)
 	self.wg.Wait()
-	log.Printf("server stopped")
+	sLog.Infof("server stopped")
 }
 
 func (self *Server) GetNamespace(ns string) *NamespaceNode {
@@ -92,7 +102,7 @@ func (self *Server) onNamespaceDeleted(ns string) func() {
 		self.mutex.Lock()
 		_, ok := self.kvNodes[ns]
 		if ok {
-			log.Printf("namespace deleted: %v", ns)
+			sLog.Infof("namespace deleted: %v", ns)
 			delete(self.kvNodes, ns)
 		}
 		self.mutex.Unlock()
@@ -151,7 +161,7 @@ func (self *Server) ProposeConfChange(ns string, cc raftpb.ConfChange) {
 	if ok {
 		nsNode.confChangeC <- cc
 	} else {
-		log.Printf("namespace not found: %v", ns)
+		sLog.Infof("namespace not found: %v", ns)
 	}
 }
 

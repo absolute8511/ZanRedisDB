@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"github.com/absolute8511/gorocksdb"
-	"log"
 )
 
 // Note: since different data structure has different prefix,
@@ -93,11 +92,10 @@ func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.Wri
 	var size int64
 	v, err := db.eng.GetBytes(db.defaultReadOpts, tm)
 	if err != nil {
-		log.Printf("get table size error: %v", err)
 		return 0, err
 	}
 	if size, err = Int64(v, err); err != nil {
-		log.Printf("convert table size error: %v, set size to init: %v", err, delta)
+		dbLog.Infof("convert table size error: %v, set size to init: %v", err, delta)
 		size = delta
 	} else {
 		size += delta
@@ -115,7 +113,6 @@ func (db *RockDB) GetTableKeyCount(table []byte) (int64, error) {
 	var err error
 	var size int64
 	if size, err = Int64(db.eng.GetBytes(db.defaultReadOpts, tm)); err != nil {
-		log.Printf("get table size error: %v", err)
 	}
 	return size, err
 }

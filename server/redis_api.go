@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/tidwall/redcon"
-	"log"
 	"runtime"
 	"strconv"
 )
@@ -19,7 +18,7 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			log.Printf("handle redis command panic: %s:%v", buf, e)
+			sLog.Infof("handle redis command panic: %s:%v", buf, e)
 		}
 	}()
 
@@ -32,7 +31,7 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	switch cmdName {
 	case "detach":
 		hconn := conn.Detach()
-		log.Printf("connection has been detached")
+		sLog.Infof("connection has been detached")
 		go func() {
 			defer hconn.Close()
 			hconn.WriteString("OK")
@@ -62,22 +61,22 @@ func (self *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
 		":"+strconv.Itoa(port),
 		self.serverRedis,
 		func(conn redcon.Conn) bool {
-			//log.Printf("accept: %s", conn.RemoteAddr())
+			//sLog.Infof("accept: %s", conn.RemoteAddr())
 			return true
 		},
 		func(conn redcon.Conn, err error) {
 			if err != nil {
-				log.Printf("closed: %s, err: %v", conn.RemoteAddr(), err)
+				sLog.Infof("closed: %s, err: %v", conn.RemoteAddr(), err)
 			}
 		},
 	)
 	go func() {
 		err := redisS.ListenAndServe()
 		if err != nil {
-			log.Fatalf("failed to start the redis server: %v", err)
+			sLog.Fatalf("failed to start the redis server: %v", err)
 		}
 	}()
 	<-stopC
 	redisS.Close()
-	log.Printf("redis api server exit\n")
+	sLog.Infof("redis api server exit\n")
 }

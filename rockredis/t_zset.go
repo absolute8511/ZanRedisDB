@@ -6,7 +6,6 @@ import (
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
-	"log"
 )
 
 const (
@@ -260,7 +259,7 @@ func (db *RockDB) zDelItem(key []byte, member []byte,
 
 func (db *RockDB) zDelete(key []byte, wb *gorocksdb.WriteBatch) (int64, error) {
 	delMembCnt, err := db.zRemRange(key, MinScore, MaxScore, 0, -1, wb)
-	//	todo : log err
+	//	TODO : log err
 	return delMembCnt, err
 }
 
@@ -479,7 +478,6 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 
 	v, _ := db.eng.GetBytes(db.defaultReadOpts, k)
 	if v == nil {
-		log.Printf("not found zset member: %v\n", member)
 		return -1, nil
 	} else {
 		if s, err := Int64(v, nil); err != nil {
@@ -510,7 +508,7 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 				n--
 				return n, nil
 			} else {
-				log.Printf("last key decode error: %v, %v, %v\n", lastKey, m, member)
+				dbLog.Infof("last key decode error: %v, %v, %v\n", lastKey, m, member)
 			}
 		}
 	}

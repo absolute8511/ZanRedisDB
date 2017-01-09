@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"log"
 	"os"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -63,9 +62,6 @@ func (s *KVStore) LocalDelete(key []byte) error {
 
 func (s *KVStore) LocalPut(key []byte, value []byte) error {
 	err := s.KVSet(key, value)
-	if err != nil {
-		log.Printf("failed to write key %v to db: %v\n", string(key), err)
-	}
 	return err
 }
 

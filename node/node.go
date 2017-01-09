@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"path"
@@ -162,7 +161,7 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 		ts.KeyNum = cnt
 		ns.TStats = append(ns.TStats, ts)
 	}
-	log.Println(self.store.GetStatistics())
+	nodeLog.Info(self.store.GetStatistics())
 	return ns
 }
 
@@ -270,9 +269,9 @@ func (self *KVNode) handleProposeReq() {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			log.Printf("handle propose loop panic: %s:%v", buf, e)
+			nodeLog.Infof("handle propose loop panic: %s:%v", buf, e)
 		}
-		log.Printf("handle propose loop exit")
+		nodeLog.Infof("handle propose loop exit")
 		for _, r := range reqList.Reqs {
 			self.w.Trigger(r.Header.ID, common.ErrStopped)
 		}
@@ -303,7 +302,7 @@ func (self *KVNode) handleProposeReq() {
 			reqList.ReqNum = int32(len(reqList.Reqs))
 			buffer, err := reqList.Marshal()
 			if err != nil {
-				log.Printf("failed to marshal request: %v", err)
+				nodeLog.Infof("failed to marshal request: %v", err)
 				for _, r := range reqList.Reqs {
 					self.w.Trigger(r.Header.ID, err)
 				}
@@ -311,7 +310,7 @@ func (self *KVNode) handleProposeReq() {
 				continue
 			}
 			lastReq.done = make(chan struct{})
-			//log.Printf("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
+			//nodeLog.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := time.Now()
 			self.proposeC <- buffer
@@ -322,7 +321,7 @@ func (self *KVNode) handleProposeReq() {
 			}
 			cost := time.Since(start)
 			if len(reqList.Reqs) >= 100 && cost >= time.Second || (cost >= time.Second*2) {
-				log.Printf("slow for batch: %v, %v", len(reqList.Reqs), cost)
+				nodeLog.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
 			}
 			reqList.Reqs = reqList.Reqs[:0]
 			lastReq = nil
@@ -344,7 +343,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 			self.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
 		}
 	}
-	//log.Printf("queue request: %v", req.reqData.String())
+	//nodeLog.Infof("queue request: %v", req.reqData.String())
 	var err error
 	var rsp interface{}
 	var ok bool
@@ -401,16 +400,16 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 		return
 	}
 	// signaled to load snapshot
-	log.Printf("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
-	defer log.Printf("finished applying snapshot at index %d\n", np)
+	nodeLog.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
+	defer nodeLog.Infof("finished applying snapshot at index %d\n", np)
 
 	if applyEvent.snapshot.Metadata.Index <= np.appliedi {
-		log.Fatalf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
+		nodeLog.Fatalf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
 
 	if err := self.RestoreFromSnapshot(false, applyEvent.snapshot); err != nil {
-		log.Panic(err)
+		nodeLog.Panic(err)
 	}
 
 	self.raftNode.applySnapshot(applyEvent.snapshot)
@@ -427,7 +426,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 	}
 	firsti := applyEvent.ents[0].Index
 	if firsti > np.appliedi+1 {
-		log.Panicf("first index of committed entry[%d] should <= appliedi[%d] + 1", firsti, np.appliedi)
+		nodeLog.Panicf("first index of committed entry[%d] should <= appliedi[%d] + 1", firsti, np.appliedi)
 	}
 	var ents []raftpb.Entry
 	if np.appliedi+1-firsti < uint64(len(applyEvent.ents)) {
@@ -448,12 +447,12 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 				var reqList BatchInternalRaftRequest
 				parseErr := reqList.Unmarshal(evnt.Data)
 				if parseErr != nil {
-					log.Printf("parse request failed: %v, data len %v, entry: %v, raw:%v",
+					nodeLog.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
 						parseErr, len(evnt.Data), evnt,
 						string(evnt.Data))
 				}
 				if len(reqList.Reqs) != int(reqList.ReqNum) {
-					log.Printf("request check failed %v, real len:%v",
+					nodeLog.Infof("request check failed %v, real len:%v",
 						reqList, len(reqList.Reqs))
 				}
 				for _, req := range reqList.Reqs {
@@ -466,14 +465,14 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 							cmdName := strings.ToLower(string(cmd.Args[0]))
 							h, ok := self.router.GetInternalCmdHandler(cmdName)
 							if !ok {
-								log.Printf("unsupported redis command: %v", cmd)
+								nodeLog.Infof("unsupported redis command: %v", cmd)
 								self.w.Trigger(reqID, common.ErrInvalidCommand)
 							} else {
 								cmdStart := time.Now()
 								v, err := h(cmd)
 								cmdCost := time.Since(cmdStart)
 								if cmdCost >= time.Millisecond*500 {
-									log.Printf("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
+									nodeLog.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 								}
 								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 								// write the future response or error
@@ -490,7 +489,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 						dec := gob.NewDecoder(bytes.NewBuffer(req.Data))
 						var err error
 						if err = dec.Decode(&dataKv); err != nil {
-							log.Fatalf("could not decode message (%v)\n", err)
+							nodeLog.Fatalf("could not decode message (%v)\n", err)
 						} else {
 							err = self.store.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
 						}
@@ -501,7 +500,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 				}
 				cost := time.Since(start)
 				if len(reqList.Reqs) >= 100 && cost > time.Second || (cost > time.Second*2) {
-					log.Printf("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
+					nodeLog.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
 				}
 
 			}
@@ -514,7 +513,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 		}
 		np.appliedi = evnt.Index
 		if evnt.Index == self.raftNode.lastIndex {
-			log.Printf("replay finished at index: %v\n", evnt.Index)
+			nodeLog.Infof("replay finished at index: %v\n", evnt.Index)
 		}
 	}
 	if shouldStop {
@@ -542,7 +541,7 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 		snapi:     snap.Metadata.Index,
 		appliedi:  snap.Metadata.Index,
 	}
-	log.Printf("starting state: %v\n", np)
+	nodeLog.Infof("starting state: %v\n", np)
 	for {
 		select {
 		case ent := <-commitC:
@@ -554,7 +553,7 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 			if !ok {
 				return
 			}
-			log.Printf("error: %v", err)
+			nodeLog.Infof("error: %v", err)
 			return
 		case <-self.stopChan:
 			return
@@ -574,10 +573,10 @@ func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
 		return
 	}
 
-	log.Printf("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
+	nodeLog.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
 	err := self.raftNode.beginSnapshot(np.appliedi, np.confState)
 	if err != nil {
-		log.Printf("begin snapshot failed: %v", err)
+		nodeLog.Infof("begin snapshot failed: %v", err)
 		return
 	}
 
@@ -605,7 +604,7 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		return err
 	}
 	self.raftNode.RestoreMembers(si.Members)
-	log.Printf("should recovery from snapshot here: %v, %v, %v", si.BackupMeta, si.LeaderInfo, si.Members)
+	nodeLog.Infof("should recovery from snapshot here: %v, %v, %v", si.BackupMeta, si.LeaderInfo, si.Members)
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
@@ -621,7 +620,7 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		// hasBackup = false
 	}
 	if !hasBackup {
-		log.Printf("local no backup for snapshot, copy from remote\n")
+		nodeLog.Infof("local no backup for snapshot, copy from remote\n")
 		syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
 		if syncAddr == "" && syncDir == "" {
 			panic("no backup can be found from others")
@@ -650,7 +649,7 @@ func (self *KVNode) checkLocalBackup(rs raftpb.Snapshot) (bool, error) {
 	var si KVSnapInfo
 	err := json.Unmarshal(rs.Data, &si)
 	if err != nil {
-		log.Printf("unmarshal snap meta failed: %v", string(rs.Data))
+		nodeLog.Infof("unmarshal snap meta failed: %v", string(rs.Data))
 		return false, err
 	}
 	return self.store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
@@ -716,14 +715,14 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 			strconv.Itoa(m.HttpAPIPort)+"/cluster/checkbackup/"+self.ns, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
 		if err != nil {
-			log.Printf("request error: %v", err)
+			nodeLog.Infof("request error: %v", err)
 			continue
 		}
 		rsp.Body.Close()
 		if m.Broadcast == h {
 			if m.DataDir == self.store.GetBackupBase() {
 				// the leader is old mine, try find another leader
-				log.Printf("data dir can not be same if on local: %v, %v", m, self.store.GetBackupBase())
+				nodeLog.Infof("data dir can not be same if on local: %v, %v", m, self.store.GetBackupBase())
 				continue
 			}
 			// local node with different directory
@@ -734,6 +733,6 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 		syncDir = m.DataDir
 		break
 	}
-	log.Printf("should recovery from : %v, %v", syncAddr, syncDir)
+	nodeLog.Infof("should recovery from : %v, %v", syncAddr, syncDir)
 	return syncAddr, syncDir
 }

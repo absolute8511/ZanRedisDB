@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"strconv"
@@ -47,13 +46,11 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	key := req.RequestURI
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		log.Printf("Failed to read on POST (%v)\n", err)
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 
 	nodeId, err := strconv.ParseUint(key[1:], 0, 64)
 	if err != nil {
-		log.Printf("Failed to convert ID for conf change (%v)\n", err)
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 
@@ -77,7 +74,6 @@ func (self *Server) doRemoveNode(w http.ResponseWriter, req *http.Request, ps ht
 	key := req.RequestURI
 	nodeId, err := strconv.ParseUint(key[1:], 0, 64)
 	if err != nil {
-		log.Printf("Failed to convert ID for conf change (%v)\n", err)
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	ns := ps.ByName("namespace")
@@ -120,12 +116,10 @@ func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps
 	}
 	meta, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		log.Printf("Failed to read (%v)\n", err)
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	ok, err := v.node.CheckLocalBackup(meta)
 	if err != nil || !ok {
-		log.Printf("Failed to find backup (%v)\n", meta)
 		return nil, Err{Code: http.StatusNotFound, Text: "no backup found"}
 	}
 	return nil, nil
@@ -158,5 +152,5 @@ func (self *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
 	}
 	err = srv.Serve(l)
 	// exit when raft goes down
-	log.Printf("http server stopped: %v", err)
+	sLog.Infof("http server stopped: %v", err)
 }

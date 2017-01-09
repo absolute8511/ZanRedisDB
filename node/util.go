@@ -6,6 +6,13 @@ import (
 	"strconv"
 )
 
+var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("node"))
+
+func SetLogger(level int32, logger common.Logger) {
+	nodeLog.SetLevel(level)
+	nodeLog.Logger = logger
+}
+
 func buildCommand(args [][]byte) redcon.Command {
 	// build a pipeline command
 	buf := make([]byte, 0, 128)

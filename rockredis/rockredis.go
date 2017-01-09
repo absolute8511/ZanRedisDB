@@ -6,7 +6,6 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 	"io"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -20,6 +19,13 @@ import (
 const (
 	MAX_CHECKPOINT_NUM = 10
 )
+
+var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
+
+func SetLogger(level int32, logger common.Logger) {
+	dbLog.SetLevel(level)
+	dbLog.Logger = logger
+}
 
 func GetCheckpointDir(term uint64, index uint64) string {
 	return fmt.Sprintf("%016x-%016x", term, index)
@@ -56,11 +62,11 @@ func (self CheckpointSortNames) Less(i, j int) bool {
 	lsplit := strings.SplitN(left, "-", 2)
 	rsplit := strings.SplitN(right, "-", 2)
 	if len(lsplit) != 2 || len(rsplit) != 2 {
-		log.Panicf("the checkpoint name is not valid: %v, %v", left, right)
+		dbLog.Panicf("the checkpoint name is not valid: %v, %v", left, right)
 	}
 	lterm, err := strconv.ParseUint(lsplit[0], 16, 64)
 	if err != nil {
-		log.Panicf("the checkpoint name is not valid: %v, %v, %v", left, right, err)
+		dbLog.Panicf("the checkpoint name is not valid: %v, %v, %v", left, right, err)
 	}
 	lindex, _ := strconv.ParseUint(lsplit[1], 16, 64)
 	rterm, _ := strconv.ParseUint(rsplit[0], 16, 64)
@@ -74,7 +80,7 @@ func (self CheckpointSortNames) Less(i, j int) bool {
 func purgeOldCheckpoint(keepNum int, checkpointDir string) {
 	defer func() {
 		if e := recover(); e != nil {
-			log.Printf("purge old checkpoint failed: %v", e)
+			dbLog.Infof("purge old checkpoint failed: %v", e)
 		}
 	}()
 	checkpointList, err := filepath.Glob(path.Join(checkpointDir, "*-*"))
@@ -86,7 +92,7 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string) {
 		sort.Sort(sortedNameList)
 		for i := 0; i < len(sortedNameList)-keepNum; i++ {
 			os.RemoveAll(sortedNameList[i])
-			log.Printf("clean checkpoint : %v", sortedNameList[i])
+			dbLog.Infof("clean checkpoint : %v", sortedNameList[i])
 		}
 	}
 }
@@ -297,17 +303,17 @@ func (r *RockDB) backupLoop() {
 
 			func() {
 				defer close(rsp.done)
-				log.Printf("begin backup to:%v \n", rsp.backupDir)
+				dbLog.Infof("begin backup to:%v \n", rsp.backupDir)
 				start := time.Now()
 				ck, err := gorocksdb.NewCheckpoint(r.eng)
 				if err != nil {
-					log.Printf("init checkpoint failed: %v", err)
+					dbLog.Infof("init checkpoint failed: %v", err)
 					rsp.err = err
 					return
 				}
 				_, err = os.Stat(rsp.backupDir)
 				if !os.IsNotExist(err) {
-					log.Printf("checkpoint exist: %v, remove it", rsp.backupDir)
+					dbLog.Infof("checkpoint exist: %v, remove it", rsp.backupDir)
 					os.RemoveAll(rsp.backupDir)
 				}
 				time.AfterFunc(time.Second*2, func() {
@@ -315,12 +321,12 @@ func (r *RockDB) backupLoop() {
 				})
 				err = ck.Save(rsp.backupDir)
 				if err != nil {
-					log.Printf("save checkpoint failed: %v", err)
+					dbLog.Infof("save checkpoint failed: %v", err)
 					rsp.err = err
 					return
 				}
 				cost := time.Now().Sub(start)
-				log.Printf("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
+				dbLog.Infof("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
 				// purge some old checkpoint
 				rsp.rsp = []byte(rsp.backupDir)
 				purgeOldCheckpoint(MAX_CHECKPOINT_NUM, r.GetBackupDir())
@@ -350,7 +356,7 @@ func (r *RockDB) IsLocalBackupOK(term uint64, index uint64) (bool, error) {
 	ro.SetCreateIfMissing(false)
 	db, err := gorocksdb.OpenDbForReadOnly(&ro, path.Join(backupDir, checkpointDir), false)
 	if err != nil {
-		log.Printf("checkpoint open failed: %v", err)
+		dbLog.Infof("checkpoint open failed: %v", err)
 		return false, err
 	}
 	db.Close()
@@ -407,7 +413,7 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 
 	checkpointDir := GetCheckpointDir(term, index)
 	start := time.Now()
-	log.Printf("begin restore from checkpoint: %v\n", checkpointDir)
+	dbLog.Infof("begin restore from checkpoint: %v\n", checkpointDir)
 	r.eng.Close()
 	// 1. remove all files in current db except sst files
 	// 2. get the list of sst in checkpoint
@@ -416,12 +422,12 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 	matchName := path.Join(r.GetDataDir(), "*")
 	nameList, err := filepath.Glob(matchName)
 	if err != nil {
-		log.Printf("list files failed:  %v\n", err)
+		dbLog.Infof("list files failed:  %v\n", err)
 		return err
 	}
 	ckNameList, err := filepath.Glob(path.Join(backupDir, checkpointDir, "*"))
 	if err != nil {
-		log.Printf("list checkpoint files failed:  %v\n", err)
+		dbLog.Infof("list checkpoint files failed:  %v\n", err)
 		return err
 	}
 	ckSstNameMap := make(map[string]bool)
@@ -438,32 +444,32 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 		}
 		if strings.HasSuffix(shortName, ".sst") {
 			if _, ok := ckSstNameMap[shortName]; ok {
-				log.Printf("keeping sst file: %v", fn)
+				dbLog.Infof("keeping sst file: %v", fn)
 				continue
 			}
 		}
-		log.Printf("removing: %v", fn)
+		dbLog.Infof("removing: %v", fn)
 		os.RemoveAll(fn)
 	}
 	for _, fn := range ckNameList {
 		if strings.HasPrefix(path.Base(fn), "LOG") {
-			log.Printf("ignore copy LOG file: %v", fn)
+			dbLog.Infof("ignore copy LOG file: %v", fn)
 			continue
 		}
 		dst := path.Join(r.GetDataDir(), path.Base(fn))
 		err := copyFile(fn, dst, false)
 		if err != nil {
-			log.Printf("copy %v to %v failed: %v", fn, dst, err)
+			dbLog.Infof("copy %v to %v failed: %v", fn, dst, err)
 			return err
 		} else {
-			log.Printf("copy %v to %v done", fn, dst)
+			dbLog.Infof("copy %v to %v done", fn, dst)
 		}
 	}
 
 	err = r.reOpen()
-	log.Printf("restore done, cost: %v\n", time.Now().Sub(start))
+	dbLog.Infof("restore done, cost: %v\n", time.Now().Sub(start))
 	if err != nil {
-		log.Printf("reopen the restored db failed:  %v\n", err)
+		dbLog.Infof("reopen the restored db failed:  %v\n", err)
 	}
 	return err
 }

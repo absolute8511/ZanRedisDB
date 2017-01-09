@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
-	"log"
 )
 
 type kv struct {
@@ -25,7 +24,6 @@ func (self *KVNode) Put(k string, v string) error {
 	}
 
 	if err := gob.NewEncoder(&buf).Encode(kv{Key: string(key), Val: v}); err != nil {
-		log.Println(err)
 		return err
 	}
 	_, err = self.HTTPPropose(buf.Bytes())

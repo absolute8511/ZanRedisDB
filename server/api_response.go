@@ -9,7 +9,6 @@ import (
 
 	"errors"
 	"github.com/julienschmidt/httprouter"
-	"log"
 )
 
 var (
@@ -119,8 +118,10 @@ func Log(level int32) Decorator {
 				status = e.Code
 			}
 			if status != 200 || (status == 200 && level > 1) {
-				log.Output(2, fmt.Sprintf("%d %s %s (%s) %s",
-					status, req.Method, req.URL.RequestURI(), req.RemoteAddr, elapsed))
+				if sLog.Logger != nil {
+					sLog.Logger.Output(2, fmt.Sprintf("%d %s %s (%s) %s",
+						status, req.Method, req.URL.RequestURI(), req.RemoteAddr, elapsed))
+				}
 			}
 			return response, err
 		}
