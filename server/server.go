@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
@@ -11,7 +10,6 @@ import (
 	"net/http"
 	"path"
 	"sync"
-	"time"
 )
 
 var (
@@ -131,26 +129,6 @@ func (self *Server) InitKVNamespace(clusterID uint64, id int, localRaftAddr stri
 	self.mutex.Lock()
 	self.kvNodes[conf.Name] = n
 	self.mutex.Unlock()
-	_, ok := clusterNodes[id]
-	if ok {
-		var m node.MemberInfo
-		m.ID = uint64(id)
-		m.ClusterID = clusterID
-		m.DataDir = kvOpts.DataDir
-		m.RaftURLs = append(m.RaftURLs, localRaftAddr)
-		m.Broadcast = self.conf.BroadcastAddr
-		m.HttpAPIPort = self.conf.HttpAPIPort
-		data, _ := json.Marshal(m)
-		go func() {
-			cc := raftpb.ConfChange{
-				Type:    raftpb.ConfChangeUpdateNode,
-				NodeID:  uint64(id),
-				Context: data,
-			}
-			time.Sleep(time.Second)
-			self.ProposeConfChange(conf.Name, cc)
-		}()
-	}
 	return nil
 }
 

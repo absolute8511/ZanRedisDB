@@ -84,10 +84,10 @@ type MemberInfo struct {
 
 // A key-value stream backed by raft
 type raftNode struct {
-	proposeC    <-chan []byte            // proposed messages (k,v)
-	confChangeC <-chan raftpb.ConfChange // proposed cluster config changes
-	commitC     chan<- applyInfo         // entries committed to log (k,v)
-	errorC      chan error               // errors from raft session
+	proposeC    <-chan []byte          // proposed messages (k,v)
+	confChangeC chan raftpb.ConfChange // proposed cluster config changes
+	commitC     chan<- applyInfo       // entries committed to log (k,v)
+	errorC      chan error             // errors from raft session
 	config      *RaftConfig
 
 	memMutex  sync.Mutex
@@ -120,7 +120,7 @@ type raftNode struct {
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries. To shutdown, close proposeC and read errorC.
 func newRaftNode(rconfig *RaftConfig, join bool, ds DataStorage, proposeC <-chan []byte,
-	confChangeC <-chan raftpb.ConfChange) (<-chan applyInfo, <-chan error, *raftNode) {
+	confChangeC chan raftpb.ConfChange) (<-chan applyInfo, <-chan error, *raftNode) {
 
 	commitC := make(chan applyInfo, 1000)
 	errorC := make(chan error)
@@ -328,6 +328,29 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		startPeers := rpeers
 		if rc.join {
 			startPeers = nil
+		} else {
+			// always update myself to cluster while first start, to allow all the members in
+			// the cluster be notified the newest info of this node.
+			_, ok := rc.config.RaftPeers[rc.config.ID]
+			if ok {
+				var m MemberInfo
+				m.ID = uint64(rc.config.ID)
+				m.ClusterID = rc.config.ClusterID
+				m.DataDir = rc.config.DataDir
+				m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
+				m.Broadcast = rc.config.nodeConfig.BroadcastAddr
+				m.HttpAPIPort = rc.config.nodeConfig.HttpAPIPort
+				data, _ := json.Marshal(m)
+				go func() {
+					cc := raftpb.ConfChange{
+						Type:    raftpb.ConfChangeUpdateNode,
+						NodeID:  m.ID,
+						Context: data,
+					}
+					time.Sleep(time.Second)
+					rc.confChangeC <- cc
+				}()
+			}
 		}
 		rc.node = raft.StartNode(c, startPeers)
 	}
