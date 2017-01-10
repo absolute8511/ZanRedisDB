@@ -432,8 +432,6 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 		nodeLog.Panic(err)
 	}
 
-	self.raftNode.applySnapshot(applyEvent.snapshot)
-
 	np.confState = applyEvent.snapshot.Metadata.ConfState
 	np.snapi = applyEvent.snapshot.Metadata.Index
 	np.appliedi = applyEvent.snapshot.Metadata.Index
@@ -616,7 +614,7 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		return err
 	}
 	self.raftNode.RestoreMembers(si.Members)
-	nodeLog.Infof("should recovery from snapshot here: %v, %v, %v", si.BackupMeta, si.LeaderInfo, si.Members)
+	nodeLog.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader

@@ -447,17 +447,6 @@ func (rc *raftNode) stopHTTP() {
 	<-rc.httpdonec
 }
 
-func (rc *raftNode) applySnapshot(snapshotToSave raftpb.Snapshot) {
-	rc.transport.RemoveAllPeers()
-	rc.memMutex.Lock()
-	for _, m := range rc.members {
-		if m.ID != uint64(rc.config.ID) {
-			rc.transport.AddPeer(types.ID(m.ID), m.RaftURLs)
-		}
-	}
-	rc.memMutex.Unlock()
-}
-
 func newSnapshotReaderCloser() io.ReadCloser {
 	pr, pw := io.Pipe()
 	go func() {
@@ -730,6 +719,12 @@ func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
 		} else {
 			rc.members[m.ID] = m
 			nodeLog.Infof("node added to the cluster: %v\n", m)
+		}
+	}
+	rc.transport.RemoveAllPeers()
+	for _, m := range rc.members {
+		if m.ID != uint64(rc.config.ID) {
+			rc.transport.AddPeer(types.ID(m.ID), m.RaftURLs)
 		}
 	}
 	rc.memMutex.Unlock()
