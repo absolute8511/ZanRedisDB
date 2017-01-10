@@ -9,6 +9,9 @@ import (
 )
 
 func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err error) {
+	if len(args) == 0 {
+		return
+	}
 	cursor = args[0]
 	args = args[1:]
 	count = 0
@@ -47,11 +50,11 @@ func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err e
 // SCAN cursor [MATCH match] [COUNT count]
 // scan only kv type, cursor is table:key
 func (self *KVNode) scanCommand(conn redcon.Conn, cmd redcon.Command) {
-	args := cmd.Args[1:]
-	if len(args) < 1 {
+	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	args := cmd.Args[1:]
 	cursor, match, count, err := parseScanArgs(args)
 
 	if err != nil {
@@ -148,12 +151,12 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 // HSCAN key cursor [MATCH match] [COUNT count]
 // key is (table:key)
 func (self *KVNode) hscanCommand(conn redcon.Conn, cmd redcon.Command) {
-	args := cmd.Args[1:]
-
-	if len(args) < 2 {
+	// the cursor can be nil means scan from start of the hash
+	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	args := cmd.Args[1:]
 	key := args[0]
 	cursor, match, count, err := parseScanArgs(args[1:])
 
@@ -190,11 +193,11 @@ func (self *KVNode) hscanCommand(conn redcon.Conn, cmd redcon.Command) {
 //SSCAN key cursor [MATCH match] [COUNT count]
 // key is (table:key)
 func (self *KVNode) sscanCommand(conn redcon.Conn, cmd redcon.Command) {
-	args := cmd.Args[1:]
-	if len(args) < 2 {
+	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	args := cmd.Args[1:]
 	key := args[0]
 
 	cursor, match, count, err := parseScanArgs(args[1:])
@@ -228,12 +231,11 @@ func (self *KVNode) sscanCommand(conn redcon.Conn, cmd redcon.Command) {
 // ZSCAN key cursor [MATCH match] [COUNT count]
 // key is (table:key)
 func (self *KVNode) zscanCommand(conn redcon.Conn, cmd redcon.Command) {
-	args := cmd.Args[1:]
-
-	if len(args) < 2 {
+	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	args := cmd.Args[1:]
 	key := args[0]
 
 	cursor, match, count, err := parseScanArgs(args[1:])
