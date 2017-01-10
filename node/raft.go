@@ -371,12 +371,13 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	}
 
 	rc.transport.Start()
-	for id, v := range rc.config.RaftPeers {
-		if id != rc.config.ID {
-			rc.transport.AddPeer(types.ID(id), []string{v})
+	if !oldwal {
+		for id, v := range rc.config.RaftPeers {
+			if id != rc.config.ID {
+				rc.transport.AddPeer(types.ID(id), []string{v})
+			}
 		}
 	}
-
 	for _, m := range rc.members {
 		if m.ID != uint64(rc.config.ID) {
 			rc.transport.AddPeer(types.ID(m.ID), m.RaftURLs)
@@ -721,10 +722,12 @@ func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
 			nodeLog.Infof("node added to the cluster: %v\n", m)
 		}
 	}
-	rc.transport.RemoveAllPeers()
-	for _, m := range rc.members {
-		if m.ID != uint64(rc.config.ID) {
-			rc.transport.AddPeer(types.ID(m.ID), m.RaftURLs)
+	if rc.transport != nil {
+		rc.transport.RemoveAllPeers()
+		for _, m := range rc.members {
+			if m.ID != uint64(rc.config.ID) {
+				rc.transport.AddPeer(types.ID(m.ID), m.RaftURLs)
+			}
 		}
 	}
 	rc.memMutex.Unlock()
