@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
 
@@ -125,7 +126,7 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	stop := sEncodeStopKey(key)
 
 	var num int64 = 0
-	it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
+	it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	for ; it.Valid(); it.Next() {
 		wb.Delete(it.RefKey())
 		num++
@@ -275,7 +276,7 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 
 	v := make([][]byte, 0, 16)
 
-	it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
+	it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		_, m, err := sDecodeSetKey(it.Key())

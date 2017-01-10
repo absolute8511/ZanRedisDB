@@ -165,6 +165,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 
 	namespace, _, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
+		sLog.Infof("failed to get the namespace of the redis command:%v", rawKey)
 		return nil, cmd, err
 	}
 	self.mutex.Lock()

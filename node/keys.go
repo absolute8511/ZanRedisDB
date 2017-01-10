@@ -1,34 +1,9 @@
 package node
 
 import (
-	"bytes"
-	"encoding/gob"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 )
-
-type kv struct {
-	Key   string
-	Val   string
-	Err   error
-	ReqID int64
-	// the write operation describe
-	Op string
-}
-
-func (self *KVNode) Put(k string, v string) error {
-	var buf bytes.Buffer
-	_, key, err := common.ExtractNamesapce([]byte(k))
-	if err != nil {
-		return err
-	}
-
-	if err := gob.NewEncoder(&buf).Encode(kv{Key: string(key), Val: v}); err != nil {
-		return err
-	}
-	_, err = self.HTTPPropose(buf.Bytes())
-	return err
-}
 
 func (self *KVNode) Lookup(key []byte) ([]byte, error) {
 	_, key, err := common.ExtractNamesapce(key)

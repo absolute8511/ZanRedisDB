@@ -458,7 +458,7 @@ func (db *RockDB) ZCount(key []byte, min int64, max int64) (int64, error) {
 	}
 	minKey := zEncodeStartScoreKey(key, min)
 	maxKey := zEncodeStopScoreKey(key, max)
-	it := NewDBRangeIterator(db.eng, minKey, maxKey, RangeClose, false)
+	it := NewDBRangeIterator(db.eng, minKey, maxKey, common.RangeClose, false)
 
 	var n int64 = 0
 	for ; it.Valid(); it.Next() {
@@ -487,10 +487,10 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 			var rit *RangeLimitedIterator
 			if !reverse {
 				minKey := zEncodeStartScoreKey(key, MinScore)
-				rit = NewDBRangeIterator(db.eng, minKey, sk, RangeClose, reverse)
+				rit = NewDBRangeIterator(db.eng, minKey, sk, common.RangeClose, reverse)
 			} else {
 				maxKey := zEncodeStopScoreKey(key, MaxScore)
-				rit = NewDBRangeIterator(db.eng, sk, maxKey, RangeClose, reverse)
+				rit = NewDBRangeIterator(db.eng, sk, maxKey, common.RangeClose, reverse)
 			}
 			defer rit.Close()
 
@@ -531,7 +531,7 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 
 	minKey := zEncodeStartScoreKey(key, min)
 	maxKey := zEncodeStopScoreKey(key, max)
-	it := NewDBRangeLimitIterator(db.eng, minKey, maxKey, RangeClose, offset, count, false)
+	it := NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
 	num := int64(0)
 	for ; it.Valid(); it.Next() {
 		sk := it.RefKey()
@@ -586,9 +586,9 @@ func (db *RockDB) zRange(key []byte, min int64, max int64, offset int, count int
 	//if reverse and offset is 0, count < 0, we may use forward iterator then reverse
 	//because store iterator prev is slower than next
 	if !reverse || (offset == 0 && count < 0) {
-		it = NewDBRangeLimitIterator(db.eng, minKey, maxKey, RangeClose, offset, count, false)
+		it = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
 	} else {
-		it = NewDBRangeLimitIterator(db.eng, minKey, maxKey, RangeClose, offset, count, true)
+		it = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, true)
 	}
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()

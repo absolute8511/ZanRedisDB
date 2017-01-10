@@ -10,44 +10,6 @@ const (
 	NotFound ErrType = 1
 )
 
-type DataType byte
-
-// for out use
-const (
-	NONE DataType = iota
-	KV
-	LIST
-	HASH
-	SET
-	ZSET
-	ALL
-)
-
-func (d DataType) String() string {
-	switch d {
-	case KV:
-		return KVName
-	case LIST:
-		return ListName
-	case HASH:
-		return HashName
-	case SET:
-		return SetName
-	case ZSET:
-		return ZSetName
-	default:
-		return "unknown"
-	}
-}
-
-const (
-	KVName   = "KV"
-	ListName = "LIST"
-	HashName = "HASH"
-	SetName  = "SET"
-	ZSetName = "ZSET"
-)
-
 // for backend store
 const (
 	NoneType byte = 0
@@ -100,7 +62,7 @@ var (
 )
 
 const (
-	defaultScanCount int = 10
+	defaultScanCount int = 100
 	MAX_BATCH_NUM        = 5000
 	RANGE_DELETE_NUM     = 100000
 )

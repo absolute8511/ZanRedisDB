@@ -1690,3 +1690,113 @@ func TestZSetLex(t *testing.T) {
 		t.Fatal(n)
 	}
 }
+
+func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
+	a, err := goredis.Strings(ay, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(a) != len(values) {
+		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
+	}
+	for i, v := range a {
+		if string(v) != fmt.Sprintf("testscan:%v", values[i]) {
+			t.Fatal(fmt.Sprintf("%d %s != %v", string(v), values[i]))
+		}
+	}
+}
+
+func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"", tp, "count", 5)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "testscan:4" {
+		t.Fatal(string(n))
+	} else {
+		checkScanValues(t, ay[1], 0, 1, 2, 3, 4)
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"4", tp, "count", 6)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "" {
+		t.Fatal(string(n))
+	} else {
+		checkScanValues(t, ay[1], 5, 6, 7, 8, 9)
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"9", tp, "count", 0)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "" {
+		t.Fatal(string(n))
+	} else {
+		if len(ay[1].([]interface{})) != 0 {
+			t.Fatal(ay[1])
+		}
+	}
+}
+
+func TestScan(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	testKVScan(t, c)
+	testHashKeyScan(t, c)
+	testListKeyScan(t, c)
+	testZSetKeyScan(t, c)
+	//testSetKeyScan(t, c)
+}
+
+func testKVScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 10; i++ {
+		if _, err := c.Do("set", "default:testscan:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkAdvanceScan(t, c, "KV")
+}
+
+func testHashKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 10; i++ {
+		if _, err := c.Do("hset", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkAdvanceScan(t, c, "HASH")
+}
+
+func testListKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 10; i++ {
+		if _, err := c.Do("lpush", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkAdvanceScan(t, c, "LIST")
+}
+
+func testZSetKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 10; i++ {
+		if _, err := c.Do("zadd", "default:testscan:"+fmt.Sprintf("%d", i), i, []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkAdvanceScan(t, c, "ZSET")
+}
+
+func testSetKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 10; i++ {
+		if _, err := c.Do("sadd", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkAdvanceScan(t, c, "SET")
+}

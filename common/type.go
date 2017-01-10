@@ -20,6 +20,44 @@ var (
 	ErrInvalidRedisKey = errors.New("invalid redis key")
 )
 
+// for out use
+type DataType byte
+
+const (
+	NONE DataType = iota
+	KV
+	LIST
+	HASH
+	SET
+	ZSET
+	ALL
+)
+
+const (
+	KVName   = "KV"
+	ListName = "LIST"
+	HashName = "HASH"
+	SetName  = "SET"
+	ZSetName = "ZSET"
+)
+
+func (d DataType) String() string {
+	switch d {
+	case KV:
+		return KVName
+	case LIST:
+		return ListName
+	case HASH:
+		return HashName
+	case SET:
+		return SetName
+	case ZSET:
+		return ZSetName
+	default:
+		return "unknown"
+	}
+}
+
 type WriteCmd struct {
 	Operation string
 	Args      [][]byte

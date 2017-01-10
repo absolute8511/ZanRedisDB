@@ -2,7 +2,6 @@ package node
 
 import (
 	"bytes"
-	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -227,6 +226,13 @@ func (self *KVNode) registerHandler() {
 	self.router.Register("zremrangebyscore", self.zremrangebyscoreCommand)
 	self.router.Register("zremrangebylex", self.zremrangebylexCommand)
 	self.router.Register("zclear", wrapWriteCommandK(self, self.zclearCommand))
+
+	// for scan
+	self.router.Register("scan", wrapReadCommandKAnySubkey(self.scanCommand))
+	self.router.Register("hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
+	self.router.Register("sscan", wrapReadCommandKAnySubkey(self.sscanCommand))
+	self.router.Register("zscan", wrapReadCommandKAnySubkey(self.zscanCommand))
+	self.router.Register("advscan", self.advanceScanCommand)
 
 	// only write command need to be registered as internal
 	// kv
@@ -484,16 +490,8 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 							}
 						}
 					} else if req.Header.DataType == int32(HTTPReq) {
-						// try other protocol command
-						var dataKv kv
-						dec := gob.NewDecoder(bytes.NewBuffer(req.Data))
-						var err error
-						if err = dec.Decode(&dataKv); err != nil {
-							nodeLog.Fatalf("could not decode message (%v)\n", err)
-						} else {
-							err = self.store.LocalPut([]byte(dataKv.Key), []byte(dataKv.Val))
-						}
-						self.w.Trigger(reqID, err)
+						//TODO: try other protocol command
+						self.w.Trigger(reqID, errUnknownData)
 					} else {
 						self.w.Trigger(reqID, errUnknownData)
 					}

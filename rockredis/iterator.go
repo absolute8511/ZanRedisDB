@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"bytes"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
 
@@ -18,13 +19,6 @@ type Iterator interface {
 	RefValue() []byte
 	Value() []byte
 }
-
-const (
-	RangeClose uint8 = 0x00
-	RangeLOpen uint8 = 0x01
-	RangeROpen uint8 = 0x10
-	RangeOpen  uint8 = 0x11
-)
 
 type Range struct {
 	Min  []byte
@@ -169,7 +163,7 @@ func (it *RangeLimitedIterator) Valid() bool {
 	if !it.reverse {
 		if it.r.Max != nil {
 			r := bytes.Compare(it.Iterator.RefKey(), it.r.Max)
-			if it.r.Type&RangeROpen > 0 {
+			if it.r.Type&common.RangeROpen > 0 {
 				return !(r >= 0)
 			} else {
 				return !(r > 0)
@@ -178,7 +172,7 @@ func (it *RangeLimitedIterator) Valid() bool {
 	} else {
 		if it.r.Min != nil {
 			r := bytes.Compare(it.Iterator.RefKey(), it.r.Min)
-			if it.r.Type&RangeLOpen > 0 {
+			if it.r.Type&common.RangeLOpen > 0 {
 				return !(r <= 0)
 			} else {
 				return !(r < 0)
@@ -225,7 +219,7 @@ func rangeLimitIterator(i Iterator, r *Range, l *Limit, reverse bool) *RangeLimi
 			it.Iterator.SeekToFirst()
 		} else {
 			it.Iterator.Seek(r.Min)
-			if r.Type&RangeLOpen > 0 {
+			if r.Type&common.RangeLOpen > 0 {
 				if it.Iterator.Valid() && bytes.Equal(it.Iterator.RefKey(), r.Min) {
 					it.Iterator.Next()
 				}
@@ -243,7 +237,7 @@ func rangeLimitIterator(i Iterator, r *Range, l *Limit, reverse bool) *RangeLimi
 					it.Iterator.Prev()
 				}
 			}
-			if r.Type&RangeROpen > 0 {
+			if r.Type&common.RangeROpen > 0 {
 				if it.Iterator.Valid() && bytes.Equal(it.Iterator.RefKey(), r.Max) {
 					it.Iterator.Prev()
 				}

@@ -240,38 +240,38 @@ func TestZLex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if ay, err := db.ZRangeByLex(key, nil, []byte("c"), RangeClose, 0, -1); err != nil {
+	if ay, err := db.ZRangeByLex(key, nil, []byte("c"), common.RangeClose, 0, -1); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ay, [][]byte{[]byte("a"), []byte("b"), []byte("c")}) {
 		t.Errorf("must equal a, b, c: %v", ay)
 	}
 
-	if ay, err := db.ZRangeByLex(key, nil, []byte("c"), RangeROpen, 0, -1); err != nil {
+	if ay, err := db.ZRangeByLex(key, nil, []byte("c"), common.RangeROpen, 0, -1); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ay, [][]byte{[]byte("a"), []byte("b")}) {
 		t.Errorf("must equal a, b: %v", ay)
 	}
 
-	if ay, err := db.ZRangeByLex(key, []byte("aaa"), []byte("g"), RangeROpen, 0, -1); err != nil {
+	if ay, err := db.ZRangeByLex(key, []byte("aaa"), []byte("g"), common.RangeROpen, 0, -1); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ay, [][]byte{[]byte("b"),
 		[]byte("c"), []byte("d"), []byte("e"), []byte("f")}) {
 		t.Fatal("must equal b, c, d, e, f", fmt.Sprintf("%q", ay))
 	}
 
-	if n, err := db.ZLexCount(key, nil, nil, RangeClose); err != nil {
+	if n, err := db.ZLexCount(key, nil, nil, common.RangeClose); err != nil {
 		t.Fatal(err)
 	} else if n != 7 {
 		t.Fatal(n)
 	}
 
-	if n, err := db.ZRemRangeByLex(key, []byte("aaa"), []byte("g"), RangeROpen); err != nil {
+	if n, err := db.ZRemRangeByLex(key, []byte("aaa"), []byte("g"), common.RangeROpen); err != nil {
 		t.Fatal(err)
 	} else if n != 5 {
 		t.Fatal(n)
 	}
 
-	if n, err := db.ZLexCount(key, nil, nil, RangeClose); err != nil {
+	if n, err := db.ZLexCount(key, nil, nil, common.RangeClose); err != nil {
 		t.Fatal(err)
 	} else if n != 2 {
 		t.Fatal(n)

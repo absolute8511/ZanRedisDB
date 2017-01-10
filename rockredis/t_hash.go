@@ -325,7 +325,7 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch) int64 {
 	start := hEncodeStartKey(hkey)
 	stop := hEncodeStopKey(hkey)
 
-	it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
+	it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	defer it.Close()
 	var num int64 = 0
 	for ; it.Valid(); it.Next() {
@@ -425,7 +425,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 	go func() {
 		start := hEncodeStartKey(key)
 		stop := hEncodeStopKey(key)
-		it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
+		it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {
@@ -457,7 +457,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 	go func() {
 		start := hEncodeStartKey(key)
 		stop := hEncodeStopKey(key)
-		it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
+		it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {
@@ -490,7 +490,7 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 	go func() {
 		start := hEncodeStartKey(key)
 		stop := hEncodeStopKey(key)
-		it := NewDBRangeIterator(db.eng, start, stop, RangeROpen, false)
+		it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {

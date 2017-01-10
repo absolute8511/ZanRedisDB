@@ -3,6 +3,7 @@ package rockredis
 import (
 	"bytes"
 	"errors"
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
 
@@ -72,7 +73,7 @@ func (db *RockDB) GetTables() chan []byte {
 	go func() {
 		s := encodeTableMetaStartKey()
 		e := encodeTableMetaStopKey()
-		it := NewDBRangeIterator(db.eng, s, e, RangeOpen, false)
+		it := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
 		defer it.Close()
 		for ; it.Valid(); it.Next() {
 			rk := it.Key()

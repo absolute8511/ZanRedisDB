@@ -251,7 +251,7 @@ func (r *RockDB) GetInternalPropertyStatus(p string) string {
 func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {
 	retChan := make(chan common.KVRecord, 32)
 	go func() {
-		it := NewDBRangeLimitIterator(r.eng, sKey, eKey, RangeClose, 0, maxNum, false)
+		it := NewDBRangeLimitIterator(r.eng, sKey, eKey, common.RangeClose, 0, maxNum, false)
 		defer it.Close()
 		for it = it; it.Valid(); it.Next() {
 			key := it.Key()
