@@ -226,6 +226,14 @@ func (self *KVNode) registerHandler() {
 	self.router.Register("zremrangebyscore", self.zremrangebyscoreCommand)
 	self.router.Register("zremrangebylex", self.zremrangebylexCommand)
 	self.router.Register("zclear", wrapWriteCommandK(self, self.zclearCommand))
+	// for set
+	self.router.Register("scard", wrapReadCommandK(self.scardCommand))
+	self.router.Register("sismember", wrapReadCommandKSubkey(self.sismemberCommand))
+	self.router.Register("smembers", wrapReadCommandK(self.smembersCommand))
+	self.router.Register("sadd", wrapWriteCommandKSubkeySubkey(self, self.saddCommand))
+	self.router.Register("srem", wrapWriteCommandKSubkeySubkey(self, self.sremCommand))
+	self.router.Register("sclear", wrapWriteCommandK(self, self.sclearCommand))
+	self.router.Register("smclear", wrapWriteCommandKK(self, self.smclearCommand))
 
 	// for scan
 	self.router.Register("scan", wrapReadCommandKAnySubkey(self.scanCommand))
@@ -264,6 +272,11 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterInternal("zremrangebyscore", self.localZremrangebyscoreCommand)
 	self.router.RegisterInternal("zremrangebylex", self.localZremrangebylexCommand)
 	self.router.RegisterInternal("zclear", self.localZclearCommand)
+	// set
+	self.router.RegisterInternal("sadd", self.localSadd)
+	self.router.RegisterInternal("srem", self.localSrem)
+	self.router.RegisterInternal("sclear", self.localSclear)
+	self.router.RegisterInternal("smclear", self.localSmclear)
 }
 
 func (self *KVNode) handleProposeReq() {

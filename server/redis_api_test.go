@@ -938,18 +938,18 @@ func TestListErrorParams(t *testing.T) {
 	}
 }
 
-func disableTestSet(t *testing.T) {
+func TestSet(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
 	key1 := "default:test:testdb_cmd_set_1"
 	key2 := "default:test:testdb_cmd_set_2"
 
-	//if n, err := goredis.Int(c.Do("skeyexists", key1)); err != nil {
-	//	t.Fatal(err)
-	//} else if n != 0 {
-	//	t.Fatal(n)
-	//}
+	if n, err := goredis.Int(c.Do("scard", key1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
 
 	if n, err := goredis.Int(c.Do("sadd", key1, 0, 1)); err != nil {
 		t.Fatal(err)
@@ -957,11 +957,11 @@ func disableTestSet(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	//if n, err := goredis.Int(c.Do("skeyexists", key1)); err != nil {
-	//	t.Fatal(err)
-	//} else if n != 1 {
-	//	t.Fatal(n)
-	//}
+	if n, err := goredis.Int(c.Do("scard", key1)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
 
 	if n, err := goredis.Int(c.Do("sadd", key2, 0, 1, 2, 3)); err != nil {
 		t.Fatal(err)
@@ -1749,7 +1749,7 @@ func TestScan(t *testing.T) {
 	testHashKeyScan(t, c)
 	testListKeyScan(t, c)
 	testZSetKeyScan(t, c)
-	//testSetKeyScan(t, c)
+	testSetKeyScan(t, c)
 }
 
 func testKVScan(t *testing.T, c *goredis.PoolConn) {
