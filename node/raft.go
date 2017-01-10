@@ -311,21 +311,23 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		for id, v := range rc.config.RaftPeers {
 			var m MemberInfo
 			m.ClusterID = rc.config.ClusterID
-			m.ClusterName = ""
 			m.ID = uint64(id)
-			if id == rc.config.ID {
-				m.DataDir = rc.config.DataDir
-				m.Broadcast = rc.config.nodeConfig.BroadcastAddr
-				m.HttpAPIPort = rc.config.nodeConfig.HttpAPIPort
-				m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
-			} else {
-				m.RaftURLs = append(m.RaftURLs, v)
-			}
+			m.RaftURLs = append(m.RaftURLs, v)
 			d, _ := json.Marshal(m)
 			rpeers = append(rpeers, raft.Peer{ID: uint64(id), Context: d})
 		}
 
 		startPeers := rpeers
+		var m MemberInfo
+		m.ID = uint64(rc.config.ID)
+		m.ClusterID = rc.config.ClusterID
+		m.Namespace = rc.config.Namespace
+		m.DataDir = rc.config.DataDir
+		m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
+		m.Broadcast = rc.config.nodeConfig.BroadcastAddr
+		m.HttpAPIPort = rc.config.nodeConfig.HttpAPIPort
+		data, _ := json.Marshal(m)
+
 		if rc.join {
 			startPeers = nil
 		} else {
@@ -333,24 +335,16 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 			// the cluster be notified the newest info of this node.
 			_, ok := rc.config.RaftPeers[rc.config.ID]
 			if ok {
-				var m MemberInfo
-				m.ID = uint64(rc.config.ID)
-				m.ClusterID = rc.config.ClusterID
-				m.Namespace = rc.config.Namespace
-				m.DataDir = rc.config.DataDir
-				m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
-				m.Broadcast = rc.config.nodeConfig.BroadcastAddr
-				m.HttpAPIPort = rc.config.nodeConfig.HttpAPIPort
-				data, _ := json.Marshal(m)
-				go func() {
-					cc := raftpb.ConfChange{
-						Type:    raftpb.ConfChangeUpdateNode,
-						NodeID:  m.ID,
-						Context: data,
-					}
-					time.Sleep(time.Second)
-					rc.confChangeC <- cc
-				}()
+				cc := &raftpb.ConfChange{
+					Type:    raftpb.ConfChangeUpdateNode,
+					NodeID:  m.ID,
+					Context: data,
+				}
+				rc.wg.Add(1)
+				go func(confChange raftpb.ConfChange) {
+					defer rc.wg.Done()
+					rc.proposeMyself(confChange)
+				}(*cc)
 			}
 		}
 		rc.node = raft.StartNode(c, startPeers)
@@ -371,7 +365,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	}
 
 	rc.transport.Start()
-	if !oldwal {
+	if len(rc.members) == 0 {
 		for id, v := range rc.config.RaftPeers {
 			if id != rc.config.ID {
 				rc.transport.AddPeer(types.ID(id), []string{v})
@@ -399,6 +393,30 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		defer rc.wg.Done()
 		rc.purgeFile()
 	}()
+}
+
+func (rc *raftNode) proposeMyself(cc raftpb.ConfChange) {
+	for {
+		time.Sleep(time.Second)
+		select {
+		case rc.confChangeC <- cc:
+		case <-rc.stopc:
+			return
+		}
+		// check if ok
+		time.Sleep(time.Second)
+		rc.memMutex.Lock()
+		mine, ok := rc.members[uint64(rc.config.ID)]
+		rc.memMutex.Unlock()
+		if ok {
+			if mine.DataDir != "" &&
+				mine.Namespace != "" &&
+				mine.Broadcast != "" &&
+				mine.HttpAPIPort > 0 {
+				return
+			}
+		}
+	}
 }
 
 func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) {
@@ -576,7 +594,7 @@ func (rc *raftNode) serveChannels() {
 					rc.confChangeC = nil
 				} else {
 					cc.ID = rc.reqIDGen.Next()
-					nodeLog.Infof("propose the conf change: %v", cc)
+					nodeLog.Infof("propose the conf change: %v", cc.String())
 					err := rc.node.ProposeConfChange(context.TODO(), cc)
 					if err != nil {
 						nodeLog.Infof("failed to propose the conf change: %v", err)
