@@ -336,6 +336,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 				var m MemberInfo
 				m.ID = uint64(rc.config.ID)
 				m.ClusterID = rc.config.ClusterID
+				m.Namespace = rc.config.Namespace
 				m.DataDir = rc.config.DataDir
 				m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
 				m.Broadcast = rc.config.nodeConfig.BroadcastAddr

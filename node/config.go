@@ -7,6 +7,7 @@ type NodeConfig struct {
 
 type RaftConfig struct {
 	ClusterID   uint64             `json:"cluster_id"`
+	Namespace   string             `json:"namespace"`
 	ID          int                `json:"id"`
 	RaftAddr    string             `json:"raft_addr"`
 	DataDir     string             `json:"data_dir"`

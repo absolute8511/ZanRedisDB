@@ -88,6 +88,7 @@ func NewKVNode(kvopts *store.KVOptions, nodeConfig *NodeConfig,
 
 	config := &RaftConfig{
 		ClusterID:   clusterID,
+		Namespace:   ns,
 		ID:          id,
 		RaftAddr:    localRaftAddr,
 		DataDir:     kvopts.DataDir,
