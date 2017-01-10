@@ -3,7 +3,7 @@ package rockredis
 import (
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
-	"regexp"
+	"github.com/gobwas/glob"
 )
 
 var errDataType = errors.New("error data type")
@@ -38,12 +38,12 @@ func getDataStoreType(dataType common.DataType) (byte, error) {
 	return storeDataType, nil
 }
 
-func buildMatchRegexp(match string) (*regexp.Regexp, error) {
+func buildMatchRegexp(match string) (glob.Glob, error) {
 	var err error
-	var r *regexp.Regexp = nil
+	var r glob.Glob = nil
 
 	if len(match) > 0 {
-		if r, err = regexp.Compile(match); err != nil {
+		if r, err = glob.Compile(match); err != nil {
 			return nil, err
 		}
 	}
@@ -149,7 +149,7 @@ func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
 	for i := 0; it.Valid() && i < count; it.Next() {
 		if k, err := decodeScanKey(storeDataType, it.Key()); err != nil {
 			continue
-		} else if r != nil && !r.Match(k) {
+		} else if r != nil && !r.Match(string(k)) {
 			continue
 		} else {
 			v = append(v, k)
@@ -238,7 +238,7 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 		_, f, err := hDecodeHashKey(it.Key())
 		if err != nil {
 			return nil, err
-		} else if r != nil && !r.Match(f) {
+		} else if r != nil && !r.Match(string(f)) {
 			continue
 		}
 		v = append(v, common.KVRecord{Key: f, Value: it.Value()})
@@ -269,7 +269,7 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 		_, m, err := sDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
-		} else if r != nil && !r.Match(m) {
+		} else if r != nil && !r.Match(string(m)) {
 			continue
 		}
 
@@ -303,7 +303,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 		_, m, err := zDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
-		} else if r != nil && !r.Match(m) {
+		} else if r != nil && !r.Match(string(m)) {
 			continue
 		}
 
