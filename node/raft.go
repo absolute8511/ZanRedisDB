@@ -723,13 +723,12 @@ func (rc *raftNode) GetLeadMember() *MemberInfo {
 
 func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
 	rc.memMutex.Lock()
+	rc.members = make(map[uint64]*MemberInfo)
 	for _, m := range mems {
-		if m.ID != uint64(rc.config.ID) {
-			if _, ok := rc.members[m.ID]; ok {
-			} else {
-				rc.members[m.ID] = m
-				nodeLog.Infof("node added to the cluster: %v\n", m)
-			}
+		if _, ok := rc.members[m.ID]; ok {
+		} else {
+			rc.members[m.ID] = m
+			nodeLog.Infof("node added to the cluster: %v\n", m)
 		}
 	}
 	rc.memMutex.Unlock()

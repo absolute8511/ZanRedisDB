@@ -43,13 +43,7 @@ func (self *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps http
 }
 
 func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	key := req.RequestURI
 	data, err := ioutil.ReadAll(req.Body)
-	if err != nil {
-		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
-	}
-
-	nodeId, err := strconv.ParseUint(key[1:], 0, 64)
 	if err != nil {
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
@@ -59,10 +53,11 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	if err != nil {
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
+	data, _ = json.Marshal(m)
 
 	cc := raftpb.ConfChange{
 		Type:    raftpb.ConfChangeAddNode,
-		NodeID:  nodeId,
+		NodeID:  m.ID,
 		Context: data,
 	}
 	self.ProposeConfChange(m.Namespace, cc)
@@ -71,13 +66,15 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 }
 
 func (self *Server) doRemoveNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	key := req.RequestURI
-	nodeId, err := strconv.ParseUint(key[1:], 0, 64)
+	ns := ps.ByName("namespace")
+	nodeIdStr := ps.ByName("node")
+	if len(nodeIdStr) == 0 {
+		return nil, Err{Code: http.StatusBadRequest, Text: "missing node id"}
+	}
+	nodeId, err := strconv.ParseUint(nodeIdStr, 10, 64)
 	if err != nil {
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	ns := ps.ByName("namespace")
-
 	cc := raftpb.ConfChange{
 		Type:   raftpb.ConfChangeRemoveNode,
 		NodeID: nodeId,
@@ -134,7 +131,7 @@ func (self *Server) initHttpHandler() {
 	router.Handle("GET", "/kv/get/:namespace", Decorate(self.getKey, PlainText))
 	router.Handle("POST", "/kv/optimize", Decorate(self.doOptimize, log, V1))
 	router.Handle("POST", "/cluster/node/add", Decorate(self.doAddNode, log, V1))
-	router.Handle("DELETE", "/cluster/node/remove/:namespace", Decorate(self.doRemoveNode, log, V1))
+	router.Handle("DELETE", "/cluster/node/remove/:namespace/:node", Decorate(self.doRemoveNode, log, V1))
 	self.router = router
 }
 
