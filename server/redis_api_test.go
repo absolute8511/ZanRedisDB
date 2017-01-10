@@ -1701,8 +1701,8 @@ func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
 	}
 	for i, v := range a {
-		if string(v) != fmt.Sprintf("testscan:%v", values[i]) {
-			t.Fatal(fmt.Sprintf("%d %s != %v", string(v), values[i]))
+		if string(v) != fmt.Sprintf("%v", values[i]) {
+			t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
 		}
 	}
 }
@@ -1715,7 +1715,7 @@ func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 	} else if n := ay[0].([]byte); string(n) != "testscan:4" {
 		t.Fatal(string(n))
 	} else {
-		checkScanValues(t, ay[1], 0, 1, 2, 3, 4)
+		checkScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:2", "testscan:3", "testscan:4")
 	}
 
 	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"4", tp, "count", 6)); err != nil {
@@ -1725,7 +1725,7 @@ func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 	} else if n := ay[0].([]byte); string(n) != "" {
 		t.Fatal(string(n))
 	} else {
-		checkScanValues(t, ay[1], 5, 6, 7, 8, 9)
+		checkScanValues(t, ay[1], "testscan:5", "testscan:6", "testscan:7", "testscan:8", "testscan:9")
 	}
 
 	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"9", tp, "count", 0)); err != nil {
@@ -1799,4 +1799,52 @@ func testSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	}
 
 	checkAdvanceScan(t, c, "SET")
+}
+
+func TestHashScan(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:testscan:scan_hash"
+	c.Do("HMSET", key, "a", 1, "b", 2)
+
+	if ay, err := goredis.Values(c.Do("HSCAN", key, "")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "a", 1, "b", 2)
+	}
+}
+
+func TestSetScan(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:scan_set"
+	c.Do("SADD", key, "a", "b")
+
+	if ay, err := goredis.Values(c.Do("SSCAN", key, "")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "a", "b")
+	}
+}
+
+func TestZSetScan(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:scan_zset"
+	c.Do("ZADD", key, 1, "a", 2, "b")
+
+	if ay, err := goredis.Values(c.Do("ZSCAN", key, "")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "a", 1, "b", 2)
+	}
 }
