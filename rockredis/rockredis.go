@@ -120,7 +120,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	// use large block to reduce index block size for hdd
 	// if using ssd, should use the default value
-	bbto.SetBlockSize(1024 * 16)
+	bbto.SetBlockSize(1024 * 64)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 1024))

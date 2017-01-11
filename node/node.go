@@ -572,7 +572,7 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 }
 
 func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
-	if np.appliedi-np.snapi <= 1 {
+	if np.appliedi-np.snapi <= 0 {
 		return
 	}
 	if !confChanged && np.appliedi-np.snapi <= uint64(self.raftNode.config.SnapCount) {
