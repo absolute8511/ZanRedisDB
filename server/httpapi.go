@@ -9,7 +9,7 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/coreos/etcd/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/julienschmidt/httprouter"
 )
 

@@ -28,16 +28,16 @@ import (
 	"sync/atomic"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/raft"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/snap"
+	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/absolute8511/ZanRedisDB/wal"
+	"github.com/absolute8511/ZanRedisDB/wal/walpb"
 	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/idutil"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/raft"
-	"github.com/coreos/etcd/raft/raftpb"
-	"github.com/coreos/etcd/rafthttp"
-	"github.com/coreos/etcd/snap"
-	"github.com/coreos/etcd/wal"
-	"github.com/coreos/etcd/wal/walpb"
 	"golang.org/x/net/context"
 )
 

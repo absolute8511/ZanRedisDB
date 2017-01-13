@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/raft"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/ZanRedisDB/store"
 	"github.com/coreos/etcd/pkg/wait"
-	"github.com/coreos/etcd/raft"
-	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/tidwall/redcon"
 )
 
