@@ -16,7 +16,6 @@ package node
 
 import (
 	"io"
-	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -185,7 +184,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 			var m MemberInfo
 			err := json.Unmarshal(cc.Context, &m)
 			if err != nil {
-				log.Fatalf("error conf context: %v", err)
+				nodeLog.Fatalf("error conf context: %v", err)
 			} else {
 				m.ID = cc.NodeID
 				rc.memMutex.Lock()
@@ -230,7 +229,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	if !wal.Exist(rc.config.WALDir) {
 		if err := os.MkdirAll(rc.config.WALDir, common.DIR_PERM); err != nil {
-			log.Fatalf("cannot create dir for wal (%v)", err)
+			nodeLog.Fatalf("cannot create dir for wal (%v)", err)
 		}
 
 		var m MemberInfo
@@ -240,7 +239,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 		d, _ := json.Marshal(m)
 		w, err := wal.Create(rc.config.WALDir, d)
 		if err != nil {
-			log.Fatalf("create wal error (%v)", err)
+			nodeLog.Fatalf("create wal error (%v)", err)
 		}
 		return w
 	}
@@ -251,7 +250,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	}
 	w, err := wal.Open(rc.config.WALDir, walsnap)
 	if err != nil {
-		log.Fatalf("error loading wal (%v)", err)
+		nodeLog.Fatalf("error loading wal (%v)", err)
 	}
 
 	return w
@@ -263,9 +262,20 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	meta, st, ents, err := w.ReadAll()
 	if err != nil {
 		w.Close()
-		log.Fatalf("failed to read WAL (%v)", err)
+		nodeLog.Fatalf("failed to read WAL (%v)", err)
 	}
 	nodeLog.Infof("wal meta: %v, restart with: %v", string(meta), st.String())
+	var m MemberInfo
+	err = json.Unmarshal(meta, &m)
+	if err != nil {
+		w.Close()
+		nodeLog.Fatalf("meta is wrong: %v", err)
+	}
+	if m.ID != uint64(rc.config.ID) ||
+		m.ClusterID != rc.config.ClusterID {
+		w.Close()
+		nodeLog.Fatalf("meta starting mismatch config: %v, %v", m, rc.config)
+	}
 
 	if snapshot != nil {
 		rc.raftStorage.ApplySnapshot(*snapshot)
@@ -286,7 +296,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	walDir := rc.config.WALDir
 	if !fileutil.Exist(snapDir) {
 		if err := os.MkdirAll(snapDir, common.DIR_PERM); err != nil {
-			log.Fatalf("cannot create dir for snapshot (%v)", err)
+			nodeLog.Fatalf("cannot create dir for snapshot (%v)", err)
 		}
 	}
 	rc.snapshotter = snap.New(snapDir)
@@ -626,11 +636,11 @@ func (rc *raftNode) serveChannels() {
 				rc.sendMessages(rd.Messages)
 			}
 			if err := rc.wal.Save(rd.HardState, rd.Entries); err != nil {
-				log.Fatalf("raft save wal error: %v", err)
+				nodeLog.Fatalf("raft save wal error: %v", err)
 			}
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				if err := rc.saveSnap(rd.Snapshot); err != nil {
-					log.Fatalf("raft save snap error: %v", err)
+					nodeLog.Fatalf("raft save snap error: %v", err)
 				}
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
 				nodeLog.Infof("raft applied incoming snapshot at index: %v", rd.Snapshot.String())
@@ -676,19 +686,19 @@ func (rc *raftNode) sendMessages(msgs []raftpb.Message) {
 func (rc *raftNode) serveRaft() {
 	url, err := url.Parse(rc.config.RaftAddr)
 	if err != nil {
-		log.Fatalf("Failed parsing URL (%v)", err)
+		nodeLog.Fatalf("Failed parsing URL (%v)", err)
 	}
 
 	ln, err := common.NewStoppableListener(url.Host, rc.httpstopc)
 	if err != nil {
-		log.Fatalf("Failed to listen rafthttp (%v)", err)
+		nodeLog.Fatalf("Failed to listen rafthttp (%v)", err)
 	}
 
 	err = (&http.Server{Handler: rc.transport.Handler()}).Serve(ln)
 	select {
 	case <-rc.httpstopc:
 	default:
-		log.Fatalf("Failed to serve rafthttp (%v)", err)
+		nodeLog.Fatalf("Failed to serve rafthttp (%v)", err)
 	}
 	close(rc.httpdonec)
 }

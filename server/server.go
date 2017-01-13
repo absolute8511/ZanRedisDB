@@ -6,6 +6,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/store"
 	"github.com/coreos/etcd/raft/raftpb"
+	"github.com/coreos/etcd/rafthttp"
 	"github.com/tidwall/redcon"
 	"net/http"
 	"path"
@@ -34,12 +35,13 @@ type NamespaceNode struct {
 }
 
 type Server struct {
-	mutex   sync.Mutex
-	kvNodes map[string]*NamespaceNode
-	conf    ServerConfig
-	stopC   chan struct{}
-	wg      sync.WaitGroup
-	router  http.Handler
+	mutex         sync.Mutex
+	kvNodes       map[string]*NamespaceNode
+	conf          ServerConfig
+	stopC         chan struct{}
+	wg            sync.WaitGroup
+	router        http.Handler
+	raftTransport *rafthttp.Transport
 }
 
 func NewServer(conf ServerConfig) *Server {
