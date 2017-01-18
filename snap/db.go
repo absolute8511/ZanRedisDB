@@ -21,12 +21,14 @@ import (
 	"os"
 	"path"
 
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/coreos/etcd/pkg/fileutil"
 )
 
 // SaveDBFrom saves snapshot of the database from the given reader. It
 // guarantees the save operation is atomic.
-func (s *Snapshotter) SaveDBFrom(r io.Reader, id uint64) (int64, error) {
+func (s *Snapshotter) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
+	id := msg.Snapshot.Metadata.Index
 	f, err := ioutil.TempFile(s.dir, "tmp")
 	if err != nil {
 		return 0, err

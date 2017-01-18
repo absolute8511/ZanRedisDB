@@ -186,7 +186,7 @@ func (cw *streamWriter) run() {
 			cw.close()
 			plog.Warningf("lost the TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
 			heartbeatc, msgc = nil, nil
-			cw.r.ReportUnreachable(m.To)
+			cw.r.ReportUnreachable(m.To, m.ToGroup)
 			sentFailures.WithLabelValues(cw.peerID.String()).Inc()
 
 		case conn := <-cw.connc:
@@ -242,7 +242,7 @@ func (cw *streamWriter) closeUnlocked() bool {
 	}
 	cw.closer.Close()
 	if len(cw.msgc) > 0 {
-		cw.r.ReportUnreachable(uint64(cw.peerID))
+		cw.r.ReportUnreachable(0, raftpb.Group{NodeId: uint64(cw.peerID)})
 	}
 	cw.msgc = make(chan raftpb.Message, streamBufSize)
 	cw.working = false
@@ -363,7 +363,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			return err
 		}
 
-		receivedBytes.WithLabelValues(types.ID(m.From).String()).Add(float64(m.Size()))
+		receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(m.Size()))
 
 		cr.mu.Lock()
 		paused := cr.paused
@@ -379,6 +379,9 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			// it.
 			continue
 		}
+		if m.ToGroup.GroupId == 0 {
+			plog.Errorf("receive message not group: %v", m.String())
+		}
 
 		recvc := cr.recvc
 		if m.Type == raftpb.MsgProp {
@@ -392,7 +395,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 				plog.MergeWarningf("dropped internal raft message from %s since receiving buffer is full (overloaded network)", types.ID(m.From))
 			}
 			plog.Debugf("dropped %s from %s since receiving buffer is full", m.Type, types.ID(m.From))
-			recvFailures.WithLabelValues(types.ID(m.From).String()).Inc()
+			recvFailures.WithLabelValues(m.FromGroup.String()).Inc()
 		}
 	}
 }

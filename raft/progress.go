@@ -14,7 +14,10 @@
 
 package raft
 
-import "fmt"
+import (
+	"fmt"
+	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+)
 
 const (
 	ProgressStateProbe ProgressStateType = iota
@@ -76,6 +79,9 @@ type Progress struct {
 	// be freed by calling inflights.freeTo with the index of the last
 	// received entry.
 	ins *inflights
+
+	// group indicate which node the raft follower is belonged
+	group pb.Group
 }
 
 func (pr *Progress) resetState(state ProgressStateType) {
@@ -181,7 +187,8 @@ func (pr *Progress) needSnapshotAbort() bool {
 }
 
 func (pr *Progress) String() string {
-	return fmt.Sprintf("next = %d, match = %d, state = %s, waiting = %v, pendingSnapshot = %d", pr.Next, pr.Match, pr.State, pr.IsPaused(), pr.PendingSnapshot)
+	return fmt.Sprintf("next = %d, match = %d, state = %s, waiting = %v, pendingSnapshot = %d, group = %s",
+		pr.Next, pr.Match, pr.State, pr.IsPaused(), pr.PendingSnapshot, pr.group.String())
 }
 
 type inflights struct {

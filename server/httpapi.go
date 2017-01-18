@@ -56,11 +56,13 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	data, _ = json.Marshal(m)
 
 	cc := raftpb.ConfChange{
-		Type:    raftpb.ConfChangeAddNode,
-		NodeID:  m.ID,
+		Type:      raftpb.ConfChangeAddNode,
+		ReplicaID: m.ID,
+		NodeGroup: raftpb.Group{NodeId: m.NodeID,
+			GroupId: uint64(m.GroupID), RaftReplicaId: m.ID},
 		Context: data,
 	}
-	self.ProposeConfChange(m.Namespace, cc)
+	self.ProposeConfChange(m.GroupName, cc)
 
 	return nil, nil
 }
@@ -76,8 +78,8 @@ func (self *Server) doRemoveNode(w http.ResponseWriter, req *http.Request, ps ht
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	cc := raftpb.ConfChange{
-		Type:   raftpb.ConfChangeRemoveNode,
-		NodeID: nodeId,
+		Type:      raftpb.ConfChangeRemoveNode,
+		ReplicaID: nodeId,
 	}
 	self.ProposeConfChange(ns, cc)
 	return nil, nil

@@ -71,12 +71,14 @@ func (s *snapshotSender) send(merged snap.Message) {
 	u := s.picker.pick()
 	req := createPostRequest(u, RaftSnapshotPrefix, body, "application/octet-stream", s.tr.URLs, s.from, s.cid)
 
-	plog.Infof("start to send database snapshot [index: %d, to %s]...", m.Snapshot.Metadata.Index, types.ID(m.To))
+	plog.Infof("start to send database snapshot [index: %d, to %s]...",
+		m.Snapshot.Metadata.Index, m.ToGroup.String())
 
 	err := s.post(req)
 	defer merged.CloseWithError(err)
 	if err != nil {
-		plog.Warningf("database snapshot [index: %d, to: %s] failed to be sent out (%v)", m.Snapshot.Metadata.Index, types.ID(m.To), err)
+		plog.Warningf("database snapshot [index: %d, to: %s] failed to be sent out (%v)",
+			m.Snapshot.Metadata.Index, m.ToGroup.String(), err)
 
 		// errMemberRemoved is a critical error since a removed member should
 		// always be stopped. So we use reportCriticalError to report it to errorc.
@@ -86,19 +88,20 @@ func (s *snapshotSender) send(merged snap.Message) {
 
 		s.picker.unreachable(u)
 		s.status.deactivate(failureType{source: sendSnap, action: "post"}, err.Error())
-		s.r.ReportUnreachable(m.To)
+		s.r.ReportUnreachable(m.To, m.ToGroup)
 		// report SnapshotFailure to raft state machine. After raft state
 		// machine knows about it, it would pause a while and retry sending
 		// new snapshot message.
-		s.r.ReportSnapshot(m.To, raft.SnapshotFailure)
-		sentFailures.WithLabelValues(types.ID(m.To).String()).Inc()
+		s.r.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
+		sentFailures.WithLabelValues(m.ToGroup.String()).Inc()
 		return
 	}
 	s.status.activate()
-	s.r.ReportSnapshot(m.To, raft.SnapshotFinish)
-	plog.Infof("database snapshot [index: %d, to: %s] sent out successfully", m.Snapshot.Metadata.Index, types.ID(m.To))
+	s.r.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFinish)
+	plog.Infof("database snapshot [index: %d, to: %s] sent out successfully",
+		m.Snapshot.Metadata.Index, m.ToGroup.String())
 
-	sentBytes.WithLabelValues(types.ID(m.To).String()).Add(float64(merged.TotalSize))
+	sentBytes.WithLabelValues(m.ToGroup.String()).Add(float64(merged.TotalSize))
 }
 
 // post posts the given request.

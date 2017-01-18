@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/server"
 	"github.com/judwhite/go-svc/svc"
 	"io/ioutil"
@@ -96,26 +97,25 @@ func (p *program) Start() error {
 			panic("namespace name not match the config file")
 		}
 
-		id := nsNodeConf.LocalNodeID
-		clusterID := nsConf.ClusterConf.ClusterID
+		id := nsNodeConf.LocalReplicaID
+		gID := nsConf.RaftGroupConf.GroupID
 		// raft provides a commit stream for the proposals from the http api
-		clusterNodes := make(map[int]string)
-		for _, v := range nsConf.ClusterConf.SeedNodes {
-			clusterNodes[v.ID] = v.Addr
+		clusterNodes := make(map[uint64]node.ReplicaInfo)
+		for _, v := range nsConf.RaftGroupConf.SeedNodes {
+			clusterNodes[v.ReplicaID] = v
 		}
-		raftAddr, ok := clusterNodes[id]
+		mineSeed, ok := clusterNodes[uint64(id)]
 		if !ok {
 			nsNodeConf.Join = true
 		} else {
-			nsNodeConf.LocalRaftAddr = raftAddr
+			serverConf.LocalRaftAddr = mineSeed.RaftAddr
 		}
-		raftAddr = nsNodeConf.LocalRaftAddr
 		d, _ = json.MarshalIndent(&nsConf, "", " ")
 		fmt.Printf("namespace load config: %v \n", string(d))
-		fmt.Printf("local %v start with cluster: %v\n", raftAddr, clusterNodes)
-		app.InitKVNamespace(clusterID, id, raftAddr, clusterNodes, nsNodeConf.Join, &nsConf)
+		fmt.Printf("local %v start with cluster: %v\n", serverConf.LocalRaftAddr, clusterNodes)
+		app.InitKVNamespace(gID, id, serverConf.LocalRaftAddr, clusterNodes, nsNodeConf.Join, &nsConf)
 	}
-	app.ServeAPI()
+	app.Start()
 	p.server = app
 	return nil
 }

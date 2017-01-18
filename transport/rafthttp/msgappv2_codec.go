@@ -67,9 +67,16 @@ type msgAppV2Encoder struct {
 
 	term      uint64
 	index     uint64
+	ToGroup   raftpb.Group
+	FromGroup raftpb.Group
 	buf       []byte
 	uint64buf []byte
 	uint8buf  []byte
+}
+
+func isSameGroup(l *raftpb.Group, r *raftpb.Group) bool {
+	return l.NodeId == r.NodeId && l.GroupId == r.GroupId &&
+		l.RaftReplicaId == r.RaftReplicaId
 }
 
 func newMsgAppV2Encoder(w io.Writer, fs *stats.FollowerStats) *msgAppV2Encoder {
@@ -82,6 +89,11 @@ func newMsgAppV2Encoder(w io.Writer, fs *stats.FollowerStats) *msgAppV2Encoder {
 	}
 }
 
+func (enc *msgAppV2Encoder) isContinue(m *raftpb.Message) bool {
+	return enc.index == m.Index && enc.term == m.LogTerm && m.LogTerm == m.Term &&
+		isSameGroup(&enc.ToGroup, &m.ToGroup) && isSameGroup(&enc.FromGroup, &m.FromGroup)
+}
+
 func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 	start := time.Now()
 	switch {
@@ -90,7 +102,7 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 		if _, err := enc.w.Write(enc.uint8buf); err != nil {
 			return err
 		}
-	case enc.index == m.Index && enc.term == m.LogTerm && m.LogTerm == m.Term:
+	case enc.isContinue(m):
 		enc.uint8buf[0] = byte(msgTypeAppEntries)
 		if _, err := enc.w.Write(enc.uint8buf); err != nil {
 			return err
@@ -141,6 +153,8 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 
 		enc.term = m.Term
 		enc.index = m.Index
+		enc.ToGroup = m.ToGroup
+		enc.FromGroup = m.FromGroup
 		if l := len(m.Entries); l > 0 {
 			enc.index = m.Entries[l-1].Index
 		}
@@ -155,6 +169,8 @@ type msgAppV2Decoder struct {
 
 	term      uint64
 	index     uint64
+	ToGroup   raftpb.Group
+	FromGroup raftpb.Group
 	buf       []byte
 	uint64buf []byte
 	uint8buf  []byte
@@ -184,13 +200,20 @@ func (dec *msgAppV2Decoder) decode() (raftpb.Message, error) {
 	case msgTypeLinkHeartbeat:
 		return linkHeartbeatMessage, nil
 	case msgTypeAppEntries:
+		if uint64(dec.remote) != dec.FromGroup.NodeId ||
+			uint64(dec.local) != dec.ToGroup.NodeId {
+			return m, fmt.Errorf("remote node and local node maybe not matched: %v, %v (%v, %v)",
+				dec.remote, dec.local, dec.FromGroup, dec.ToGroup)
+		}
 		m = raftpb.Message{
-			Type:    raftpb.MsgApp,
-			From:    uint64(dec.remote),
-			To:      uint64(dec.local),
-			Term:    dec.term,
-			LogTerm: dec.term,
-			Index:   dec.index,
+			Type:      raftpb.MsgApp,
+			From:      dec.FromGroup.RaftReplicaId,
+			To:        dec.ToGroup.RaftReplicaId,
+			Term:      dec.term,
+			LogTerm:   dec.term,
+			ToGroup:   dec.ToGroup,
+			FromGroup: dec.FromGroup,
+			Index:     dec.index,
 		}
 
 		// decode entries
@@ -238,6 +261,8 @@ func (dec *msgAppV2Decoder) decode() (raftpb.Message, error) {
 
 		dec.term = m.Term
 		dec.index = m.Index
+		dec.FromGroup = m.FromGroup
+		dec.ToGroup = m.ToGroup
 		if l := len(m.Entries); l > 0 {
 			dec.index = m.Entries[l-1].Index
 		}

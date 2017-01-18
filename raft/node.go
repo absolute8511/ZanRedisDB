@@ -156,16 +156,17 @@ type Node interface {
 	// Status returns the current status of the raft state machine.
 	Status() Status
 	// ReportUnreachable reports the given node is not reachable for the last send.
-	ReportUnreachable(id uint64)
+	ReportUnreachable(id uint64, group pb.Group)
 	// ReportSnapshot reports the status of the sent snapshot.
-	ReportSnapshot(id uint64, status SnapshotStatus)
+	ReportSnapshot(id uint64, group pb.Group, status SnapshotStatus)
 	// Stop performs any necessary termination of the Node.
 	Stop()
 }
 
 type Peer struct {
-	ID      uint64
-	Context []byte
+	NodeID    uint64
+	ReplicaID uint64
+	Context   []byte
 }
 
 // StartNode returns a new Node given configuration and a list of raft peers.
@@ -176,7 +177,10 @@ func StartNode(c *Config, peers []Peer) Node {
 	// entries of term 1
 	r.becomeFollower(1, None)
 	for _, peer := range peers {
-		cc := pb.ConfChange{Type: pb.ConfChangeAddNode, NodeID: peer.ID, Context: peer.Context}
+		cc := pb.ConfChange{Type: pb.ConfChangeAddNode, ReplicaID: peer.ReplicaID,
+			NodeGroup: pb.Group{NodeId: peer.NodeID, Name: r.group.Name, GroupId: r.group.GroupId,
+				RaftReplicaId: peer.ReplicaID},
+			Context: peer.Context}
 		d, err := cc.Marshal()
 		if err != nil {
 			panic("unexpected marshal error")
@@ -198,7 +202,8 @@ func StartNode(c *Config, peers []Peer) Node {
 	// We do not set raftLog.applied so the application will be able
 	// to observe all conf changes via Ready.CommittedEntries.
 	for _, peer := range peers {
-		r.addNode(peer.ID)
+		r.addNode(peer.ReplicaID, pb.Group{NodeId: peer.NodeID, Name: r.group.Name, GroupId: r.group.GroupId,
+			RaftReplicaId: peer.ReplicaID})
 	}
 
 	n := newNode()
@@ -312,38 +317,66 @@ func (n *node) run(r *raft) {
 		// Currently it is dropped in Step silently.
 		case m := <-propc:
 			m.From = r.id
+			m.FromGroup = r.group
 			r.Step(m)
 		case m := <-n.recvc:
 			// filter out response message from unknown From.
-			if _, ok := r.prs[m.From]; ok || !IsResponseMsg(m.Type) {
+			from, ok := r.prs[m.From]
+			if ok || !IsResponseMsg(m.Type) {
+				if m.Type == pb.MsgTransferLeader {
+					if m.FromGroup.NodeId == 0 {
+						if !ok {
+							n.logger.Errorf("no replica found %v while processing : %v",
+								m.From, m.String())
+							continue
+						}
+						m.FromGroup = from.group
+					}
+					if m.ToGroup.NodeId == 0 {
+						g, ok := r.prs[m.To]
+						if !ok {
+							n.logger.Errorf("no replica found %v while processing : %v",
+								m.From, m.String())
+							continue
+						}
+						m.ToGroup = g.group
+					}
+				} else {
+					// if we missing the peer node group info, try update it from
+					// raft message
+					if ok && from.group.NodeId == 0 && m.FromGroup.NodeId > 0 &&
+						m.FromGroup.GroupId == r.group.GroupId {
+						from.group = m.FromGroup
+					}
+				}
 				r.Step(m) // raft never returns an error
 			}
 		case cc := <-n.confc:
-			if cc.NodeID == None {
+			if cc.ReplicaID == None {
 				r.resetPendingConf()
 				select {
-				case n.confstatec <- pb.ConfState{Nodes: r.nodes()}:
+				case n.confstatec <- pb.ConfState{Nodes: r.nodes(), Groups: r.groups()}:
 				case <-n.done:
 				}
 				break
 			}
 			switch cc.Type {
 			case pb.ConfChangeAddNode:
-				r.addNode(cc.NodeID)
+				r.addNode(cc.ReplicaID, cc.NodeGroup)
 			case pb.ConfChangeRemoveNode:
 				// block incoming proposal when local node is
 				// removed
-				if cc.NodeID == r.id {
+				if cc.ReplicaID == r.id {
 					propc = nil
 				}
-				r.removeNode(cc.NodeID)
+				r.removeNode(cc.ReplicaID)
 			case pb.ConfChangeUpdateNode:
-				r.resetPendingConf()
+				r.updateNode(cc.ReplicaID, cc.NodeGroup)
 			default:
 				panic("unexpected conf type")
 			}
 			select {
-			case n.confstatec <- pb.ConfState{Nodes: r.nodes()}:
+			case n.confstatec <- pb.ConfState{Nodes: r.nodes(), Groups: r.groups()}:
 			case <-n.done:
 			}
 		case <-n.tickc:
@@ -470,18 +503,18 @@ func (n *node) Status() Status {
 	}
 }
 
-func (n *node) ReportUnreachable(id uint64) {
+func (n *node) ReportUnreachable(id uint64, group pb.Group) {
 	select {
-	case n.recvc <- pb.Message{Type: pb.MsgUnreachable, From: id}:
+	case n.recvc <- pb.Message{Type: pb.MsgUnreachable, From: id, FromGroup: group}:
 	case <-n.done:
 	}
 }
 
-func (n *node) ReportSnapshot(id uint64, status SnapshotStatus) {
+func (n *node) ReportSnapshot(id uint64, gp pb.Group, status SnapshotStatus) {
 	rej := status == SnapshotFailure
 
 	select {
-	case n.recvc <- pb.Message{Type: pb.MsgSnapStatus, From: id, Reject: rej}:
+	case n.recvc <- pb.Message{Type: pb.MsgSnapStatus, From: id, FromGroup: gp, Reject: rej}:
 	case <-n.done:
 	}
 }

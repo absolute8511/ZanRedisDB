@@ -24,22 +24,22 @@ func header(lvl, msg string) string {
 
 func NewDefaultLogger(module string) *defaultLogger {
 	return &defaultLogger{
-		logger: log.New(os.Stderr, module, log.LstdFlags|log.Lmicroseconds),
+		logger: log.New(os.Stderr, module, log.LstdFlags|log.Lmicroseconds|log.Lshortfile),
 	}
 }
 
 func (self *defaultLogger) Output(maxdepth int, s string) error {
-	self.logger.Output(maxdepth, s)
+	self.logger.Output(maxdepth+1, s)
 	return nil
 }
 
 func (self *defaultLogger) OutputErr(maxdepth int, s string) error {
-	self.logger.Output(maxdepth, header("ERR", s))
+	self.logger.Output(maxdepth+1, header("ERR", s))
 	return nil
 }
 
 func (self *defaultLogger) OutputWarning(maxdepth int, s string) error {
-	self.logger.Output(maxdepth, header("WARN", s))
+	self.logger.Output(maxdepth+1, header("WARN", s))
 	return nil
 }
 
@@ -87,6 +87,12 @@ func (self *LevelLogger) SetLevel(l int32) {
 
 func (self *LevelLogger) Level() int32 {
 	return atomic.LoadInt32(&self.level)
+}
+
+func (self *LevelLogger) InfoDepth(d int, l string) {
+	if self.Logger != nil && self.Level() >= LOG_INFO {
+		self.Logger.Output(2+d, l)
+	}
 }
 
 func (self *LevelLogger) Infof(f string, args ...interface{}) {

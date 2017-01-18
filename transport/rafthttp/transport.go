@@ -35,9 +35,9 @@ var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/coreos/e
 
 type Raft interface {
 	Process(ctx context.Context, m raftpb.Message) error
-	IsIDRemoved(id uint64) bool
-	ReportUnreachable(id uint64)
-	ReportSnapshot(id uint64, status raft.SnapshotStatus)
+	//IsIDRemoved(id uint64, group raftpb.Group) bool
+	ReportUnreachable(id uint64, group raftpb.Group)
+	ReportSnapshot(id uint64, group raftpb.Group, status raft.SnapshotStatus)
 }
 
 type Transporter interface {
@@ -101,7 +101,7 @@ type Transport struct {
 	URLs        types.URLs // local peer URLs
 	ClusterID   types.ID   // raft cluster ID for request validation
 	Raft        Raft       // raft state machine, to which the Transport forwards received messages and reports status
-	Snapshotter *snap.Snapshotter
+	Snapshotter ISnapSaver
 	ServerStats *stats.ServerStats // used to record general transportation statistics
 	// used to record transportation statistics with followers when
 	// performing as leader in raft protocol
@@ -162,7 +162,7 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 			// ignore intentionally dropped message
 			continue
 		}
-		to := types.ID(m.To)
+		to := types.ID(m.ToGroup.NodeId)
 
 		t.mu.RLock()
 		p, pok := t.peers[to]
@@ -298,7 +298,8 @@ func (t *Transport) removePeer(id types.ID) {
 	if peer, ok := t.peers[id]; ok {
 		peer.stop()
 	} else {
-		plog.Panicf("unexpected removal of unknown peer '%d'", id)
+		plog.Errorf("unexpected removal of unknown peer '%d'", id)
+		return
 	}
 	delete(t.peers, id)
 	delete(t.LeaderStats.Followers, id.String())
@@ -336,7 +337,7 @@ func (t *Transport) ActiveSince(id types.ID) time.Time {
 func (t *Transport) SendSnapshot(m snap.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	p := t.peers[types.ID(m.To)]
+	p := t.peers[types.ID(m.ToGroup.NodeId)]
 	if p == nil {
 		m.CloseWithError(errMemberNotFound)
 		return
@@ -396,7 +397,9 @@ func NewSnapTransporter(snapDir string) (Transporter, <-chan snap.Message) {
 
 func (s *snapTransporter) SendSnapshot(m snap.Message) {
 	ss := snap.New(s.snapDir)
-	ss.SaveDBFrom(m.ReadCloser, m.Snapshot.Metadata.Index+1)
+	tmp := m.Message
+	tmp.Snapshot.Metadata.Index++
+	ss.SaveDBFrom(m.ReadCloser, tmp)
 	m.CloseWithError(nil)
 	s.snapDoneC <- m
 }

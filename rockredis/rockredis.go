@@ -214,6 +214,7 @@ func (r *RockDB) Close() {
 	if r.eng != nil {
 		r.eng.Close()
 	}
+	dbLog.Infof("rocksdb closed")
 }
 
 func (r *RockDB) SetPerfLevel(level int) {

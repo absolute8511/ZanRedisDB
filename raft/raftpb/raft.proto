@@ -32,6 +32,15 @@ message Snapshot {
 	optional SnapshotMetadata metadata = 2 [(gogoproto.nullable) = false];
 }
 
+message Group {
+    optional uint64 node_id = 1 [(gogoproto.nullable) = false];
+    optional string name = 2 [(gogoproto.nullable) = false];
+    // group id is the namespace id, which is unchanged in the same namespace
+    optional uint64 group_id = 3 [(gogoproto.nullable) = false];
+    // replica id is the specific partition id, always increased if re-add the removed partition
+    optional uint64 raft_replica_id = 4 [(gogoproto.nullable) = false];
+}
+
 enum MessageType {
 	MsgHup             = 0;
 	MsgBeat            = 1;
@@ -67,6 +76,8 @@ message Message {
 	optional bool        reject      = 10 [(gogoproto.nullable) = false];
 	optional uint64      rejectHint  = 11 [(gogoproto.nullable) = false];
 	optional bytes       context     = 12;
+    optional Group from_group = 13 [(gogoproto.nullable) = false];
+    optional Group to_group = 14 [(gogoproto.nullable) = false];
 }
 
 message HardState {
@@ -77,6 +88,7 @@ message HardState {
 
 message ConfState {
 	repeated uint64 nodes = 1;
+    repeated Group groups = 2;
 }
 
 enum ConfChangeType {
@@ -88,6 +100,7 @@ enum ConfChangeType {
 message ConfChange {
 	optional uint64          ID      = 1 [(gogoproto.nullable) = false];
 	optional ConfChangeType  Type    = 2 [(gogoproto.nullable) = false];
-	optional uint64          NodeID  = 3 [(gogoproto.nullable) = false];
-	optional bytes           Context = 4;
+	optional uint64          ReplicaID  = 3 [(gogoproto.nullable) = false];
+	optional Group node_group  = 4 [(gogoproto.nullable) = false];
+	optional bytes           Context = 5;
 }

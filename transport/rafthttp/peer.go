@@ -217,9 +217,9 @@ func (p *peer) send(m raftpb.Message) {
 	select {
 	case writec <- m:
 	default:
-		p.r.ReportUnreachable(m.To)
+		p.r.ReportUnreachable(m.To, m.ToGroup)
 		if isMsgSnap(m) {
-			p.r.ReportSnapshot(m.To, raft.SnapshotFailure)
+			p.r.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
 		}
 		if p.status.isActive() {
 			plog.MergeWarningf("dropped internal raft message to %s since %s's sending buffer is full (bad/overloaded network)", p.id, name)

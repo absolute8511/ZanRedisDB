@@ -92,7 +92,10 @@ func NewRawNode(config *Config, peers []Peer) (*RawNode, error) {
 		r.becomeFollower(1, None)
 		ents := make([]pb.Entry, len(peers))
 		for i, peer := range peers {
-			cc := pb.ConfChange{Type: pb.ConfChangeAddNode, NodeID: peer.ID, Context: peer.Context}
+			cc := pb.ConfChange{Type: pb.ConfChangeAddNode,
+				ReplicaID: peer.ReplicaID,
+				NodeGroup: pb.Group{NodeId: peer.NodeID, GroupId: r.group.GroupId, RaftReplicaId: peer.ReplicaID},
+				Context:   peer.Context}
 			data, err := cc.Marshal()
 			if err != nil {
 				panic("unexpected marshal error")
@@ -103,7 +106,8 @@ func NewRawNode(config *Config, peers []Peer) (*RawNode, error) {
 		r.raftLog.append(ents...)
 		r.raftLog.committed = uint64(len(ents))
 		for _, peer := range peers {
-			r.addNode(peer.ID)
+			r.addNode(peer.ReplicaID,
+				pb.Group{NodeId: peer.NodeID, GroupId: r.group.GroupId, RaftReplicaId: peer.ReplicaID})
 		}
 	}
 
@@ -168,21 +172,21 @@ func (rn *RawNode) ProposeConfChange(cc pb.ConfChange) error {
 
 // ApplyConfChange applies a config change to the local node.
 func (rn *RawNode) ApplyConfChange(cc pb.ConfChange) *pb.ConfState {
-	if cc.NodeID == None {
+	if cc.ReplicaID == None {
 		rn.raft.resetPendingConf()
-		return &pb.ConfState{Nodes: rn.raft.nodes()}
+		return &pb.ConfState{Nodes: rn.raft.nodes(), Groups: rn.raft.groups()}
 	}
 	switch cc.Type {
 	case pb.ConfChangeAddNode:
-		rn.raft.addNode(cc.NodeID)
+		rn.raft.addNode(cc.ReplicaID, cc.NodeGroup)
 	case pb.ConfChangeRemoveNode:
-		rn.raft.removeNode(cc.NodeID)
+		rn.raft.removeNode(cc.ReplicaID)
 	case pb.ConfChangeUpdateNode:
-		rn.raft.resetPendingConf()
+		rn.raft.updateNode(cc.ReplicaID, cc.NodeGroup)
 	default:
 		panic("unexpected conf type")
 	}
-	return &pb.ConfState{Nodes: rn.raft.nodes()}
+	return &pb.ConfState{Nodes: rn.raft.nodes(), Groups: rn.raft.groups()}
 }
 
 // Step advances the state machine using the given message.

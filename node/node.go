@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/net/context"
+	"io"
 	"net"
 	"net/http"
 	"path"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/ZanRedisDB/store"
+	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/coreos/etcd/pkg/wait"
 	"github.com/tidwall/redcon"
 )
@@ -49,8 +53,7 @@ type internalReq struct {
 // a key-value node backed by raft
 type KVNode struct {
 	reqProposeC       chan *internalReq
-	proposeC          chan<- []byte // channel for proposing updates
-	raftNode          *raftNode
+	rn                *raftNode
 	store             *store.KVStore
 	stopping          int32
 	stopChan          chan struct{}
@@ -61,6 +64,8 @@ type KVNode struct {
 	clusterWriteStats common.WriteStats
 	ns                string
 	nodeConfig        *NodeConfig
+	wg                sync.WaitGroup
+	commitC           <-chan applyInfo
 }
 
 type KVSnapInfo struct {
@@ -80,57 +85,55 @@ func (self *KVSnapInfo) GetData() ([]byte, error) {
 	return d, nil
 }
 
-func NewKVNode(kvopts *store.KVOptions, nodeConfig *NodeConfig,
-	ns string, clusterID uint64, id int, localRaftAddr string,
-	peers map[int]string, join bool, deleteCb func()) (*KVNode, chan raftpb.ConfChange) {
-	proposeC := make(chan []byte)
-	confChangeC := make(chan raftpb.ConfChange)
-
-	config := &RaftConfig{
-		ClusterID:   clusterID,
-		Namespace:   ns,
-		ID:          id,
-		RaftAddr:    localRaftAddr,
-		DataDir:     kvopts.DataDir,
-		RaftPeers:   peers,
-		SnapCount:   kvopts.SnapCount,
-		SnapCatchup: kvopts.SnapCatchup,
-		nodeConfig:  nodeConfig,
-	}
-	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", id))
-	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", id))
+func NewKVNode(kvopts *store.KVOptions, nodeConfig *NodeConfig, config *RaftConfig,
+	transport *rafthttp.Transport, join bool, deleteCb func()) *KVNode {
+	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
+	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
+	config.nodeConfig = nodeConfig
 
 	s := &KVNode{
 		reqProposeC: make(chan *internalReq, 200),
-		proposeC:    proposeC,
 		store:       store.NewKVStore(kvopts),
 		stopChan:    make(chan struct{}),
 		w:           wait.New(),
 		router:      common.NewCmdRouter(),
 		deleteCb:    deleteCb,
-		ns:          ns,
+		ns:          config.GroupName,
 		nodeConfig:  nodeConfig,
 	}
 	s.registerHandler()
-	commitC, errorC, raftNode := newRaftNode(config,
-		join, s, proposeC, confChangeC)
-	s.raftNode = raftNode
+	commitC, raftNode := newRaftNode(config, transport,
+		join, s)
+	s.rn = raftNode
+	s.commitC = commitC
+	return s
+}
 
-	raftNode.startRaft(s)
+func (self *KVNode) Start() {
+	self.rn.startRaft(self)
 	// read commits from raft into KVStore map until error
-	go s.applyCommits(commitC, errorC)
-	go s.handleProposeReq()
-	return s, confChangeC
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.applyCommits(self.commitC)
+	}()
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.handleProposeReq()
+	}()
 }
 
 func (self *KVNode) Stop() {
 	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
 		return
 	}
-	self.raftNode.StopNode()
+	self.rn.StopNode()
 	self.store.Close()
 	close(self.stopChan)
 	go self.deleteCb()
+	self.wg.Wait()
+	self.rn.Infof("node %v stopped", self.ns)
 }
 
 func (self *KVNode) OptimizeDB() {
@@ -138,10 +141,10 @@ func (self *KVNode) OptimizeDB() {
 }
 
 func (self *KVNode) GetLeadMember() *MemberInfo {
-	return self.raftNode.GetLeadMember()
+	return self.rn.GetLeadMember()
 }
 func (self *KVNode) GetMembers() []*MemberInfo {
-	return self.raftNode.GetMembers()
+	return self.rn.GetMembers()
 }
 
 func (self *KVNode) GetStats() common.NamespaceStats {
@@ -161,7 +164,7 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 		ts.KeyNum = cnt
 		ns.TStats = append(ns.TStats, ts)
 	}
-	nodeLog.Info(self.store.GetStatistics())
+	self.rn.Infof(self.store.GetStatistics())
 	return ns
 }
 
@@ -289,18 +292,18 @@ func (self *KVNode) handleProposeReq() {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			nodeLog.Infof("handle propose loop panic: %s:%v", buf, e)
+			self.rn.Infof("handle propose loop panic: %s:%v", buf, e)
 		}
-		nodeLog.Infof("handle propose loop exit")
 		for _, r := range reqList.Reqs {
 			self.w.Trigger(r.Header.ID, common.ErrStopped)
 		}
+		self.rn.Infof("handle propose loop exit")
 		for {
 			select {
 			case r := <-self.reqProposeC:
 				self.w.Trigger(r.reqData.Header.ID, common.ErrStopped)
 			default:
-				break
+				return
 			}
 		}
 	}()
@@ -322,7 +325,7 @@ func (self *KVNode) handleProposeReq() {
 			reqList.ReqNum = int32(len(reqList.Reqs))
 			buffer, err := reqList.Marshal()
 			if err != nil {
-				nodeLog.Infof("failed to marshal request: %v", err)
+				self.rn.Infof("failed to marshal request: %v", err)
 				for _, r := range reqList.Reqs {
 					self.w.Trigger(r.Header.ID, err)
 				}
@@ -330,10 +333,10 @@ func (self *KVNode) handleProposeReq() {
 				continue
 			}
 			lastReq.done = make(chan struct{})
-			//nodeLog.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
+			//self.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := time.Now()
-			self.proposeC <- buffer
+			self.rn.node.Propose(context.TODO(), buffer)
 			select {
 			case <-lastReq.done:
 			case <-self.stopChan:
@@ -341,7 +344,7 @@ func (self *KVNode) handleProposeReq() {
 			}
 			cost := time.Since(start)
 			if len(reqList.Reqs) >= 100 && cost >= time.Second || (cost >= time.Second*2) {
-				nodeLog.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
+				self.rn.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
 			}
 			reqList.Reqs = reqList.Reqs[:0]
 			lastReq = nil
@@ -363,7 +366,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 			self.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
 		}
 	}
-	//nodeLog.Infof("queue request: %v", req.reqData.String())
+	//self.rn.Infof("queue request: %v", req.reqData.String())
 	var err error
 	var rsp interface{}
 	var ok bool
@@ -387,7 +390,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 
 func (self *KVNode) Propose(buf []byte) (interface{}, error) {
 	h := &RequestHeader{
-		ID:       self.raftNode.reqIDGen.Next(),
+		ID:       self.rn.reqIDGen.Next(),
 		DataType: 0,
 	}
 	raftReq := InternalRaftRequest{
@@ -402,7 +405,7 @@ func (self *KVNode) Propose(buf []byte) (interface{}, error) {
 
 func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	h := &RequestHeader{
-		ID:       self.raftNode.reqIDGen.Next(),
+		ID:       self.rn.reqIDGen.Next(),
 		DataType: int32(HTTPReq),
 	}
 	raftReq := InternalRaftRequest{
@@ -415,13 +418,27 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	return self.queueRequest(req)
 }
 
+func (self *KVNode) ProposeConfChange(cc raftpb.ConfChange) error {
+	cc.ID = self.rn.reqIDGen.Next()
+	self.rn.Infof("propose the conf change: %v", cc.String())
+	err := self.rn.node.ProposeConfChange(context.TODO(), cc)
+	if err != nil {
+		self.rn.Infof("failed to propose the conf change: %v", err)
+	}
+	return err
+}
+
+func (self *KVNode) Tick() {
+	self.rn.node.Tick()
+}
+
 func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	if raft.IsEmptySnap(applyEvent.snapshot) {
 		return
 	}
 	// signaled to load snapshot
-	nodeLog.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
-	defer nodeLog.Infof("finished applying snapshot at index %d\n", np)
+	self.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
+	defer self.rn.Infof("finished applying snapshot at index %d\n", np)
 
 	if applyEvent.snapshot.Metadata.Index <= np.appliedi {
 		nodeLog.Fatalf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
@@ -465,12 +482,12 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 				var reqList BatchInternalRaftRequest
 				parseErr := reqList.Unmarshal(evnt.Data)
 				if parseErr != nil {
-					nodeLog.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
+					self.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
 						parseErr, len(evnt.Data), evnt,
 						string(evnt.Data))
 				}
 				if len(reqList.Reqs) != int(reqList.ReqNum) {
-					nodeLog.Infof("request check failed %v, real len:%v",
+					self.rn.Infof("request check failed %v, real len:%v",
 						reqList, len(reqList.Reqs))
 				}
 				for _, req := range reqList.Reqs {
@@ -483,14 +500,14 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 							cmdName := strings.ToLower(string(cmd.Args[0]))
 							h, ok := self.router.GetInternalCmdHandler(cmdName)
 							if !ok {
-								nodeLog.Infof("unsupported redis command: %v", cmd)
+								self.rn.Infof("unsupported redis command: %v", cmd)
 								self.w.Trigger(reqID, common.ErrInvalidCommand)
 							} else {
 								cmdStart := time.Now()
 								v, err := h(cmd)
 								cmdCost := time.Since(cmdStart)
 								if cmdCost >= time.Millisecond*500 {
-									nodeLog.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
+									self.rn.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 								}
 								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 								// write the future response or error
@@ -510,39 +527,40 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 				}
 				cost := time.Since(start)
 				if len(reqList.Reqs) >= 100 && cost > time.Second || (cost > time.Second*2) {
-					nodeLog.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
+					self.rn.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
 				}
 
 			}
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange
 			cc.Unmarshal(evnt.Data)
-			removeSelf, _ := self.raftNode.applyConfChange(cc, &np.confState)
+			removeSelf, _ := self.rn.applyConfChange(cc, &np.confState)
 			shouldStop = shouldStop || removeSelf
 			confChanged = true
 		}
 		np.appliedi = evnt.Index
-		if evnt.Index == self.raftNode.lastIndex {
-			nodeLog.Infof("replay finished at index: %v\n", evnt.Index)
+		if evnt.Index == self.rn.lastIndex {
+			self.rn.Infof("replay finished at index: %v\n", evnt.Index)
 		}
 	}
 	if shouldStop {
 		go func() {
 			time.Sleep(time.Second)
 			select {
-			case self.raftNode.errorC <- errors.New("my node removed"):
+			case <-self.stopChan:
 			default:
+				self.Stop()
 			}
 		}()
 	}
 	return confChanged
 }
 
-func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) {
+func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 	defer func() {
-		self.Stop()
+		self.rn.Infof("apply commit exit")
 	}()
-	snap, err := self.raftNode.raftStorage.Snapshot()
+	snap, err := self.rn.raftStorage.Snapshot()
 	if err != nil {
 		panic(err)
 	}
@@ -551,20 +569,20 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo, errorC <-chan error) 
 		snapi:     snap.Metadata.Index,
 		appliedi:  snap.Metadata.Index,
 	}
-	nodeLog.Infof("starting state: %v\n", np)
+	self.rn.Infof("starting state: %v\n", np)
 	for {
 		select {
-		case ent := <-commitC:
-			confChanged := self.applyAll(&np, &ent)
-			<-ent.raftDone
-			self.maybeTriggerSnapshot(&np, confChanged)
-			self.raftNode.handleSendSnapshot(&np)
-		case err, ok := <-errorC:
+		case ent, ok := <-commitC:
 			if !ok {
 				return
 			}
-			nodeLog.Infof("error: %v", err)
-			return
+			if ent.raftDone == nil {
+				nodeLog.Panicf("wrong events : %v", ent)
+			}
+			confChanged := self.applyAll(&np, &ent)
+			<-ent.raftDone
+			self.maybeTriggerSnapshot(&np, confChanged)
+			self.rn.handleSendSnapshot(&np)
 		case <-self.stopChan:
 			return
 		}
@@ -575,18 +593,18 @@ func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
 	if np.appliedi-np.snapi <= 0 {
 		return
 	}
-	if !confChanged && np.appliedi-np.snapi <= uint64(self.raftNode.config.SnapCount) {
+	if !confChanged && np.appliedi-np.snapi <= uint64(self.rn.config.SnapCount) {
 		return
 	}
-	if np.appliedi <= self.raftNode.lastIndex {
+	if np.appliedi <= self.rn.lastIndex {
 		// replaying local log
 		return
 	}
 
-	nodeLog.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
-	err := self.raftNode.beginSnapshot(np.appliedi, np.confState)
+	self.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
+	err := self.rn.beginSnapshot(np.appliedi, np.confState)
 	if err != nil {
-		nodeLog.Infof("begin snapshot failed: %v", err)
+		self.rn.Infof("begin snapshot failed: %v", err)
 		return
 	}
 
@@ -601,8 +619,8 @@ func (self *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 		return nil, errors.New("failed to begin backup: maybe too much backup running")
 	}
 	si.WaitReady()
-	si.LeaderInfo = self.raftNode.GetLeadMember()
-	si.Members = self.raftNode.GetMembers()
+	si.LeaderInfo = self.rn.GetLeadMember()
+	si.Members = self.rn.GetMembers()
 	return &si, nil
 }
 
@@ -613,8 +631,8 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 	if err != nil {
 		return err
 	}
-	self.raftNode.RestoreMembers(si.Members)
-	nodeLog.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
+	self.rn.RestoreMembers(si.Members)
+	self.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
@@ -630,7 +648,7 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		// hasBackup = false
 	}
 	if !hasBackup {
-		nodeLog.Infof("local no backup for snapshot, copy from remote\n")
+		self.rn.Infof("local no backup for snapshot, copy from remote\n")
 		syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
 		if syncAddr == "" && syncDir == "" {
 			panic("no backup can be found from others")
@@ -659,7 +677,7 @@ func (self *KVNode) checkLocalBackup(rs raftpb.Snapshot) (bool, error) {
 	var si KVSnapInfo
 	err := json.Unmarshal(rs.Data, &si)
 	if err != nil {
-		nodeLog.Infof("unmarshal snap meta failed: %v", string(rs.Data))
+		self.rn.Infof("unmarshal snap meta failed: %v", string(rs.Data))
 		return false, err
 	}
 	return self.store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
@@ -707,7 +725,7 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	members := make([]*MemberInfo, 0)
 	members = append(members, remoteLeader)
 	members = append(members, si.Members...)
-	curMembers := self.raftNode.GetMembers()
+	curMembers := self.rn.GetMembers()
 	members = append(members, curMembers...)
 	syncAddr := ""
 	syncDir := ""
@@ -716,7 +734,7 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 		if m == nil {
 			continue
 		}
-		if m.ID == uint64(self.raftNode.config.ID) {
+		if m.ID == uint64(self.rn.config.ID) {
 			continue
 		}
 		c := http.Client{Transport: newDeadlineTransport(time.Second)}
@@ -725,14 +743,14 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 			strconv.Itoa(m.HttpAPIPort)+"/cluster/checkbackup/"+self.ns, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
 		if err != nil {
-			nodeLog.Infof("request error: %v", err)
+			self.rn.Infof("request error: %v", err)
 			continue
 		}
 		rsp.Body.Close()
 		if m.Broadcast == h {
 			if m.DataDir == self.store.GetBackupBase() {
 				// the leader is old mine, try find another leader
-				nodeLog.Infof("data dir can not be same if on local: %v, %v", m, self.store.GetBackupBase())
+				self.rn.Infof("data dir can not be same if on local: %v, %v", m, self.store.GetBackupBase())
 				continue
 			}
 			// local node with different directory
@@ -743,6 +761,22 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 		syncDir = m.DataDir
 		break
 	}
-	nodeLog.Infof("should recovery from : %v, %v", syncAddr, syncDir)
+	self.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
 	return syncAddr, syncDir
+}
+
+func (self *KVNode) Process(ctx context.Context, m raftpb.Message) error {
+	return self.rn.Process(ctx, m)
+}
+
+func (self *KVNode) ReportUnreachable(id uint64, group raftpb.Group) {
+	self.rn.ReportUnreachable(id, group)
+}
+
+func (self *KVNode) ReportSnapshot(id uint64, gp raftpb.Group, status raft.SnapshotStatus) {
+	self.rn.ReportSnapshot(id, gp, status)
+}
+
+func (self *KVNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
+	return self.rn.snapshotter.SaveDBFrom(r, msg)
 }

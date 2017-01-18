@@ -89,11 +89,11 @@ func (p *pipeline) handle() {
 				if m.Type == raftpb.MsgApp && p.followerStats != nil {
 					p.followerStats.Fail()
 				}
-				p.raft.ReportUnreachable(m.To)
+				p.raft.ReportUnreachable(m.To, m.ToGroup)
 				if isMsgSnap(m) {
-					p.raft.ReportSnapshot(m.To, raft.SnapshotFailure)
+					p.raft.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
 				}
-				sentFailures.WithLabelValues(types.ID(m.To).String()).Inc()
+				sentFailures.WithLabelValues(m.ToGroup.String()).Inc()
 				continue
 			}
 
@@ -102,9 +102,9 @@ func (p *pipeline) handle() {
 				p.followerStats.Succ(end.Sub(start))
 			}
 			if isMsgSnap(m) {
-				p.raft.ReportSnapshot(m.To, raft.SnapshotFinish)
+				p.raft.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFinish)
 			}
-			sentBytes.WithLabelValues(types.ID(m.To).String()).Add(float64(m.Size()))
+			sentBytes.WithLabelValues(m.ToGroup.String()).Add(float64(m.Size()))
 		case <-p.stopc:
 			return
 		}

@@ -110,6 +110,7 @@ type Config struct {
 	// ID is the identity of the local raft. ID cannot be 0.
 	ID uint64
 
+	Group pb.Group
 	// peers contains the IDs of all nodes (including self) in the raft cluster. It
 	// should only be set when starting a new raft cluster. Restarting raft from
 	// previous configuration will panic if peers is set. peer is private and only
@@ -183,6 +184,10 @@ func (c *Config) validate() error {
 		return errors.New("cannot use none as id")
 	}
 
+	if c.ID != c.Group.RaftReplicaId {
+		return errors.New("local raft id should match group replica id")
+	}
+
 	if c.HeartbeatTick <= 0 {
 		return errors.New("heartbeat tick must be greater than 0")
 	}
@@ -206,8 +211,19 @@ func (c *Config) validate() error {
 	return nil
 }
 
+func IsFromLocalNodeMsg(r *raft, m *pb.Message) bool {
+	if r.group.NodeId == m.FromGroup.NodeId &&
+		r.group.GroupId == m.FromGroup.GroupId &&
+		r.group.RaftReplicaId == m.FromGroup.RaftReplicaId &&
+		r.id == m.From {
+		return true
+	}
+	return false
+}
+
 type raft struct {
-	id uint64
+	id    uint64
+	group pb.Group
 
 	Term uint64
 	Vote uint64
@@ -284,6 +300,7 @@ func newRaft(c *Config) *raft {
 	}
 	r := &raft{
 		id:               c.ID,
+		group:            c.Group,
 		lead:             None,
 		raftLog:          raftlog,
 		maxMsgSize:       c.MaxSizePerMsg,
@@ -296,8 +313,19 @@ func newRaft(c *Config) *raft {
 		preVote:          c.PreVote,
 		readOnly:         newReadOnly(c.ReadOnlyOption),
 	}
+	groups := make(map[uint64]pb.Group)
+	for _, g := range cs.Groups {
+		groups[g.RaftReplicaId] = *g
+	}
 	for _, p := range peers {
-		r.prs[p] = &Progress{Next: 1, ins: newInflights(r.maxInflight)}
+		g := r.group
+		g.NodeId = 0
+		g.RaftReplicaId = p
+		if gp, ok := groups[p]; ok {
+			g.NodeId = gp.NodeId
+		}
+		r.prs[p] = &Progress{Next: 1, ins: newInflights(r.maxInflight), group: g}
+		r.logger.Infof("newRaft %x [add peer: %v ]", r.id, r.prs[p])
 	}
 	if !isHardStateEqual(hs, emptyState) {
 		r.loadState(hs)
@@ -340,9 +368,19 @@ func (r *raft) nodes() []uint64 {
 	return nodes
 }
 
+func (r *raft) groups() []*pb.Group {
+	groups := make([]*pb.Group, 0, len(r.prs))
+	for _, pr := range r.prs {
+		newg := pr.group
+		groups = append(groups, &newg)
+	}
+	return groups
+}
+
 // send persists state to stable storage and then sends to its mailbox.
 func (r *raft) send(m pb.Message) {
 	m.From = r.id
+	m.FromGroup = r.group
 	if m.Type == pb.MsgVote || m.Type == pb.MsgPreVote {
 		if m.Term == 0 {
 			// PreVote RPCs are sent at a term other than our actual term, so the code
@@ -370,7 +408,7 @@ func (r *raft) sendAppend(to uint64) {
 	if pr.IsPaused() {
 		return
 	}
-	m := pb.Message{}
+	m := pb.Message{FromGroup: r.group, ToGroup: pr.group}
 	m.To = to
 
 	term, errt := r.raftLog.term(pr.Next - 1)
@@ -434,6 +472,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 	commit := min(r.prs[to].Match, r.raftLog.committed)
 	m := pb.Message{
 		To:      to,
+		ToGroup: r.prs[to].group,
 		Type:    pb.MsgHeartbeat,
 		Commit:  commit,
 		Context: ctx,
@@ -501,10 +540,11 @@ func (r *raft) reset(term uint64) {
 
 	r.votes = make(map[uint64]bool)
 	for id := range r.prs {
-		r.prs[id] = &Progress{Next: r.raftLog.lastIndex() + 1, ins: newInflights(r.maxInflight)}
+		r.prs[id] = &Progress{Next: r.raftLog.lastIndex() + 1, ins: newInflights(r.maxInflight), group: r.prs[id].group}
 		if id == r.id {
 			r.prs[id].Match = r.raftLog.lastIndex()
 		}
+		r.logger.Infof(" %x [peer progress: %v ]", r.id, r.prs[id])
 	}
 	r.pendingConf = false
 	r.readOnly = newReadOnly(r.readOnly.option)
@@ -528,7 +568,7 @@ func (r *raft) tickElection() {
 
 	if r.promotable() && r.pastElectionTimeout() {
 		r.electionElapsed = 0
-		r.Step(pb.Message{From: r.id, Type: pb.MsgHup})
+		r.Step(pb.Message{From: r.id, FromGroup: r.group, Type: pb.MsgHup})
 	}
 }
 
@@ -540,7 +580,7 @@ func (r *raft) tickHeartbeat() {
 	if r.electionElapsed >= r.electionTimeout {
 		r.electionElapsed = 0
 		if r.checkQuorum {
-			r.Step(pb.Message{From: r.id, Type: pb.MsgCheckQuorum})
+			r.Step(pb.Message{From: r.id, FromGroup: r.group, Type: pb.MsgCheckQuorum})
 		}
 		// If current leader cannot transfer leadership in electionTimeout, it becomes leader again.
 		if r.state == StateLeader && r.leadTransferee != None {
@@ -554,7 +594,7 @@ func (r *raft) tickHeartbeat() {
 
 	if r.heartbeatElapsed >= r.heartbeatTimeout {
 		r.heartbeatElapsed = 0
-		r.Step(pb.Message{From: r.id, Type: pb.MsgBeat})
+		r.Step(pb.Message{From: r.id, FromGroup: r.group, Type: pb.MsgBeat})
 	}
 }
 
@@ -644,18 +684,19 @@ func (r *raft) campaign(t CampaignType) {
 		}
 		return
 	}
-	for id := range r.prs {
+	for id, p := range r.prs {
 		if id == r.id {
 			continue
 		}
-		r.logger.Infof("%x [logterm: %d, index: %d] sent %s request to %x at term %d",
-			r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), voteMsg, id, r.Term)
+		r.logger.Infof("%x [logterm: %d, index: %d] sent %s request to %x (%v) at term %d",
+			r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), voteMsg, id, p.group, r.Term)
 
 		var ctx []byte
 		if t == campaignTransfer {
 			ctx = []byte(t)
 		}
-		r.send(pb.Message{Term: term, To: id, Type: voteMsg, Index: r.raftLog.lastIndex(), LogTerm: r.raftLog.lastTerm(), Context: ctx})
+		r.send(pb.Message{Term: term, To: id, ToGroup: p.group, Type: voteMsg, Index: r.raftLog.lastIndex(),
+			LogTerm: r.raftLog.lastTerm(), Context: ctx})
 	}
 }
 
@@ -725,7 +766,7 @@ func (r *raft) Step(m pb.Message) error {
 			// removed node will send MsgVotes (or MsgPreVotes) which will be ignored,
 			// but it will not receive MsgApp or MsgHeartbeat, so it will not create
 			// disruptive term increases
-			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp})
+			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgAppResp})
 		} else {
 			// ignore other cases
 			r.logger.Infof("%x [term: %d] ignored a %s message with lower term from %x [term: %d]",
@@ -762,7 +803,7 @@ func (r *raft) Step(m pb.Message) error {
 		if (r.Vote == None || m.Term > r.Term || r.Vote == m.From) && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
 			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] cast %s for %x [logterm: %d, index: %d] at term %d",
 				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
-			r.send(pb.Message{To: m.From, Type: voteRespMsgType(m.Type)})
+			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: voteRespMsgType(m.Type)})
 			if m.Type == pb.MsgVote {
 				// Only record real votes.
 				r.electionElapsed = 0
@@ -771,7 +812,7 @@ func (r *raft) Step(m pb.Message) error {
 		} else {
 			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
 				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
-			r.send(pb.Message{To: m.From, Type: voteRespMsgType(m.Type), Reject: true})
+			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: voteRespMsgType(m.Type), Reject: true})
 		}
 
 	default:
@@ -835,10 +876,11 @@ func stepLeader(r *raft, m pb.Message) {
 				if r.checkQuorum {
 					ri = r.raftLog.committed
 				}
-				if m.From == None || m.From == r.id { // from local member
+				if m.From == None || IsFromLocalNodeMsg(r, &m) { // from local member
 					r.readStates = append(r.readStates, ReadState{Index: r.raftLog.committed, RequestCtx: m.Entries[0].Data})
 				} else {
-					r.send(pb.Message{To: m.From, Type: pb.MsgReadIndexResp, Index: ri, Entries: m.Entries})
+					r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgReadIndexResp, Index: ri,
+						Entries: m.Entries})
 				}
 			}
 		} else {
@@ -891,7 +933,7 @@ func stepLeader(r *raft, m pb.Message) {
 				// Transfer leadership is in progress.
 				if m.From == r.leadTransferee && pr.Match == r.raftLog.lastIndex() {
 					r.logger.Infof("%x sent MsgTimeoutNow to %x after received MsgAppResp", r.id, m.From)
-					r.sendTimeoutNow(m.From)
+					r.sendTimeoutNow(m.From, m.FromGroup)
 				}
 			}
 		}
@@ -919,10 +961,11 @@ func stepLeader(r *raft, m pb.Message) {
 		rss := r.readOnly.advance(m)
 		for _, rs := range rss {
 			req := rs.req
-			if req.From == None || req.From == r.id { // from local member
+			if req.From == None || IsFromLocalNodeMsg(r, &req) { // from local member
 				r.readStates = append(r.readStates, ReadState{Index: rs.index, RequestCtx: req.Entries[0].Data})
 			} else {
-				r.send(pb.Message{To: req.From, Type: pb.MsgReadIndexResp, Index: rs.index, Entries: req.Entries})
+				r.send(pb.Message{To: req.From, ToGroup: req.FromGroup, Type: pb.MsgReadIndexResp, Index: rs.index,
+					Entries: req.Entries})
 			}
 		}
 	case pb.MsgSnapStatus:
@@ -970,7 +1013,7 @@ func stepLeader(r *raft, m pb.Message) {
 		r.electionElapsed = 0
 		r.leadTransferee = leadTransferee
 		if pr.Match == r.raftLog.lastIndex() {
-			r.sendTimeoutNow(leadTransferee)
+			r.sendTimeoutNow(leadTransferee, m.FromGroup)
 			r.logger.Infof("%x sends MsgTimeoutNow to %x immediately as %x already has up-to-date log", r.id, leadTransferee, leadTransferee)
 		} else {
 			r.sendAppend(leadTransferee)
@@ -1030,6 +1073,7 @@ func stepFollower(r *raft, m pb.Message) {
 			return
 		}
 		m.To = r.lead
+		m.ToGroup = r.prs[m.To].group
 		r.send(m)
 	case pb.MsgApp:
 		r.electionElapsed = 0
@@ -1049,6 +1093,7 @@ func stepFollower(r *raft, m pb.Message) {
 			return
 		}
 		m.To = r.lead
+		m.ToGroup = r.prs[m.To].group
 		r.send(m)
 	case pb.MsgTimeoutNow:
 		if r.promotable() {
@@ -1066,6 +1111,7 @@ func stepFollower(r *raft, m pb.Message) {
 			return
 		}
 		m.To = r.lead
+		m.ToGroup = r.prs[m.To].group
 		r.send(m)
 	case pb.MsgReadIndexResp:
 		if len(m.Entries) != 1 {
@@ -1078,22 +1124,23 @@ func stepFollower(r *raft, m pb.Message) {
 
 func (r *raft) handleAppendEntries(m pb.Message) {
 	if m.Index < r.raftLog.committed {
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
+		r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 		return
 	}
 
 	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok {
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
+		r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgAppResp, Index: mlastIndex})
 	} else {
 		r.logger.Debugf("%x [logterm: %d, index: %d] rejected msgApp [logterm: %d, index: %d] from %x",
 			r.id, r.raftLog.zeroTermOnErrCompacted(r.raftLog.term(m.Index)), m.Index, m.LogTerm, m.Index, m.From)
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index, Reject: true, RejectHint: r.raftLog.lastIndex()})
+		r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgAppResp, Index: m.Index, Reject: true,
+			RejectHint: r.raftLog.lastIndex()})
 	}
 }
 
 func (r *raft) handleHeartbeat(m pb.Message) {
 	r.raftLog.commitTo(m.Commit)
-	r.send(pb.Message{To: m.From, Type: pb.MsgHeartbeatResp, Context: m.Context})
+	r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgHeartbeatResp, Context: m.Context})
 }
 
 func (r *raft) handleSnapshot(m pb.Message) {
@@ -1101,11 +1148,11 @@ func (r *raft) handleSnapshot(m pb.Message) {
 	if r.restore(m.Snapshot) {
 		r.logger.Infof("%x [commit: %d] restored snapshot [index: %d, term: %d]",
 			r.id, r.raftLog.committed, sindex, sterm)
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.lastIndex()})
+		r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgAppResp, Index: r.raftLog.lastIndex()})
 	} else {
 		r.logger.Infof("%x [commit: %d] ignored snapshot [index: %d, term: %d]",
 			r.id, r.raftLog.committed, sindex, sterm)
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
+		r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 	}
 }
 
@@ -1122,17 +1169,26 @@ func (r *raft) restore(s pb.Snapshot) bool {
 		return false
 	}
 
-	r.logger.Infof("%x [commit: %d, lastindex: %d, lastterm: %d] starts to restore snapshot [index: %d, term: %d]",
-		r.id, r.raftLog.committed, r.raftLog.lastIndex(), r.raftLog.lastTerm(), s.Metadata.Index, s.Metadata.Term)
+	r.logger.Infof("%x [commit: %d, lastindex: %d, lastterm: %d] starts to restore snapshot [index: %d, term: %d, prs:%v]",
+		r.id, r.raftLog.committed, r.raftLog.lastIndex(), r.raftLog.lastTerm(),
+		s.Metadata.Index, s.Metadata.Term, r.prs)
 
 	r.raftLog.restore(s)
 	r.prs = make(map[uint64]*Progress)
+	grps := make(map[uint64]pb.Group)
+	for _, g := range s.Metadata.ConfState.Groups {
+		if g.GroupId != r.group.GroupId {
+			r.logger.Errorf("group id mismatch for replica: %v, %v", g, r.group)
+			return false
+		}
+		grps[g.RaftReplicaId] = *g
+	}
 	for _, n := range s.Metadata.ConfState.Nodes {
 		match, next := uint64(0), r.raftLog.lastIndex()+1
 		if n == r.id {
 			match = next - 1
 		}
-		r.setProgress(n, match, next)
+		r.setProgress(n, match, next, grps[n])
 		r.logger.Infof("%x restored progress of %x [%s]", r.id, n, r.prs[n])
 	}
 	return true
@@ -1145,15 +1201,30 @@ func (r *raft) promotable() bool {
 	return ok
 }
 
-func (r *raft) addNode(id uint64) {
+func (r *raft) updateNode(id uint64, g pb.Group) {
 	r.pendingConf = false
-	if _, ok := r.prs[id]; ok {
+	if pr, ok := r.prs[id]; ok {
+		r.logger.Infof("%x update progress group info for node : %v, %v", r.id, pr, g)
+		if g.NodeId > 0 && g.GroupId == r.group.GroupId && g.RaftReplicaId == id {
+			pr.group = g
+		}
+	}
+}
+
+func (r *raft) addNode(id uint64, g pb.Group) {
+	r.pendingConf = false
+	if pr, ok := r.prs[id]; ok {
 		// Ignore any redundant addNode calls (which can happen because the
 		// initial bootstrapping entries are applied twice).
+		if pr.group.NodeId == 0 || pr.group.GroupId == 0 ||
+			pr.group.RaftReplicaId == 0 {
+			r.logger.Infof("%x missing progress group info for node : %v, %v", r.id, pr, g)
+			pr.group = g
+		}
 		return
 	}
 
-	r.setProgress(id, 0, r.raftLog.lastIndex()+1)
+	r.setProgress(id, 0, r.raftLog.lastIndex()+1, g)
 }
 
 func (r *raft) removeNode(id uint64) {
@@ -1178,8 +1249,11 @@ func (r *raft) removeNode(id uint64) {
 
 func (r *raft) resetPendingConf() { r.pendingConf = false }
 
-func (r *raft) setProgress(id, match, next uint64) {
-	r.prs[id] = &Progress{Next: next, Match: match, ins: newInflights(r.maxInflight)}
+func (r *raft) setProgress(id, match, next uint64, g pb.Group) {
+	r.prs[id] = &Progress{Next: next, Match: match,
+		ins: newInflights(r.maxInflight), group: g}
+
+	r.logger.Infof(" %x [peer progress: %v ]", r.id, r.prs[id])
 }
 
 func (r *raft) delProgress(id uint64) {
@@ -1229,8 +1303,8 @@ func (r *raft) checkQuorumActive() bool {
 	return act >= r.quorum()
 }
 
-func (r *raft) sendTimeoutNow(to uint64) {
-	r.send(pb.Message{To: to, Type: pb.MsgTimeoutNow})
+func (r *raft) sendTimeoutNow(to uint64, toGroup pb.Group) {
+	r.send(pb.Message{To: to, ToGroup: toGroup, Type: pb.MsgTimeoutNow})
 }
 
 func (r *raft) abortLeaderTransfer() {

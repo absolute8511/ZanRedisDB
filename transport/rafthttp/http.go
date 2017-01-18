@@ -17,13 +17,13 @@ package rafthttp
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"path"
 	"strings"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/snap"
 	pioutil "github.com/coreos/etcd/pkg/ioutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/version"
@@ -116,7 +116,7 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	receivedBytes.WithLabelValues(types.ID(m.From).String()).Add(float64(len(b)))
+	receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(len(b)))
 
 	if err := h.r.Process(context.TODO(), m); err != nil {
 		switch v := err.(type) {
@@ -137,14 +137,18 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type ISnapSaver interface {
+	SaveDBFrom(io.Reader, raftpb.Message) (int64, error)
+}
+
 type snapshotHandler struct {
 	tr          Transporter
 	r           Raft
-	snapshotter *snap.Snapshotter
+	snapshotter ISnapSaver
 	cid         types.ID
 }
 
-func newSnapshotHandler(tr Transporter, r Raft, snapshotter *snap.Snapshotter, cid types.ID) http.Handler {
+func newSnapshotHandler(tr Transporter, r Raft, snapshotter ISnapSaver, cid types.ID) http.Handler {
 	return &snapshotHandler{
 		tr:          tr,
 		r:           r,
@@ -192,7 +196,7 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	receivedBytes.WithLabelValues(types.ID(m.From).String()).Add(float64(m.Size()))
+	receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(m.Size()))
 
 	if m.Type != raftpb.MsgSnap {
 		plog.Errorf("unexpected raft message type %s on snapshot path", m.Type)
@@ -202,14 +206,14 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	plog.Infof("receiving database snapshot [index:%d, from %s] ...", m.Snapshot.Metadata.Index, types.ID(m.From))
 	// save incoming database snapshot.
-	n, err := h.snapshotter.SaveDBFrom(r.Body, m.Snapshot.Metadata.Index)
+	n, err := h.snapshotter.SaveDBFrom(r.Body, m)
 	if err != nil {
 		msg := fmt.Sprintf("failed to save KV snapshot (%v)", err)
 		plog.Error(msg)
 		http.Error(w, msg, http.StatusInternalServerError)
 		return
 	}
-	receivedBytes.WithLabelValues(types.ID(m.From).String()).Add(float64(n))
+	receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(n))
 	plog.Infof("received and saved database snapshot [index: %d, from: %s] successfully", m.Snapshot.Metadata.Index, types.ID(m.From))
 
 	if err := h.r.Process(context.TODO(), m); err != nil {
@@ -282,11 +286,11 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid from", http.StatusNotFound)
 		return
 	}
-	if h.r.IsIDRemoved(uint64(from)) {
-		plog.Warningf("rejected the stream from peer %s since it was removed", from)
-		http.Error(w, "removed member", http.StatusGone)
-		return
-	}
+	//if h.r.IsIDRemoved(uint64(from)) {
+	//	plog.Warningf("rejected the stream from peer %s since it was removed", from)
+	//	http.Error(w, "removed member", http.StatusGone)
+	//	return
+	//}
 	p := h.peerGetter.Get(from)
 	if p == nil {
 		// This may happen in following cases:
