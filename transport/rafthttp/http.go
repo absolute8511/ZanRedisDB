@@ -127,7 +127,6 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "error processing raft message", http.StatusInternalServerError)
 			w.(http.Flusher).Flush()
 			// disconnect the http stream
-			panic(err)
 		}
 		return
 	}
@@ -301,7 +300,9 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if urls := r.Header.Get("X-PeerURLs"); urls != "" {
 			h.tr.AddRemote(from, strings.Split(urls, ","))
 		}
-		plog.Errorf("failed to find member %s in cluster %s", from, h.cid)
+		// while in multi raft group mode, it can happen if a new raft group is
+		// init and not ready to process raft message
+		//plog.Errorf("failed to find member %s in cluster %s", from, h.cid)
 		http.Error(w, "error sender not found", http.StatusNotFound)
 		return
 	}

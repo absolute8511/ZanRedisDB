@@ -238,6 +238,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	if oldwal {
 		rc.restartNode(c, ds)
 	} else {
+		rc.ds.Clear()
 		rc.wal = rc.openWAL(nil)
 		rpeers := make([]raft.Peer, 0, len(rc.config.RaftPeers))
 		for _, v := range rc.config.RaftPeers {

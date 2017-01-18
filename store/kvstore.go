@@ -24,10 +24,7 @@ func NewKVStore(kvopts *KVOptions) *KVStore {
 		opts: kvopts,
 	}
 
-	err := s.openDB()
-	if err != nil {
-		panic(err)
-	}
+	s.openDB()
 	return s
 }
 
@@ -44,7 +41,9 @@ func (s *KVStore) openDB() error {
 }
 
 func (s *KVStore) Clear() error {
-	s.Close()
+	if s.RockDB != nil {
+		s.Close()
+	}
 	os.RemoveAll(s.GetDataDir())
 	return s.openDB()
 }
