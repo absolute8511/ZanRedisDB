@@ -138,6 +138,12 @@ func (t *Transport) Start() error {
 	return nil
 }
 
+func (t *Transport) IsStarted() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.peers != nil && t.remotes != nil
+}
+
 func (t *Transport) Handler() http.Handler {
 	pipelineHandler := newPipelineHandler(t, t.Raft, t.ClusterID)
 	streamHandler := newStreamHandler(t, t, t.Raft, t.ID, t.ClusterID)

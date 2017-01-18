@@ -286,6 +286,15 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		}
 		rc.node = raft.StartNode(c, startPeers)
 	}
+	rc.initForTransport()
+	rc.wg.Add(1)
+	go func() {
+		defer rc.wg.Done()
+		rc.serveChannels()
+	}()
+}
+
+func (rc *raftNode) initForTransport() {
 	if len(rc.members) == 0 {
 		for _, v := range rc.config.RaftPeers {
 			if v.NodeID != rc.config.nodeConfig.NodeID {
@@ -298,12 +307,6 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 			rc.transport.AddPeer(types.ID(m.NodeID), m.RaftURLs)
 		}
 	}
-
-	rc.wg.Add(1)
-	go func() {
-		defer rc.wg.Done()
-		rc.serveChannels()
-	}()
 }
 
 func (rc *raftNode) proposeMyself(cc raftpb.ConfChange) {
@@ -682,7 +685,7 @@ func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
 			rc.Infof("node added to the cluster: %v\n", m)
 		}
 	}
-	if rc.transport != nil {
+	if rc.transport != nil && rc.transport.IsStarted() {
 		for _, m := range rc.members {
 			if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
 				rc.transport.RemovePeer(types.ID(m.NodeID))
@@ -694,8 +697,12 @@ func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
 }
 
 func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
+	if rc.node == nil {
+		return nil
+	}
 	return rc.node.Step(ctx, m)
 }
+
 func (rc *raftNode) IsIDRemoved(id uint64, group raftpb.Group) bool { return false }
 func (rc *raftNode) ReportUnreachable(id uint64, group raftpb.Group) {
 	//rc.Infof("report node %v in group %v unreachable", id, group)

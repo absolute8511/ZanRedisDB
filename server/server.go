@@ -18,11 +18,13 @@ import (
 	"path"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 var (
 	errNamespaceNotFound = errors.New("namespace not found")
+	errRaftGroupNotReady = errors.New("raft group not ready")
 )
 
 var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("server"))
@@ -37,8 +39,13 @@ func SLogger() *common.LevelLogger {
 }
 
 type NamespaceNode struct {
-	node *node.KVNode
-	conf *NamespaceConfig
+	node  *node.KVNode
+	conf  *NamespaceConfig
+	ready int32
+}
+
+func (self *NamespaceNode) IsReady() bool {
+	return atomic.LoadInt32(&self.ready) == 1
 }
 
 type Server struct {
@@ -193,9 +200,12 @@ func (self *Server) Start() {
 		self.raftTransport.Start()
 		self.serveRaft()
 	}()
+
 	for _, kv := range self.kvNodes {
 		kv.node.Start()
+		atomic.StoreInt32(&kv.ready, 1)
 	}
+
 	self.wg.Add(1)
 	go func() {
 		defer self.wg.Done()
@@ -248,7 +258,9 @@ func (self *Server) processRaftTick() {
 			self.mutex.Lock()
 			nodes := make([]*node.KVNode, 0, len(self.kvNodes))
 			for _, v := range self.kvNodes {
-				nodes = append(nodes, v.node)
+				if v.IsReady() {
+					nodes = append(nodes, v.node)
+				}
 			}
 			self.mutex.Unlock()
 			for _, n := range nodes {
@@ -292,7 +304,10 @@ func (self *Server) Process(ctx context.Context, m raftpb.Message) error {
 	self.mutex.Unlock()
 	if !ok {
 		sLog.Errorf("kv namespace not found %v while processing %v ", gn, m.String())
-		return errors.New("raft group not found")
+		return errNamespaceNotFound
+	}
+	if !kv.IsReady() {
+		return errRaftGroupNotReady
 	}
 	return kv.node.Process(ctx, m)
 }
@@ -313,6 +328,10 @@ func (self *Server) ReportUnreachable(id uint64, group raftpb.Group) {
 		sLog.Errorf("kv namespace not found %v ", gn)
 		return
 	}
+	if !kv.IsReady() {
+		return
+	}
+
 	kv.node.ReportUnreachable(id, group)
 }
 
@@ -330,6 +349,10 @@ func (self *Server) ReportSnapshot(id uint64, gp raftpb.Group, status raft.Snaps
 		sLog.Errorf("kv namespace not found %v ", gn)
 		return
 	}
+	if !kv.IsReady() {
+		return
+	}
+
 	kv.node.ReportSnapshot(id, gp, status)
 }
 
@@ -345,7 +368,10 @@ func (self *Server) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 	self.mutex.Unlock()
 	if !ok {
 		sLog.Errorf("kv namespace not found %v ", gn)
-		return 0, errors.New("raft group not found")
+		return 0, errNamespaceNotFound
+	}
+	if !kv.IsReady() {
+		return 0, errRaftGroupNotReady
 	}
 
 	return kv.node.SaveDBFrom(r, msg)
