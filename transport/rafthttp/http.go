@@ -61,7 +61,7 @@ type writerToResponse interface {
 type pipelineHandler struct {
 	tr  Transporter
 	r   Raft
-	cid types.ID
+	cid string
 }
 
 // newPipelineHandler returns a handler for handling raft messages
@@ -69,7 +69,7 @@ type pipelineHandler struct {
 //
 // The handler reads out the raft message from request body,
 // and forwards it to the given raft state machine for processing.
-func newPipelineHandler(tr Transporter, r Raft, cid types.ID) http.Handler {
+func newPipelineHandler(tr Transporter, r Raft, cid string) http.Handler {
 	return &pipelineHandler{
 		tr:  tr,
 		r:   r,
@@ -84,7 +84,7 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("X-Etcd-Cluster-ID", h.cid.String())
+	w.Header().Set("X-Etcd-Cluster-ID", h.cid)
 
 	if err := checkClusterCompatibilityFromHeader(r.Header, h.cid); err != nil {
 		http.Error(w, err.Error(), http.StatusPreconditionFailed)
@@ -144,10 +144,10 @@ type snapshotHandler struct {
 	tr          Transporter
 	r           Raft
 	snapshotter ISnapSaver
-	cid         types.ID
+	cid         string
 }
 
-func newSnapshotHandler(tr Transporter, r Raft, snapshotter ISnapSaver, cid types.ID) http.Handler {
+func newSnapshotHandler(tr Transporter, r Raft, snapshotter ISnapSaver, cid string) http.Handler {
 	return &snapshotHandler{
 		tr:          tr,
 		r:           r,
@@ -172,7 +172,7 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("X-Etcd-Cluster-ID", h.cid.String())
+	w.Header().Set("X-Etcd-Cluster-ID", h.cid)
 
 	if err := checkClusterCompatibilityFromHeader(r.Header, h.cid); err != nil {
 		http.Error(w, err.Error(), http.StatusPreconditionFailed)
@@ -238,10 +238,10 @@ type streamHandler struct {
 	peerGetter peerGetter
 	r          Raft
 	id         types.ID
-	cid        types.ID
+	cid        string
 }
 
-func newStreamHandler(tr *Transport, pg peerGetter, r Raft, id, cid types.ID) http.Handler {
+func newStreamHandler(tr *Transport, pg peerGetter, r Raft, id types.ID, cid string) http.Handler {
 	return &streamHandler{
 		tr:         tr,
 		peerGetter: pg,
@@ -259,7 +259,7 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("X-Server-Version", version.Version)
-	w.Header().Set("X-Etcd-Cluster-ID", h.cid.String())
+	w.Header().Set("X-Etcd-Cluster-ID", h.cid)
 
 	if err := checkClusterCompatibilityFromHeader(r.Header, h.cid); err != nil {
 		http.Error(w, err.Error(), http.StatusPreconditionFailed)
@@ -333,12 +333,12 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // It checks whether the version of local member is compatible with
 // the versions in the header, and whether the cluster ID of local member
 // matches the one in the header.
-func checkClusterCompatibilityFromHeader(header http.Header, cid types.ID) error {
+func checkClusterCompatibilityFromHeader(header http.Header, cid string) error {
 	if err := checkVersionCompability(header.Get("X-Server-From"), serverVersion(header), minClusterVersion(header)); err != nil {
 		plog.Errorf("request version incompatibility (%v)", err)
 		return errIncompatibleVersion
 	}
-	if gcid := header.Get("X-Etcd-Cluster-ID"); gcid != cid.String() {
+	if gcid := header.Get("X-Etcd-Cluster-ID"); gcid != cid {
 		plog.Errorf("request cluster ID mismatch (got %s want %s)", gcid, cid)
 		return errClusterIDMismatch
 	}

@@ -35,7 +35,7 @@ var (
 
 type snapshotSender struct {
 	from, to types.ID
-	cid      types.ID
+	cid      string
 
 	tr     *Transport
 	picker *urlPicker

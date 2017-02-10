@@ -1,10 +1,27 @@
 package node
 
-type NodeConfig struct {
+type NamespaceConfig struct {
+	Name          string          `json:"name"`
+	EngType       string          `json:"eng_type"`
+	SnapCount     int             `json:"snap_count"`
+	SnapCatchup   int             `json:"snap_catchup"`
+	RaftGroupConf RaftGroupConfig `json:"raft_group_conf"`
+}
+
+type NamespaceDynamicConf struct {
+}
+
+type RaftGroupConfig struct {
+	GroupID   uint64        `json:"group_id"`
+	SeedNodes []ReplicaInfo `json:"seed_nodes"`
+}
+
+type MachineConfig struct {
 	// server node id
 	NodeID        uint64 `json:"node_id"`
 	BroadcastAddr string `json:"broadcast_addr"`
 	HttpAPIPort   int    `json:"http_api_port"`
+	LocalRaftAddr string `json:"local_raft_addr"`
 }
 
 type ReplicaInfo struct {
@@ -27,5 +44,5 @@ type RaftConfig struct {
 	RaftPeers   map[uint64]ReplicaInfo `json:"raft_peers"`
 	SnapCount   int                    `json:"snap_count"`
 	SnapCatchup int                    `json:"snap_catchup"`
-	nodeConfig  *NodeConfig
+	nodeConfig  *MachineConfig
 }

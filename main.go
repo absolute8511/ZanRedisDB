@@ -88,7 +88,7 @@ func (p *program) Start() error {
 		if err != nil {
 			panic(err)
 		}
-		var nsConf server.NamespaceConfig
+		var nsConf node.NamespaceConfig
 		err = json.Unmarshal(d, &nsConf)
 		if err != nil {
 			panic(err)
@@ -98,7 +98,6 @@ func (p *program) Start() error {
 		}
 
 		id := nsNodeConf.LocalReplicaID
-		gID := nsConf.RaftGroupConf.GroupID
 		// raft provides a commit stream for the proposals from the http api
 		clusterNodes := make(map[uint64]node.ReplicaInfo)
 		for _, v := range nsConf.RaftGroupConf.SeedNodes {
@@ -113,7 +112,7 @@ func (p *program) Start() error {
 		d, _ = json.MarshalIndent(&nsConf, "", " ")
 		fmt.Printf("namespace load config: %v \n", string(d))
 		fmt.Printf("local %v start with cluster: %v\n", serverConf.LocalRaftAddr, clusterNodes)
-		app.InitKVNamespace(gID, id, serverConf.LocalRaftAddr, clusterNodes, nsNodeConf.Join, &nsConf)
+		app.InitKVNamespace(id, nsNodeConf.Join, &nsConf)
 	}
 	app.Start()
 	p.server = app

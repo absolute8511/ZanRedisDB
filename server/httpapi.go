@@ -23,11 +23,11 @@ func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprout
 	if err != nil {
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	kv, ok := self.kvNodes[ns]
-	if !ok || kv == nil {
+	kv := self.GetNamespace(ns)
+	if kv == nil {
 		return nil, Err{Code: http.StatusNotFound, Text: "Namespace not found:" + ns}
 	}
-	if v, err := kv.node.Lookup(realKey); err == nil {
+	if v, err := kv.Node.Lookup(realKey); err == nil {
 		if v == nil {
 			v = []byte("")
 		}
@@ -91,7 +91,7 @@ func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httpr
 	if v == nil {
 		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
-	l := v.node.GetLeadMember()
+	l := v.Node.GetLeadMember()
 	if l == nil {
 		return nil, Err{Code: http.StatusSeeOther, Text: "no leader found"}
 	}
@@ -104,7 +104,7 @@ func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps http
 	if v == nil {
 		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
-	return v.node.GetMembers(), nil
+	return v.Node.GetMembers(), nil
 }
 
 func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
@@ -117,7 +117,7 @@ func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps
 	if err != nil {
 		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	ok, err := v.node.CheckLocalBackup(meta)
+	ok, err := v.Node.CheckLocalBackup(meta)
 	if err != nil || !ok {
 		return nil, Err{Code: http.StatusNotFound, Text: "no backup found"}
 	}

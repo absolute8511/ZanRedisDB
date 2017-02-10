@@ -21,7 +21,6 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
-	"github.com/absolute8511/ZanRedisDB/store"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/coreos/etcd/pkg/wait"
 	"github.com/tidwall/redcon"
@@ -54,7 +53,7 @@ type internalReq struct {
 type KVNode struct {
 	reqProposeC       chan *internalReq
 	rn                *raftNode
-	store             *store.KVStore
+	store             *KVStore
 	stopping          int32
 	stopChan          chan struct{}
 	w                 wait.Wait
@@ -63,7 +62,7 @@ type KVNode struct {
 	dbWriteStats      common.WriteStats
 	clusterWriteStats common.WriteStats
 	ns                string
-	nodeConfig        *NodeConfig
+	machineConfig     *MachineConfig
 	wg                sync.WaitGroup
 	commitC           <-chan applyInfo
 }
@@ -85,21 +84,21 @@ func (self *KVSnapInfo) GetData() ([]byte, error) {
 	return d, nil
 }
 
-func NewKVNode(kvopts *store.KVOptions, nodeConfig *NodeConfig, config *RaftConfig,
+func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConfig,
 	transport *rafthttp.Transport, join bool, deleteCb func()) *KVNode {
 	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
-	config.nodeConfig = nodeConfig
+	config.nodeConfig = machineConfig
 
 	s := &KVNode{
-		reqProposeC: make(chan *internalReq, 200),
-		store:       store.NewKVStore(kvopts),
-		stopChan:    make(chan struct{}),
-		w:           wait.New(),
-		router:      common.NewCmdRouter(),
-		deleteCb:    deleteCb,
-		ns:          config.GroupName,
-		nodeConfig:  nodeConfig,
+		reqProposeC:   make(chan *internalReq, 200),
+		store:         NewKVStore(kvopts),
+		stopChan:      make(chan struct{}),
+		w:             wait.New(),
+		router:        common.NewCmdRouter(),
+		deleteCb:      deleteCb,
+		ns:            config.GroupName,
+		machineConfig: machineConfig,
 	}
 	s.registerHandler()
 	commitC, raftNode := newRaftNode(config, transport,
@@ -729,7 +728,7 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	members = append(members, curMembers...)
 	syncAddr := ""
 	syncDir := ""
-	h := self.nodeConfig.BroadcastAddr
+	h := self.machineConfig.BroadcastAddr
 	for _, m := range members {
 		if m == nil {
 			continue

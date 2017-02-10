@@ -99,7 +99,7 @@ type Transport struct {
 
 	ID          types.ID   // local member ID
 	URLs        types.URLs // local peer URLs
-	ClusterID   types.ID   // raft cluster ID for request validation
+	ClusterID   string     // raft cluster ID for request validation
 	Raft        Raft       // raft state machine, to which the Transport forwards received messages and reports status
 	Snapshotter ISnapSaver
 	ServerStats *stats.ServerStats // used to record general transportation statistics
