@@ -27,6 +27,7 @@ const (
 	CoordLocalTmpErr
 	CoordTmpErr
 	CoordClusterNoRetryWriteErr
+	CoordRegisterErr
 )
 
 const (
@@ -171,7 +172,7 @@ func GenNodeID(n *NodeInfo, extra string) string {
 	tmpbuf.WriteString(":")
 	tmpbuf.WriteString(n.RpcPort)
 	tmpbuf.WriteString(":")
-	tmpbuf.WriteString(n.TcpPort)
+	tmpbuf.WriteString(n.RedisPort)
 	tmpbuf.WriteString(":")
 	tmpbuf.WriteString(n.HttpPort)
 	tmpbuf.WriteString(":")

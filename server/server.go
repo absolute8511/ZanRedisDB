@@ -44,27 +44,41 @@ type Server struct {
 	wg            sync.WaitGroup
 	router        http.Handler
 	raftTransport *rafthttp.Transport
-	pdCoord       *cluster.PDCoordinator
+	dataCoord     *cluster.DataCoordinator
 	nsMgr         *node.NamespaceMgr
 }
 
 func NewServer(conf ServerConfig) *Server {
 	myNode := &cluster.NodeInfo{
-		ID:     conf.BroadcastAddr,
-		NodeIP: conf.BroadcastAddr,
+		NodeIP:    conf.BroadcastAddr,
+		RedisPort: strconv.Itoa(conf.RedisAPIPort),
+	}
+	if conf.ClusterID == "" {
+		sLog.Fatalf("cluster id can not be empty")
+	}
+	if conf.BroadcastInterface != "" {
+		myNode.NodeIP = common.GetIPv4ForInterfaceName(conf.BroadcastInterface)
+	}
+	if myNode.NodeIP == "" {
+		myNode.NodeIP = conf.BroadcastAddr
+	} else {
+		conf.BroadcastAddr = myNode.NodeIP
+	}
+	if myNode.NodeIP == "0.0.0.0" || myNode.NodeIP == "" {
+		sLog.Fatalf("can not decide the broadcast ip: %v", myNode.NodeIP)
 	}
 
-	clusterOpts := &cluster.Options{}
+	myNode.ID = cluster.GenNodeID(myNode, "pd")
 	s := &Server{
 		conf:          conf,
 		stopC:         make(chan struct{}),
 		raftHttpDoneC: make(chan struct{}),
-		pdCoord:       cluster.NewPDCoordinator(conf.ClusterID, myNode, clusterOpts),
+		dataCoord:     cluster.NewDataCoordinator(conf.ClusterID, myNode),
 		nsMgr:         node.NewNamespaceMgr(),
 	}
 
-	r := cluster.NewPDEtcdRegister(conf.EtcdClusterAddresses)
-	s.pdCoord.SetRegister(r)
+	r := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
+	s.dataCoord.SetRegister(r)
 
 	ss := &stats.ServerStats{}
 	ss.Initialize()
@@ -86,7 +100,7 @@ func (self *Server) Stop() {
 	self.raftTransport.Stop()
 	close(self.stopC)
 	<-self.raftHttpDoneC
-	self.nsMgr.Stop()
+	self.dataCoord.Stop()
 	self.wg.Wait()
 	sLog.Infof("server stopped")
 }
@@ -105,7 +119,7 @@ func (self *Server) OptimizeDB() {
 	self.nsMgr.OptimizeDB()
 }
 
-func (self *Server) InitKVNamespace(id uint64, join bool, conf *node.NamespaceConfig) error {
+func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig) error {
 	mconf := &node.MachineConfig{
 		NodeID:        self.conf.NodeID,
 		BroadcastAddr: self.conf.BroadcastAddr,
@@ -113,7 +127,7 @@ func (self *Server) InitKVNamespace(id uint64, join bool, conf *node.NamespaceCo
 		LocalRaftAddr: self.conf.LocalRaftAddr,
 	}
 
-	return self.nsMgr.InitNamespaceNode(self.conf.DataDir, mconf, conf, self.raftTransport, id, join)
+	return self.nsMgr.InitNamespaceNode(self.conf.DataDir, mconf, conf, self.raftTransport, id)
 }
 
 func (self *Server) ProposeConfChange(ns string, cc raftpb.ConfChange) {
@@ -133,7 +147,7 @@ func (self *Server) Start() {
 		self.serveRaft()
 	}()
 
-	self.nsMgr.Start()
+	self.dataCoord.Start()
 
 	self.wg.Add(1)
 	go func() {

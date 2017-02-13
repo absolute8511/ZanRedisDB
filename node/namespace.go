@@ -1,10 +1,13 @@
 package node
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/spaolacci/murmur3"
 	"path"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -64,15 +67,29 @@ func (self *NamespaceMgr) Stop() {
 }
 
 func (self *NamespaceMgr) InitNamespaceNode(dataDir string, mConf *MachineConfig, conf *NamespaceConfig,
-	transport *rafthttp.Transport, raftID uint64, join bool) error {
+	transport *rafthttp.Transport, raftID uint64) error {
 	kvOpts := &KVOptions{
 		DataDir: path.Join(dataDir, conf.Name),
 		EngType: conf.EngType,
+	}
+	if conf.PartitionNum == 0 {
+		conf.PartitionNum = 1
 	}
 	clusterNodes := make(map[uint64]ReplicaInfo)
 	for _, v := range conf.RaftGroupConf.SeedNodes {
 		clusterNodes[v.ReplicaID] = v
 	}
+	mineSeed, ok := clusterNodes[uint64(raftID)]
+	join := false
+	if !ok {
+		join = true
+	} else {
+		mConf.LocalRaftAddr = mineSeed.RaftAddr
+	}
+
+	d, _ := json.MarshalIndent(&conf, "", " ")
+	nodeLog.Infof("namespace load config: %v", string(d))
+	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, mConf.LocalRaftAddr, clusterNodes)
 
 	raftConf := &RaftConfig{
 		GroupID:     conf.RaftGroupConf.GroupID,
@@ -99,6 +116,24 @@ func (self *NamespaceMgr) InitNamespaceNode(dataDir string, mConf *MachineConfig
 	self.groups[raftConf.GroupID] = conf.Name
 	self.mutex.Unlock()
 	return nil
+}
+
+func GetHashedPartitionID(pk []byte, pnum int) int {
+	return int(murmur3.Sum32(pk)) % pnum
+}
+
+func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(ns string, pk []byte) *NamespaceNode {
+	self.mutex.Lock()
+	defer self.mutex.Unlock()
+	v, ok := self.kvNodes[ns+"-0"]
+	if !ok {
+		return nil
+	}
+	v, ok = self.kvNodes[ns+"-"+strconv.Itoa(GetHashedPartitionID(pk, v.conf.PartitionNum))]
+	if !ok {
+		return nil
+	}
+	return v
 }
 
 func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {

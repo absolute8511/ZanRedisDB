@@ -47,7 +47,7 @@ func (p *program) Start() error {
 	flagSet.Parse(os.Args[1:])
 
 	if *showVersion {
-		fmt.Println(common.String("ZanRedisDB"))
+		fmt.Println(common.VerString("ZanRedisDB"))
 		os.Exit(0)
 	}
 	var configFile server.ConfigFile
@@ -98,21 +98,11 @@ func (p *program) Start() error {
 		}
 
 		id := nsNodeConf.LocalReplicaID
-		// raft provides a commit stream for the proposals from the http api
 		clusterNodes := make(map[uint64]node.ReplicaInfo)
 		for _, v := range nsConf.RaftGroupConf.SeedNodes {
 			clusterNodes[v.ReplicaID] = v
 		}
-		mineSeed, ok := clusterNodes[uint64(id)]
-		if !ok {
-			nsNodeConf.Join = true
-		} else {
-			serverConf.LocalRaftAddr = mineSeed.RaftAddr
-		}
-		d, _ = json.MarshalIndent(&nsConf, "", " ")
-		fmt.Printf("namespace load config: %v \n", string(d))
-		fmt.Printf("local %v start with cluster: %v\n", serverConf.LocalRaftAddr, clusterNodes)
-		app.InitKVNamespace(id, nsNodeConf.Join, &nsConf)
+		app.InitKVNamespace(id, &nsConf)
 	}
 	app.Start()
 	p.server = app

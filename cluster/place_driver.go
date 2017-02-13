@@ -3,6 +3,7 @@ package cluster
 import (
 	"errors"
 	"fmt"
+	"github.com/spaolacci/murmur3"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,10 +63,6 @@ func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
 
 // query the raft peers if the nid already in the raft group for the namespace
 func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid string) bool {
-	return false
-}
-
-func (self *DataPlacement) IsRaftLeader(nsInfo *PartitionMetaInfo, nid string) bool {
 	return true
 }
 
@@ -119,7 +116,9 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 	namespaceName := namespaceInfo.Name
 	partitionID := namespaceInfo.Partition
 	// since we need add new catchup, we make the replica as replica+1
-	partitionNodes, err := self.getRebalancedPartitionsFromNameList(namespaceInfo.PartitionNum,
+	partitionNodes, err := self.getRebalancedPartitionsFromNameList(
+		namespaceInfo.Name,
+		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica+1, nodeNameList)
 	if err != nil {
 		return err.ToErrorType()
@@ -141,7 +140,7 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 		nid := selectedCatchup[currentSelect]
 		namespaceInfo, err := self.pdCoord.register.GetNamespacePartInfo(namespaceName, partitionID)
 		if err != nil {
-			coordLog.Infof("failed to get namespace info: %v-%v: %v", namespaceName, partitionID, err)
+			coordLog.Infof("failed to get namespace %v info: %v", namespaceInfo.GetDesp(), err)
 		} else {
 			if self.IsRaftNodeJoined(namespaceInfo, nid) {
 				break
@@ -151,12 +150,12 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 				case <-monitorChan:
 					return errors.New("quiting")
 				case <-time.After(time.Second * 5):
-					coordLog.Infof("node: %v is added for namespace: %v-%v catchup, still waiting catchup", nid, namespaceName, partitionID)
+					coordLog.Infof("node: %v is added for namespace %v , still waiting catchup", nid, namespaceInfo.GetDesp())
 				}
 				continue
 			} else {
-				coordLog.Infof("node: %v is added for namespace: %v-%v catchup", nid, namespaceName, partitionID)
-				self.pdCoord.addNodeToNamespace(namespaceInfo, nid)
+				coordLog.Infof("node: %v is added for namespace %v", nid, namespaceInfo.GetDesp())
+				self.pdCoord.addNamespaceToNode(namespaceInfo, nid)
 			}
 		}
 		select {
@@ -189,7 +188,9 @@ func (self *DataPlacement) allocNodeForNamespace(namespaceInfo *PartitionMetaInf
 		return nil, ErrRegisterServiceUnstable
 	}
 
-	partitionNodes, err := self.getRebalancedNamespacePartitions(namespaceInfo.PartitionNum,
+	partitionNodes, err := self.getRebalancedNamespacePartitions(
+		namespaceInfo.Name,
+		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica, currentNodes)
 	if err != nil {
 		return nil, err
@@ -222,10 +223,12 @@ func (self *DataPlacement) checkNamespaceNodeConflict(namespaceInfo *PartitionMe
 	return true
 }
 
-func (self *DataPlacement) allocNamespaceISR(currentNodes map[string]NodeInfo,
+func (self *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[string]NodeInfo,
 	replica int, partitionNum int, existPart map[int]*PartitionMetaInfo) ([][]string, *CoordErr) {
 	isrlist := make([][]string, partitionNum)
-	partitionNodes, err := self.getRebalancedNamespacePartitions(partitionNum,
+	partitionNodes, err := self.getRebalancedNamespacePartitions(
+		ns,
+		partitionNum,
 		replica, currentNodes)
 	if err != nil {
 		return nil, err
@@ -253,7 +256,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 	}
 	defer atomic.StoreInt32(&self.pdCoord.balanceWaiting, 0)
 
-	allNamespaces, err := self.pdCoord.register.GetAllNamespaces()
+	allNamespaces, _, err := self.pdCoord.register.GetAllNamespaces()
 	if err != nil {
 		coordLog.Infof("scan namespaces error: %v", err)
 		return moved, isAllBalanced
@@ -287,7 +290,9 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			nodeNameList = append(nodeNameList, n.ID)
 		}
 
-		partitionNodes, err := self.getRebalancedNamespacePartitions(namespaceInfo.PartitionNum,
+		partitionNodes, err := self.getRebalancedNamespacePartitions(
+			namespaceInfo.Name,
+			namespaceInfo.PartitionNum,
 			namespaceInfo.Replica, currentNodes)
 		if err != nil {
 			isAllBalanced = false
@@ -318,7 +323,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			if err != nil {
 				continue
 			} else {
-				self.pdCoord.removeNamespaceFromNode(namespaceInfo.Name, namespaceInfo.Partition, nid)
+				self.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 				moved = true
 			}
 		}
@@ -356,7 +361,7 @@ func (s SortableStrings) Swap(l, r int) {
 	s[l], s[r] = s[r], s[l]
 }
 
-func (self *DataPlacement) getRebalancedNamespacePartitions(
+func (self *DataPlacement) getRebalancedNamespacePartitions(ns string,
 	partitionNum int, replica int,
 	currentNodes map[string]NodeInfo) ([][]string, *CoordErr) {
 	if len(currentNodes) < replica {
@@ -400,10 +405,10 @@ func (self *DataPlacement) getRebalancedNamespacePartitions(
 	for nid, _ := range currentNodes {
 		nodeNameList = append(nodeNameList, nid)
 	}
-	return self.getRebalancedPartitionsFromNameList(partitionNum, replica, nodeNameList)
+	return self.getRebalancedPartitionsFromNameList(ns, partitionNum, replica, nodeNameList)
 }
 
-func (self *DataPlacement) getRebalancedPartitionsFromNameList(
+func (self *DataPlacement) getRebalancedPartitionsFromNameList(ns string,
 	partitionNum int, replica int,
 	nodeNameList SortableStrings) ([][]string, *CoordErr) {
 	if len(nodeNameList) < replica {
@@ -411,7 +416,7 @@ func (self *DataPlacement) getRebalancedPartitionsFromNameList(
 	}
 	sort.Sort(nodeNameList)
 	partitionNodes := make([][]string, partitionNum)
-	selectIndex := 0
+	selectIndex := int(murmur3.Sum32([]byte(ns)))
 	for i := 0; i < partitionNum; i++ {
 		nlist := make([]string, replica)
 		partitionNodes[i] = nlist
@@ -424,10 +429,12 @@ func (self *DataPlacement) getRebalancedPartitionsFromNameList(
 	return partitionNodes, nil
 }
 
-func (self *DataPlacement) decideUnwantedISRNode(namespaceInfo *PartitionMetaInfo, currentNodes map[string]NodeInfo) string {
+func (self *DataPlacement) decideUnwantedRaftNode(namespaceInfo *PartitionMetaInfo, currentNodes map[string]NodeInfo) string {
 	unwantedNode := ""
 	//remove the unwanted node in isr
-	partitionNodes, err := self.getRebalancedNamespacePartitions(namespaceInfo.PartitionNum,
+	partitionNodes, err := self.getRebalancedNamespacePartitions(
+		namespaceInfo.Name,
+		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica, currentNodes)
 	if err != nil {
 		return unwantedNode

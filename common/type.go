@@ -143,3 +143,18 @@ func (r *CmdRouter) GetInternalCmdHandler(name string) (InternalCommandFunc, boo
 	v, ok := r.internalCmds[strings.ToLower(name)]
 	return v, ok
 }
+
+type StringArray []string
+
+func (a *StringArray) Set(s string) error {
+	*a = append(*a, s)
+	return nil
+}
+
+func (a *StringArray) String() string {
+	return strings.Join(*a, ",")
+}
+
+const (
+	MAX_PARTITION_NUM = 1024
+)

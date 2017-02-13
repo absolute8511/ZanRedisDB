@@ -1,6 +1,7 @@
 {
-    "name":"yz_cp_simple",
+    "name":"yz_cp_simple-0",
     "eng_type": "rocksdb",
+    "partition_num":1,
     "snap_count": 50000,
     "snap_catchup": 10000,
     "raft_group_conf":{

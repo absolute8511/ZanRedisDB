@@ -21,11 +21,11 @@ func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprout
 	key := req.RequestURI
 	ns, realKey, err := common.ExtractNamesapce([]byte(key))
 	if err != nil {
-		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	kv := self.GetNamespace(ns)
 	if kv == nil {
-		return nil, Err{Code: http.StatusNotFound, Text: "Namespace not found:" + ns}
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "Namespace not found:" + ns}
 	}
 	if v, err := kv.Node.Lookup(realKey); err == nil {
 		if v == nil {
@@ -33,7 +33,7 @@ func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprout
 		}
 		return v, nil
 	} else {
-		return nil, Err{Code: http.StatusNotFound, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: err.Error()}
 	}
 }
 
@@ -45,13 +45,13 @@ func (self *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps http
 func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 
 	var m node.MemberInfo
 	err = json.Unmarshal(data, &m)
 	if err != nil {
-		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	data, _ = json.Marshal(m)
 
@@ -71,11 +71,11 @@ func (self *Server) doRemoveNode(w http.ResponseWriter, req *http.Request, ps ht
 	ns := ps.ByName("namespace")
 	nodeIdStr := ps.ByName("node")
 	if len(nodeIdStr) == 0 {
-		return nil, Err{Code: http.StatusBadRequest, Text: "missing node id"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "missing node id"}
 	}
 	nodeId, err := strconv.ParseUint(nodeIdStr, 10, 64)
 	if err != nil {
-		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	cc := raftpb.ConfChange{
 		Type:      raftpb.ConfChangeRemoveNode,
@@ -89,11 +89,11 @@ func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httpr
 	ns := ps.ByName("namespace")
 	v := self.GetNamespace(ns)
 	if v == nil {
-		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
 	l := v.Node.GetLeadMember()
 	if l == nil {
-		return nil, Err{Code: http.StatusSeeOther, Text: "no leader found"}
+		return nil, common.HttpErr{Code: http.StatusSeeOther, Text: "no leader found"}
 	}
 	return l, nil
 }
@@ -102,7 +102,7 @@ func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps http
 	ns := ps.ByName("namespace")
 	v := self.GetNamespace(ns)
 	if v == nil {
-		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
 	return v.Node.GetMembers(), nil
 }
@@ -111,29 +111,30 @@ func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps
 	ns := ps.ByName("namespace")
 	v := self.GetNamespace(ns)
 	if v == nil {
-		return nil, Err{Code: http.StatusNotFound, Text: "no namespace found"}
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
 	meta, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		return nil, Err{Code: http.StatusBadRequest, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	ok, err := v.Node.CheckLocalBackup(meta)
 	if err != nil || !ok {
-		return nil, Err{Code: http.StatusNotFound, Text: "no backup found"}
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no backup found"}
 	}
 	return nil, nil
 }
 
 func (self *Server) initHttpHandler() {
-	log := Log(1)
+	log := common.HttpLog(common.LOG_INFO, sLog.Logger)
+	//debugLog := common.HttpLog(common.LOG_DEBUG, sLog.Logger)
 	router := httprouter.New()
-	router.Handle("GET", "/cluster/leader/:namespace", Decorate(self.getLeader, V1))
-	router.Handle("GET", "/cluster/members/:namespace", Decorate(self.getMembers, V1))
-	router.Handle("GET", "/cluster/checkbackup/:namespace", Decorate(self.checkNodeBackup, V1))
-	router.Handle("GET", "/kv/get/:namespace", Decorate(self.getKey, PlainText))
-	router.Handle("POST", "/kv/optimize", Decorate(self.doOptimize, log, V1))
-	router.Handle("POST", "/cluster/node/add", Decorate(self.doAddNode, log, V1))
-	router.Handle("DELETE", "/cluster/node/remove/:namespace/:node", Decorate(self.doRemoveNode, log, V1))
+	router.Handle("GET", "/cluster/leader/:namespace", common.Decorate(self.getLeader, common.V1))
+	router.Handle("GET", "/cluster/members/:namespace", common.Decorate(self.getMembers, common.V1))
+	router.Handle("GET", "/cluster/checkbackup/:namespace", common.Decorate(self.checkNodeBackup, common.V1))
+	router.Handle("GET", "/kv/get/:namespace", common.Decorate(self.getKey, common.PlainText))
+	router.Handle("POST", "/kv/optimize", common.Decorate(self.doOptimize, log, common.V1))
+	router.Handle("POST", "/cluster/node/add", common.Decorate(self.doAddNode, log, common.V1))
+	router.Handle("DELETE", "/cluster/node/remove/:namespace/:node", common.Decorate(self.doRemoveNode, log, common.V1))
 	self.router = router
 }
 

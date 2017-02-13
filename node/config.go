@@ -3,6 +3,7 @@ package node
 type NamespaceConfig struct {
 	Name          string          `json:"name"`
 	EngType       string          `json:"eng_type"`
+	PartitionNum  int             `json:"partition_num"`
 	SnapCount     int             `json:"snap_count"`
 	SnapCatchup   int             `json:"snap_catchup"`
 	RaftGroupConf RaftGroupConfig `json:"raft_group_conf"`

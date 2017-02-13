@@ -13,12 +13,13 @@ var (
 type EpochType int64
 
 type NodeInfo struct {
-	ID       string
-	NodeIP   string
-	TcpPort  string
-	HttpPort string
-	RpcPort  string
-	Epoch    EpochType
+	ID                string
+	NodeIP            string
+	RedisPort         string
+	HttpPort          string
+	RpcPort           string
+	RaftTransportAddr string
+	Epoch             EpochType
 }
 
 func (self *NodeInfo) GetID() string {
@@ -31,11 +32,12 @@ type NamespaceMetaInfo struct {
 	// to verify the data of the create -> delete -> create with same namespace
 	MagicCode int64
 	MetaEpoch EpochType
+	MaxRaftID int64
+	EngType   string
 }
 
 type PartitionReplicaInfo struct {
 	RaftNodes []string
-	MaxRaftID int64
 	RaftIDs   map[string]int64
 	Epoch     EpochType
 }
@@ -47,6 +49,7 @@ func GetDesp(ns string, part int) string {
 type PartitionMetaInfo struct {
 	Name      string
 	Partition int
+	GID       int64
 	NamespaceMetaInfo
 	PartitionReplicaInfo
 }
@@ -71,7 +74,7 @@ type Register interface {
 	// get  meta info only
 	GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, error)
 	GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error)
-	GetAllNamespaces() (map[string][]PartitionMetaInfo, error)
+	GetAllNamespaces() (map[string][]PartitionMetaInfo, EpochType, error)
 	GetNamespacesNotifyChan() chan struct{}
 }
 
@@ -91,6 +94,7 @@ type PDRegister interface {
 	WatchDataNodes(nodeC chan []NodeInfo, stopC chan struct{})
 	// create and write the meta info to meta node
 	CreateNamespace(ns string, meta *NamespaceMetaInfo) error
+	UpdateNamespaceMetaInfo(ns string, meta *NamespaceMetaInfo, oldGen EpochType) error
 	// create partition path
 	CreateNamespacePartition(ns string, partition int) error
 	IsExistNamespace(ns string) (bool, error)

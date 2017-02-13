@@ -63,9 +63,6 @@ func NewPDCoordinator(cluster string, n *NodeInfo, opts *Options) *PDCoordinator
 		stopChan:               make(chan struct{}),
 		monitorChan:            make(chan struct{}),
 	}
-	if coord.register != nil {
-		coord.register.InitClusterID(coord.clusterKey)
-	}
 	coord.dpm = NewDataPlacement(coord)
 	if opts != nil {
 		coord.dpm.SetBalanceInterval(opts.BalanceStart, opts.BalanceEnd)
@@ -75,13 +72,11 @@ func NewPDCoordinator(cluster string, n *NodeInfo, opts *Options) *PDCoordinator
 
 func (self *PDCoordinator) SetRegister(r PDRegister) {
 	self.register = r
-	if self.register != nil {
-		self.register.InitClusterID(self.clusterKey)
-	}
 }
 
 func (self *PDCoordinator) Start() error {
 	if self.register != nil {
+		self.register.InitClusterID(self.clusterKey)
 		err := self.register.Register(&self.myNode)
 		if err != nil {
 			coordLog.Warningf("failed to register pd coordinator: %v", err)
@@ -95,8 +90,10 @@ func (self *PDCoordinator) Start() error {
 
 func (self *PDCoordinator) Stop() {
 	close(self.stopChan)
-	self.register.Unregister(&self.myNode)
-	self.register.Stop()
+	if self.register != nil {
+		self.register.Unregister(&self.myNode)
+		self.register.Stop()
+	}
 	self.wg.Wait()
 	coordLog.Infof("coordinator stopped.")
 }
@@ -164,7 +161,7 @@ func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	coordLog.Infof("I am master now.")
 	// reload namespace information
 	if self.register != nil {
-		newNamespaces, err := self.register.GetAllNamespaces()
+		newNamespaces, _, err := self.register.GetAllNamespaces()
 		if err != nil {
 			coordLog.Errorf("load namespace info failed: %v", err)
 		} else {
@@ -249,9 +246,9 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 	if self.register != nil {
 		go self.register.WatchDataNodes(nodesChan, monitorChan)
 	}
-	coordLog.Debugf("start watch the nsqd nodes.")
+	coordLog.Debugf("start watch the nodes.")
 	defer func() {
-		coordLog.Infof("stop watch the nsqd nodes.")
+		coordLog.Infof("stop watch the nodes.")
 	}()
 	for {
 		select {
@@ -259,12 +256,12 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 			if !ok {
 				return
 			}
-			// check if any nsqd node changed.
+			// check if any node changed.
 			coordLog.Debugf("Current data nodes: %v", len(nodes))
 			oldNodes := self.dataNodes
 			newNodes := make(map[string]NodeInfo)
 			for _, v := range nodes {
-				//coordLog.Infof("nsqd node %v : %v", v.GetID(), v)
+				//coordLog.Infof("node %v : %v", v.GetID(), v)
 				newNodes[v.GetID()] = v
 			}
 			self.nodesMutex.Lock()
@@ -272,7 +269,7 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 			check := false
 			for oldID, oldNode := range oldNodes {
 				if _, ok := newNodes[oldID]; !ok {
-					coordLog.Warningf("nsqd node failed: %v, %v", oldID, oldNode)
+					coordLog.Warningf("node failed: %v, %v", oldID, oldNode)
 					// if node is missing we need check election immediately.
 					check = true
 				}
@@ -288,7 +285,7 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 			}
 			for newID, newNode := range newNodes {
 				if _, ok := oldNodes[newID]; !ok {
-					coordLog.Infof("new nsqd node joined: %v, %v", newID, newNode)
+					coordLog.Infof("new node joined: %v, %v", newID, newNode)
 					check = true
 				}
 			}
@@ -302,9 +299,9 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 }
 
 func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
-	coordLog.Debugf("start handle the removing nsqd nodes.")
+	coordLog.Debugf("start handle the removing nodes.")
 	defer func() {
-		coordLog.Infof("stop handle the removing nsqd nodes.")
+		coordLog.Infof("stop handle the removing nodes.")
 	}()
 	ticker := time.NewTicker(time.Second * 30)
 	defer ticker.Stop()
@@ -331,13 +328,13 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 				nodeNameList = append(nodeNameList, s.ID)
 			}
 
-			allNamespaces, err := self.register.GetAllNamespaces()
+			allNamespaces, _, err := self.register.GetAllNamespaces()
 			if err != nil {
 				continue
 			}
 			for nid, _ := range removingNodes {
 				anyPending := false
-				coordLog.Infof("handle the removing node %v ", nid)
+				coordLog.Infof("handle removing node %v ", nid)
 				// only check the namespace with one replica left
 				// because the doCheckNamespaces will check the others
 				// we add a new replica for the removing node
@@ -359,7 +356,7 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							coordLog.Infof("namespace %v data on node %v transfered success", namespaceInfo.GetDesp(), nid)
 							anyStateChanged = true
 						}
-						self.removeNamespaceFromNode(namespaceInfo.Name, namespaceInfo.Partition, nid)
+						self.removeNamespaceFromNode(&namespaceInfo, nid)
 					}
 					if !anyPending {
 						anyStateChanged = true
@@ -445,7 +442,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 
 	namespaces := []PartitionMetaInfo{}
 	if failedInfo == nil || failedInfo.NamespaceName == "" || failedInfo.NamespacePartition < 0 {
-		allNamespaces, commonErr := self.register.GetAllNamespaces()
+		allNamespaces, _, commonErr := self.register.GetAllNamespaces()
 		if commonErr != nil {
 			coordLog.Infof("scan namespaces failed. %v", commonErr)
 			return
@@ -468,6 +465,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 
 	// TODO: check partition number for namespace, maybe failed to create
 	// some partition when creating namespace.
+
 	currentNodes, currentNodesEpoch := self.getCurrentNodesWithRemoving()
 	checkOK := true
 	for _, t := range namespaces {
@@ -482,14 +480,9 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		default:
 		}
 
-		if failedInfo != nil && failedInfo.NamespaceName != "" {
-			if t.Name != failedInfo.NamespaceName {
-				continue
-			}
-		}
 		needMigrate := false
 		if len(t.RaftNodes) < t.Replica {
-			coordLog.Infof("ISR is not enough for namespace %v, isr is :%v", t.GetDesp(), t.RaftNodes)
+			coordLog.Infof("replicas is not enough for namespace %v, isr is :%v", t.GetDesp(), t.RaftNodes)
 			needMigrate = true
 			checkOK = false
 		}
@@ -545,16 +538,12 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			delete(partitions, t.Partition)
 		}
 
-		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
-			coordLog.Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
-			return
-		}
 		if aliveCount > t.Replica && atomic.LoadInt32(&self.balanceWaiting) == 0 {
 			//remove the unwanted node in isr
 			coordLog.Infof("isr is more than replicator: %v, %v", aliveCount, t.Replica)
-			removeNode := self.dpm.decideUnwantedISRNode(&namespaceInfo, currentNodes)
+			removeNode := self.dpm.decideUnwantedRaftNode(&namespaceInfo, currentNodes)
 			if removeNode != "" {
-				coordErr := self.removeNamespaceFromNode(namespaceInfo.Name, namespaceInfo.Partition, removeNode)
+				coordErr := self.removeNamespaceFromNode(&namespaceInfo, removeNode)
 				if coordErr == nil {
 					coordLog.Infof("node %v removed by plan from namespace : %v", removeNode, t)
 				}
@@ -576,27 +565,20 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		return
 	}
 	isrChanged := false
+	aliveReplicas := 0
 	for _, replica := range nsInfo.RaftNodes {
-		if _, ok := currentNodes[replica]; !ok {
-			coordLog.Warningf("namespace %v isr node %v is lost.", nsInfo.GetDesp(), replica)
-			isrChanged = true
+		if _, ok := currentNodes[replica]; ok {
+			aliveReplicas++
 		}
 	}
-	if isrChanged {
-		// will re-check to handle isr node failure
-		return
-	}
 
-	num := len(nsInfo.RaftNodes)
-	if num < nsInfo.Replica {
-		for i := num; i < nsInfo.Replica; i++ {
-			n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
-			if err != nil {
-				coordLog.Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
-			} else {
-				nsInfo.RaftNodes = append(nsInfo.RaftNodes, n.GetID())
-				isrChanged = true
-			}
+	for i := aliveReplicas; i < nsInfo.Replica; i++ {
+		n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
+		if err != nil {
+			coordLog.Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
+		} else {
+			nsInfo.RaftNodes = append(nsInfo.RaftNodes, n.GetID())
+			isrChanged = true
 		}
 	}
 	if isrChanged {
@@ -605,67 +587,45 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		if err != nil {
 			coordLog.Infof("update namespace replica info failed: %v", err.Error())
 			return
+		} else {
+			coordLog.Infof("namespace %v migrate to replicas : %v", nsInfo.GetDesp(), nsInfo.RaftNodes)
 		}
 	}
 }
 
-func (self *PDCoordinator) removeNamespaceFromNode(ns string, part int, nid string) *CoordErr {
-	return nil
-}
-
-func (self *PDCoordinator) addNodeToNamespace(nsInfo *PartitionMetaInfo, nid string) *CoordErr {
-	return nil
-}
-
-// some API for outside
-func (self *PDCoordinator) GetAllPDNodes() ([]NodeInfo, error) {
-	return self.register.GetAllPDNodes()
-}
-
-func (self *PDCoordinator) GetPDLeader() NodeInfo {
-	return self.leaderNode
-}
-
-func (self *PDCoordinator) SetClusterUpgradeState(upgrading bool) error {
-	if self.leaderNode.GetID() != self.myNode.GetID() {
-		coordLog.Infof("not leader while delete topic")
-		return ErrNotLeader
+func (self *PDCoordinator) addNamespaceToNode(nsInfo *PartitionMetaInfo, nid string) *CoordErr {
+	nsInfo.RaftNodes = append(nsInfo.RaftNodes, nid)
+	if self.dpm.checkNamespaceNodeConflict(nsInfo) {
+		return ErrNamespaceNodeConflict
 	}
 
-	if upgrading {
-		if !atomic.CompareAndSwapInt32(&self.isUpgrading, 0, 1) {
-			coordLog.Infof("the cluster state is already upgrading")
-			return nil
-		}
-		coordLog.Infof("the cluster state has been changed to upgrading")
+	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
+	if err != nil {
+		coordLog.Infof("add namespace replica info failed: %v", err.Error())
+		return &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
 	} else {
-		if !atomic.CompareAndSwapInt32(&self.isUpgrading, 1, 0) {
-			return nil
-		}
-		coordLog.Infof("the cluster state has been changed to normal")
-		self.triggerCheckNamespaces("", 0, time.Second)
+		coordLog.Infof("namespace %v replica : %v added", nsInfo.GetDesp(), nid)
 	}
 	return nil
 }
 
-func (self *PDCoordinator) MarkNodeAsRemoving(nid string) error {
-	if self.leaderNode.GetID() != self.myNode.GetID() {
-		coordLog.Infof("not leader while delete topic")
-		return ErrNotLeader
-	}
-
-	coordLog.Infof("try mark node %v as removed", nid)
-	self.nodesMutex.Lock()
-	newRemovingNodes := make(map[string]string)
-	if _, ok := self.removingNodes[nid]; ok {
-		coordLog.Infof("already mark as removing")
-	} else {
-		newRemovingNodes[nid] = "marked"
-		for id, removeState := range self.removingNodes {
-			newRemovingNodes[id] = removeState
+func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, nid string) *CoordErr {
+	nodes := make([]string, 0, len(nsInfo.RaftNodes))
+	for _, replica := range nsInfo.RaftNodes {
+		if nid == replica {
+			continue
 		}
-		self.removingNodes = newRemovingNodes
+		nodes = append(nodes, replica)
 	}
-	self.nodesMutex.Unlock()
+	nsInfo.RaftNodes = nodes
+	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
+	if err != nil {
+		coordLog.Infof("update namespace replica info failed: %v", err.Error())
+		return &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
+	} else {
+		coordLog.Infof("namespace %v replica : %v removed", nsInfo.GetDesp(), nid)
+	}
 	return nil
 }

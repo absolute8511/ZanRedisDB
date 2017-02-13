@@ -20,7 +20,6 @@ type ServerConfig struct {
 type NamespaceNodeConfig struct {
 	Name           string `json:"name"`
 	LocalReplicaID uint64 `json:"local_replica_id"`
-	Join           bool   `json:"join"`
 }
 
 type ConfigFile struct {
