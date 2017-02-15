@@ -25,6 +25,7 @@ const (
 
 const (
 	ROOT_DIR               = "ZanRedisDBMetaData"
+	CLUSTER_META_INFO      = "ClusterMeta"
 	NAMESPACE_DIR          = "Namespaces"
 	NAMESPACE_META         = "NamespaceMeta"
 	NAMESPACE_REPLICA_INFO = "ReplicaInfo"
@@ -59,6 +60,41 @@ func isEtcdErrorNum(err error, errorCode int) bool {
 		// NOTE: There are other error types returned
 	}
 	return false
+}
+
+func exchangeNodeValue(c *etcdlock.EtcdClient, nodePath string, valueChangeFn func(oldValue string) (string, error)) error {
+	rsp, err := c.Get(nodePath, false, false)
+	if err != nil {
+		if client.IsKeyNotFound(err) {
+			rsp, err = c.Create(nodePath, string(""), 0)
+			if err != nil {
+				if !IsEtcdNotFile(err) {
+					return err
+				}
+			}
+		} else {
+			return err
+		}
+	}
+	retry := 5
+	for retry > 0 {
+		retry--
+		newValue, err := valueChangeFn(rsp.Node.Value)
+		if err != nil {
+			return err
+		}
+		rsp, err = c.CompareAndSwap(nodePath, newValue, 0, "", rsp.Node.ModifiedIndex)
+		if err != nil {
+			time.Sleep(time.Millisecond * 10)
+			rsp, err = c.Get(nodePath, false, false)
+			if err != nil {
+				return err
+			}
+		} else {
+			break
+		}
+	}
+	return nil
 }
 
 type EtcdRegister struct {
@@ -315,6 +351,10 @@ func (self *EtcdRegister) getClusterPath() string {
 	return path.Join("/", ROOT_DIR, self.clusterID)
 }
 
+func (self *EtcdRegister) getClusterMetaPath() string {
+	return path.Join(self.getClusterPath(), CLUSTER_META_INFO)
+}
+
 func (self *EtcdRegister) getPDNodePath(value *NodeInfo) string {
 	return path.Join(self.getPDNodeRootPath(), "Node-"+value.ID)
 }
@@ -440,6 +480,21 @@ func (self *PDEtcdRegister) Stop() {
 	if self.watchNamespaceStopCh != nil {
 		close(self.watchNamespaceStopCh)
 	}
+}
+
+func (self *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
+	var clusterMeta ClusterMetaInfo
+	exchangeNodeValue(self.client, self.getClusterMetaPath(), func(oldValue string) (string, error) {
+		err := json.Unmarshal([]byte(oldValue), &clusterMeta)
+		if err != nil {
+			return "", err
+		}
+		clusterMeta.MaxGID += 10000
+		newValue, err := json.Marshal(clusterMeta)
+		return string(newValue), err
+	})
+
+	return clusterMeta.MaxGID, nil
 }
 
 func (self *PDEtcdRegister) GetClusterEpoch() (EpochType, error) {
@@ -789,6 +844,36 @@ func (self *DNEtcdRegister) Unregister(nodeData *NodeInfo) error {
 	return nil
 }
 
+func (self *DNEtcdRegister) GetNodeInfo(nid string) (NodeInfo, error) {
+	var node NodeInfo
+	rsp, err := self.client.Get(self.getDataNodePathFromID(nid), false, false)
+	if err != nil {
+		if client.IsKeyNotFound(err) {
+			return node, ErrKeyNotFound
+		}
+		return node, err
+	}
+	err = json.Unmarshal([]byte(rsp.Node.Value), &node)
+	if err != nil {
+		return node, err
+	}
+	return node, nil
+}
+
+func (self *DNEtcdRegister) NewRegisterNodeID() (uint64, error) {
+	var clusterMeta ClusterMetaInfo
+	exchangeErr := exchangeNodeValue(self.client, self.getClusterMetaPath(), func(oldValue string) (string, error) {
+		err := json.Unmarshal([]byte(oldValue), &clusterMeta)
+		if err != nil {
+			return "", err
+		}
+		clusterMeta.MaxRegID += 1
+		newValue, err := json.Marshal(clusterMeta)
+		return string(newValue), err
+	})
+	return clusterMeta.MaxRegID, exchangeErr
+}
+
 func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struct{}) error {
 	key := self.getPDLeaderPath()
 
@@ -863,6 +948,10 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 	}
 
 	return nil
+}
+
+func (self *DNEtcdRegister) getDataNodePathFromID(nid string) string {
+	return path.Join("/", ROOT_DIR, self.clusterID, DATA_NODE_DIR, "Node-"+nid)
 }
 
 func (self *DNEtcdRegister) getDataNodePath(nodeData *NodeInfo) string {

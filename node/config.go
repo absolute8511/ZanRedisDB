@@ -9,6 +9,13 @@ type NamespaceConfig struct {
 	RaftGroupConf RaftGroupConfig `json:"raft_group_conf"`
 }
 
+func NewNSConfig() *NamespaceConfig {
+	return &NamespaceConfig{
+		SnapCount:   50000,
+		SnapCatchup: 10000,
+	}
+}
+
 type NamespaceDynamicConf struct {
 }
 
@@ -23,6 +30,7 @@ type MachineConfig struct {
 	BroadcastAddr string `json:"broadcast_addr"`
 	HttpAPIPort   int    `json:"http_api_port"`
 	LocalRaftAddr string `json:"local_raft_addr"`
+	DataRootDir   string `json:data_root_dir`
 }
 
 type ReplicaInfo struct {

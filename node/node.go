@@ -167,8 +167,13 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 	return ns
 }
 
-func (self *KVNode) Clear() error {
-	return self.store.Clear()
+func (self *KVNode) Destroy() error {
+	self.Stop()
+	return self.store.Destroy()
+}
+
+func (self *KVNode) CleanData() error {
+	return self.store.CleanData()
 }
 
 func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool) {

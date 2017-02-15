@@ -13,6 +13,7 @@ var (
 type EpochType int64
 
 type NodeInfo struct {
+	RegID             uint64
 	ID                string
 	NodeIP            string
 	RedisPort         string
@@ -26,19 +27,29 @@ func (self *NodeInfo) GetID() string {
 	return self.ID
 }
 
+func (self *NodeInfo) GetRegisterID() uint64 {
+	return self.RegID
+}
+
+type ClusterMetaInfo struct {
+	MaxGID   int64
+	MaxRegID uint64
+}
+
 type NamespaceMetaInfo struct {
 	PartitionNum int
 	Replica      int
 	// to verify the data of the create -> delete -> create with same namespace
 	MagicCode int64
+	MinGID    int64
 	MetaEpoch EpochType
-	MaxRaftID int64
 	EngType   string
 }
 
 type PartitionReplicaInfo struct {
 	RaftNodes []string
-	RaftIDs   map[string]int64
+	RaftIDs   map[string]uint64
+	MaxRaftID int64
 	Epoch     EpochType
 }
 
@@ -49,7 +60,6 @@ func GetDesp(ns string, part int) string {
 type PartitionMetaInfo struct {
 	Name      string
 	Partition int
-	GID       int64
 	NamespaceMetaInfo
 	PartitionReplicaInfo
 }
@@ -107,6 +117,7 @@ type PDRegister interface {
 	// the epoch in replicaInfo should be updated to the new epoch
 	// if no partition, replica info node should create only once.
 	UpdateNamespacePartReplicaInfo(ns string, partition int, replicaInfo *PartitionReplicaInfo, oldGen EpochType) error
+	PrepareNamespaceMinGID() (int64, error)
 }
 
 type DataNodeRegister interface {
@@ -115,4 +126,6 @@ type DataNodeRegister interface {
 	Unregister(nodeData *NodeInfo) error
 	// get the newest pd leader and watch the change of it.
 	WatchPDLeader(leader chan *NodeInfo, stop chan struct{}) error
+	GetNodeInfo(nid string) (NodeInfo, error)
+	NewRegisterNodeID() (uint64, error)
 }

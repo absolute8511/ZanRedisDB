@@ -3,7 +3,6 @@ package server
 import ()
 
 type ServerConfig struct {
-	NodeID uint64 `json:"node_id"`
 	// this cluster id is used for server transport to tell
 	// different global cluster
 	ClusterID            string                `json:"cluster_id"`

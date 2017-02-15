@@ -57,7 +57,7 @@ type Snapshot interface {
 }
 
 type DataStorage interface {
-	Clear() error
+	CleanData() error
 	RestoreFromSnapshot(bool, raftpb.Snapshot) error
 	GetSnapshot(term uint64, index uint64) (Snapshot, error)
 }
@@ -238,7 +238,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	if oldwal {
 		rc.restartNode(c, ds)
 	} else {
-		rc.ds.Clear()
+		rc.ds.CleanData()
 		rc.wal = rc.openWAL(nil)
 		rpeers := make([]raft.Peer, 0, len(rc.config.RaftPeers))
 		for _, v := range rc.config.RaftPeers {
@@ -347,7 +347,7 @@ func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) {
 	}
 	if err == snap.ErrNoSnapshot || raft.IsEmptySnap(*snapshot) {
 		rc.Infof("loading no snapshot \n")
-		rc.ds.Clear()
+		rc.ds.CleanData()
 	} else {
 		rc.Infof("loading snapshot at term %d and index %d, snap: %v",
 			snapshot.Metadata.Term,

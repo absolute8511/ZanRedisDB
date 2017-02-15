@@ -1,0 +1,21 @@
+## <addr>:<port> to listen on for HTTP clients
+http_address = "0.0.0.0:18001"
+
+## the network interface for broadcast, the ip will be detected automatically.
+broadcast_interface = "eth0"
+
+## local reverse proxy port, basically used for collecting the stats 
+reverse_proxy_port = "18003"
+
+cluster_id = "test-cluster-dev-1"
+## the etcd cluster ip list
+cluster_leadership_addresses = "127.0.0.1:2379"
+
+## the detail of the log, larger number means more details
+log_level = 2
+
+## if empty, use the default flag value in glog
+log_dir = "./"
+
+## the time period (in hour) that the balance is allowed.
+balance_interval = ["4", "5"]

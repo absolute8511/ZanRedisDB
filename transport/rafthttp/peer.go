@@ -21,7 +21,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/types"
 	"golang.org/x/net/context"
 )
@@ -116,7 +116,7 @@ type peer struct {
 	stopc  chan struct{}
 }
 
-func startPeer(transport *Transport, urls types.URLs, peerID types.ID, fs *stats.FollowerStats) *peer {
+func startPeer(transport *Transport, urls types.URLs, peerID types.ID, ps *stats.PeerStats) *peer {
 	plog.Infof("starting peer %s...", peerID)
 	defer plog.Infof("started peer %s", peerID)
 
@@ -125,13 +125,13 @@ func startPeer(transport *Transport, urls types.URLs, peerID types.ID, fs *stats
 	errorc := transport.ErrorC
 	r := transport.Raft
 	pipeline := &pipeline{
-		peerID:        peerID,
-		tr:            transport,
-		picker:        picker,
-		status:        status,
-		followerStats: fs,
-		raft:          r,
-		errorc:        errorc,
+		peerID:    peerID,
+		tr:        transport,
+		picker:    picker,
+		status:    status,
+		peerStats: ps,
+		raft:      r,
+		errorc:    errorc,
 	}
 	pipeline.start()
 
@@ -140,8 +140,8 @@ func startPeer(transport *Transport, urls types.URLs, peerID types.ID, fs *stats
 		r:              r,
 		status:         status,
 		picker:         picker,
-		msgAppV2Writer: startStreamWriter(peerID, status, fs, r),
-		writer:         startStreamWriter(peerID, status, fs, r),
+		msgAppV2Writer: startStreamWriter(peerID, status, ps, r),
+		writer:         startStreamWriter(peerID, status, ps, r),
 		pipeline:       pipeline,
 		snapSender:     newSnapshotSender(transport, picker, peerID, status),
 		recvc:          make(chan raftpb.Message, recvBufSize),

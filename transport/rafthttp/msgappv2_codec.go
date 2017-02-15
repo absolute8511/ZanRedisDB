@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/types"
 )
@@ -63,7 +63,7 @@ const (
 // | 9      | n     | encoded message |
 type msgAppV2Encoder struct {
 	w  io.Writer
-	fs *stats.FollowerStats
+	ps *stats.PeerStats
 
 	term      uint64
 	index     uint64
@@ -79,10 +79,10 @@ func isSameGroup(l *raftpb.Group, r *raftpb.Group) bool {
 		l.RaftReplicaId == r.RaftReplicaId
 }
 
-func newMsgAppV2Encoder(w io.Writer, fs *stats.FollowerStats) *msgAppV2Encoder {
+func newMsgAppV2Encoder(w io.Writer, ps *stats.PeerStats) *msgAppV2Encoder {
 	return &msgAppV2Encoder{
 		w:         w,
-		fs:        fs,
+		ps:        ps,
 		buf:       make([]byte, msgAppV2BufSize),
 		uint64buf: make([]byte, 8),
 		uint8buf:  make([]byte, 1),
@@ -137,7 +137,7 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 		if _, err := enc.w.Write(enc.uint64buf); err != nil {
 			return err
 		}
-		enc.fs.Succ(time.Since(start))
+		enc.ps.Succ(time.Since(start))
 	default:
 		if err := binary.Write(enc.w, binary.BigEndian, msgTypeApp); err != nil {
 			return err
@@ -158,7 +158,7 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 		if l := len(m.Entries); l > 0 {
 			enc.index = m.Entries[l-1].Index
 		}
-		enc.fs.Succ(time.Since(start))
+		enc.ps.Succ(time.Since(start))
 	}
 	return nil
 }

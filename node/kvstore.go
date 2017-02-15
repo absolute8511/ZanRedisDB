@@ -40,12 +40,21 @@ func (s *KVStore) openDB() error {
 	return err
 }
 
-func (s *KVStore) Clear() error {
+func (s *KVStore) CleanData() error {
 	if s.RockDB != nil {
 		s.Close()
+		s.RockDB = nil
 	}
 	os.RemoveAll(s.GetDataDir())
 	return s.openDB()
+}
+
+func (s *KVStore) Destroy() error {
+	if s.RockDB != nil {
+		s.Close()
+		s.RockDB = nil
+	}
+	return os.RemoveAll(s.GetDataDir())
 }
 
 func (s *KVStore) LocalLookup(key []byte) ([]byte, error) {

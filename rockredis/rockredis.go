@@ -191,7 +191,7 @@ func (r *RockDB) GetDataDir() string {
 	return path.Join(r.cfg.DataDir, "rocksdb")
 }
 
-func (r *RockDB) reOpen() error {
+func (r *RockDB) reOpenEng() error {
 	var err error
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	return err
@@ -202,17 +202,27 @@ func (r *RockDB) CompactRange() {
 	r.eng.CompactRange(rg)
 }
 
+func (r *RockDB) closeEng() {
+	if r.eng != nil {
+		r.eng.Close()
+	}
+}
+
 func (r *RockDB) Close() {
+	select {
+	case <-r.quit:
+		// already closed
+		return
+	default:
+	}
 	close(r.quit)
 	r.wg.Wait()
+	r.closeEng()
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
 	}
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
-	}
-	if r.eng != nil {
-		r.eng.Close()
 	}
 	dbLog.Infof("rocksdb closed")
 }
@@ -415,7 +425,7 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 	checkpointDir := GetCheckpointDir(term, index)
 	start := time.Now()
 	dbLog.Infof("begin restore from checkpoint: %v\n", checkpointDir)
-	r.eng.Close()
+	r.closeEng()
 	// 1. remove all files in current db except sst files
 	// 2. get the list of sst in checkpoint
 	// 3. remove all the sst files not in the checkpoint list
@@ -467,7 +477,7 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 		}
 	}
 
-	err = r.reOpen()
+	err = r.reOpenEng()
 	dbLog.Infof("restore done, cost: %v\n", time.Now().Sub(start))
 	if err != nil {
 		dbLog.Infof("reopen the restored db failed:  %v\n", err)

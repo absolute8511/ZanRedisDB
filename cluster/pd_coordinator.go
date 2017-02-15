@@ -9,18 +9,18 @@ import (
 )
 
 var (
-	ErrAlreadyExist        = errors.New("already exist")
-	ErrNamespaceNotCreated = errors.New("namespace is not created")
-	ErrNotLeader           = errors.New("Not leader")
-	ErrClusterUnstable     = errors.New("the cluster is unstable")
+	ErrAlreadyExist    = errors.New("already exist")
+	ErrNotLeader       = errors.New("Not leader")
+	ErrClusterUnstable = errors.New("the cluster is unstable")
 
-	ErrLeaderNodeLost          = NewCoordErr("leader node is lost", CoordTmpErr)
-	ErrNodeNotFound            = NewCoordErr("node not found", CoordCommonErr)
-	ErrNodeUnavailable         = NewCoordErr("No node is available for namespace", CoordTmpErr)
-	ErrNamespaceRaftEnough     = NewCoordErr("the namespace isr and catchup nodes are enough", CoordTmpErr)
-	ErrClusterNodeRemoving     = NewCoordErr("the node is mark as removed", CoordTmpErr)
-	ErrNamespaceNodeConflict   = NewCoordErr("the namespace node info is conflicted", CoordClusterErr)
-	ErrRegisterServiceUnstable = NewCoordErr("the register service is unstable", CoordTmpErr)
+	ErrLeaderNodeLost            = NewCoordErr("leader node is lost", CoordTmpErr)
+	ErrNodeNotFound              = NewCoordErr("node not found", CoordCommonErr)
+	ErrNodeUnavailable           = NewCoordErr("No node is available for namespace", CoordTmpErr)
+	ErrNamespaceRaftEnough       = NewCoordErr("the namespace isr and catchup nodes are enough", CoordTmpErr)
+	ErrClusterNodeRemoving       = NewCoordErr("the node is mark as removed", CoordTmpErr)
+	ErrNamespaceNodeConflict     = NewCoordErr("the namespace node info is conflicted", CoordClusterErr)
+	ErrRegisterServiceUnstable   = NewCoordErr("the register service is unstable", CoordTmpErr)
+	ErrNamespaceReplicaNotEnough = NewCoordErr("the replica nodes is not enough", CoordTmpErr)
 )
 
 const (
@@ -617,6 +617,10 @@ func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, ni
 			continue
 		}
 		nodes = append(nodes, replica)
+	}
+	if len(nodes) < 1 {
+		coordLog.Infof("single replica can not be removed from namespace %v ", nsInfo.GetDesp())
+		return ErrNamespaceReplicaNotEnough
 	}
 	nsInfo.RaftNodes = nodes
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,

@@ -6,10 +6,18 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/spaolacci/murmur3"
+	"io/ioutil"
+	"os"
 	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
+)
+
+var (
+	ErrNamespaceAlreadyExist = errors.New("namespace already exist")
+	ErrRaftIDMismatch        = errors.New("raft id mismatch")
+	ErrRaftConfMismatch      = errors.New("raft config mismatch")
 )
 
 type NamespaceNode struct {
@@ -25,7 +33,26 @@ func (self *NamespaceNode) IsReady() bool {
 func (self *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 }
 
+func (self *NamespaceNode) SetMagicCode(magic int64) error {
+	return nil
+}
+
 func (self *NamespaceNode) SetDataFixState(needFix bool) {
+}
+
+func (self *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) error {
+	if self.conf.EngType != conf.EngType ||
+		self.conf.RaftGroupConf.GroupID != conf.RaftGroupConf.GroupID {
+		return ErrRaftConfMismatch
+	}
+	if raftID != self.Node.rn.config.ID {
+		return ErrRaftIDMismatch
+	}
+	return nil
+}
+
+func (self *NamespaceNode) Destroy() {
+	self.Node.Destroy()
 }
 
 func (self *NamespaceNode) Close() {
@@ -37,17 +64,50 @@ func (self *NamespaceNode) IsDataNeedFix() bool {
 }
 
 type NamespaceMgr struct {
-	mutex   sync.Mutex
-	kvNodes map[string]*NamespaceNode
-	groups  map[uint64]string
+	mutex         sync.Mutex
+	kvNodes       map[string]*NamespaceNode
+	groups        map[uint64]string
+	machineConf   *MachineConfig
+	raftTransport *rafthttp.Transport
 }
 
-func NewNamespaceMgr() *NamespaceMgr {
+func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *NamespaceMgr {
 	ns := &NamespaceMgr{
-		kvNodes: make(map[string]*NamespaceNode),
-		groups:  make(map[uint64]string),
+		kvNodes:       make(map[string]*NamespaceNode),
+		groups:        make(map[uint64]string),
+		raftTransport: transport,
+		machineConf:   conf,
 	}
+	regID, err := ns.LoadMachineRegID()
+	if err != nil {
+		nodeLog.Infof("load my register node id failed: %v", err)
+	} else if regID > 0 {
+		ns.machineConf.NodeID = regID
+	}
+
 	return ns
+}
+
+func (self *NamespaceMgr) LoadMachineRegID() (uint64, error) {
+	d, err := ioutil.ReadFile(
+		path.Join(self.machineConf.DataRootDir, "myid"),
+	)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	v, err := strconv.ParseInt(string(d), 10, 64)
+	return uint64(v), err
+}
+
+func (self *NamespaceMgr) SaveMachineRegID(regID uint64) error {
+	self.machineConf.NodeID = regID
+	return ioutil.WriteFile(
+		path.Join(self.machineConf.DataRootDir, "myid"),
+		[]byte(strconv.FormatInt(int64(regID), 10)),
+		common.FILE_PERM)
 }
 
 func (self *NamespaceMgr) Start() {
@@ -66,10 +126,25 @@ func (self *NamespaceMgr) Stop() {
 	self.mutex.Unlock()
 }
 
-func (self *NamespaceMgr) InitNamespaceNode(dataDir string, mConf *MachineConfig, conf *NamespaceConfig,
-	transport *rafthttp.Transport, raftID uint64) error {
+func (self *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
+	tmp := make(map[string]*NamespaceNode)
+	self.mutex.Lock()
+	for k, n := range self.kvNodes {
+		tmp[k] = n
+	}
+	self.mutex.Unlock()
+	return tmp
+}
+
+func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64) (*NamespaceNode, error) {
+	self.mutex.Lock()
+	defer self.mutex.Unlock()
+	if n, ok := self.kvNodes[conf.Name]; ok {
+		return n, ErrNamespaceAlreadyExist
+	}
+
 	kvOpts := &KVOptions{
-		DataDir: path.Join(dataDir, conf.Name),
+		DataDir: path.Join(self.machineConf.DataRootDir, conf.Name),
 		EngType: conf.EngType,
 	}
 	if conf.PartitionNum == 0 {
@@ -79,34 +154,27 @@ func (self *NamespaceMgr) InitNamespaceNode(dataDir string, mConf *MachineConfig
 	for _, v := range conf.RaftGroupConf.SeedNodes {
 		clusterNodes[v.ReplicaID] = v
 	}
-	mineSeed, ok := clusterNodes[uint64(raftID)]
+	_, ok := clusterNodes[uint64(raftID)]
 	join := false
 	if !ok {
 		join = true
-	} else {
-		mConf.LocalRaftAddr = mineSeed.RaftAddr
 	}
 
 	d, _ := json.MarshalIndent(&conf, "", " ")
 	nodeLog.Infof("namespace load config: %v", string(d))
-	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, mConf.LocalRaftAddr, clusterNodes)
+	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, clusterNodes)
 
 	raftConf := &RaftConfig{
 		GroupID:     conf.RaftGroupConf.GroupID,
 		GroupName:   conf.Name,
 		ID:          uint64(raftID),
-		RaftAddr:    mConf.LocalRaftAddr,
+		RaftAddr:    self.machineConf.LocalRaftAddr,
 		DataDir:     kvOpts.DataDir,
 		RaftPeers:   clusterNodes,
 		SnapCount:   conf.SnapCount,
 		SnapCatchup: conf.SnapCatchup,
 	}
-	self.mutex.Lock()
-	if _, ok := self.kvNodes[conf.Name]; ok {
-		self.mutex.Unlock()
-		return errors.New("namespace already exist")
-	}
-	kv := NewKVNode(kvOpts, mConf, raftConf, transport,
+	kv := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
 		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name))
 	n := &NamespaceNode{
 		Node: kv,
@@ -114,8 +182,7 @@ func (self *NamespaceMgr) InitNamespaceNode(dataDir string, mConf *MachineConfig
 	}
 	self.kvNodes[conf.Name] = n
 	self.groups[raftConf.GroupID] = conf.Name
-	self.mutex.Unlock()
-	return nil
+	return n, nil
 }
 
 func GetHashedPartitionID(pk []byte, pnum int) int {
@@ -222,5 +289,10 @@ func (self *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error
 }
 
 func (self *NamespaceMgr) ForceDeleteNamespaceData(ns string) error {
+	nsNode := self.GetNamespaceNode(ns)
+	if nsNode == nil {
+		return errors.New("namespace not found: " + ns)
+	}
+	nsNode.Destroy()
 	return nil
 }

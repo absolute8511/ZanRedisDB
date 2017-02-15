@@ -23,7 +23,7 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/httputil"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/types"
@@ -49,7 +49,7 @@ type pipeline struct {
 	raft   Raft
 	errorc chan error
 	// deprecate when we depercate v2 API
-	followerStats *stats.FollowerStats
+	peerStats *stats.PeerStats
 
 	msgc chan raftpb.Message
 	// wait for the handling routines
@@ -86,8 +86,8 @@ func (p *pipeline) handle() {
 			if err != nil {
 				p.status.deactivate(failureType{source: pipelineMsg, action: "write"}, err.Error())
 
-				if m.Type == raftpb.MsgApp && p.followerStats != nil {
-					p.followerStats.Fail()
+				if m.Type == raftpb.MsgApp && p.peerStats != nil {
+					p.peerStats.Fail()
 				}
 				p.raft.ReportUnreachable(m.To, m.ToGroup)
 				if isMsgSnap(m) {
@@ -98,8 +98,8 @@ func (p *pipeline) handle() {
 			}
 
 			p.status.activate()
-			if m.Type == raftpb.MsgApp && p.followerStats != nil {
-				p.followerStats.Succ(end.Sub(start))
+			if m.Type == raftpb.MsgApp && p.peerStats != nil {
+				p.peerStats.Succ(end.Sub(start))
 			}
 			if isMsgSnap(m) {
 				p.raft.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFinish)

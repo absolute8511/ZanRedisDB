@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/httputil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/version"
@@ -101,7 +101,7 @@ type outgoingConn struct {
 type streamWriter struct {
 	peerID types.ID
 	status *peerStatus
-	fs     *stats.FollowerStats
+	ps     *stats.PeerStats
 	r      Raft
 
 	mu      sync.Mutex // guard field working and closer
@@ -116,11 +116,11 @@ type streamWriter struct {
 
 // startStreamWriter creates a streamWrite and starts a long running go-routine that accepts
 // messages and writes to the attached outgoing connection.
-func startStreamWriter(id types.ID, status *peerStatus, fs *stats.FollowerStats, r Raft) *streamWriter {
+func startStreamWriter(id types.ID, status *peerStatus, ps *stats.PeerStats, r Raft) *streamWriter {
 	w := &streamWriter{
 		peerID: id,
 		status: status,
-		fs:     fs,
+		ps:     ps,
 		r:      r,
 		msgc:   make(chan raftpb.Message, streamBufSize),
 		connc:  make(chan *outgoingConn),
@@ -195,7 +195,7 @@ func (cw *streamWriter) run() {
 			t = conn.t
 			switch conn.t {
 			case streamTypeMsgAppV2:
-				enc = newMsgAppV2Encoder(conn.Writer, cw.fs)
+				enc = newMsgAppV2Encoder(conn.Writer, cw.ps)
 			case streamTypeMessage:
 				enc = &messageEncoder{w: conn.Writer}
 			default:

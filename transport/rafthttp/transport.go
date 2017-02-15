@@ -22,7 +22,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/logutil"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
@@ -102,10 +102,10 @@ type Transport struct {
 	ClusterID   string     // raft cluster ID for request validation
 	Raft        Raft       // raft state machine, to which the Transport forwards received messages and reports status
 	Snapshotter ISnapSaver
-	ServerStats *stats.ServerStats // used to record general transportation statistics
+	TrStats     *stats.TransportStats // used to record general transportation statistics
 	// used to record transportation statistics with followers when
 	// performing as leader in raft protocol
-	LeaderStats *stats.LeaderStats
+	PeersStats *stats.PeersStats
 	// ErrorC is used to report detected critical errors, e.g.,
 	// the member has been permanently removed from the cluster
 	// When an error is received from ErrorC, user should stop raft state
@@ -177,7 +177,7 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 
 		if pok {
 			if m.Type == raftpb.MsgApp {
-				t.ServerStats.SendAppendReq(m.Size())
+				t.TrStats.SendAppendReq(m.Size())
 			}
 			p.send(m)
 			continue
@@ -278,7 +278,7 @@ func (t *Transport) AddPeer(id types.ID, us []string) {
 	if err != nil {
 		plog.Panicf("newURLs %+v should never fail: %+v", us, err)
 	}
-	fs := t.LeaderStats.Follower(id.String())
+	fs := t.PeersStats.Peer(id.String())
 	t.peers[id] = startPeer(t, urls, id, fs)
 	addPeerToProber(t.prober, id.String(), us)
 
@@ -308,7 +308,7 @@ func (t *Transport) removePeer(id types.ID) {
 		return
 	}
 	delete(t.peers, id)
-	delete(t.LeaderStats.Followers, id.String())
+	t.PeersStats.RemovePeer(id.String())
 	t.prober.Remove(id.String())
 	plog.Infof("removed peer %s", id)
 }

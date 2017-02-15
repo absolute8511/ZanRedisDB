@@ -7,8 +7,8 @@ import (
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
-	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/tidwall/redcon"
 	"golang.org/x/net/context"
@@ -68,30 +68,38 @@ func NewServer(conf ServerConfig) *Server {
 		sLog.Fatalf("can not decide the broadcast ip: %v", myNode.NodeIP)
 	}
 
-	myNode.ID = cluster.GenNodeID(myNode, "pd")
 	s := &Server{
 		conf:          conf,
 		stopC:         make(chan struct{}),
 		raftHttpDoneC: make(chan struct{}),
-		dataCoord:     cluster.NewDataCoordinator(conf.ClusterID, myNode),
-		nsMgr:         node.NewNamespaceMgr(),
 	}
 
-	r := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
-	s.dataCoord.SetRegister(r)
-
-	ss := &stats.ServerStats{}
-	ss.Initialize()
+	ts := &stats.TransportStats{}
+	ts.Initialize()
 	s.raftTransport = &rafthttp.Transport{
 		DialTimeout: time.Second * 5,
-		ID:          types.ID(conf.NodeID),
 		ClusterID:   conf.ClusterID,
 		Raft:        s,
 		Snapshotter: s,
-		ServerStats: ss,
-		LeaderStats: stats.NewLeaderStats(strconv.Itoa(int(conf.NodeID))),
+		TrStats:     ts,
+		PeersStats:  stats.NewPeersStats(),
 		ErrorC:      nil,
 	}
+	mconf := &node.MachineConfig{
+		BroadcastAddr: conf.BroadcastAddr,
+		HttpAPIPort:   conf.HttpAPIPort,
+		LocalRaftAddr: conf.LocalRaftAddr,
+		DataRootDir:   conf.DataDir,
+	}
+	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
+	myNode.RegID = mconf.NodeID
+
+	r := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
+	s.dataCoord = cluster.NewDataCoordinator(conf.ClusterID, myNode, s.nsMgr)
+	if err := s.dataCoord.SetRegister(r); err != nil {
+		sLog.Fatalf("failed to init register for coordinator: %v", err)
+	}
+	s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
 
 	return s
 }
@@ -119,15 +127,8 @@ func (self *Server) OptimizeDB() {
 	self.nsMgr.OptimizeDB()
 }
 
-func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig) error {
-	mconf := &node.MachineConfig{
-		NodeID:        self.conf.NodeID,
-		BroadcastAddr: self.conf.BroadcastAddr,
-		HttpAPIPort:   self.conf.HttpAPIPort,
-		LocalRaftAddr: self.conf.LocalRaftAddr,
-	}
-
-	return self.nsMgr.InitNamespaceNode(self.conf.DataDir, mconf, conf, self.raftTransport, id)
+func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig) (*node.NamespaceNode, error) {
+	return self.nsMgr.InitNamespaceNode(conf, id)
 }
 
 func (self *Server) ProposeConfChange(ns string, cc raftpb.ConfChange) {
@@ -147,7 +148,10 @@ func (self *Server) Start() {
 		self.serveRaft()
 	}()
 
-	self.dataCoord.Start()
+	err := self.dataCoord.Start()
+	if err != nil {
+		sLog.Fatalf("data coordinator start failed: %v", err)
+	}
 
 	self.wg.Add(1)
 	go func() {

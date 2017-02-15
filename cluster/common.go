@@ -22,7 +22,6 @@ const (
 	CoordCommonErr
 	CoordNetErr
 	CoordClusterErr
-	CoordSlaveErr
 	CoordLocalErr
 	CoordLocalTmpErr
 	CoordTmpErr
@@ -149,8 +148,7 @@ func (self *CoordErr) CanRetryWrite(retryTimes int) bool {
 		}
 		return true
 	}
-	return self.ErrType == CoordSlaveErr ||
-		self.IsNetErr()
+	return self.IsNetErr()
 }
 
 var (
@@ -164,10 +162,14 @@ var (
 	ErrNamespaceExiting               = NewCoordErrWithCode("too much namespace node joining the raft group", CoordLocalErr, RpcNoErr)
 	ErrEpochLessThanCurrent           = NewCoordErrWithCode("epoch should be increased", CoordClusterErr, RpcNoErr)
 	ErrLocalInitNamespaceFailed       = NewCoordErrWithCode("init local namespace failed", CoordLocalErr, RpcNoErr)
+	ErrNamespaceNotCreated            = NewCoordErrWithCode("namespace not created", CoordLocalErr, RpcNoErr)
+	ErrNamespaceConfInvalid           = NewCoordErrWithCode("namespace config is invalid", CoordClusterErr, RpcNoErr)
 )
 
 func GenNodeID(n *NodeInfo, extra string) string {
 	var tmpbuf bytes.Buffer
+	tmpbuf.WriteString(strconv.FormatInt(int64(n.RegID), 10))
+	tmpbuf.WriteString(":")
 	tmpbuf.WriteString(n.NodeIP)
 	tmpbuf.WriteString(":")
 	tmpbuf.WriteString(n.RpcPort)
@@ -180,10 +182,22 @@ func GenNodeID(n *NodeInfo, extra string) string {
 	return tmpbuf.String()
 }
 
-func ExtractRpcAddrFromID(nid string) string {
+func ExtractRegIDFromGenID(nid string) uint64 {
 	pos1 := strings.Index(nid, ":")
-	pos2 := strings.Index(nid[pos1+1:], ":")
-	return nid[:pos1+pos2+1]
+	v, _ := strconv.ParseInt(nid[:pos1], 10, 64)
+	return uint64(v)
+}
+
+func ExtractNodeInfoFromID(nid string) (ip string, rpc string, redis string, http string) {
+	lines := strings.SplitN(nid, ":", 5)
+	if len(lines) < 5 {
+		return
+	}
+	ip = lines[1]
+	rpc = lines[2]
+	redis = lines[3]
+	http = lines[4]
+	return
 }
 
 func FindSlice(in []string, e string) int {
