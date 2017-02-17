@@ -109,6 +109,7 @@ type raftNode struct {
 	msgSnapC          chan raftpb.Message
 	inflightSnapshots int64
 	description       string
+	readStateC        chan raft.ReadState
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -138,6 +139,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		reqIDGen:    idutil.NewGenerator(uint16(rconfig.ID), time.Now()),
 		msgSnapC:    make(chan raftpb.Message, maxInFlightMsgSnap),
 		transport:   transport,
+		readStateC:  make(chan raft.ReadState, 1),
 		// rest of structure populated after WAL replay
 	}
 	snapDir := rc.config.SnapDir
@@ -274,7 +276,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 				cc := &raftpb.ConfChange{
 					Type:      raftpb.ConfChangeUpdateNode,
 					ReplicaID: m.ID,
-					NodeGroup: raftpb.Group{NodeId: m.NodeID,
+					NodeGroup: raftpb.Group{NodeId: m.NodeID, Name: m.GroupName,
 						GroupId: uint64(rc.config.GroupID), RaftReplicaId: m.ID},
 					Context: data,
 				}
@@ -586,6 +588,15 @@ func (rc *raftNode) serveChannels() {
 				}
 				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
 				isLeader = rd.RaftState == raft.StateLeader
+			}
+			if len(rd.ReadStates) != 0 {
+				select {
+				case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
+				case <-time.After(time.Second):
+					nodeLog.Infof("timeout sending read state")
+				case <-rc.stopc:
+					return
+				}
 			}
 			raftDone := make(chan struct{}, 1)
 			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, raftDone)

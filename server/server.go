@@ -67,6 +67,7 @@ func NewServer(conf ServerConfig) *Server {
 	if myNode.NodeIP == "0.0.0.0" || myNode.NodeIP == "" {
 		sLog.Fatalf("can not decide the broadcast ip: %v", myNode.NodeIP)
 	}
+	myNode.RaftTransportAddr = conf.LocalRaftAddr
 
 	s := &Server{
 		conf:          conf,
@@ -129,15 +130,6 @@ func (self *Server) OptimizeDB() {
 
 func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig) (*node.NamespaceNode, error) {
 	return self.nsMgr.InitNamespaceNode(conf, id)
-}
-
-func (self *Server) ProposeConfChange(ns string, cc raftpb.ConfChange) {
-	n := self.nsMgr.GetNamespaceNode(ns)
-	if n != nil {
-		n.Node.ProposeConfChange(cc)
-	} else {
-		sLog.Infof("namespace not found: %v", ns)
-	}
 }
 
 func (self *Server) Start() {

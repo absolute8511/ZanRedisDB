@@ -9,7 +9,6 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -53,35 +52,15 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	data, _ = json.Marshal(m)
-
-	cc := raftpb.ConfChange{
-		Type:      raftpb.ConfChangeAddNode,
-		ReplicaID: m.ID,
-		NodeGroup: raftpb.Group{NodeId: m.NodeID,
-			GroupId: uint64(m.GroupID), RaftReplicaId: m.ID},
-		Context: data,
+	nsNode := self.GetNamespace(m.GroupName)
+	if nsNode == nil {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: errNamespaceNotFound.Error()}
 	}
-	self.ProposeConfChange(m.GroupName, cc)
-
-	return nil, nil
-}
-
-func (self *Server) doRemoveNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	ns := ps.ByName("namespace")
-	nodeIdStr := ps.ByName("node")
-	if len(nodeIdStr) == 0 {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "missing node id"}
-	}
-	nodeId, err := strconv.ParseUint(nodeIdStr, 10, 64)
+	err = nsNode.Node.ProposeAddMember(m)
 	if err != nil {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
 	}
-	cc := raftpb.ConfChange{
-		Type:      raftpb.ConfChangeRemoveNode,
-		ReplicaID: nodeId,
-	}
-	self.ProposeConfChange(ns, cc)
+
 	return nil, nil
 }
 
@@ -128,13 +107,12 @@ func (self *Server) initHttpHandler() {
 	log := common.HttpLog(common.LOG_INFO, sLog.Logger)
 	//debugLog := common.HttpLog(common.LOG_DEBUG, sLog.Logger)
 	router := httprouter.New()
-	router.Handle("GET", "/cluster/leader/:namespace", common.Decorate(self.getLeader, common.V1))
-	router.Handle("GET", "/cluster/members/:namespace", common.Decorate(self.getMembers, common.V1))
-	router.Handle("GET", "/cluster/checkbackup/:namespace", common.Decorate(self.checkNodeBackup, common.V1))
+	router.Handle("GET", common.APIGetLeader, common.Decorate(self.getLeader, common.V1))
+	router.Handle("GET", common.APIGetMembers, common.Decorate(self.getMembers, common.V1))
+	router.Handle("GET", common.APICheckBackup, common.Decorate(self.checkNodeBackup, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(self.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(self.doOptimize, log, common.V1))
-	router.Handle("POST", "/cluster/node/add", common.Decorate(self.doAddNode, log, common.V1))
-	router.Handle("DELETE", "/cluster/node/remove/:namespace/:node", common.Decorate(self.doRemoveNode, log, common.V1))
+	router.Handle("POST", common.APIAddNode, common.Decorate(self.doAddNode, log, common.V1))
 	self.router = router
 }
 

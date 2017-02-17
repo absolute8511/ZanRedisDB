@@ -62,11 +62,14 @@ func isEtcdErrorNum(err error, errorCode int) bool {
 	return false
 }
 
-func exchangeNodeValue(c *etcdlock.EtcdClient, nodePath string, valueChangeFn func(oldValue string) (string, error)) error {
+func exchangeNodeValue(c *etcdlock.EtcdClient, nodePath string, initValue string,
+	valueChangeFn func(bool, string) (string, error)) error {
 	rsp, err := c.Get(nodePath, false, false)
+	isNew := false
 	if err != nil {
 		if client.IsKeyNotFound(err) {
-			rsp, err = c.Create(nodePath, string(""), 0)
+			isNew = true
+			rsp, err = c.Create(nodePath, initValue, 0)
 			if err != nil {
 				if !IsEtcdNotFile(err) {
 					return err
@@ -79,10 +82,11 @@ func exchangeNodeValue(c *etcdlock.EtcdClient, nodePath string, valueChangeFn fu
 	retry := 5
 	for retry > 0 {
 		retry--
-		newValue, err := valueChangeFn(rsp.Node.Value)
+		newValue, err := valueChangeFn(isNew, rsp.Node.Value)
 		if err != nil {
 			return err
 		}
+		isNew = false
 		rsp, err = c.CompareAndSwap(nodePath, newValue, 0, "", rsp.Node.ModifiedIndex)
 		if err != nil {
 			time.Sleep(time.Millisecond * 10)
@@ -484,10 +488,13 @@ func (self *PDEtcdRegister) Stop() {
 
 func (self *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
 	var clusterMeta ClusterMetaInfo
-	exchangeNodeValue(self.client, self.getClusterMetaPath(), func(oldValue string) (string, error) {
-		err := json.Unmarshal([]byte(oldValue), &clusterMeta)
-		if err != nil {
-			return "", err
+	initValue, _ := json.Marshal(clusterMeta)
+	exchangeNodeValue(self.client, self.getClusterMetaPath(), string(initValue), func(isNew bool, oldValue string) (string, error) {
+		if !isNew || oldValue == "" {
+			err := json.Unmarshal([]byte(oldValue), &clusterMeta)
+			if err != nil {
+				return "", err
+			}
 		}
 		clusterMeta.MaxGID += 10000
 		newValue, err := json.Marshal(clusterMeta)
@@ -862,10 +869,13 @@ func (self *DNEtcdRegister) GetNodeInfo(nid string) (NodeInfo, error) {
 
 func (self *DNEtcdRegister) NewRegisterNodeID() (uint64, error) {
 	var clusterMeta ClusterMetaInfo
-	exchangeErr := exchangeNodeValue(self.client, self.getClusterMetaPath(), func(oldValue string) (string, error) {
-		err := json.Unmarshal([]byte(oldValue), &clusterMeta)
-		if err != nil {
-			return "", err
+	initValue, _ := json.Marshal(clusterMeta)
+	exchangeErr := exchangeNodeValue(self.client, self.getClusterMetaPath(), string(initValue), func(isNew bool, oldValue string) (string, error) {
+		if !isNew || oldValue == "" {
+			err := json.Unmarshal([]byte(oldValue), &clusterMeta)
+			if err != nil {
+				return "", err
+			}
 		}
 		clusterMeta.MaxRegID += 1
 		newValue, err := json.Marshal(clusterMeta)

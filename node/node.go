@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,6 +66,7 @@ type KVNode struct {
 	machineConfig     *MachineConfig
 	wg                sync.WaitGroup
 	commitC           <-chan applyInfo
+	committedIndex    uint64
 }
 
 type KVSnapInfo struct {
@@ -422,7 +424,58 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	return self.queueRequest(req)
 }
 
-func (self *KVNode) ProposeConfChange(cc raftpb.ConfChange) error {
+func (self *KVNode) FillMyMemberInfo(m *MemberInfo) {
+	m.DataDir = self.rn.config.DataDir
+	m.Broadcast = self.machineConfig.BroadcastAddr
+	m.HttpAPIPort = self.machineConfig.HttpAPIPort
+	m.RaftURLs = append(m.RaftURLs, self.machineConfig.LocalRaftAddr)
+}
+
+func (self *KVNode) ProposeAddMember(m MemberInfo) error {
+	if m.NodeID == self.machineConfig.NodeID {
+		self.FillMyMemberInfo(&m)
+	}
+	data, _ := json.Marshal(m)
+	cc := raftpb.ConfChange{
+		Type:      raftpb.ConfChangeAddNode,
+		ReplicaID: m.ID,
+		NodeGroup: raftpb.Group{
+			NodeId:        m.NodeID,
+			Name:          m.GroupName,
+			GroupId:       uint64(m.GroupID),
+			RaftReplicaId: m.ID},
+		Context: data,
+	}
+	return self.proposeConfChange(cc)
+}
+
+func (self *KVNode) ProposeRemoveMember(m MemberInfo) error {
+	cc := raftpb.ConfChange{
+		Type:      raftpb.ConfChangeRemoveNode,
+		ReplicaID: m.ID,
+	}
+	return self.proposeConfChange(cc)
+}
+
+func (self *KVNode) ProposeUpdateMember(m MemberInfo) error {
+	if m.NodeID == self.machineConfig.NodeID {
+		self.FillMyMemberInfo(&m)
+	}
+	data, _ := json.Marshal(m)
+	cc := raftpb.ConfChange{
+		Type:      raftpb.ConfChangeUpdateNode,
+		ReplicaID: m.ID,
+		NodeGroup: raftpb.Group{
+			NodeId:        m.NodeID,
+			Name:          m.GroupName,
+			GroupId:       uint64(m.GroupID),
+			RaftReplicaId: m.ID},
+		Context: data,
+	}
+	return self.proposeConfChange(cc)
+}
+
+func (self *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
 	cc.ID = self.rn.reqIDGen.Next()
 	self.rn.Infof("propose the conf change: %v", cc.String())
 	err := self.rn.node.ProposeConfChange(context.TODO(), cc)
@@ -434,6 +487,56 @@ func (self *KVNode) ProposeConfChange(cc raftpb.ConfChange) error {
 
 func (self *KVNode) Tick() {
 	self.rn.node.Tick()
+}
+
+func (self *KVNode) GetCommittedIndex() uint64 {
+	return atomic.LoadUint64(&self.committedIndex)
+}
+
+func (self *KVNode) SetCommittedIndex(ci uint64) {
+	atomic.StoreUint64(&self.committedIndex, ci)
+}
+
+func (self *KVNode) IsRaftSynced() bool {
+	req := make([]byte, 0)
+	binary.BigEndian.PutUint64(req, self.rn.reqIDGen.Next())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	if err := self.rn.node.ReadIndex(ctx, req); err != nil {
+		cancel()
+		if err == raft.ErrStopped {
+		}
+		nodeLog.Warningf("failed to get the read index from raft: %v", err)
+		return false
+	}
+	cancel()
+
+	var rs raft.ReadState
+	var (
+		timeout bool
+		done    bool
+	)
+	for !timeout && !done {
+		select {
+		case rs := <-self.rn.readStateC:
+			done = bytes.Equal(rs.RequestCtx, req)
+			if !done {
+			}
+		case <-time.After(time.Second):
+			nodeLog.Infof("timeout waiting for read index response")
+			timeout = true
+		case <-self.stopChan:
+			return false
+		}
+	}
+	if !done {
+		return false
+	}
+	ci := self.GetCommittedIndex()
+	nodeLog.Infof("local committed %v, read index %v", ci, rs.Index)
+	if ci >= rs.Index-1 {
+		return true
+	}
+	return false
 }
 
 func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
@@ -459,6 +562,16 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 }
 
 func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
+	var lastCommittedIndex uint64
+	if len(applyEvent.ents) > 0 {
+		lastCommittedIndex = applyEvent.ents[len(applyEvent.ents)-1].Index
+	}
+	if applyEvent.snapshot.Metadata.Index > lastCommittedIndex {
+		lastCommittedIndex = applyEvent.snapshot.Metadata.Index
+	}
+	if lastCommittedIndex > self.GetCommittedIndex() {
+		self.SetCommittedIndex(lastCommittedIndex)
+	}
 	self.applySnapshot(np, applyEvent)
 	if len(applyEvent.ents) == 0 {
 		return false

@@ -41,11 +41,13 @@ func (s *KVStore) openDB() error {
 }
 
 func (s *KVStore) CleanData() error {
-	if s.RockDB != nil {
-		s.Close()
-		s.RockDB = nil
+	if s.RockDB == nil {
+		nodeLog.Warningf("the db is not opened while clean data")
+		return nil
 	}
-	os.RemoveAll(s.GetDataDir())
+	dataPath := s.GetDataDir()
+	s.Close()
+	os.RemoveAll(dataPath)
 	return s.openDB()
 }
 

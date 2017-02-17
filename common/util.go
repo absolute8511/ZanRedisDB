@@ -4,6 +4,13 @@ import (
 	"net"
 )
 
+const (
+	APIAddNode     = "/cluster/node/add"
+	APIGetMembers  = "/cluster/members/:namespace"
+	APIGetLeader   = "/cluster/leader/:namespace"
+	APICheckBackup = "/cluster/checkbackup/:namespace"
+)
+
 func GetIPv4ForInterfaceName(ifname string) string {
 	interfaces, _ := net.Interfaces()
 	for _, inter := range interfaces {

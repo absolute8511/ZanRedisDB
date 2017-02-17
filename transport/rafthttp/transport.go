@@ -31,7 +31,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/coreos/etcd", "rafthttp"))
+var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "transport/rafthttp"))
 
 type Raft interface {
 	Process(ctx context.Context, m raftpb.Message) error

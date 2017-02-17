@@ -6,18 +6,22 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/spaolacci/murmur3"
+	"golang.org/x/net/context"
 	"io/ioutil"
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
 	ErrNamespaceAlreadyExist = errors.New("namespace already exist")
 	ErrRaftIDMismatch        = errors.New("raft id mismatch")
 	ErrRaftConfMismatch      = errors.New("raft config mismatch")
+	errTimeoutLeaderTransfer = errors.New("raft leader transfer failed")
 )
 
 type NamespaceNode struct {
@@ -63,6 +67,30 @@ func (self *NamespaceNode) IsDataNeedFix() bool {
 	return false
 }
 
+func (self *NamespaceNode) IsRaftSynced() bool {
+	return self.Node.IsRaftSynced()
+}
+
+func (self *NamespaceNode) GetMembers() []*MemberInfo {
+	return self.Node.GetMembers()
+}
+
+func (self *NamespaceNode) TransferMyLeader(to uint64) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*5)
+	oldLeader := self.Node.rn.Lead()
+	self.Node.rn.node.TransferLeadership(ctx, oldLeader, to)
+	for self.Node.rn.Lead() != to {
+		select {
+		case <-ctx.Done():
+			return errTimeoutLeaderTransfer
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	nodeLog.Infof("finished transfer from %v to %v", oldLeader, to)
+	cancel()
+	return nil
+}
+
 type NamespaceMgr struct {
 	mutex         sync.Mutex
 	kvNodes       map[string]*NamespaceNode
@@ -98,7 +126,7 @@ func (self *NamespaceMgr) LoadMachineRegID() (uint64, error) {
 		}
 		return 0, err
 	}
-	v, err := strconv.ParseInt(string(d), 10, 64)
+	v, err := strconv.ParseInt(strings.Trim(string(d), "\r\n"), 10, 64)
 	return uint64(v), err
 }
 
@@ -111,19 +139,20 @@ func (self *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 }
 
 func (self *NamespaceMgr) Start() {
+	self.mutex.Lock()
 	for _, kv := range self.kvNodes {
 		kv.Node.Start()
 		atomic.StoreInt32(&kv.ready, 1)
 	}
+	self.mutex.Unlock()
 }
 
 func (self *NamespaceMgr) Stop() {
-	self.mutex.Lock()
-	for k, n := range self.kvNodes {
+	tmp := self.GetNamespaces()
+	for k, n := range tmp {
 		n.Node.Stop()
 		nodeLog.Infof("kv namespace stopped: %v", k)
 	}
-	self.mutex.Unlock()
 }
 
 func (self *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
