@@ -357,6 +357,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	for {
 		m, err := dec.decode()
 		if err != nil {
+			plog.Warningf("failed to decode message : %v", err)
 			cr.mu.Lock()
 			cr.close()
 			cr.mu.Unlock()

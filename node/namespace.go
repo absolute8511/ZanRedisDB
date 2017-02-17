@@ -241,13 +241,13 @@ func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {
 
 func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 	self.mutex.Lock()
+	defer self.mutex.Unlock()
 	gn, ok := self.groups[gid]
 	if !ok {
 		nodeLog.Errorf("group name not found %v ", gid)
 		return nil
 	}
 	kv, ok := self.kvNodes[gn]
-	self.mutex.Unlock()
 	if !ok {
 		nodeLog.Errorf("kv namespace not found %v ", gn)
 		return nil

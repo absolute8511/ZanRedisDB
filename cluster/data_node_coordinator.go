@@ -300,6 +300,10 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 			if err != nil {
 				if err == ErrKeyNotFound {
 					coordLog.Infof("the namespace should be clean since not found in register: %v", name)
+					_, err = self.register.GetNamespaceMetaInfo(namespace)
+					if err == ErrKeyNotFound {
+						self.removeLocalNamespace(namespaceMeta, true)
+					}
 				}
 				continue
 			}
@@ -404,7 +408,7 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 }
 
 func (self *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *PartitionMetaInfo,
-	localNamespace *node.NamespaceNode) {
+	localNamespace *node.NamespaceNode, remoteNode string) {
 	var m node.MemberInfo
 	m.ID = raftID
 	m.NodeID = self.GetMyRegID()
@@ -412,20 +416,17 @@ func (self *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *Pa
 	m.GroupName = nsInfo.GetDesp()
 	localNamespace.Node.FillMyMemberInfo(&m)
 	localNamespace.Node.ProposeAddMember(m)
-	for _, nid := range nsInfo.RaftNodes {
-		if nid == self.GetMyID() {
-			continue
-		}
-		nip, _, _, httpPort := ExtractNodeInfoFromID(nid)
-		d, _ := json.Marshal(m)
-		err := common.APIRequest("POST",
-			"http://"+net.JoinHostPort(nip, httpPort)+common.APIAddNode,
-			bytes.NewReader(d), time.Second, nil)
-		if err != nil {
-			coordLog.Infof("failed to request join namespace: %v", err)
-		} else {
-			break
-		}
+	if remoteNode == self.GetMyID() {
+		return
+	}
+	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+	d, _ := json.Marshal(m)
+	coordLog.Infof("request to %v for join member: %v", nip, m)
+	err := common.APIRequest("POST",
+		"http://"+net.JoinHostPort(nip, httpPort)+common.APIAddNode,
+		bytes.NewReader(d), time.Second, nil)
+	if err != nil {
+		coordLog.Infof("failed to request join namespace: %v", err)
 	}
 }
 
@@ -452,7 +453,8 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 			nsInfo.RaftIDs)
 		return ErrNamespaceConfInvalid
 	}
-	for {
+	retry := 0
+	for retry < 2*len(nsInfo.RaftNodes) {
 		mems := localNamespace.GetMembers()
 		alreadyJoined := false
 		for _, m := range mems {
@@ -469,7 +471,12 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 			time.Sleep(time.Second)
 			coordLog.Infof("namespace %v still waiting raft synced", nsInfo.GetDesp())
 		} else {
-			self.requestJoinNamespaceGroup(raftID, nsInfo, localNamespace)
+			remote := nsInfo.RaftNodes[retry%len(nsInfo.RaftNodes)]
+			retry++
+			if remote == self.GetMyID() {
+				continue
+			}
+			self.requestJoinNamespaceGroup(raftID, nsInfo, localNamespace, remote)
 			time.Sleep(time.Second)
 		}
 	}

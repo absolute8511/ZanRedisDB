@@ -5,7 +5,9 @@ import (
 	"github.com/absolute8511/glog"
 	"log"
 	"os"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Logger interface {
@@ -171,4 +173,175 @@ func (self *LevelLogger) Panic(args ...interface{}) {
 		self.Logger.OutputErr(2, s)
 	}
 	panic(s)
+}
+
+var (
+	defaultMergePeriod     = time.Second
+	defaultTimeOutputScale = 10 * time.Millisecond
+	outputInterval         = time.Second
+)
+
+// line represents a log line that can be printed out
+// through Logger.
+type line struct {
+	level int32
+	str   string
+}
+
+func (l line) append(s string) line {
+	return line{
+		level: l.level,
+		str:   l.str + " " + s,
+	}
+}
+
+// status represents the merge status of a line.
+type status struct {
+	period time.Duration
+	start  time.Time // start time of latest merge period
+	count  int       // number of merged lines from starting
+}
+
+func (s *status) isInMergePeriod(now time.Time) bool {
+	return s.period == 0 || s.start.Add(s.period).After(now)
+}
+
+func (s *status) isEmpty() bool { return s.count == 0 }
+
+func (s *status) summary(now time.Time) string {
+	ts := s.start.Round(defaultTimeOutputScale)
+	took := now.Round(defaultTimeOutputScale).Sub(ts)
+	return fmt.Sprintf("[merged %d repeated lines in %s]", s.count, took)
+}
+
+func (s *status) reset(now time.Time) {
+	s.start = now
+	s.count = 0
+}
+
+// MergeLogger supports merge logging, which merges repeated log lines
+// and prints summary log lines instead.
+//
+// For merge logging, MergeLogger prints out the line when the line appears
+// at the first time. MergeLogger holds the same log line printed within
+// defaultMergePeriod, and prints out summary log line at the end of defaultMergePeriod.
+// It stops merging when the line doesn't appear within the
+// defaultMergePeriod.
+type MergeLogger struct {
+	*LevelLogger
+
+	mu      sync.Mutex // protect statusm
+	statusm map[line]*status
+}
+
+func NewMergeLogger(logger *LevelLogger) *MergeLogger {
+	l := &MergeLogger{
+		LevelLogger: logger,
+		statusm:     make(map[line]*status),
+	}
+	go l.outputLoop()
+	return l
+}
+
+func (l *MergeLogger) MergeInfo(entries ...interface{}) {
+	l.merge(line{
+		level: LOG_INFO,
+		str:   fmt.Sprint(entries...),
+	})
+}
+
+func (l *MergeLogger) MergeInfof(format string, args ...interface{}) {
+	l.merge(line{
+		level: LOG_INFO,
+		str:   fmt.Sprintf(format, args...),
+	})
+}
+
+func (l *MergeLogger) MergeWarning(entries ...interface{}) {
+	l.merge(line{
+		level: LOG_WARN,
+		str:   fmt.Sprint(entries...),
+	})
+}
+
+func (l *MergeLogger) MergeWarningf(format string, args ...interface{}) {
+	l.merge(line{
+		level: LOG_WARN,
+		str:   fmt.Sprintf(format, args...),
+	})
+}
+
+func (l *MergeLogger) MergeError(entries ...interface{}) {
+	l.merge(line{
+		level: LOG_ERR,
+		str:   fmt.Sprint(entries...),
+	})
+}
+
+func (l *MergeLogger) MergeErrorf(format string, args ...interface{}) {
+	l.merge(line{
+		level: LOG_ERR,
+		str:   fmt.Sprintf(format, args...),
+	})
+}
+
+func (l *MergeLogger) merge(ln line) {
+	l.mu.Lock()
+
+	// increase count if the logger is merging the line
+	if status, ok := l.statusm[ln]; ok {
+		status.count++
+		l.mu.Unlock()
+		return
+	}
+
+	// initialize status of the line
+	l.statusm[ln] = &status{
+		period: defaultMergePeriod,
+		start:  time.Now(),
+	}
+	// release the lock before IO operation
+	l.mu.Unlock()
+	// print out the line at its first time
+	if ln.level >= l.Level() {
+		if ln.level >= LOG_INFO {
+			l.LevelLogger.Info(ln.str)
+		} else if ln.level == LOG_WARN {
+			l.LevelLogger.Warning(ln.str)
+		} else if ln.level <= LOG_ERR {
+			l.LevelLogger.Error(ln.str)
+		}
+	}
+}
+
+func (l *MergeLogger) outputLoop() {
+	for now := range time.Tick(outputInterval) {
+		var outputs []line
+
+		l.mu.Lock()
+		for ln, status := range l.statusm {
+			if status.isInMergePeriod(now) {
+				continue
+			}
+			if status.isEmpty() {
+				delete(l.statusm, ln)
+				continue
+			}
+			outputs = append(outputs, ln.append(status.summary(now)))
+			status.reset(now)
+		}
+		l.mu.Unlock()
+
+		for _, o := range outputs {
+			if o.level >= l.Level() {
+				if o.level >= LOG_INFO {
+					l.LevelLogger.Info(o.str)
+				} else if o.level == LOG_WARN {
+					l.LevelLogger.Warning(o.str)
+				} else if o.level <= LOG_ERR {
+					l.LevelLogger.Error(o.str)
+				}
+			}
+		}
+	}
 }

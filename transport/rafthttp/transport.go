@@ -19,19 +19,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
 	"github.com/absolute8511/ZanRedisDB/stats"
-	"github.com/coreos/etcd/pkg/logutil"
+	//"github.com/coreos/etcd/pkg/logutil"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/pkg/capnslog"
+	//"github.com/coreos/pkg/capnslog"
 	"github.com/xiang90/probing"
 	"golang.org/x/net/context"
 )
 
-var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "transport/rafthttp"))
+//var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "transport/rafthttp"))
+var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("transport/rafthttp")))
 
 type Raft interface {
 	Process(ctx context.Context, m raftpb.Message) error
