@@ -224,8 +224,8 @@ func (self *DataPlacement) checkNamespaceNodeConflict(namespaceInfo *PartitionMe
 }
 
 func (self *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[string]NodeInfo,
-	replica int, partitionNum int, existPart map[int]*PartitionMetaInfo) ([][]string, *CoordErr) {
-	isrlist := make([][]string, partitionNum)
+	replica int, partitionNum int, existPart map[int]*PartitionMetaInfo) ([]PartitionReplicaInfo, *CoordErr) {
+	replicaList := make([]PartitionReplicaInfo, partitionNum)
 	partitionNodes, err := self.getRebalancedNamespacePartitions(
 		ns,
 		partitionNum,
@@ -234,17 +234,22 @@ func (self *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[s
 		return nil, err
 	}
 	for p := 0; p < partitionNum; p++ {
-		var isr []string
+		var replicaInfo PartitionReplicaInfo
 		if elem, ok := existPart[p]; ok {
-			isr = elem.RaftNodes
+			replicaInfo = elem.PartitionReplicaInfo
 		} else {
-			isr = partitionNodes[p]
+			replicaInfo.RaftNodes = partitionNodes[p]
+			replicaInfo.RaftIDs = make(map[string]uint64)
+			for _, nid := range replicaInfo.RaftNodes {
+				replicaInfo.MaxRaftID++
+				replicaInfo.RaftIDs[nid] = uint64(replicaInfo.MaxRaftID)
+			}
 		}
-		isrlist[p] = isr
+		replicaList[p] = replicaInfo
 	}
 
-	coordLog.Infof("selected namespace selected isr : %v", isrlist)
-	return isrlist, nil
+	coordLog.Infof("selected namespace replica list : %v", replicaList)
+	return replicaList, nil
 }
 
 func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bool) {

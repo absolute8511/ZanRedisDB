@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"errors"
 	"path"
 	"strconv"
 	"strings"
@@ -662,6 +663,9 @@ func (self *PDEtcdRegister) CreateNamespacePartition(ns string, partition int) e
 }
 
 func (self *PDEtcdRegister) CreateNamespace(ns string, meta *NamespaceMetaInfo) error {
+	if meta.MinGID <= 0 {
+		return errors.New("namespace MinGID is invalid")
+	}
 	metaValue, err := json.Marshal(meta)
 	if err != nil {
 		return err

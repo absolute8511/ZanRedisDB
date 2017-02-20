@@ -191,15 +191,6 @@ func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	}()
 }
 
-func (self *PDCoordinator) IsClusterStable() bool {
-	return atomic.LoadInt32(&self.isClusterUnstable) == 0 &&
-		atomic.LoadInt32(&self.isUpgrading) == 0
-}
-
-func (self *PDCoordinator) IsMineLeader() bool {
-	return self.leaderNode.GetID() == self.myNode.GetID()
-}
-
 func (self *PDCoordinator) getCurrentNodes() map[string]NodeInfo {
 	self.nodesMutex.RLock()
 	currentNodes := self.dataNodes
@@ -577,6 +568,8 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		if err != nil {
 			coordLog.Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
 		} else {
+			nsInfo.MaxRaftID++
+			nsInfo.RaftIDs[n.GetID()] = uint64(nsInfo.MaxRaftID)
 			nsInfo.RaftNodes = append(nsInfo.RaftNodes, n.GetID())
 			isrChanged = true
 		}
@@ -598,6 +591,8 @@ func (self *PDCoordinator) addNamespaceToNode(nsInfo *PartitionMetaInfo, nid str
 	if self.dpm.checkNamespaceNodeConflict(nsInfo) {
 		return ErrNamespaceNodeConflict
 	}
+	nsInfo.MaxRaftID++
+	nsInfo.RaftIDs[nid] = uint64(nsInfo.MaxRaftID)
 
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
@@ -623,6 +618,7 @@ func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, ni
 		return ErrNamespaceReplicaNotEnough
 	}
 	nsInfo.RaftNodes = nodes
+	delete(nsInfo.RaftIDs, nid)
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
 	if err != nil {

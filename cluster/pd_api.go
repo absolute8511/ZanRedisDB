@@ -8,12 +8,26 @@ import (
 )
 
 // some API for outside
+func (self *PDCoordinator) IsClusterStable() bool {
+	return atomic.LoadInt32(&self.isClusterUnstable) == 0 &&
+		atomic.LoadInt32(&self.isUpgrading) == 0
+}
+
+func (self *PDCoordinator) IsMineLeader() bool {
+	return self.leaderNode.GetID() == self.myNode.GetID()
+}
+
 func (self *PDCoordinator) GetAllPDNodes() ([]NodeInfo, error) {
 	return self.register.GetAllPDNodes()
 }
 
 func (self *PDCoordinator) GetPDLeader() NodeInfo {
 	return self.leaderNode
+}
+
+func (self *PDCoordinator) GetAllNamespaces() (map[string][]PartitionMetaInfo, int64, error) {
+	ns, epoch, err := self.register.GetAllNamespaces()
+	return ns, int64(epoch), err
 }
 
 func (self *PDCoordinator) SetClusterUpgradeState(upgrading bool) error {
@@ -179,7 +193,13 @@ func (self *PDCoordinator) CreateNamespace(namespace string, meta NamespaceMetaI
 	}
 	if ok, _ := self.register.IsExistNamespace(namespace); !ok {
 		meta.MagicCode = time.Now().UnixNano()
-		err := self.register.CreateNamespace(namespace, &meta)
+		var err error
+		meta.MinGID, err = self.register.PrepareNamespaceMinGID()
+		if err != nil {
+			coordLog.Infof("prepare namespace %v gid failed :%v", namespace, err)
+			return err
+		}
+		err = self.register.CreateNamespace(namespace, &meta)
 		if err != nil {
 			coordLog.Infof("create namespace key %v failed :%v", namespace, err)
 			return err
@@ -189,7 +209,6 @@ func (self *PDCoordinator) CreateNamespace(namespace string, meta NamespaceMetaI
 		return ErrAlreadyExist
 	}
 	coordLog.Infof("create namespace: %v, with meta: %v", namespace, meta)
-
 	return self.checkAndUpdateNamespacePartitions(currentNodes, namespace, meta)
 }
 
@@ -213,33 +232,24 @@ func (self *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map[st
 			}
 		}
 	}
-	isrList, err := self.dpm.allocNamespaceRaftNodes(namespace, currentNodes, meta.Replica, meta.PartitionNum, existPart)
+	partReplicaList, err := self.dpm.allocNamespaceRaftNodes(namespace, currentNodes, meta.Replica, meta.PartitionNum, existPart)
 	if err != nil {
 		coordLog.Infof("failed to alloc nodes for namespace: %v", err)
 		return err.ToErrorType()
 	}
-	if len(isrList) != meta.PartitionNum {
+	if len(partReplicaList) != meta.PartitionNum {
 		return ErrNodeUnavailable.ToErrorType()
 	}
-	//meta.MaxRaftID += meta.PartitionNum*meta.Replica
 	for i := 0; i < meta.PartitionNum; i++ {
 		if _, ok := existPart[i]; ok {
 			continue
 		}
-		var tmpReplicaInfo PartitionReplicaInfo
-		tmpReplicaInfo.RaftNodes = isrList[i]
-		// each new raft node should use the new raft id
-
+		tmpReplicaInfo := partReplicaList[i]
 		commonErr := self.register.UpdateNamespacePartReplicaInfo(namespace, i, &tmpReplicaInfo, tmpReplicaInfo.Epoch)
 		if commonErr != nil {
 			coordLog.Infof("failed update info for namespace : %v-%v, %v", namespace, i, commonErr)
 			continue
 		}
-		tmpNamespaceInfo := PartitionMetaInfo{}
-		tmpNamespaceInfo.Name = namespace
-		tmpNamespaceInfo.Partition = i
-		tmpNamespaceInfo.NamespaceMetaInfo = meta
-		tmpNamespaceInfo.PartitionReplicaInfo = tmpReplicaInfo
 	}
 	self.triggerCheckNamespaces("", 0, time.Millisecond*500)
 	return nil
