@@ -164,6 +164,7 @@ var (
 	ErrLocalInitNamespaceFailed       = NewCoordErrWithCode("init local namespace failed", CoordLocalErr, RpcNoErr)
 	ErrNamespaceNotCreated            = NewCoordErrWithCode("namespace not created", CoordLocalErr, RpcNoErr)
 	ErrNamespaceConfInvalid           = NewCoordErrWithCode("namespace config is invalid", CoordClusterErr, RpcNoErr)
+	ErrNamespaceWaitingSync           = NewCoordErrWithCode("namespace is still waiting sync", CoordTmpErr, RpcNoErr)
 )
 
 func GenNodeID(n *NodeInfo, extra string) string {
@@ -189,7 +190,7 @@ func ExtractRegIDFromGenID(nid string) uint64 {
 }
 
 func ExtractNodeInfoFromID(nid string) (ip string, rpc string, redis string, http string) {
-	lines := strings.SplitN(nid, ":", 5)
+	lines := strings.SplitN(nid, ":", 6)
 	if len(lines) < 5 {
 		return
 	}

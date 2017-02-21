@@ -26,13 +26,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/snap/snappb"
 	pioutil "github.com/coreos/etcd/pkg/ioutil"
 	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/snap/snappb"
-
-	"github.com/coreos/pkg/capnslog"
 )
 
 const (
@@ -40,7 +39,7 @@ const (
 )
 
 var (
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "snap")
+	plog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("snap"))
 
 	ErrNoSnapshot    = errors.New("snap: no available snapshot")
 	ErrEmptySnapshot = errors.New("snap: empty snapshot")

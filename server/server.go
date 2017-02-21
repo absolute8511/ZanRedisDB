@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -52,6 +53,7 @@ func NewServer(conf ServerConfig) *Server {
 	myNode := &cluster.NodeInfo{
 		NodeIP:    conf.BroadcastAddr,
 		RedisPort: strconv.Itoa(conf.RedisAPIPort),
+		HttpPort:  strconv.Itoa(conf.HttpAPIPort),
 	}
 	if conf.ClusterID == "" {
 		sLog.Fatalf("cluster id can not be empty")
@@ -68,6 +70,7 @@ func NewServer(conf ServerConfig) *Server {
 		sLog.Fatalf("can not decide the broadcast ip: %v", myNode.NodeIP)
 	}
 	myNode.RaftTransportAddr = conf.LocalRaftAddr
+	os.MkdirAll(conf.DataDir, common.DIR_PERM)
 
 	s := &Server{
 		conf:          conf,
@@ -106,10 +109,10 @@ func NewServer(conf ServerConfig) *Server {
 }
 
 func (self *Server) Stop() {
-	self.raftTransport.Stop()
-	close(self.stopC)
-	<-self.raftHttpDoneC
 	self.dataCoord.Stop()
+	close(self.stopC)
+	self.raftTransport.Stop()
+	<-self.raftHttpDoneC
 	self.wg.Wait()
 	sLog.Infof("server stopped")
 }

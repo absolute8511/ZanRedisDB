@@ -85,6 +85,7 @@ func NewServer(conf *ServerConfig) *Server {
 
 func (self *Server) Stop() {
 	close(self.stopC)
+	self.pdCoord.Stop()
 	self.wg.Wait()
 	sLog.Infof("server stopped")
 }

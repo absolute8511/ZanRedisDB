@@ -25,13 +25,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/wal/walpb"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/pbutil"
-
-	"github.com/coreos/pkg/capnslog"
 )
 
 const (
@@ -51,9 +50,9 @@ var (
 	// The actual size might be larger than this. In general, the default
 	// value should be used, but this is defined as an exported variable
 	// so that tests can set a different segment size.
-	SegmentSizeBytes int64 = 64 * 1000 * 1000 // 64MB
+	SegmentSizeBytes int64 = 32 * 1000 * 1000
 
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "wal")
+	plog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("wal"))
 
 	ErrMetadataConflict = errors.New("wal: conflicting metadata found")
 	ErrFileNotFound     = errors.New("wal: file not found")

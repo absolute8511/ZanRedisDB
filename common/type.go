@@ -157,4 +157,5 @@ func (a *StringArray) String() string {
 
 const (
 	MAX_PARTITION_NUM = 1024
+	MAX_REPLICATOR    = 5
 )

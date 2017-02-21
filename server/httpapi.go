@@ -46,6 +46,7 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
+	sLog.Infof("got add node request: %v", string(data))
 
 	var m node.MemberInfo
 	err = json.Unmarshal(data, &m)
@@ -104,7 +105,7 @@ func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps
 }
 
 func (self *Server) initHttpHandler() {
-	log := common.HttpLog(common.LOG_INFO, sLog.Logger)
+	log := common.HttpLog(sLog)
 	//debugLog := common.HttpLog(common.LOG_DEBUG, sLog.Logger)
 	router := httprouter.New()
 	router.Handle("GET", common.APIGetLeader, common.Decorate(self.getLeader, common.V1))

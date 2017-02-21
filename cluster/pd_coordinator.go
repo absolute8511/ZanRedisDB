@@ -113,7 +113,6 @@ func (self *PDCoordinator) handleLeadership() {
 		}
 
 		coordLog.Warningf("leadership watch exit.")
-		time.Sleep(time.Second)
 		if self.monitorChan != nil {
 			close(self.monitorChan)
 			self.monitorChan = nil

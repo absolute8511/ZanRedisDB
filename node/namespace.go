@@ -22,6 +22,7 @@ var (
 	ErrRaftIDMismatch        = errors.New("raft id mismatch")
 	ErrRaftConfMismatch      = errors.New("raft config mismatch")
 	errTimeoutLeaderTransfer = errors.New("raft leader transfer failed")
+	errStopping              = errors.New("the namespace is stopping")
 )
 
 type NamespaceNode struct {
@@ -61,6 +62,7 @@ func (self *NamespaceNode) Destroy() {
 
 func (self *NamespaceNode) Close() {
 	self.Node.Stop()
+	nodeLog.Infof("namespace stopped: %v", self.conf.Name)
 }
 
 func (self *NamespaceNode) IsDataNeedFix() bool {
@@ -75,19 +77,24 @@ func (self *NamespaceNode) GetMembers() []*MemberInfo {
 	return self.Node.GetMembers()
 }
 
-func (self *NamespaceNode) TransferMyLeader(to uint64) error {
+func (self *NamespaceNode) Start() {
+	self.Node.Start()
+	atomic.StoreInt32(&self.ready, 1)
+}
+
+func (self *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*5)
+	defer cancel()
 	oldLeader := self.Node.rn.Lead()
-	self.Node.rn.node.TransferLeadership(ctx, oldLeader, to)
-	for self.Node.rn.Lead() != to {
+	self.Node.rn.node.TransferLeadership(ctx, oldLeader, toRaftID)
+	for self.Node.rn.Lead() != toRaftID {
 		select {
 		case <-ctx.Done():
 			return errTimeoutLeaderTransfer
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	nodeLog.Infof("finished transfer from %v to %v", oldLeader, to)
-	cancel()
+	nodeLog.Infof("finished transfer from %v to %v:%v", oldLeader, to, toRaftID)
 	return nil
 }
 
@@ -97,6 +104,7 @@ type NamespaceMgr struct {
 	groups        map[uint64]string
 	machineConf   *MachineConfig
 	raftTransport *rafthttp.Transport
+	stopping      int32
 }
 
 func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *NamespaceMgr {
@@ -141,17 +149,16 @@ func (self *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 func (self *NamespaceMgr) Start() {
 	self.mutex.Lock()
 	for _, kv := range self.kvNodes {
-		kv.Node.Start()
-		atomic.StoreInt32(&kv.ready, 1)
+		kv.Start()
 	}
 	self.mutex.Unlock()
 }
 
 func (self *NamespaceMgr) Stop() {
+	atomic.StoreInt32(&self.stopping, 1)
 	tmp := self.GetNamespaces()
-	for k, n := range tmp {
-		n.Node.Stop()
-		nodeLog.Infof("kv namespace stopped: %v", k)
+	for _, n := range tmp {
+		n.Close()
 	}
 }
 
@@ -166,6 +173,9 @@ func (self *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 }
 
 func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64) (*NamespaceNode, error) {
+	if atomic.LoadInt32(&self.stopping) == 1 {
+		return nil, errStopping
+	}
 	self.mutex.Lock()
 	defer self.mutex.Unlock()
 	if n, ok := self.kvNodes[conf.Name]; ok {
@@ -324,4 +334,9 @@ func (self *NamespaceMgr) ForceDeleteNamespaceData(ns string) error {
 	}
 	nsNode.Destroy()
 	return nil
+}
+
+func (self *NamespaceMgr) ClearUnusedRaftPeer() {
+	// TODO: while close or remove raft node, we need check if any remote transport peer
+	// should be closed.
 }

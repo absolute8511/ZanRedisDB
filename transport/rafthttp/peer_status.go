@@ -61,7 +61,7 @@ func (s *peerStatus) deactivate(failure failureType, reason string) {
 		s.since = time.Time{}
 		return
 	}
-	plog.Debugf(msg)
+	//plog.Debugf(msg)
 }
 
 func (s *peerStatus) isActive() bool {

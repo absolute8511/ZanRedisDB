@@ -53,10 +53,17 @@ func (s *KVStore) CleanData() error {
 
 func (s *KVStore) Destroy() error {
 	if s.RockDB != nil {
+		dataPath := s.GetDataDir()
 		s.Close()
 		s.RockDB = nil
+		return os.RemoveAll(dataPath)
+	} else {
+		if s.opts.EngType == "rocksdb" {
+			f := rockredis.GetDataDirFromBase(s.opts.DataDir)
+			return os.RemoveAll(f)
+		}
 	}
-	return os.RemoveAll(s.GetDataDir())
+	return nil
 }
 
 func (s *KVStore) LocalLookup(key []byte) ([]byte, error) {

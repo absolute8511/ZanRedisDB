@@ -246,6 +246,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		for _, v := range rc.config.RaftPeers {
 			var m MemberInfo
 			m.GroupID = rc.config.GroupID
+			m.GroupName = rc.config.GroupName
 			m.ID = v.ReplicaID
 			m.RaftURLs = append(m.RaftURLs, v.RaftAddr)
 			m.NodeID = v.NodeID
@@ -301,13 +302,13 @@ func (rc *raftNode) initForTransport() {
 	if len(rc.members) == 0 {
 		for _, v := range rc.config.RaftPeers {
 			if v.NodeID != rc.config.nodeConfig.NodeID {
-				rc.transport.AddPeer(types.ID(v.NodeID), []string{v.RaftAddr})
+				rc.transport.UpdatePeer(types.ID(v.NodeID), []string{v.RaftAddr})
 			}
 		}
 	}
 	for _, m := range rc.members {
 		if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
-			rc.transport.AddPeer(types.ID(m.NodeID), m.RaftURLs)
+			rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
 		}
 	}
 }
@@ -534,7 +535,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 					rc.members[m.ID] = &m
 					rc.memMutex.Unlock()
 					if m.NodeID != rc.config.nodeConfig.NodeID {
-						rc.transport.AddPeer(types.ID(m.NodeID), m.RaftURLs)
+						rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
 					}
 				}
 				rc.Infof("node added to the cluster: %v\n", m)
@@ -700,8 +701,8 @@ func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
 	if rc.transport != nil && rc.transport.IsStarted() {
 		for _, m := range rc.members {
 			if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
-				rc.transport.RemovePeer(types.ID(m.NodeID))
-				rc.transport.AddPeer(types.ID(m.NodeID), m.RaftURLs)
+				//rc.transport.RemovePeer(types.ID(m.NodeID))
+				rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
 			}
 		}
 	}

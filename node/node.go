@@ -342,12 +342,20 @@ func (self *KVNode) handleProposeReq() {
 			//self.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := time.Now()
-			self.rn.node.Propose(context.TODO(), buffer)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			self.rn.node.Propose(ctx, buffer)
 			select {
 			case <-lastReq.done:
+			case <-ctx.Done():
+				err := ctx.Err()
+				for _, r := range reqList.Reqs {
+					self.w.Trigger(r.Header.ID, err)
+				}
 			case <-self.stopChan:
+				cancel()
 				return
 			}
+			cancel()
 			cost := time.Since(start)
 			if len(reqList.Reqs) >= 100 && cost >= time.Second || (cost >= time.Second*2) {
 				self.rn.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
@@ -478,10 +486,12 @@ func (self *KVNode) ProposeUpdateMember(m MemberInfo) error {
 func (self *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
 	cc.ID = self.rn.reqIDGen.Next()
 	self.rn.Infof("propose the conf change: %v", cc.String())
-	err := self.rn.node.ProposeConfChange(context.TODO(), cc)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
+	err := self.rn.node.ProposeConfChange(ctx, cc)
 	if err != nil {
 		self.rn.Infof("failed to propose the conf change: %v", err)
 	}
+	cancel()
 	return err
 }
 
@@ -498,7 +508,7 @@ func (self *KVNode) SetCommittedIndex(ci uint64) {
 }
 
 func (self *KVNode) IsRaftSynced() bool {
-	req := make([]byte, 0)
+	req := make([]byte, 8)
 	binary.BigEndian.PutUint64(req, self.rn.reqIDGen.Next())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	if err := self.rn.node.ReadIndex(ctx, req); err != nil {
@@ -508,7 +518,9 @@ func (self *KVNode) IsRaftSynced() bool {
 		nodeLog.Warningf("failed to get the read index from raft: %v", err)
 		return false
 	}
+	nodeLog.Infof("send read index request ")
 	cancel()
+	nodeLog.Infof("send read index request done")
 
 	var rs raft.ReadState
 	var (
@@ -521,7 +533,7 @@ func (self *KVNode) IsRaftSynced() bool {
 			done = bytes.Equal(rs.RequestCtx, req)
 			if !done {
 			}
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 3):
 			nodeLog.Infof("timeout waiting for read index response")
 			timeout = true
 		case <-self.stopChan:
@@ -533,7 +545,7 @@ func (self *KVNode) IsRaftSynced() bool {
 	}
 	ci := self.GetCommittedIndex()
 	nodeLog.Infof("local committed %v, read index %v", ci, rs.Index)
-	if ci >= rs.Index-1 {
+	if rs.Index <= 0 || ci >= rs.Index-1 {
 		return true
 	}
 	return false

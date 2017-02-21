@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("node"))
+var nodeLog = common.NewLevelLogger(common.LOG_DEBUG, common.NewDefaultLogger("node"))
 
 func SetLogger(level int32, logger common.Logger) {
 	nodeLog.SetLevel(level)

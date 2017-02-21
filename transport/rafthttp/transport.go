@@ -33,7 +33,7 @@ import (
 )
 
 //var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "transport/rafthttp"))
-var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("transport/rafthttp")))
+var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_DEBUG, common.NewDefaultLogger("transport/rafthttp")))
 
 type Raft interface {
 	Process(ctx context.Context, m raftpb.Message) error
@@ -71,7 +71,7 @@ type Transporter interface {
 	// It is the caller's responsibility to ensure the urls are all valid,
 	// or it panics.
 	// Peer urls are used to connect to the remote peer.
-	AddPeer(id types.ID, urls []string)
+	//AddPeer(id types.ID, urls []string)
 	// RemovePeer removes the peer with given id.
 	RemovePeer(id types.ID)
 	// RemoveAllPeers removes all the existing peers in the transport.
@@ -266,26 +266,26 @@ func (t *Transport) AddRemote(id types.ID, us []string) {
 	t.remotes[id] = startRemote(t, urls, id)
 }
 
-func (t *Transport) AddPeer(id types.ID, us []string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.peers == nil {
-		panic("transport stopped")
-	}
-	if _, ok := t.peers[id]; ok {
-		return
-	}
-	urls, err := types.NewURLs(us)
-	if err != nil {
-		plog.Panicf("newURLs %+v should never fail: %+v", us, err)
-	}
-	fs := t.PeersStats.Peer(id.String())
-	t.peers[id] = startPeer(t, urls, id, fs)
-	addPeerToProber(t.prober, id.String(), us)
-
-	plog.Infof("added peer %s", id)
-}
+//func (t *Transport) AddPeer(id types.ID, us []string) {
+//	t.mu.Lock()
+//	defer t.mu.Unlock()
+//
+//	if t.peers == nil {
+//		panic("transport stopped")
+//	}
+//	if _, ok := t.peers[id]; ok {
+//		return
+//	}
+//	urls, err := types.NewURLs(us)
+//	if err != nil {
+//		plog.Panicf("newURLs %+v should never fail: %+v", us, err)
+//	}
+//	fs := t.PeersStats.Peer(id.String())
+//	t.peers[id] = startPeer(t, urls, id, fs)
+//	addPeerToProber(t.prober, id.String(), us)
+//
+//	plog.Infof("added peer %s", id)
+//}
 
 func (t *Transport) RemovePeer(id types.ID) {
 	t.mu.Lock()
@@ -318,17 +318,25 @@ func (t *Transport) removePeer(id types.ID) {
 func (t *Transport) UpdatePeer(id types.ID, us []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// TODO: return error or just panic?
+	if t.peers == nil {
+		panic("transport stopped")
+	}
+
+	isNew := false
 	if _, ok := t.peers[id]; !ok {
-		return
+		isNew = true
 	}
 	urls, err := types.NewURLs(us)
 	if err != nil {
 		plog.Panicf("newURLs %+v should never fail: %+v", us, err)
 	}
-	t.peers[id].update(urls)
-
-	t.prober.Remove(id.String())
+	if isNew {
+		fs := t.PeersStats.Peer(id.String())
+		t.peers[id] = startPeer(t, urls, id, fs)
+	} else {
+		t.peers[id].update(urls)
+		t.prober.Remove(id.String())
+	}
 	addPeerToProber(t.prober, id.String(), us)
 	plog.Infof("updated peer %s", id)
 }

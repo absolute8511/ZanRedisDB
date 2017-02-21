@@ -326,20 +326,30 @@ func (n *node) run(r *raft) {
 				if m.Type == pb.MsgTransferLeader {
 					if m.FromGroup.NodeId == 0 {
 						if !ok {
-							n.logger.Errorf("no replica found %v while processing : %v",
-								m.From, m.String())
-							continue
+							if m.From == r.id {
+								m.FromGroup = r.group
+							} else {
+								n.logger.Errorf("no replica found %v while processing : %v",
+									m.From, m.String())
+								continue
+							}
+						} else {
+							m.FromGroup = from.group
 						}
-						m.FromGroup = from.group
 					}
 					if m.ToGroup.NodeId == 0 {
 						g, ok := r.prs[m.To]
 						if !ok {
-							n.logger.Errorf("no replica found %v while processing : %v",
-								m.From, m.String())
-							continue
+							if m.To == r.id {
+								m.ToGroup = r.group
+							} else {
+								n.logger.Errorf("no replica found %v while processing : %v",
+									m.To, m.String())
+								continue
+							}
+						} else {
+							m.ToGroup = g.group
 						}
-						m.ToGroup = g.group
 					}
 				} else {
 					// if we missing the peer node group info, try update it from

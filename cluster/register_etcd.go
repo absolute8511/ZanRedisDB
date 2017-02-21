@@ -80,10 +80,11 @@ func exchangeNodeValue(c *etcdlock.EtcdClient, nodePath string, initValue string
 			return err
 		}
 	}
+	var newValue string
 	retry := 5
 	for retry > 0 {
 		retry--
-		newValue, err := valueChangeFn(isNew, rsp.Node.Value)
+		newValue, err = valueChangeFn(isNew, rsp.Node.Value)
 		if err != nil {
 			return err
 		}
@@ -96,10 +97,10 @@ func exchangeNodeValue(c *etcdlock.EtcdClient, nodePath string, initValue string
 				return err
 			}
 		} else {
-			break
+			return nil
 		}
 	}
-	return nil
+	return err
 }
 
 type EtcdRegister struct {
@@ -244,7 +245,7 @@ func (self *EtcdRegister) scanNamespaces() (map[string][]PartitionMetaInfo, Epoc
 		}
 		partInfos, ok := nsInfos[k]
 		if !ok {
-			partInfos = make([]PartitionMetaInfo, meta.PartitionNum)
+			partInfos = make([]PartitionMetaInfo, 0, meta.PartitionNum)
 			nsInfos[k] = partInfos
 		}
 		for k2, v2 := range v {
@@ -261,7 +262,8 @@ func (self *EtcdRegister) scanNamespaces() (map[string][]PartitionMetaInfo, Epoc
 			info.Partition = partition
 			info.NamespaceMetaInfo = meta
 			info.PartitionReplicaInfo = v2
-			partInfos[partition] = info
+			partInfos = append(partInfos, info)
+			nsInfos[k] = partInfos
 		}
 	}
 
@@ -490,19 +492,25 @@ func (self *PDEtcdRegister) Stop() {
 func (self *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
 	var clusterMeta ClusterMetaInfo
 	initValue, _ := json.Marshal(clusterMeta)
-	exchangeNodeValue(self.client, self.getClusterMetaPath(), string(initValue), func(isNew bool, oldValue string) (string, error) {
-		if !isNew || oldValue == "" {
-			err := json.Unmarshal([]byte(oldValue), &clusterMeta)
-			if err != nil {
-				return "", err
+	err := exchangeNodeValue(
+		self.client,
+		self.getClusterMetaPath(),
+		string(initValue),
+		func(isNew bool, oldValue string) (string, error) {
+			if !isNew && oldValue != "" {
+				err := json.Unmarshal([]byte(oldValue), &clusterMeta)
+				if err != nil {
+					coordLog.Infof("cluster meta: %v", string(oldValue))
+					return "", err
+				}
 			}
-		}
-		clusterMeta.MaxGID += 10000
-		newValue, err := json.Marshal(clusterMeta)
-		return string(newValue), err
-	})
+			clusterMeta.MaxGID += 10000
+			newValue, err := json.Marshal(clusterMeta)
+			coordLog.Infof("updating cluster meta: %v", clusterMeta)
+			return string(newValue), err
+		})
 
-	return clusterMeta.MaxGID, nil
+	return clusterMeta.MaxGID, err
 }
 
 func (self *PDEtcdRegister) GetClusterEpoch() (EpochType, error) {
@@ -851,7 +859,7 @@ func (self *DNEtcdRegister) Unregister(nodeData *NodeInfo) error {
 		return err
 	}
 
-	coordLog.Infof("cluser[%s] node[%s] unregistered", self.clusterID, nodeData)
+	coordLog.Infof("cluser[%s] node[%v] unregistered", self.clusterID, nodeData)
 	return nil
 }
 
@@ -875,7 +883,7 @@ func (self *DNEtcdRegister) NewRegisterNodeID() (uint64, error) {
 	var clusterMeta ClusterMetaInfo
 	initValue, _ := json.Marshal(clusterMeta)
 	exchangeErr := exchangeNodeValue(self.client, self.getClusterMetaPath(), string(initValue), func(isNew bool, oldValue string) (string, error) {
-		if !isNew || oldValue == "" {
+		if !isNew && oldValue != "" {
 			err := json.Unmarshal([]byte(oldValue), &clusterMeta)
 			if err != nil {
 				return "", err

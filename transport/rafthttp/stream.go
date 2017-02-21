@@ -299,13 +299,16 @@ func (r *streamReader) start() {
 func (cr *streamReader) run() {
 	t := cr.typ
 	plog.Infof("started streaming with peer %s (%s reader)", cr.peerID, t)
+	failedCnt := 0
 	for {
 		rc, err := cr.dial(t)
 		if err != nil {
 			if err != errUnsupportedStreamType {
 				cr.status.deactivate(failureType{source: t.String(), action: "dial"}, err.Error())
 			}
+			failedCnt++
 		} else {
+			failedCnt = 0
 			cr.status.activate()
 			plog.Infof("established a TCP streaming connection with peer %s (%s reader)", cr.peerID, cr.typ)
 			err := cr.decodeLoop(rc, t)
@@ -319,10 +322,14 @@ func (cr *streamReader) run() {
 				cr.status.deactivate(failureType{source: t.String(), action: "read"}, err.Error())
 			}
 		}
+		waitTime := time.Duration(failedCnt*200) * time.Millisecond
+		if waitTime > time.Second*3 {
+			waitTime = time.Second * 3
+		}
 		select {
 		// Wait 100ms to create a new stream, so it doesn't bring too much
 		// overhead when retry.
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(waitTime):
 		case <-cr.stopc:
 			plog.Infof("stopped streaming with peer %s (%s reader)", cr.peerID, t)
 			close(cr.done)
