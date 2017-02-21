@@ -25,6 +25,10 @@ func (self *PDCoordinator) GetPDLeader() NodeInfo {
 	return self.leaderNode
 }
 
+func (self *PDCoordinator) GetAllDataNodes() (map[string]NodeInfo, int64) {
+	return self.getCurrentNodesWithRemoving()
+}
+
 func (self *PDCoordinator) GetAllNamespaces() (map[string][]PartitionMetaInfo, int64, error) {
 	ns, epoch, err := self.register.GetAllNamespaces()
 	return ns, int64(epoch), err

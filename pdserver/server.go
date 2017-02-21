@@ -22,16 +22,25 @@ func SLogger() *common.LevelLogger {
 }
 
 type Server struct {
-	conf    *ServerConfig
-	stopC   chan struct{}
-	wg      sync.WaitGroup
-	router  http.Handler
-	pdCoord *cluster.PDCoordinator
+	conf             *ServerConfig
+	stopC            chan struct{}
+	wg               sync.WaitGroup
+	router           http.Handler
+	pdCoord          *cluster.PDCoordinator
+	dataMutex        sync.Mutex
+	tombstonePDNodes map[string]bool
 }
 
 func NewServer(conf *ServerConfig) *Server {
+	hname, err := os.Hostname()
+	if err != nil {
+		sLog.Fatal(err)
+	}
+
 	myNode := &cluster.NodeInfo{
-		NodeIP: conf.BroadcastAddr,
+		NodeIP:   conf.BroadcastAddr,
+		Hostname: hname,
+		Version:  common.VerBinary,
 	}
 
 	if conf.ClusterID == "" {
@@ -58,7 +67,6 @@ func NewServer(conf *ServerConfig) *Server {
 	myNode.ID = cluster.GenNodeID(myNode, "pd")
 
 	clusterOpts := &cluster.Options{}
-	var err error
 	if len(conf.BalanceInterval) == 2 {
 		clusterOpts.BalanceStart, err = strconv.Atoi(conf.BalanceInterval[0])
 		if err != nil {
@@ -72,9 +80,10 @@ func NewServer(conf *ServerConfig) *Server {
 		}
 	}
 	s := &Server{
-		conf:    conf,
-		stopC:   make(chan struct{}),
-		pdCoord: cluster.NewPDCoordinator(conf.ClusterID, myNode, clusterOpts),
+		conf:             conf,
+		stopC:            make(chan struct{}),
+		pdCoord:          cluster.NewPDCoordinator(conf.ClusterID, myNode, clusterOpts),
+		tombstonePDNodes: make(map[string]bool),
 	}
 
 	r := cluster.NewPDEtcdRegister(conf.ClusterLeadershipAddresses)

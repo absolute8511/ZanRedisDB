@@ -16,10 +16,12 @@ type NodeInfo struct {
 	RegID             uint64
 	ID                string
 	NodeIP            string
+	Hostname          string
 	RedisPort         string
 	HttpPort          string
 	RpcPort           string
 	RaftTransportAddr string
+	Version           string
 	Epoch             EpochType
 }
 

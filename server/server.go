@@ -50,10 +50,16 @@ type Server struct {
 }
 
 func NewServer(conf ServerConfig) *Server {
+	hname, err := os.Hostname()
+	if err != nil {
+		sLog.Fatal(err)
+	}
 	myNode := &cluster.NodeInfo{
 		NodeIP:    conf.BroadcastAddr,
+		Hostname:  hname,
 		RedisPort: strconv.Itoa(conf.RedisAPIPort),
 		HttpPort:  strconv.Itoa(conf.HttpAPIPort),
+		Version:   common.VerBinary,
 	}
 	if conf.ClusterID == "" {
 		sLog.Fatalf("cluster id can not be empty")
@@ -109,6 +115,7 @@ func NewServer(conf ServerConfig) *Server {
 }
 
 func (self *Server) Stop() {
+	sLog.Infof("server begin stopping")
 	self.dataCoord.Stop()
 	close(self.stopC)
 	self.raftTransport.Stop()

@@ -13,15 +13,11 @@ import (
 )
 
 type node struct {
-	RemoteAddress    string              `json:"remote_address"`
-	Hostname         string              `json:"hostname"`
-	BroadcastAddress string              `json:"broadcast_address"`
-	TCPPort          int                 `json:"tcp_port"`
-	HTTPPort         int                 `json:"http_port"`
-	Version          string              `json:"version"`
-	Tombstones       []bool              `json:"tombstones"`
-	Namespaces       []string            `json:"namespaces"`
-	Partitions       map[string][]string `json:"partitions"`
+	BroadcastAddress string `json:"broadcast_address"`
+	Hostname         string `json:"hostname"`
+	RedisPort        string `json:"redis_port"`
+	HTTPPort         string `json:"http_port"`
+	Version          string `json:"version"`
 }
 
 func GetValidPartitionNum(numStr string) (int, error) {
@@ -101,7 +97,7 @@ func (self *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps h
 	if err != nil {
 		return nil, common.HttpErr{500, err.Error()}
 	}
-	nameList := make([]string, len(namespaces))
+	nameList := make([]string, 0, len(namespaces))
 	for ns, _ := range namespaces {
 		nameList = append(nameList, ns)
 	}
@@ -111,8 +107,18 @@ func (self *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps h
 }
 
 func (self *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	// dont filter out tombstoned nodes
 	nodes := make([]*node, 0)
+	dns, _ := self.pdCoord.GetAllDataNodes()
+	for _, n := range dns {
+		dn := &node{
+			BroadcastAddress: n.NodeIP,
+			Hostname:         n.Hostname,
+			Version:          n.Version,
+			RedisPort:        n.RedisPort,
+			HTTPPort:         n.HttpPort,
+		}
+		nodes = append(nodes, dn)
+	}
 	return map[string]interface{}{
 		"nodes": nodes,
 	}, nil
@@ -138,7 +144,22 @@ func (self *Server) listPDNodes(w http.ResponseWriter, req *http.Request, ps htt
 }
 
 func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	return nil, nil
+	ns := ps.ByName("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{400, "MISSING_ARG_NAMESPACE"}
+	}
+
+	namespaces, _, err := self.pdCoord.GetAllNamespaces()
+	if err != nil {
+		return nil, common.HttpErr{500, err.Error()}
+	}
+	nsInfo, ok := namespaces[ns]
+	if !ok {
+		return nil, common.HttpErr{404, "NAMESPACE not found"}
+	}
+	// TODO: for each partition, get the node info (ip, port)
+
+	return nsInfo, nil
 }
 
 func (self *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
@@ -310,13 +331,26 @@ func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps h
 }
 
 func (self *Server) IsTombstonePDNode(nid string) bool {
-	return false
+	self.dataMutex.Lock()
+	_, ok := self.tombstonePDNodes[nid]
+	self.dataMutex.Unlock()
+	return ok
 }
+
 func (self *Server) TombstonePDNode(nid string, n cluster.NodeInfo) {
-	return
+	self.dataMutex.Lock()
+	self.tombstonePDNodes[nid] = true
+	self.dataMutex.Unlock()
 }
+
 func (self *Server) DelTombstonePDNode(nid string) bool {
-	return false
+	self.dataMutex.Lock()
+	_, ok := self.tombstonePDNodes[nid]
+	if ok {
+		delete(self.tombstonePDNodes, nid)
+	}
+	self.dataMutex.Unlock()
+	return ok
 }
 
 func (self *Server) serveHttpAPI(addr string, stopC <-chan struct{}) {
