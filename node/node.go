@@ -141,6 +141,14 @@ func (self *KVNode) OptimizeDB() {
 	self.store.CompactRange()
 }
 
+func (self *KVNode) IsLead() bool {
+	return self.rn.IsLead()
+}
+
+func (self *KVNode) GetRaftStatus() raft.Status {
+	return self.rn.node.Status()
+}
+
 func (self *KVNode) GetLeadMember() *MemberInfo {
 	return self.rn.GetLeadMember()
 }
@@ -869,7 +877,7 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 		c := http.Client{Transport: newDeadlineTransport(time.Second)}
 		body, _ := raftSnapshot.Marshal()
 		req, _ := http.NewRequest("GET", "http://"+m.Broadcast+":"+
-			strconv.Itoa(m.HttpAPIPort)+"/cluster/checkbackup/"+self.ns, bytes.NewBuffer(body))
+			strconv.Itoa(m.HttpAPIPort)+common.APICheckBackup+"/"+self.ns, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
 		if err != nil {
 			self.rn.Infof("request error: %v", err)

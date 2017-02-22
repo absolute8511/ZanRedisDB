@@ -652,7 +652,7 @@ func (rc *raftNode) sendMessages(msgs []raftpb.Message) {
 }
 
 func (rc *raftNode) Lead() uint64 { return atomic.LoadUint64(&rc.lead) }
-func (rc *raftNode) isLead() bool { return atomic.LoadUint64(&rc.lead) == uint64(rc.config.ID) }
+func (rc *raftNode) IsLead() bool { return atomic.LoadUint64(&rc.lead) == uint64(rc.config.ID) }
 
 type memberSorter []*MemberInfo
 

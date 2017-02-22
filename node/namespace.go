@@ -18,11 +18,13 @@ import (
 )
 
 var (
-	ErrNamespaceAlreadyExist = errors.New("namespace already exist")
-	ErrRaftIDMismatch        = errors.New("raft id mismatch")
-	ErrRaftConfMismatch      = errors.New("raft config mismatch")
-	errTimeoutLeaderTransfer = errors.New("raft leader transfer failed")
-	errStopping              = errors.New("the namespace is stopping")
+	ErrNamespaceAlreadyExist      = errors.New("namespace already exist")
+	ErrRaftIDMismatch             = errors.New("raft id mismatch")
+	ErrRaftConfMismatch           = errors.New("raft config mismatch")
+	errTimeoutLeaderTransfer      = errors.New("raft leader transfer failed")
+	errStopping                   = errors.New("the namespace is stopping")
+	ErrNamespaceNotFound          = errors.New("namespace is not found")
+	ErrNamespacePartitionNotFound = errors.New("partition of the namespace is not found")
 )
 
 type NamespaceNode struct {
@@ -98,9 +100,14 @@ func (self *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
 	return nil
 }
 
+type NamespaceMeta struct {
+	PartitionNum int
+}
+
 type NamespaceMgr struct {
 	mutex         sync.Mutex
 	kvNodes       map[string]*NamespaceNode
+	nsMetas       map[string]NamespaceMeta
 	groups        map[uint64]string
 	machineConf   *MachineConfig
 	raftTransport *rafthttp.Transport
@@ -111,6 +118,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	ns := &NamespaceMgr{
 		kvNodes:       make(map[string]*NamespaceNode),
 		groups:        make(map[uint64]string),
+		nsMetas:       make(map[string]NamespaceMeta),
 		raftTransport: transport,
 		machineConf:   conf,
 	}
@@ -202,6 +210,11 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 	d, _ := json.MarshalIndent(&conf, "", " ")
 	nodeLog.Infof("namespace load config: %v", string(d))
 	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, clusterNodes)
+	if _, ok := self.nsMetas[conf.BaseName]; !ok {
+		self.nsMetas[conf.BaseName] = NamespaceMeta{
+			PartitionNum: conf.PartitionNum,
+		}
+	}
 
 	raftConf := &RaftConfig{
 		GroupID:     conf.RaftGroupConf.GroupID,
@@ -228,18 +241,19 @@ func GetHashedPartitionID(pk []byte, pnum int) int {
 	return int(murmur3.Sum32(pk)) % pnum
 }
 
-func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(ns string, pk []byte) *NamespaceNode {
+func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []byte) (*NamespaceNode, error) {
 	self.mutex.Lock()
 	defer self.mutex.Unlock()
-	v, ok := self.kvNodes[ns+"-0"]
+	v, ok := self.nsMetas[nsBaseName]
 	if !ok {
-		return nil
+		return nil, ErrNamespaceNotFound
 	}
-	v, ok = self.kvNodes[ns+"-"+strconv.Itoa(GetHashedPartitionID(pk, v.conf.PartitionNum))]
+	fullName := common.GetNsDesp(nsBaseName, GetHashedPartitionID(pk, v.PartitionNum))
+	n, ok := self.kvNodes[fullName]
 	if !ok {
-		return nil
+		return nil, ErrNamespacePartitionNotFound
 	}
-	return v
+	return n, nil
 }
 
 func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {
@@ -273,6 +287,7 @@ func (self *NamespaceMgr) GetStats() []common.NamespaceStats {
 		ns := n.Node.GetStats()
 		ns.Name = k
 		ns.EngType = n.conf.EngType
+		ns.IsLeader = n.Node.IsLead()
 		nsStats = append(nsStats, ns)
 	}
 	self.mutex.Unlock()

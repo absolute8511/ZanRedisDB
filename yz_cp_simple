@@ -1,6 +1,6 @@
 {
     "name":"yz_cp_simple-0",
-    "eng_type": "rocksdb",
+    "eng_type": "rockredis",
     "partition_num":1,
     "snap_count": 50000,
     "snap_catchup": 10000,

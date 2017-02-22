@@ -22,7 +22,6 @@ import (
 )
 
 var (
-	errNamespaceNotFound = errors.New("namespace not found")
 	errRaftGroupNotReady = errors.New("raft group not ready")
 )
 
@@ -126,7 +125,10 @@ func (self *Server) Stop() {
 	sLog.Infof("server stopped")
 }
 
-func (self *Server) GetNamespace(ns string) *node.NamespaceNode {
+func (self *Server) GetNamespace(ns string, pk []byte) (*node.NamespaceNode, error) {
+	return self.nsMgr.GetNamespaceNodeWithPrimaryKey(ns, pk)
+}
+func (self *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
 	return self.nsMgr.GetNamespaceNode(ns)
 }
 
@@ -181,15 +183,15 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	}
 	rawKey := cmd.Args[1]
 
-	namespace, _, err := common.ExtractNamesapce(rawKey)
+	namespace, pk, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
 		sLog.Infof("failed to get the namespace of the redis command:%v", rawKey)
 		return nil, cmd, err
 	}
 	// we need decide the partition id from the primary key
-	n := self.nsMgr.GetNamespaceNode(namespace)
-	if n == nil {
-		return nil, cmd, errNamespaceNotFound
+	n, err := self.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
+	if err != nil {
+		return nil, cmd, err
 	}
 	h, ok := n.Node.GetHandler(cmdName)
 	if !ok {
@@ -236,7 +238,7 @@ func (self *Server) Process(ctx context.Context, m raftpb.Message) error {
 	kv := self.nsMgr.GetNamespaceNodeFromGID(m.ToGroup.GroupId)
 	if kv == nil {
 		sLog.Errorf("kv namespace not found while processing %v ", m.String())
-		return errNamespaceNotFound
+		return node.ErrNamespacePartitionNotFound
 	}
 	if !kv.IsReady() {
 		return errRaftGroupNotReady
@@ -277,7 +279,7 @@ func (self *Server) ReportSnapshot(id uint64, gp raftpb.Group, status raft.Snaps
 func (self *Server) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 	kv := self.nsMgr.GetNamespaceNodeFromGID(msg.ToGroup.GroupId)
 	if kv == nil {
-		return 0, errNamespaceNotFound
+		return 0, node.ErrNamespacePartitionNotFound
 	}
 	if !kv.IsReady() {
 		return 0, errRaftGroupNotReady

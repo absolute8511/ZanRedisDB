@@ -2,13 +2,14 @@ package common
 
 import (
 	"net"
+	"strconv"
 )
 
 const (
 	APIAddNode     = "/cluster/node/add"
-	APIGetMembers  = "/cluster/members/:namespace"
-	APIGetLeader   = "/cluster/leader/:namespace"
-	APICheckBackup = "/cluster/checkbackup/:namespace"
+	APIGetMembers  = "/cluster/members"
+	APIGetLeader   = "/cluster/leader"
+	APICheckBackup = "/cluster/checkbackup"
 )
 
 func GetIPv4ForInterfaceName(ifname string) string {
@@ -32,4 +33,8 @@ func GetIPv4ForInterfaceName(ifname string) string {
 
 func IsValidNamespaceName(ns string) bool {
 	return true
+}
+
+func GetNsDesp(ns string, part int) string {
+	return ns + "-" + strconv.Itoa(part)
 }

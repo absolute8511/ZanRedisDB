@@ -2,7 +2,7 @@ package cluster
 
 import (
 	"errors"
-	"strconv"
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 var (
@@ -55,10 +55,6 @@ type PartitionReplicaInfo struct {
 	Epoch     EpochType
 }
 
-func GetDesp(ns string, part int) string {
-	return ns + "-" + strconv.Itoa(part)
-}
-
 type PartitionMetaInfo struct {
 	Name      string
 	Partition int
@@ -67,7 +63,7 @@ type PartitionMetaInfo struct {
 }
 
 func (self *PartitionMetaInfo) GetDesp() string {
-	return self.Name + "-" + strconv.Itoa(self.Partition)
+	return common.GetNsDesp(self.Name, self.Partition)
 }
 
 type ConsistentStore interface {

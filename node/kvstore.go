@@ -30,7 +30,7 @@ func NewKVStore(kvopts *KVOptions) *KVStore {
 
 func (s *KVStore) openDB() error {
 	var err error
-	if s.opts.EngType == "rocksdb" {
+	if s.opts.EngType == "rockredis" {
 		cfg := rockredis.NewRockConfig()
 		cfg.DataDir = s.opts.DataDir
 		s.RockDB, err = rockredis.OpenRockDB(cfg)

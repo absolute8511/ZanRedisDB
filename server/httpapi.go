@@ -8,14 +8,22 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/julienschmidt/httprouter"
 )
+
+type RaftStatus struct {
+	LeaderInfo *node.MemberInfo
+	Members    []*node.MemberInfo
+	RaftStat   raft.Status
+}
 
 func (self *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	self.router.ServeHTTP(w, req)
@@ -27,9 +35,9 @@ func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprout
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	kv := self.GetNamespace(ns)
-	if kv == nil {
-		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "Namespace not found:" + ns}
+	kv, err := self.GetNamespace(ns, realKey)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: err.Error()}
 	}
 	if v, err := kv.Node.Lookup(realKey); err == nil {
 		if v == nil {
@@ -58,9 +66,9 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	nsNode := self.GetNamespace(m.GroupName)
+	nsNode := self.GetNamespaceFromFullName(m.GroupName)
 	if nsNode == nil {
-		return nil, common.HttpErr{Code: http.StatusNotFound, Text: errNamespaceNotFound.Error()}
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: node.ErrNamespacePartitionNotFound.Error()}
 	}
 	err = nsNode.Node.ProposeAddMember(m)
 	if err != nil {
@@ -72,7 +80,7 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 
 func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespace(ns)
+	v := self.GetNamespaceFromFullName(ns)
 	if v == nil {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
@@ -85,7 +93,7 @@ func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httpr
 
 func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespace(ns)
+	v := self.GetNamespaceFromFullName(ns)
 	if v == nil {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
@@ -94,7 +102,7 @@ func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps http
 
 func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespace(ns)
+	v := self.GetNamespaceFromFullName(ns)
 	if v == nil {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
@@ -162,7 +170,19 @@ func (self *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps htt
 		return nil, common.HttpErr{400, "INVALID_REQUEST"}
 	}
 	ns := reqParams.Get("namespace")
-	return self.dataCoord.Stats(ns, -1), nil
+	nsList := self.nsMgr.GetNamespaces()
+	rstat := make([]*RaftStatus, 0)
+	for name, nsNode := range nsList {
+		if !strings.HasPrefix(name, ns) {
+			continue
+		}
+		var s RaftStatus
+		s.LeaderInfo = nsNode.Node.GetLeadMember()
+		s.Members = nsNode.Node.GetMembers()
+		s.RaftStat = nsNode.Node.GetRaftStatus()
+		rstat = append(rstat, &s)
+	}
+	return rstat, nil
 }
 
 func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
@@ -171,26 +191,34 @@ func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprou
 		sLog.Infof("failed to parse request params - %s", err)
 		return nil, common.HttpErr{400, "INVALID_REQUEST"}
 	}
-	_ = reqParams.Get("namespace")
 	leaderOnlyStr := reqParams.Get("leader_only")
-	_, _ = strconv.ParseBool(leaderOnlyStr)
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+	ss := self.GetStats()
+	nss := make([]common.NamespaceStats, 0, len(ss.NSStats))
+	for _, nsStat := range ss.NSStats {
+		if leaderOnly && !nsStat.IsLeader {
+			continue
+		}
+		nss = append(nss, nsStat)
+	}
+	ss.NSStats = nss
 
 	startTime := self.startTime
 	uptime := time.Since(startTime)
 
 	return struct {
-		Version string `json:"version"`
-		UpTime  int64  `json:"up_time"`
-	}{common.VerBinary, int64(uptime.Seconds())}, nil
+		Version string             `json:"version"`
+		UpTime  int64              `json:"up_time"`
+		Stats   common.ServerStats `json:"stats"`
+	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
 func (self *Server) initHttpHandler() {
 	log := common.HttpLog(sLog)
-	//debugLog := common.HttpLog(common.LOG_DEBUG, sLog.Logger)
 	router := httprouter.New()
-	router.Handle("GET", common.APIGetLeader, common.Decorate(self.getLeader, common.V1))
-	router.Handle("GET", common.APIGetMembers, common.Decorate(self.getMembers, common.V1))
-	router.Handle("GET", common.APICheckBackup, common.Decorate(self.checkNodeBackup, common.V1))
+	router.Handle("GET", common.APIGetLeader+"/:namespace", common.Decorate(self.getLeader, common.V1))
+	router.Handle("GET", common.APIGetMembers+"/:namespace", common.Decorate(self.getMembers, common.V1))
+	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(self.checkNodeBackup, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(self.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(self.doOptimize, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(self.doAddNode, log, common.V1))

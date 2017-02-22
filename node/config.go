@@ -1,7 +1,10 @@
 package node
 
 type NamespaceConfig struct {
-	Name          string          `json:"name"`
+	// namespace full name with partition
+	Name string `json:"name"`
+	// namespace name without partition
+	BaseName      string          `json:"name"`
 	EngType       string          `json:"eng_type"`
 	PartitionNum  int             `json:"partition_num"`
 	SnapCount     int             `json:"snap_count"`

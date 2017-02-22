@@ -32,7 +32,7 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	}
 	nsConf := &NamespaceConfig{
 		Name:    "default",
-		EngType: "rocksdb",
+		EngType: "rockredis",
 	}
 	kv := NewServer(kvOpts)
 	kv.InitKVNamespace(1000, 1, raftAddr,

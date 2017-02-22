@@ -66,6 +66,7 @@ type NamespaceStats struct {
 	ClusterWriteStats *WriteStats            `json:"cluster_write_stats"`
 	InternalStats     map[string]interface{} `json:"internal_stats"`
 	EngType           string                 `json:"eng_type"`
+	IsLeader          bool                   `json:"is_leader"`
 }
 
 type ServerStats struct {

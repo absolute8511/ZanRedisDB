@@ -262,7 +262,7 @@ func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, 
 	}
 	engType := reqParams.Get("engtype")
 	if engType == "" {
-		engType = "rocksdb"
+		engType = "rockredis"
 	}
 
 	pnumStr := reqParams.Get("partition_num")
