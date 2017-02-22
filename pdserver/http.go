@@ -327,6 +327,20 @@ func (self *Server) doDeleteNamespace(w http.ResponseWriter, req *http.Request, 
 }
 
 func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+	}
+	levelStr := reqParams.Get("loglevel")
+	if levelStr == "" {
+		return nil, common.HttpErr{400, "MISSING_ARG_LEVEL"}
+	}
+	level, err := strconv.Atoi(levelStr)
+	if err != nil {
+		return nil, common.HttpErr{400, "BAD_LEVEL_STRING"}
+	}
+	sLog.SetLevel(int32(level))
+	cluster.SetLogLevel(level)
 	return nil, nil
 }
 

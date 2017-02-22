@@ -8,6 +8,10 @@ import (
 
 var nodeLog = common.NewLevelLogger(common.LOG_DEBUG, common.NewDefaultLogger("node"))
 
+func SetLogLevel(level int) {
+	nodeLog.SetLevel(int32(level))
+}
+
 func SetLogger(level int32, logger common.Logger) {
 	nodeLog.SetLevel(level)
 	nodeLog.Logger = logger

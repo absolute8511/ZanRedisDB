@@ -47,6 +47,7 @@ type Server struct {
 	raftTransport *rafthttp.Transport
 	dataCoord     *cluster.DataCoordinator
 	nsMgr         *node.NamespaceMgr
+	startTime     time.Time
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -82,6 +83,7 @@ func NewServer(conf ServerConfig) *Server {
 		conf:          conf,
 		stopC:         make(chan struct{}),
 		raftHttpDoneC: make(chan struct{}),
+		startTime:     time.Now(),
 	}
 
 	ts := &stats.TransportStats{}

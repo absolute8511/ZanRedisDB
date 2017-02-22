@@ -33,7 +33,11 @@ import (
 )
 
 //var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "transport/rafthttp"))
-var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_DEBUG, common.NewDefaultLogger("transport/rafthttp")))
+var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("transport/rafthttp")))
+
+func SetLogLevel(level int) {
+	plog.SetLevel(int32(level))
+}
 
 type Raft interface {
 	Process(ctx context.Context, m raftpb.Message) error

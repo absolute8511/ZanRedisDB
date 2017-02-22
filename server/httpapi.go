@@ -5,10 +5,15 @@ import (
 	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
+	"net/url"
+	"os"
 	"strconv"
+	"time"
 
+	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -104,6 +109,81 @@ func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps
 	return nil, nil
 }
 
+func (self *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	return "OK", nil
+}
+
+func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+	}
+	levelStr := reqParams.Get("loglevel")
+	if levelStr == "" {
+		return nil, common.HttpErr{400, "MISSING_ARG_LEVEL"}
+	}
+	level, err := strconv.Atoi(levelStr)
+	if err != nil {
+		return nil, common.HttpErr{400, "BAD_LEVEL_STRING"}
+	}
+	sLog.SetLevel(int32(level))
+	rafthttp.SetLogLevel(level)
+	node.SetLogLevel(level)
+	cluster.SetLogLevel(level)
+	return nil, nil
+}
+
+func (self *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, common.HttpErr{500, err.Error()}
+	}
+	return struct {
+		Version          string `json:"version"`
+		BroadcastAddress string `json:"broadcast_address"`
+		Hostname         string `json:"hostname"`
+		HTTPPort         int    `json:"http_port"`
+		RedisPort        int    `json:"redis_port"`
+		StartTime        int64  `json:"start_time"`
+	}{
+		Version:          common.VerBinary,
+		BroadcastAddress: self.conf.BroadcastAddr,
+		Hostname:         hostname,
+		HTTPPort:         self.conf.HttpAPIPort,
+		RedisPort:        self.conf.RedisAPIPort,
+		StartTime:        self.startTime.Unix(),
+	}, nil
+}
+
+func (self *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+	}
+	ns := reqParams.Get("namespace")
+	return self.dataCoord.Stats(ns, -1), nil
+}
+
+func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+	}
+	_ = reqParams.Get("namespace")
+	leaderOnlyStr := reqParams.Get("leader_only")
+	_, _ = strconv.ParseBool(leaderOnlyStr)
+
+	startTime := self.startTime
+	uptime := time.Since(startTime)
+
+	return struct {
+		Version string `json:"version"`
+		UpTime  int64  `json:"up_time"`
+	}{common.VerBinary, int64(uptime.Seconds())}, nil
+}
+
 func (self *Server) initHttpHandler() {
 	log := common.HttpLog(sLog)
 	//debugLog := common.HttpLog(common.LOG_DEBUG, sLog.Logger)
@@ -114,6 +194,14 @@ func (self *Server) initHttpHandler() {
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(self.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(self.doOptimize, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(self.doAddNode, log, common.V1))
+
+	router.Handle("GET", "/ping", common.Decorate(self.pingHandler, common.PlainText))
+	router.Handle("POST", "/loglevel/set", common.Decorate(self.doSetLogLevel, log, common.V1))
+	router.Handle("GET", "/info", common.Decorate(self.doInfo, common.V1))
+
+	router.Handle("GET", "/stats", common.Decorate(self.doStats, common.V1))
+	router.Handle("GET", "/raft/stats", common.Decorate(self.doRaftStats, common.V1))
+
 	self.router = router
 }
 
