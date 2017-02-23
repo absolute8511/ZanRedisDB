@@ -214,7 +214,8 @@ func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprou
 }
 
 func (self *Server) initHttpHandler() {
-	log := common.HttpLog(sLog)
+	log := common.HttpLog(sLog, common.LOG_INFO)
+	debugLog := common.HttpLog(sLog, common.LOG_DEBUG)
 	router := httprouter.New()
 	router.Handle("GET", common.APIGetLeader+"/:namespace", common.Decorate(self.getLeader, common.V1))
 	router.Handle("GET", common.APIGetMembers+"/:namespace", common.Decorate(self.getMembers, common.V1))
@@ -228,7 +229,7 @@ func (self *Server) initHttpHandler() {
 	router.Handle("GET", "/info", common.Decorate(self.doInfo, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(self.doStats, common.V1))
-	router.Handle("GET", "/raft/stats", common.Decorate(self.doRaftStats, common.V1))
+	router.Handle("GET", "/raft/stats", common.Decorate(self.doRaftStats, debugLog, common.V1))
 
 	self.router = router
 }

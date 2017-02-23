@@ -381,6 +381,7 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	}
 	var err *CoordErr
 	nsConf := node.NewNSConfig()
+	nsConf.BaseName = nsInfo.Name
 	nsConf.Name = nsInfo.GetDesp()
 	nsConf.EngType = nsInfo.EngType
 	nsConf.PartitionNum = nsInfo.PartitionNum

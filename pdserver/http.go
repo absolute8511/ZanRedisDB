@@ -20,6 +20,11 @@ type node struct {
 	Version          string `json:"version"`
 }
 
+type PartitionNodeInfo struct {
+	Leader   node   `json:"leader"`
+	Replicas []node `json:"replicas"`
+}
+
 func GetValidPartitionNum(numStr string) (int, error) {
 	num, err := strconv.Atoi(numStr)
 	if err != nil {
@@ -54,14 +59,15 @@ func GetValidReplicator(r string) (int, error) {
 }
 
 func (self *Server) initHttpHandler() {
-	log := common.HttpLog(sLog)
+	log := common.HttpLog(sLog, common.LOG_INFO)
+	debugLog := common.HttpLog(sLog, common.LOG_DEBUG)
 	router := httprouter.New()
 	router.Handle("GET", "/ping", common.Decorate(self.pingHandler, common.PlainText))
 	router.Handle("GET", "/info", common.Decorate(self.getInfo, common.V1))
 	router.Handle("GET", "/namespaces", common.Decorate(self.getNamespaces, common.V1))
 	router.Handle("GET", "/datanodes", common.Decorate(self.getDataNodes, common.V1))
 	router.Handle("GET", "/listpd", common.Decorate(self.listPDNodes, common.V1))
-	router.Handle("GET", "/query/:namespace", common.Decorate(self.doQueryNamespace, common.V1))
+	router.Handle("GET", "/query/:namespace", common.Decorate(self.doQueryNamespace, debugLog, common.V1))
 
 	// cluster prefix url means only handled by leader of pd
 	router.Handle("GET", "/cluster/stats", common.Decorate(self.doClusterStats, common.V1))
@@ -153,13 +159,48 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 	if err != nil {
 		return nil, common.HttpErr{500, err.Error()}
 	}
-	nsInfo, ok := namespaces[ns]
+	nsPartsInfo, ok := namespaces[ns]
 	if !ok {
 		return nil, common.HttpErr{404, "NAMESPACE not found"}
 	}
-	// TODO: for each partition, get the node info (ip, port)
+	dns, _ := self.pdCoord.GetAllDataNodes()
+	maxEpoch := int64(0)
+	partNodes := make(map[int]PartitionNodeInfo)
 
-	return nsInfo, nil
+	pnum := 0
+	engType := ""
+	for _, nsInfo := range nsPartsInfo {
+		pnum = nsInfo.PartitionNum
+		engType = nsInfo.EngType
+		if int64(nsInfo.Epoch) > maxEpoch {
+			maxEpoch = int64(nsInfo.Epoch)
+		}
+		var pn PartitionNodeInfo
+		for i, nid := range nsInfo.RaftNodes {
+			n, ok := dns[nid]
+			if !ok {
+				continue
+			}
+			dn := node{
+				BroadcastAddress: n.NodeIP,
+				Hostname:         n.Hostname,
+				Version:          n.Version,
+				RedisPort:        n.RedisPort,
+				HTTPPort:         n.HttpPort,
+			}
+			if i == 0 {
+				pn.Leader = dn
+			}
+			pn.Replicas = append(pn.Replicas, dn)
+		}
+		partNodes[nsInfo.Partition] = pn
+	}
+	return map[string]interface{}{
+		"epoch":         maxEpoch,
+		"partition_num": pnum,
+		"eng_type":      engType,
+		"partitions":    partNodes,
+	}, nil
 }
 
 func (self *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {

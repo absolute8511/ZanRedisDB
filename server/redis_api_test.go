@@ -2,8 +2,11 @@ package server
 
 import (
 	"fmt"
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/siddontang/goredis"
 	"io/ioutil"
+	"path"
 	"reflect"
 	"strconv"
 	"sync"
@@ -22,23 +25,34 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		t.Fatal(err)
 	}
 	t.Logf("dir:%v\n", tmpDir)
+	ioutil.WriteFile(
+		path.Join(tmpDir, "myid"),
+		[]byte(strconv.FormatInt(int64(1), 10)),
+		common.FILE_PERM)
 	raftAddr := "127.0.0.1:12345"
 	redisport := 22345
-	clusterNodes := make(map[int]string)
-	clusterNodes[1] = raftAddr
+	var replica node.ReplicaInfo
+	replica.NodeID = 1
+	replica.ReplicaID = 1
+	replica.RaftAddr = raftAddr
 	kvOpts := ServerConfig{
-		DataDir:      tmpDir,
-		RedisAPIPort: redisport,
+		ClusterID:     "test",
+		DataDir:       tmpDir,
+		RedisAPIPort:  redisport,
+		LocalRaftAddr: raftAddr,
+		BroadcastAddr: "127.0.0.1",
 	}
-	nsConf := &NamespaceConfig{
-		Name:    "default",
-		EngType: "rockredis",
-	}
+	nsConf := node.NewNSConfig()
+	nsConf.Name = "default-0"
+	nsConf.BaseName = "default"
+	nsConf.EngType = "rockredis"
+	nsConf.PartitionNum = 1
+	nsConf.RaftGroupConf.GroupID = 1000
+	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
 	kv := NewServer(kvOpts)
-	kv.InitKVNamespace(1000, 1, raftAddr,
-		clusterNodes, false, nsConf)
+	kv.InitKVNamespace(1, nsConf)
 
-	kv.ServeAPI()
+	kv.Start()
 	time.Sleep(time.Millisecond * 10)
 	return kv, redisport, tmpDir
 }

@@ -246,6 +246,7 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 	defer self.mutex.Unlock()
 	v, ok := self.nsMetas[nsBaseName]
 	if !ok {
+		nodeLog.Infof("namespace %v meta not found", nsBaseName)
 		return nil, ErrNamespaceNotFound
 	}
 	fullName := common.GetNsDesp(nsBaseName, GetHashedPartitionID(pk, v.PartitionNum))

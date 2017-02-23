@@ -105,19 +105,27 @@ func NewServer(conf ServerConfig) *Server {
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID
 
-	r := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
-	s.dataCoord = cluster.NewDataCoordinator(conf.ClusterID, myNode, s.nsMgr)
-	if err := s.dataCoord.SetRegister(r); err != nil {
-		sLog.Fatalf("failed to init register for coordinator: %v", err)
+	if conf.EtcdClusterAddresses != "" {
+		r := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
+		s.dataCoord = cluster.NewDataCoordinator(conf.ClusterID, myNode, s.nsMgr)
+		if err := s.dataCoord.SetRegister(r); err != nil {
+			sLog.Fatalf("failed to init register for coordinator: %v", err)
+		}
+		s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
+	} else {
+		s.raftTransport.ID = types.ID(myNode.RegID)
 	}
-	s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
 
 	return s
 }
 
 func (self *Server) Stop() {
 	sLog.Infof("server begin stopping")
-	self.dataCoord.Stop()
+	if self.dataCoord != nil {
+		self.dataCoord.Stop()
+	} else {
+		self.nsMgr.Stop()
+	}
 	close(self.stopC)
 	self.raftTransport.Stop()
 	<-self.raftHttpDoneC
@@ -154,9 +162,13 @@ func (self *Server) Start() {
 		self.serveRaft()
 	}()
 
-	err := self.dataCoord.Start()
-	if err != nil {
-		sLog.Fatalf("data coordinator start failed: %v", err)
+	if self.dataCoord != nil {
+		err := self.dataCoord.Start()
+		if err != nil {
+			sLog.Fatalf("data coordinator start failed: %v", err)
+		}
+	} else {
+		self.nsMgr.Start()
 	}
 
 	self.wg.Add(1)

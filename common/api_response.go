@@ -107,7 +107,7 @@ func Decorate(f APIHandler, ds ...Decorator) httprouter.Handle {
 	}
 }
 
-func HttpLog(log *LevelLogger) Decorator {
+func HttpLog(log *LevelLogger, level int32) Decorator {
 	return func(f APIHandler) APIHandler {
 		return func(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 			start := time.Now()
@@ -117,7 +117,7 @@ func HttpLog(log *LevelLogger) Decorator {
 			if e, ok := err.(HttpErr); ok {
 				status = e.Code
 			}
-			if status != 200 || (status == 200 && log.Level() >= LOG_INFO) {
+			if status != 200 || (status == 200 && log.Level() >= level) {
 				if log != nil && log.Logger != nil {
 					log.Logger.Output(2, fmt.Sprintf("%d %s %s (%s) %s",
 						status, req.Method, req.URL.RequestURI(), req.RemoteAddr, elapsed))
