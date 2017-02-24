@@ -123,8 +123,12 @@ func TestLeaderBcastBeat(t *testing.T) {
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
 	wmsgs := []pb.Message{
-		{From: 1, To: 2, Term: 1, Type: pb.MsgHeartbeat},
-		{From: 1, To: 3, Term: 1, Type: pb.MsgHeartbeat},
+		{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			To: 2, ToGroup: pb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2},
+			Term: 1, Type: pb.MsgHeartbeat},
+		{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			To: 3, ToGroup: pb.Group{NodeId: 3, GroupId: 1, RaftReplicaId: 3},
+			Term: 1, Type: pb.MsgHeartbeat},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
 		t.Errorf("msgs = %v, want %v", msgs, wmsgs)
@@ -175,8 +179,12 @@ func testNonleaderStartElection(t *testing.T, state StateType) {
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
 	wmsgs := []pb.Message{
-		{From: 1, To: 2, Term: 2, Type: pb.MsgVote},
-		{From: 1, To: 3, Term: 2, Type: pb.MsgVote},
+		{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			To: 2, ToGroup: pb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2},
+			Term: 2, Type: pb.MsgVote},
+		{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			To: 3, ToGroup: pb.Group{NodeId: 3, GroupId: 1, RaftReplicaId: 3},
+			Term: 2, Type: pb.MsgVote},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
 		t.Errorf("msgs = %v, want %v", msgs, wmsgs)
@@ -251,11 +259,15 @@ func TestFollowerVote(t *testing.T) {
 		r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		r.loadState(pb.HardState{Term: 1, Vote: tt.vote})
 
-		r.Step(pb.Message{From: tt.nvote, To: 1, Term: 1, Type: pb.MsgVote})
+		r.Step(pb.Message{From: tt.nvote, FromGroup: pb.Group{NodeId: tt.nvote, GroupId: 1, RaftReplicaId: tt.nvote},
+			To: 1, ToGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			Term: 1, Type: pb.MsgVote})
 
 		msgs := r.readMessages()
 		wmsgs := []pb.Message{
-			{From: 1, To: tt.nvote, Term: 1, Type: pb.MsgVoteResp, Reject: tt.wreject},
+			{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+				To: tt.nvote, ToGroup: pb.Group{NodeId: tt.nvote, GroupId: 1, RaftReplicaId: tt.nvote},
+				Term: 1, Type: pb.MsgVoteResp, Reject: tt.wreject},
 		}
 		if !reflect.DeepEqual(msgs, wmsgs) {
 			t.Errorf("#%d: msgs = %v, want %v", i, msgs, wmsgs)
@@ -415,8 +427,10 @@ func TestLeaderStartReplication(t *testing.T) {
 	sort.Sort(messageSlice(msgs))
 	wents := []pb.Entry{{Index: li + 1, Term: 1, Data: []byte("some data")}}
 	wmsgs := []pb.Message{
-		{From: 1, To: 2, Term: 1, Type: pb.MsgApp, Index: li, LogTerm: 1, Entries: wents, Commit: li},
-		{From: 1, To: 3, Term: 1, Type: pb.MsgApp, Index: li, LogTerm: 1, Entries: wents, Commit: li},
+		{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			To: 2, ToGroup: pb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2}, Term: 1, Type: pb.MsgApp, Index: li, LogTerm: 1, Entries: wents, Commit: li},
+		{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			To: 3, ToGroup: pb.Group{NodeId: 3, GroupId: 1, RaftReplicaId: 3}, Term: 1, Type: pb.MsgApp, Index: li, LogTerm: 1, Entries: wents, Commit: li},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
 		t.Errorf("msgs = %+v, want %+v", msgs, wmsgs)
@@ -625,11 +639,15 @@ func TestFollowerCheckMsgApp(t *testing.T) {
 		r.loadState(pb.HardState{Commit: 1})
 		r.becomeFollower(2, 2)
 
-		r.Step(pb.Message{From: 2, To: 1, Type: pb.MsgApp, Term: 2, LogTerm: tt.term, Index: tt.index})
+		r.Step(pb.Message{From: 2, FromGroup: pb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2},
+			To: 1, ToGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+			Type: pb.MsgApp, Term: 2, LogTerm: tt.term, Index: tt.index})
 
 		msgs := r.readMessages()
 		wmsgs := []pb.Message{
-			{From: 1, To: 2, Type: pb.MsgAppResp, Term: 2, Index: tt.windex, Reject: tt.wreject, RejectHint: tt.wrejectHint},
+			{From: 1, FromGroup: pb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+				To: 2, ToGroup: pb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2},
+				Type: pb.MsgAppResp, Term: 2, Index: tt.windex, Reject: tt.wreject, RejectHint: tt.wrejectHint},
 		}
 		if !reflect.DeepEqual(msgs, wmsgs) {
 			t.Errorf("#%d: msgs = %+v, want %+v", i, msgs, wmsgs)

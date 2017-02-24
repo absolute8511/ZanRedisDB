@@ -205,15 +205,19 @@ func TestNodeReadIndexToOldLeader(t *testing.T) {
 	var testEntries = []raftpb.Entry{{Data: []byte("testdata")}}
 
 	// send readindex request to r2(follower)
-	r2.Step(raftpb.Message{From: 2, To: 2, Type: raftpb.MsgReadIndex, Entries: testEntries})
+	r2.Step(raftpb.Message{From: 2, FromGroup: raftpb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2},
+		To: 2, ToGroup: raftpb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2},
+		Type: raftpb.MsgReadIndex, Entries: testEntries})
 
 	// verify r2(follower) forwards this message to r1(leader) with term not set
-	if len(r2.msgs) != 1 {
-		t.Fatalf("len(r2.msgs) expected 1, got %d", len(r2.msgs))
+	r2Msgs := r2.readMessages()
+	if len(r2Msgs) != 1 {
+		t.Fatalf("len(r2.msgs) expected 1, got %d", len(r2Msgs))
 	}
-	readIndxMsg1 := raftpb.Message{From: 2, To: 1, Type: raftpb.MsgReadIndex, Entries: testEntries}
-	if !reflect.DeepEqual(r2.msgs[0], readIndxMsg1) {
-		t.Fatalf("r2.msgs[0] expected %+v, got %+v", readIndxMsg1, r2.msgs[0])
+	readIndxMsg1 := raftpb.Message{From: 2, FromGroup: raftpb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2},
+		To: 1, ToGroup: raftpb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1}, Type: raftpb.MsgReadIndex, Entries: testEntries}
+	if !reflect.DeepEqual(r2Msgs[0], readIndxMsg1) {
+		t.Fatalf("r2.msgs[0] expected %+v, got %+v", readIndxMsg1, r2Msgs[0])
 	}
 
 	// send readindex request to r3(follower)
@@ -223,7 +227,8 @@ func TestNodeReadIndexToOldLeader(t *testing.T) {
 	if len(r3.msgs) != 1 {
 		t.Fatalf("len(r3.msgs) expected 1, got %d", len(r3.msgs))
 	}
-	readIndxMsg2 := raftpb.Message{From: 3, To: 1, Type: raftpb.MsgReadIndex, Entries: testEntries}
+	readIndxMsg2 := raftpb.Message{From: 3, FromGroup: raftpb.Group{NodeId: 3, GroupId: 1, RaftReplicaId: 3},
+		To: 1, ToGroup: raftpb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1}, Type: raftpb.MsgReadIndex, Entries: testEntries}
 	if !reflect.DeepEqual(r3.msgs[0], readIndxMsg2) {
 		t.Fatalf("r3.msgs[0] expected %+v, got %+v", readIndxMsg2, r3.msgs[0])
 	}
@@ -239,7 +244,8 @@ func TestNodeReadIndexToOldLeader(t *testing.T) {
 	if len(r1.msgs) != 2 {
 		t.Fatalf("len(r1.msgs) expected 1, got %d", len(r1.msgs))
 	}
-	readIndxMsg3 := raftpb.Message{From: 1, To: 3, Type: raftpb.MsgReadIndex, Entries: testEntries}
+	readIndxMsg3 := raftpb.Message{From: 1, FromGroup: raftpb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1},
+		To: 3, ToGroup: raftpb.Group{NodeId: 3, GroupId: 1, RaftReplicaId: 3}, Type: raftpb.MsgReadIndex, Entries: testEntries}
 	if !reflect.DeepEqual(r1.msgs[0], readIndxMsg3) {
 		t.Fatalf("r1.msgs[0] expected %+v, got %+v", readIndxMsg3, r1.msgs[0])
 	}
@@ -272,7 +278,7 @@ func TestNodeProposeConfig(t *testing.T) {
 		}
 		n.Advance()
 	}
-	cc := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, NodeID: 1}
+	cc := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, ReplicaID: 1}
 	ccdata, err := cc.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -331,7 +337,7 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 		}
 	}()
 
-	cc1 := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, NodeID: 1}
+	cc1 := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, ReplicaID: 1}
 	ccdata1, _ := cc1.Marshal()
 	n.ProposeConfChange(context.TODO(), cc1)
 	<-applyConfChan
@@ -341,7 +347,7 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 	<-applyConfChan
 
 	// the new node join should be ok
-	cc2 := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, NodeID: 2}
+	cc2 := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, ReplicaID: 2}
 	ccdata2, _ := cc2.Marshal()
 	n.ProposeConfChange(context.TODO(), cc2)
 	<-applyConfChan
@@ -472,8 +478,13 @@ func TestReadyContainUpdates(t *testing.T) {
 func TestNodeStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	grp := raftpb.Group{
+		NodeId:        1,
+		RaftReplicaId: 1,
+		GroupId:       1,
+	}
 
-	cc := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, NodeID: 1}
+	cc := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, ReplicaID: 1, NodeGroup: grp}
 	ccdata, err := cc.Marshal()
 	if err != nil {
 		t.Fatalf("unexpected marshal error: %v", err)
@@ -502,8 +513,9 @@ func TestNodeStart(t *testing.T) {
 		Storage:         storage,
 		MaxSizePerMsg:   noLimit,
 		MaxInflightMsgs: 256,
+		Group:           grp,
 	}
-	n := StartNode(c, []Peer{{ID: 1}})
+	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}})
 	defer n.Stop()
 	g := <-n.Ready()
 	if !reflect.DeepEqual(g, wants[0]) {
@@ -549,6 +561,12 @@ func TestNodeRestart(t *testing.T) {
 	storage := NewMemoryStorage()
 	storage.SetHardState(st)
 	storage.Append(entries)
+	grp := raftpb.Group{
+		NodeId:        1,
+		RaftReplicaId: 1,
+		GroupId:       1,
+	}
+
 	c := &Config{
 		ID:              1,
 		ElectionTick:    10,
@@ -556,6 +574,7 @@ func TestNodeRestart(t *testing.T) {
 		Storage:         storage,
 		MaxSizePerMsg:   noLimit,
 		MaxInflightMsgs: 256,
+		Group:           grp,
 	}
 	n := RestartNode(c)
 	defer n.Stop()
@@ -572,9 +591,19 @@ func TestNodeRestart(t *testing.T) {
 }
 
 func TestNodeRestartFromSnapshot(t *testing.T) {
+	peerGrps := make([]*raftpb.Group, 0)
+	for _, pid := range []uint64{1, 2} {
+		grp := raftpb.Group{
+			NodeId:        pid,
+			RaftReplicaId: pid,
+			GroupId:       1,
+		}
+		peerGrps = append(peerGrps, &grp)
+	}
+
 	snap := raftpb.Snapshot{
 		Metadata: raftpb.SnapshotMetadata{
-			ConfState: raftpb.ConfState{Nodes: []uint64{1, 2}},
+			ConfState: raftpb.ConfState{Nodes: []uint64{1, 2}, Groups: peerGrps},
 			Index:     2,
 			Term:      1,
 		},
@@ -594,6 +623,12 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 	s.SetHardState(st)
 	s.ApplySnapshot(snap)
 	s.Append(entries)
+	grp := raftpb.Group{
+		NodeId:        1,
+		RaftReplicaId: 1,
+		GroupId:       1,
+	}
+
 	c := &Config{
 		ID:              1,
 		ElectionTick:    10,
@@ -601,6 +636,7 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 		Storage:         s,
 		MaxSizePerMsg:   noLimit,
 		MaxInflightMsgs: 256,
+		Group:           grp,
 	}
 	n := RestartNode(c)
 	defer n.Stop()
@@ -622,6 +658,12 @@ func TestNodeAdvance(t *testing.T) {
 	defer cancel()
 
 	storage := NewMemoryStorage()
+	grp := raftpb.Group{
+		NodeId:        1,
+		RaftReplicaId: 1,
+		GroupId:       1,
+	}
+
 	c := &Config{
 		ID:              1,
 		ElectionTick:    10,
@@ -629,8 +671,9 @@ func TestNodeAdvance(t *testing.T) {
 		Storage:         storage,
 		MaxSizePerMsg:   noLimit,
 		MaxInflightMsgs: 256,
+		Group:           grp,
 	}
-	n := StartNode(c, []Peer{{ID: 1}})
+	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}})
 	defer n.Stop()
 	rd := <-n.Ready()
 	storage.Append(rd.Entries)

@@ -115,7 +115,7 @@ type Config struct {
 	// should only be set when starting a new raft cluster. Restarting raft from
 	// previous configuration will panic if peers is set. peer is private and only
 	// used for testing right now.
-	peers []uint64
+	peers []pb.Group
 
 	// ElectionTick is the number of Node.Tick invocations that must pass between
 	// elections. That is, if a follower does not receive any message from the
@@ -296,7 +296,15 @@ func newRaft(c *Config) *raft {
 			// updated to specify their nodes through a snapshot.
 			panic("cannot specify both newRaft(peers) and ConfState.Nodes)")
 		}
-		peers = cs.Nodes
+		if len(cs.Groups) != len(cs.Nodes) {
+			panic("initial peers from storage failed: invalid initial state")
+		}
+		for _, g := range cs.Groups {
+			if g.GroupId == 0 {
+				g.GroupId = c.Group.GroupId
+			}
+			peers = append(peers, *g)
+		}
 	}
 	r := &raft{
 		id:               c.ID,
@@ -313,19 +321,9 @@ func newRaft(c *Config) *raft {
 		preVote:          c.PreVote,
 		readOnly:         newReadOnly(c.ReadOnlyOption),
 	}
-	groups := make(map[uint64]pb.Group)
-	for _, g := range cs.Groups {
-		groups[g.RaftReplicaId] = *g
-	}
 	for _, p := range peers {
-		g := r.group
-		g.NodeId = 0
-		g.RaftReplicaId = p
-		if gp, ok := groups[p]; ok {
-			g.NodeId = gp.NodeId
-		}
-		r.prs[p] = &Progress{Next: 1, ins: newInflights(r.maxInflight), group: g}
-		r.logger.Infof("newRaft %x [add peer: %v ]", r.id, r.prs[p])
+		r.prs[p.RaftReplicaId] = &Progress{Next: 1, ins: newInflights(r.maxInflight), group: p}
+		r.logger.Debugf("newRaft %x [add peer: %v ]", r.id, r.prs[p.RaftReplicaId])
 	}
 	if !isHardStateEqual(hs, emptyState) {
 		r.loadState(hs)
@@ -381,6 +379,12 @@ func (r *raft) groups() []*pb.Group {
 func (r *raft) send(m pb.Message) {
 	m.From = r.id
 	m.FromGroup = r.group
+	if m.ToGroup.NodeId == 0 {
+		pr, ok := r.prs[m.To]
+		if ok {
+			m.ToGroup = pr.group
+		}
+	}
 	if m.Type == pb.MsgVote || m.Type == pb.MsgPreVote {
 		if m.Term == 0 {
 			// PreVote RPCs are sent at a term other than our actual term, so the code
@@ -539,12 +543,11 @@ func (r *raft) reset(term uint64) {
 	r.abortLeaderTransfer()
 
 	r.votes = make(map[uint64]bool)
-	for id := range r.prs {
-		r.prs[id] = &Progress{Next: r.raftLog.lastIndex() + 1, ins: newInflights(r.maxInflight), group: r.prs[id].group}
+	for id, pr := range r.prs {
+		r.prs[id] = &Progress{Next: r.raftLog.lastIndex() + 1, ins: newInflights(r.maxInflight), group: pr.group}
 		if id == r.id {
 			r.prs[id].Match = r.raftLog.lastIndex()
 		}
-		r.logger.Infof(" %x [peer progress: %v ]", r.id, r.prs[id])
 	}
 	r.pendingConf = false
 	r.readOnly = newReadOnly(r.readOnly.option)
@@ -718,6 +721,9 @@ func (r *raft) poll(id uint64, t pb.MessageType, v bool) (granted int) {
 }
 
 func (r *raft) Step(m pb.Message) error {
+	if m.FromGroup.NodeId == 0 {
+		m.FromGroup = r.group
+	}
 	// Handle the message term, which may result in our stepping down to a follower.
 	switch {
 	case m.Term == 0:

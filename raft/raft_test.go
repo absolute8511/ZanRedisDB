@@ -44,6 +44,16 @@ type stateMachine interface {
 func (r *raft) readMessages() []pb.Message {
 	msgs := r.msgs
 	r.msgs = make([]pb.Message, 0)
+	for i, m := range msgs {
+		if m.ToGroup.NodeId == 0 {
+			pr, ok := r.prs[m.To]
+			if !ok {
+				continue
+			}
+			m.ToGroup = pr.group
+			msgs[i] = m
+		}
+	}
 
 	return msgs
 }
@@ -1051,6 +1061,10 @@ func TestCommit(t *testing.T) {
 		{[]uint64{2, 1, 2, 2}, []pb.Entry{{Index: 1, Term: 1}, {Index: 2, Term: 1}}, 2, 0},
 	}
 
+	grp := pb.Group{
+		NodeId:        1,
+		RaftReplicaId: 1,
+	}
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
 		storage.Append(tt.logs)
@@ -1058,7 +1072,7 @@ func TestCommit(t *testing.T) {
 
 		sm := newTestRaft(1, []uint64{1}, 5, 1, storage)
 		for j := 0; j < len(tt.matches); j++ {
-			sm.setProgress(uint64(j)+1, tt.matches[j], tt.matches[j]+1)
+			sm.setProgress(uint64(j)+1, tt.matches[j], tt.matches[j]+1, grp)
 		}
 		sm.maybeCommit()
 		if g := sm.raftLog.committed; g != tt.w {
@@ -1917,11 +1931,21 @@ func TestLeaderAppResp(t *testing.T) {
 func TestBcastBeat(t *testing.T) {
 	offset := uint64(1000)
 	// make a state machine with log.offset = 1000
+	peerGrps := make([]*pb.Group, 0)
+	for _, pid := range []uint64{1, 2, 3} {
+		grp := pb.Group{
+			NodeId:        pid,
+			RaftReplicaId: pid,
+			GroupId:       1,
+		}
+		peerGrps = append(peerGrps, &grp)
+	}
+
 	s := pb.Snapshot{
 		Metadata: pb.SnapshotMetadata{
 			Index:     offset,
 			Term:      1,
-			ConfState: pb.ConfState{Nodes: []uint64{1, 2, 3}},
+			ConfState: pb.ConfState{Nodes: []uint64{1, 2, 3}, Groups: peerGrps},
 		},
 	}
 	storage := NewMemoryStorage()
@@ -2430,7 +2454,12 @@ func TestRecoverDoublePendingConfig(t *testing.T) {
 func TestAddNode(t *testing.T) {
 	r := newTestRaft(1, []uint64{1}, 10, 1, NewMemoryStorage())
 	r.pendingConf = true
-	r.addNode(2)
+	grp := pb.Group{
+		NodeId:        2,
+		GroupId:       1,
+		RaftReplicaId: 2,
+	}
+	r.addNode(2, grp)
 	if r.pendingConf {
 		t.Errorf("pendingConf = %v, want false", r.pendingConf)
 	}
@@ -2546,8 +2575,8 @@ func TestCommitAfterRemoveNode(t *testing.T) {
 
 	// Begin to remove the second node.
 	cc := pb.ConfChange{
-		Type:   pb.ConfChangeRemoveNode,
-		NodeID: 2,
+		Type:      pb.ConfChangeRemoveNode,
+		ReplicaID: 2,
 	}
 	ccData, err := cc.Marshal()
 	if err != nil {
@@ -2984,6 +3013,7 @@ func newNetwork(peers ...stateMachine) *network {
 func newNetworkWithConfig(configFunc func(*Config), peers ...stateMachine) *network {
 	size := len(peers)
 	peerAddrs := idsBySize(size)
+	peerGroups := grpsByIds(peerAddrs)
 
 	npeers := make(map[uint64]stateMachine, size)
 	nstorage := make(map[uint64]*MemoryStorage, size)
@@ -3003,7 +3033,7 @@ func newNetworkWithConfig(configFunc func(*Config), peers ...stateMachine) *netw
 			v.id = id
 			v.prs = make(map[uint64]*Progress)
 			for i := 0; i < size; i++ {
-				v.prs[peerAddrs[i]] = &Progress{}
+				v.prs[peerAddrs[i]] = &Progress{group: peerGroups[peerAddrs[i]]}
 			}
 			v.reset(v.Term)
 			npeers[id] = v
@@ -3029,6 +3059,16 @@ func (nw *network) send(msgs ...pb.Message) {
 	for len(msgs) > 0 {
 		m := msgs[0]
 		p := nw.peers[m.To]
+		if m.ToGroup.NodeId == 0 {
+			m.ToGroup.NodeId = m.To
+			m.ToGroup.GroupId = 1
+			m.ToGroup.RaftReplicaId = m.To
+		}
+		if m.FromGroup.NodeId == 0 {
+			m.FromGroup.NodeId = m.From
+			m.FromGroup.RaftReplicaId = m.From
+			m.FromGroup.GroupId = 1
+		}
 		p.Step(m)
 		msgs = append(msgs[1:], nw.filter(p.readMessages())...)
 	}
@@ -3101,6 +3141,13 @@ func idsBySize(size int) []uint64 {
 	}
 	return ids
 }
+func grpsByIds(ids []uint64) map[uint64]pb.Group {
+	grps := make(map[uint64]pb.Group, len(ids))
+	for i := 0; i < len(ids); i++ {
+		grps[ids[i]] = pb.Group{NodeId: ids[i], GroupId: 1, RaftReplicaId: ids[i]}
+	}
+	return grps
+}
 
 // setRandomizedElectionTimeout set up the value by caller instead of choosing
 // by system, in some test scenario we need to fill in some expected value to
@@ -3110,14 +3157,29 @@ func setRandomizedElectionTimeout(r *raft, v int) {
 }
 
 func newTestConfig(id uint64, peers []uint64, election, heartbeat int, storage Storage) *Config {
+	grp := pb.Group{
+		NodeId:        id,
+		RaftReplicaId: id,
+		GroupId:       1,
+	}
+	peerGrps := make([]pb.Group, 0)
+	for _, pid := range peers {
+		grp := pb.Group{
+			NodeId:        pid,
+			RaftReplicaId: pid,
+			GroupId:       1,
+		}
+		peerGrps = append(peerGrps, grp)
+	}
 	return &Config{
 		ID:              id,
-		peers:           peers,
+		peers:           peerGrps,
 		ElectionTick:    election,
 		HeartbeatTick:   heartbeat,
 		Storage:         storage,
 		MaxSizePerMsg:   noLimit,
 		MaxInflightMsgs: 256,
+		Group:           grp,
 	}
 }
 
