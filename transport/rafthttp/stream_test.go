@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/version"
@@ -37,7 +37,7 @@ import (
 // to streamWriter. After that, streamWriter can use it to send messages
 // continuously, and closes it when stopped.
 func TestStreamWriterAttachOutgoingConn(t *testing.T) {
-	sw := startStreamWriter(types.ID(1), newPeerStatus(types.ID(1)), &stats.FollowerStats{}, &fakeRaft{})
+	sw := startStreamWriter(types.ID(1), newPeerStatus(types.ID(1)), &stats.PeerStats{}, &fakeRaft{})
 	// the expected initial state of streamWriter is not working
 	if _, ok := sw.writec(); ok {
 		t.Errorf("initial working status = %v, want false", ok)
@@ -89,7 +89,7 @@ func TestStreamWriterAttachOutgoingConn(t *testing.T) {
 // TestStreamWriterAttachBadOutgoingConn tests that streamWriter with bad
 // outgoingConn will close the outgoingConn and fall back to non-working status.
 func TestStreamWriterAttachBadOutgoingConn(t *testing.T) {
-	sw := startStreamWriter(types.ID(1), newPeerStatus(types.ID(1)), &stats.FollowerStats{}, &fakeRaft{})
+	sw := startStreamWriter(types.ID(1), newPeerStatus(types.ID(1)), &stats.PeerStats{}, &fakeRaft{})
 	defer sw.stop()
 	wfc := newFakeWriteFlushCloser(errors.New("blah"))
 	sw.attach(&outgoingConn{t: streamTypeMessage, Writer: wfc, Flusher: wfc, Closer: wfc})
@@ -111,7 +111,7 @@ func TestStreamReaderDialRequest(t *testing.T) {
 		tr := &roundTripperRecorder{rec: &testutil.RecorderBuffered{}}
 		sr := &streamReader{
 			peerID: types.ID(2),
-			tr:     &Transport{streamRt: tr, ClusterID: types.ID(1), ID: types.ID(1)},
+			tr:     &Transport{streamRt: tr, ClusterID: "1", ID: types.ID(1)},
 			picker: mustNewURLPicker(t, []string{"http://localhost:2380"}),
 		}
 		sr.dial(tt)
@@ -164,7 +164,7 @@ func TestStreamReaderDialResult(t *testing.T) {
 		}
 		sr := &streamReader{
 			peerID: types.ID(2),
-			tr:     &Transport{streamRt: tr, ClusterID: types.ID(1)},
+			tr:     &Transport{streamRt: tr, ClusterID: "1"},
 			picker: mustNewURLPicker(t, []string{"http://localhost:2380"}),
 			errorc: make(chan error, 1),
 		}
@@ -187,7 +187,7 @@ func TestStreamReaderStopOnDial(t *testing.T) {
 	tr := &respWaitRoundTripper{rrt: &respRoundTripper{code: http.StatusOK, header: h}}
 	sr := &streamReader{
 		peerID: types.ID(2),
-		tr:     &Transport{streamRt: tr, ClusterID: types.ID(1)},
+		tr:     &Transport{streamRt: tr, ClusterID: "1"},
 		picker: mustNewURLPicker(t, []string{"http://localhost:2380"}),
 		errorc: make(chan error, 1),
 		typ:    streamTypeMessage,
@@ -244,7 +244,7 @@ func TestStreamReaderDialDetectUnsupport(t *testing.T) {
 		}
 		sr := &streamReader{
 			peerID: types.ID(2),
-			tr:     &Transport{streamRt: tr, ClusterID: types.ID(1)},
+			tr:     &Transport{streamRt: tr, ClusterID: "1"},
 			picker: mustNewURLPicker(t, []string{"http://localhost:2380"}),
 		}
 
@@ -296,12 +296,12 @@ func TestStream(t *testing.T) {
 		srv := httptest.NewServer(h)
 		defer srv.Close()
 
-		sw := startStreamWriter(types.ID(1), newPeerStatus(types.ID(1)), &stats.FollowerStats{}, &fakeRaft{})
+		sw := startStreamWriter(types.ID(1), newPeerStatus(types.ID(1)), &stats.PeerStats{}, &fakeRaft{})
 		defer sw.stop()
 		h.sw = sw
 
 		picker := mustNewURLPicker(t, []string{srv.URL})
-		tr := &Transport{streamRt: &http.Transport{}, ClusterID: types.ID(1)}
+		tr := &Transport{streamRt: &http.Transport{}, ClusterID: "1"}
 
 		sr := &streamReader{
 			peerID: types.ID(2),

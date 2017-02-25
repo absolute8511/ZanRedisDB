@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/xiang90/probing"
@@ -30,29 +30,32 @@ import (
 // TestTransportSend tests that transport can send messages using correct
 // underlying peer, and drop local or unknown-target messages.
 func TestTransportSend(t *testing.T) {
-	ss := &stats.ServerStats{}
+	ss := &stats.TransportStats{}
 	ss.Initialize()
 	peer1 := newFakePeer()
 	peer2 := newFakePeer()
 	tr := &Transport{
-		ServerStats: ss,
-		peers:       map[types.ID]Peer{types.ID(1): peer1, types.ID(2): peer2},
+		TrStats: ss,
+		peers:   map[types.ID]Peer{types.ID(1): peer1, types.ID(2): peer2},
 	}
+	grp1 := raftpb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1}
+	grp2 := raftpb.Group{NodeId: 2, GroupId: 1, RaftReplicaId: 2}
+	grp3 := raftpb.Group{NodeId: 3, GroupId: 1, RaftReplicaId: 3}
 	wmsgsIgnored := []raftpb.Message{
 		// bad local message
 		{Type: raftpb.MsgBeat},
 		// bad remote message
-		{Type: raftpb.MsgProp, To: 3},
+		{Type: raftpb.MsgProp, To: 3, ToGroup: grp3},
 	}
 	wmsgsTo1 := []raftpb.Message{
 		// good message
-		{Type: raftpb.MsgProp, To: 1},
-		{Type: raftpb.MsgApp, To: 1},
+		{Type: raftpb.MsgProp, To: 1, ToGroup: grp1},
+		{Type: raftpb.MsgApp, To: 1, ToGroup: grp1},
 	}
 	wmsgsTo2 := []raftpb.Message{
 		// good message
-		{Type: raftpb.MsgProp, To: 2},
-		{Type: raftpb.MsgApp, To: 2},
+		{Type: raftpb.MsgProp, To: 2, ToGroup: grp2},
+		{Type: raftpb.MsgApp, To: 2, ToGroup: grp2},
 	}
 	tr.Send(wmsgsIgnored)
 	tr.Send(wmsgsTo1)
@@ -67,21 +70,22 @@ func TestTransportSend(t *testing.T) {
 }
 
 func TestTransportCutMend(t *testing.T) {
-	ss := &stats.ServerStats{}
+	ss := &stats.TransportStats{}
 	ss.Initialize()
 	peer1 := newFakePeer()
 	peer2 := newFakePeer()
 	tr := &Transport{
-		ServerStats: ss,
-		peers:       map[types.ID]Peer{types.ID(1): peer1, types.ID(2): peer2},
+		TrStats: ss,
+		peers:   map[types.ID]Peer{types.ID(1): peer1, types.ID(2): peer2},
 	}
 
+	grp1 := raftpb.Group{NodeId: 1, GroupId: 1, RaftReplicaId: 1}
 	tr.CutPeer(types.ID(1))
 
 	wmsgsTo := []raftpb.Message{
 		// good message
-		{Type: raftpb.MsgProp, To: 1},
-		{Type: raftpb.MsgApp, To: 1},
+		{Type: raftpb.MsgProp, To: 1, ToGroup: grp1},
+		{Type: raftpb.MsgApp, To: 1, ToGroup: grp1},
 	}
 
 	tr.Send(wmsgsTo)
@@ -98,16 +102,16 @@ func TestTransportCutMend(t *testing.T) {
 }
 
 func TestTransportAdd(t *testing.T) {
-	ls := stats.NewLeaderStats("")
+	ls := stats.NewPeersStats()
 	tr := &Transport{
-		LeaderStats: ls,
-		streamRt:    &roundTripperRecorder{},
-		peers:       make(map[types.ID]Peer),
-		prober:      probing.NewProber(nil),
+		PeersStats: ls,
+		streamRt:   &roundTripperRecorder{},
+		peers:      make(map[types.ID]Peer),
+		prober:     probing.NewProber(nil),
 	}
-	tr.AddPeer(1, []string{"http://localhost:2380"})
+	tr.UpdatePeer(1, []string{"http://localhost:2380"})
 
-	if _, ok := ls.Followers["1"]; !ok {
+	if _, ok := ls.Peers["1"]; !ok {
 		t.Errorf("FollowerStats[1] is nil, want exists")
 	}
 	s, ok := tr.peers[types.ID(1)]
@@ -117,7 +121,7 @@ func TestTransportAdd(t *testing.T) {
 	}
 
 	// duplicate AddPeer is ignored
-	tr.AddPeer(1, []string{"http://localhost:2380"})
+	tr.UpdatePeer(1, []string{"http://localhost:2380"})
 	ns := tr.peers[types.ID(1)]
 	if s != ns {
 		t.Errorf("sender = %v, want %v", ns, s)
@@ -128,12 +132,12 @@ func TestTransportAdd(t *testing.T) {
 
 func TestTransportRemove(t *testing.T) {
 	tr := &Transport{
-		LeaderStats: stats.NewLeaderStats(""),
-		streamRt:    &roundTripperRecorder{},
-		peers:       make(map[types.ID]Peer),
-		prober:      probing.NewProber(nil),
+		PeersStats: stats.NewPeersStats(),
+		streamRt:   &roundTripperRecorder{},
+		peers:      make(map[types.ID]Peer),
+		prober:     probing.NewProber(nil),
 	}
-	tr.AddPeer(1, []string{"http://localhost:2380"})
+	tr.UpdatePeer(1, []string{"http://localhost:2380"})
 	tr.RemovePeer(types.ID(1))
 	defer tr.Stop()
 
@@ -159,15 +163,15 @@ func TestTransportUpdate(t *testing.T) {
 func TestTransportErrorc(t *testing.T) {
 	errorc := make(chan error, 1)
 	tr := &Transport{
-		Raft:        &fakeRaft{},
-		LeaderStats: stats.NewLeaderStats(""),
-		ErrorC:      errorc,
-		streamRt:    newRespRoundTripper(http.StatusForbidden, nil),
-		pipelineRt:  newRespRoundTripper(http.StatusForbidden, nil),
-		peers:       make(map[types.ID]Peer),
-		prober:      probing.NewProber(nil),
+		Raft:       &fakeRaft{},
+		PeersStats: stats.NewPeersStats(),
+		ErrorC:     errorc,
+		streamRt:   newRespRoundTripper(http.StatusForbidden, nil),
+		pipelineRt: newRespRoundTripper(http.StatusForbidden, nil),
+		peers:      make(map[types.ID]Peer),
+		prober:     probing.NewProber(nil),
 	}
-	tr.AddPeer(1, []string{"http://localhost:2380"})
+	tr.UpdatePeer(1, []string{"http://localhost:2380"})
 	defer tr.Stop()
 
 	select {

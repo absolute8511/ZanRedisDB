@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/snap"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/snap"
 )
 
 type strReaderCloser struct{ *strings.Reader }
@@ -100,9 +100,9 @@ func testSnapshotSend(t *testing.T, sm *snap.Message) (bool, []os.FileInfo) {
 	defer os.RemoveAll(d)
 
 	r := &fakeRaft{}
-	tr := &Transport{pipelineRt: &http.Transport{}, ClusterID: types.ID(1), Raft: r}
+	tr := &Transport{pipelineRt: &http.Transport{}, ClusterID: "1", Raft: r}
 	ch := make(chan struct{}, 1)
-	h := &syncHandler{newSnapshotHandler(tr, r, snap.New(d), types.ID(1)), ch}
+	h := &syncHandler{newSnapshotHandler(tr, r, snap.New(d), "1"), ch}
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 

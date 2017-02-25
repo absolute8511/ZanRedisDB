@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/snap"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/snap"
 	"github.com/coreos/etcd/version"
 )
 
@@ -151,7 +151,7 @@ func TestServeRaftPrefix(t *testing.T) {
 		req.Header.Set("X-Etcd-Cluster-ID", tt.clusterID)
 		req.Header.Set("X-Server-Version", version.Version)
 		rw := httptest.NewRecorder()
-		h := newPipelineHandler(NewNopTransporter(), tt.p, types.ID(0))
+		h := newPipelineHandler(NewNopTransporter(), tt.p, "0")
 
 		// goroutine because the handler panics to disconnect on raft error
 		donec := make(chan struct{})
@@ -196,7 +196,7 @@ func TestServeRaftStreamPrefix(t *testing.T) {
 		peer := newFakePeer()
 		peerGetter := &fakePeerGetter{peers: map[types.ID]Peer{types.ID(1): peer}}
 		tr := &Transport{}
-		h := newStreamHandler(tr, peerGetter, &fakeRaft{}, types.ID(2), types.ID(1))
+		h := newStreamHandler(tr, peerGetter, &fakeRaft{}, types.ID(2), "1")
 
 		rw := httptest.NewRecorder()
 		go h.ServeHTTP(rw, req)
@@ -312,11 +312,11 @@ func TestServeRaftStreamPrefixBad(t *testing.T) {
 		tr := &Transport{}
 		peerGetter := &fakePeerGetter{peers: map[types.ID]Peer{types.ID(1): newFakePeer()}}
 		r := &fakeRaft{removedID: removedID}
-		h := newStreamHandler(tr, peerGetter, r, types.ID(1), types.ID(1))
+		h := newStreamHandler(tr, peerGetter, r, types.ID(1), "1")
 		h.ServeHTTP(rw, req)
 
 		if rw.Code != tt.wcode {
-			t.Errorf("#%d: code = %d, want %d", i, rw.Code, tt.wcode)
+			t.Errorf("#%d: %v code = %d, want %d", i, tt.path, rw.Code, tt.wcode)
 		}
 	}
 }

@@ -285,11 +285,11 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid from", http.StatusNotFound)
 		return
 	}
-	//if h.r.IsIDRemoved(uint64(from)) {
-	//	plog.Warningf("rejected the stream from peer %s since it was removed", from)
-	//	http.Error(w, "removed member", http.StatusGone)
-	//	return
-	//}
+	if h.r.IsPeerRemoved(uint64(from)) {
+		plog.Warningf("rejected the stream from peer %s since it was removed", from)
+		http.Error(w, "removed member", http.StatusGone)
+		return
+	}
 	p := h.peerGetter.Get(from)
 	if p == nil {
 		// This may happen in following cases:

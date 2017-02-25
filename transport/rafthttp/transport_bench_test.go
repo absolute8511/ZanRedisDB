@@ -22,7 +22,7 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/types"
 	"golang.org/x/net/context"
 )
@@ -30,11 +30,11 @@ import (
 func BenchmarkSendingMsgApp(b *testing.B) {
 	// member 1
 	tr := &Transport{
-		ID:          types.ID(1),
-		ClusterID:   types.ID(1),
-		Raft:        &fakeRaft{},
-		ServerStats: newServerStats(),
-		LeaderStats: stats.NewLeaderStats("1"),
+		ID:         types.ID(1),
+		ClusterID:  "1",
+		Raft:       &fakeRaft{},
+		TrStats:    newTrStats(),
+		PeersStats: stats.NewPeersStats(),
 	}
 	tr.Start()
 	srv := httptest.NewServer(tr.Handler())
@@ -43,19 +43,19 @@ func BenchmarkSendingMsgApp(b *testing.B) {
 	// member 2
 	r := &countRaft{}
 	tr2 := &Transport{
-		ID:          types.ID(2),
-		ClusterID:   types.ID(1),
-		Raft:        r,
-		ServerStats: newServerStats(),
-		LeaderStats: stats.NewLeaderStats("2"),
+		ID:         types.ID(2),
+		ClusterID:  "1",
+		Raft:       r,
+		TrStats:    newTrStats(),
+		PeersStats: stats.NewPeersStats(),
 	}
 	tr2.Start()
 	srv2 := httptest.NewServer(tr2.Handler())
 	defer srv2.Close()
 
-	tr.AddPeer(types.ID(2), []string{srv2.URL})
+	tr.UpdatePeer(types.ID(2), []string{srv2.URL})
 	defer tr.Stop()
-	tr2.AddPeer(types.ID(1), []string{srv.URL})
+	tr2.UpdatePeer(types.ID(1), []string{srv.URL})
 	defer tr2.Stop()
 	if !waitStreamWorking(tr.Get(types.ID(2)).(*peer)) {
 		b.Fatalf("stream from 1 to 2 is not in work as expected")
@@ -101,11 +101,11 @@ func (r *countRaft) Process(ctx context.Context, m raftpb.Message) error {
 	return nil
 }
 
-func (r *countRaft) IsIDRemoved(id uint64) bool { return false }
+func (r *countRaft) IsPeerRemoved(id uint64) bool { return false }
 
-func (r *countRaft) ReportUnreachable(id uint64) {}
+func (r *countRaft) ReportUnreachable(id uint64, g raftpb.Group) {}
 
-func (r *countRaft) ReportSnapshot(id uint64, status raft.SnapshotStatus) {}
+func (r *countRaft) ReportSnapshot(id uint64, g raftpb.Group, status raft.SnapshotStatus) {}
 
 func (r *countRaft) count() int {
 	r.mu.Lock()

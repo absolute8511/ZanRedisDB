@@ -16,6 +16,7 @@ package rafthttp
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/ioutil"
 	"sync"
@@ -24,7 +25,6 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/stats"
-	"github.com/coreos/etcd/pkg/httputil"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/types"
 )
@@ -118,7 +118,8 @@ func (p *pipeline) post(data []byte) (err error) {
 	req := createPostRequest(u, RaftPrefix, bytes.NewBuffer(data), "application/protobuf", p.tr.URLs, p.tr.ID, p.tr.ClusterID)
 
 	done := make(chan struct{}, 1)
-	cancel := httputil.RequestCanceler(req)
+	ctx, cancel := context.WithCancel(context.Background())
+	req = req.WithContext(ctx)
 	go func() {
 		select {
 		case <-done:

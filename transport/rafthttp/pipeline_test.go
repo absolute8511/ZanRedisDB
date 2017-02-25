@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/version"
@@ -42,8 +42,8 @@ func TestPipelineSend(t *testing.T) {
 	p.msgc <- raftpb.Message{Type: raftpb.MsgApp}
 	tr.rec.Wait(1)
 	p.stop()
-	if p.followerStats.Counts.Success != 1 {
-		t.Errorf("success = %d, want 1", p.followerStats.Counts.Success)
+	if p.peerStats.Counts.Success != 1 {
+		t.Errorf("success = %d, want 1", p.peerStats.Counts.Success)
 	}
 }
 
@@ -117,15 +117,15 @@ func TestPipelineSendFailed(t *testing.T) {
 
 	p.stop()
 
-	if p.followerStats.Counts.Fail != 1 {
-		t.Errorf("fail = %d, want 1", p.followerStats.Counts.Fail)
+	if p.peerStats.Counts.Fail != 1 {
+		t.Errorf("fail = %d, want 1", p.peerStats.Counts.Fail)
 	}
 }
 
 func TestPipelinePost(t *testing.T) {
 	tr := &roundTripperRecorder{rec: &testutil.RecorderBuffered{}}
 	picker := mustNewURLPicker(t, []string{"http://localhost:2380"})
-	tp := &Transport{ClusterID: types.ID(1), pipelineRt: tr}
+	tp := &Transport{ClusterID: "1", pipelineRt: tr}
 	p := startTestPipeline(tp, picker)
 	if err := p.post([]byte("some data")); err != nil {
 		t.Fatalf("unexpected post error: %v", err)
@@ -298,13 +298,13 @@ func (n *nopReadCloser) Close() error               { return nil }
 
 func startTestPipeline(tr *Transport, picker *urlPicker) *pipeline {
 	p := &pipeline{
-		peerID:        types.ID(1),
-		tr:            tr,
-		picker:        picker,
-		status:        newPeerStatus(types.ID(1)),
-		raft:          &fakeRaft{},
-		followerStats: &stats.FollowerStats{},
-		errorc:        make(chan error, 1),
+		peerID:    types.ID(1),
+		tr:        tr,
+		picker:    picker,
+		status:    newPeerStatus(types.ID(1)),
+		raft:      &fakeRaft{},
+		peerStats: &stats.PeerStats{},
+		errorc:    make(chan error, 1),
 	}
 	p.start()
 	return p

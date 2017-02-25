@@ -22,7 +22,7 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/etcdserver/stats"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/types"
 	"golang.org/x/net/context"
 )
@@ -30,11 +30,11 @@ import (
 func TestSendMessage(t *testing.T) {
 	// member 1
 	tr := &Transport{
-		ID:          types.ID(1),
-		ClusterID:   types.ID(1),
-		Raft:        &fakeRaft{},
-		ServerStats: newServerStats(),
-		LeaderStats: stats.NewLeaderStats("1"),
+		ID:         types.ID(1),
+		ClusterID:  "1",
+		Raft:       &fakeRaft{},
+		TrStats:    newTrStats(),
+		PeersStats: stats.NewPeersStats(),
 	}
 	tr.Start()
 	srv := httptest.NewServer(tr.Handler())
@@ -44,35 +44,37 @@ func TestSendMessage(t *testing.T) {
 	recvc := make(chan raftpb.Message, 1)
 	p := &fakeRaft{recvc: recvc}
 	tr2 := &Transport{
-		ID:          types.ID(2),
-		ClusterID:   types.ID(1),
-		Raft:        p,
-		ServerStats: newServerStats(),
-		LeaderStats: stats.NewLeaderStats("2"),
+		ID:         types.ID(2),
+		ClusterID:  "1",
+		Raft:       p,
+		TrStats:    newTrStats(),
+		PeersStats: stats.NewPeersStats(),
 	}
 	tr2.Start()
 	srv2 := httptest.NewServer(tr2.Handler())
 	defer srv2.Close()
 
-	tr.AddPeer(types.ID(2), []string{srv2.URL})
+	tr.UpdatePeer(types.ID(2), []string{srv2.URL})
 	defer tr.Stop()
-	tr2.AddPeer(types.ID(1), []string{srv.URL})
+	tr2.UpdatePeer(types.ID(1), []string{srv.URL})
 	defer tr2.Stop()
 	if !waitStreamWorking(tr.Get(types.ID(2)).(*peer)) {
 		t.Fatalf("stream from 1 to 2 is not in work as expected")
 	}
 
 	data := []byte("some data")
+	group1 := raftpb.Group{NodeId: 1, RaftReplicaId: 1, GroupId: 1}
+	group2 := raftpb.Group{NodeId: 2, RaftReplicaId: 2, GroupId: 1}
 	tests := []raftpb.Message{
 		// these messages are set to send to itself, which facilitates testing.
-		{Type: raftpb.MsgProp, From: 1, To: 2, Entries: []raftpb.Entry{{Data: data}}},
-		{Type: raftpb.MsgApp, From: 1, To: 2, Term: 1, Index: 3, LogTerm: 0, Entries: []raftpb.Entry{{Index: 4, Term: 1, Data: data}}, Commit: 3},
-		{Type: raftpb.MsgAppResp, From: 1, To: 2, Term: 1, Index: 3},
-		{Type: raftpb.MsgVote, From: 1, To: 2, Term: 1, Index: 3, LogTerm: 0},
-		{Type: raftpb.MsgVoteResp, From: 1, To: 2, Term: 1},
-		{Type: raftpb.MsgSnap, From: 1, To: 2, Term: 1, Snapshot: raftpb.Snapshot{Metadata: raftpb.SnapshotMetadata{Index: 1000, Term: 1}, Data: data}},
-		{Type: raftpb.MsgHeartbeat, From: 1, To: 2, Term: 1, Commit: 3},
-		{Type: raftpb.MsgHeartbeatResp, From: 1, To: 2, Term: 1},
+		{Type: raftpb.MsgProp, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Entries: []raftpb.Entry{{Data: data}}},
+		{Type: raftpb.MsgApp, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1, Index: 3, LogTerm: 0, Entries: []raftpb.Entry{{Index: 4, Term: 1, Data: data}}, Commit: 3},
+		{Type: raftpb.MsgAppResp, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1, Index: 3},
+		{Type: raftpb.MsgVote, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1, Index: 3, LogTerm: 0},
+		{Type: raftpb.MsgVoteResp, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1},
+		{Type: raftpb.MsgSnap, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1, Snapshot: raftpb.Snapshot{Metadata: raftpb.SnapshotMetadata{Index: 1000, Term: 1}, Data: data}},
+		{Type: raftpb.MsgHeartbeat, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1, Commit: 3},
+		{Type: raftpb.MsgHeartbeatResp, From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1},
 	}
 	for i, tt := range tests {
 		tr.Send([]raftpb.Message{tt})
@@ -88,11 +90,11 @@ func TestSendMessage(t *testing.T) {
 func TestSendMessageWhenStreamIsBroken(t *testing.T) {
 	// member 1
 	tr := &Transport{
-		ID:          types.ID(1),
-		ClusterID:   types.ID(1),
-		Raft:        &fakeRaft{},
-		ServerStats: newServerStats(),
-		LeaderStats: stats.NewLeaderStats("1"),
+		ID:         types.ID(1),
+		ClusterID:  "1",
+		Raft:       &fakeRaft{},
+		TrStats:    newTrStats(),
+		PeersStats: stats.NewPeersStats(),
 	}
 	tr.Start()
 	srv := httptest.NewServer(tr.Handler())
@@ -102,19 +104,19 @@ func TestSendMessageWhenStreamIsBroken(t *testing.T) {
 	recvc := make(chan raftpb.Message, 1)
 	p := &fakeRaft{recvc: recvc}
 	tr2 := &Transport{
-		ID:          types.ID(2),
-		ClusterID:   types.ID(1),
-		Raft:        p,
-		ServerStats: newServerStats(),
-		LeaderStats: stats.NewLeaderStats("2"),
+		ID:         types.ID(2),
+		ClusterID:  "1",
+		Raft:       p,
+		TrStats:    newTrStats(),
+		PeersStats: stats.NewPeersStats(),
 	}
 	tr2.Start()
 	srv2 := httptest.NewServer(tr2.Handler())
 	defer srv2.Close()
 
-	tr.AddPeer(types.ID(2), []string{srv2.URL})
+	tr.UpdatePeer(types.ID(2), []string{srv2.URL})
 	defer tr.Stop()
-	tr2.AddPeer(types.ID(1), []string{srv.URL})
+	tr2.UpdatePeer(types.ID(1), []string{srv.URL})
 	defer tr2.Stop()
 	if !waitStreamWorking(tr.Get(types.ID(2)).(*peer)) {
 		t.Fatalf("stream from 1 to 2 is not in work as expected")
@@ -123,13 +125,17 @@ func TestSendMessageWhenStreamIsBroken(t *testing.T) {
 	// break the stream
 	srv.CloseClientConnections()
 	srv2.CloseClientConnections()
+
+	group1 := raftpb.Group{NodeId: 1, RaftReplicaId: 1, GroupId: 1}
+	group2 := raftpb.Group{NodeId: 2, RaftReplicaId: 2, GroupId: 1}
 	var n int
 	for {
 		select {
 		// TODO: remove this resend logic when we add retry logic into the code
 		case <-time.After(time.Millisecond):
 			n++
-			tr.Send([]raftpb.Message{{Type: raftpb.MsgHeartbeat, From: 1, To: 2, Term: 1, Commit: 3}})
+			tr.Send([]raftpb.Message{{Type: raftpb.MsgHeartbeat,
+				From: 1, FromGroup: group1, To: 2, ToGroup: group2, Term: 1, Commit: 3}})
 		case <-recvc:
 			if n > 50 {
 				t.Errorf("disconnection time = %dms, want < 50ms", n)
@@ -139,8 +145,8 @@ func TestSendMessageWhenStreamIsBroken(t *testing.T) {
 	}
 }
 
-func newServerStats() *stats.ServerStats {
-	ss := &stats.ServerStats{}
+func newTrStats() *stats.TransportStats {
+	ss := &stats.TransportStats{}
 	ss.Initialize()
 	return ss
 }
@@ -173,8 +179,8 @@ func (p *fakeRaft) Process(ctx context.Context, m raftpb.Message) error {
 	return p.err
 }
 
-func (p *fakeRaft) IsIDRemoved(id uint64) bool { return id == p.removedID }
+func (p *fakeRaft) IsPeerRemoved(id uint64) bool { return id == p.removedID }
 
-func (p *fakeRaft) ReportUnreachable(id uint64) {}
+func (p *fakeRaft) ReportUnreachable(id uint64, g raftpb.Group) {}
 
-func (p *fakeRaft) ReportSnapshot(id uint64, status raft.SnapshotStatus) {}
+func (p *fakeRaft) ReportSnapshot(id uint64, g raftpb.Group, status raft.SnapshotStatus) {}

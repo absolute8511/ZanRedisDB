@@ -41,7 +41,7 @@ func SetLogLevel(level int) {
 
 type Raft interface {
 	Process(ctx context.Context, m raftpb.Message) error
-	//IsIDRemoved(id uint64, group raftpb.Group) bool
+	IsPeerRemoved(id uint64) bool
 	ReportUnreachable(id uint64, group raftpb.Group)
 	ReportSnapshot(id uint64, group raftpb.Group, status raft.SnapshotStatus)
 }

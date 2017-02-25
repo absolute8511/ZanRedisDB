@@ -716,7 +716,6 @@ func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
 	return rc.node.Step(ctx, m)
 }
 
-func (rc *raftNode) IsIDRemoved(id uint64, group raftpb.Group) bool { return false }
 func (rc *raftNode) ReportUnreachable(id uint64, group raftpb.Group) {
 	//rc.Infof("report node %v in group %v unreachable", id, group)
 	rc.node.ReportUnreachable(id, group)

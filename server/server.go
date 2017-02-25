@@ -258,7 +258,7 @@ func (self *Server) Process(ctx context.Context, m raftpb.Message) error {
 	return kv.Node.Process(ctx, m)
 }
 
-func (self *Server) IsIDRemoved(id uint64, group raftpb.Group) bool { return false }
+func (self *Server) IsPeerRemoved(peerID uint64) bool { return false }
 
 func (self *Server) ReportUnreachable(id uint64, group raftpb.Group) {
 	//sLog.Infof("report node %v in group %v unreachable", id, group)
