@@ -64,7 +64,7 @@ func (self *KVNode) plsetCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) localPlsetCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localPlsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) < 3 || (len(cmd.Args)-1)%2 != 0 {
 		return nil, errors.New("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 	}
@@ -73,6 +73,6 @@ func (self *KVNode) localPlsetCommand(cmd redcon.Command) (interface{}, error) {
 	for i := 1; i < len(cmd.Args); i += 2 {
 		kvpairs = append(kvpairs, common.KVRecord{Key: cmd.Args[i], Value: cmd.Args[i+1]})
 	}
-	err := self.store.MSet(kvpairs...)
+	err := self.store.MSet(ts, kvpairs...)
 	return nil, err
 }

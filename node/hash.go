@@ -104,12 +104,12 @@ func (self *KVNode) hclearCommand(conn redcon.Conn, cmd redcon.Command, v interf
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (self *KVNode) localHSetCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	v, err := self.store.HSet(cmd.Args[1], cmd.Args[2], cmd.Args[3])
 	return v, err
 }
 
-func (self *KVNode) localHMsetCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHMsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	args := cmd.Args[2:]
 	if len(args)%2 != 0 {
 		return nil, common.ErrInvalidArgs
@@ -122,13 +122,13 @@ func (self *KVNode) localHMsetCommand(cmd redcon.Command) (interface{}, error) {
 	return nil, err
 }
 
-func (self *KVNode) localHIncrbyCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHIncrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	v, _ := strconv.Atoi(string(cmd.Args[3]))
 	ret, err := self.store.HIncrBy(cmd.Args[1], cmd.Args[2], int64(v))
 	return ret, err
 }
 
-func (self *KVNode) localHDelCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	n, err := self.store.HDel(cmd.Args[1], cmd.Args[2:]...)
 	if err != nil {
 		// leader write need response
@@ -138,6 +138,6 @@ func (self *KVNode) localHDelCommand(cmd redcon.Command) (interface{}, error) {
 	}
 }
 
-func (self *KVNode) localHclearCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localHclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.HClear(cmd.Args[1])
 }

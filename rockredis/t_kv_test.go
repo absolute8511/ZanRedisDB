@@ -26,13 +26,13 @@ func TestDBKV(t *testing.T) {
 
 	key1 := []byte("test:testdb_kv_a")
 
-	if err := db.KVSet(key1, []byte("hello world 1")); err != nil {
+	if err := db.KVSet(0, key1, []byte("hello world 1")); err != nil {
 		t.Fatal(err)
 	}
 
 	key2 := []byte("test:testdb_kv_b")
 
-	if err := db.KVSet(key2, []byte("hello world 2")); err != nil {
+	if err := db.KVSet(0, key2, []byte("hello world 2")); err != nil {
 		t.Fatal(err)
 	}
 	v1, _ := db.KVGet(key1)
@@ -56,22 +56,22 @@ func TestDBKV(t *testing.T) {
 	}
 
 	if !bytes.Equal(v1, ay[0]) {
-		t.Errorf("%v, %v", ay[0], errs[0])
+		t.Errorf("%v, %v", ay[0], v1)
 	}
 
 	if !bytes.Equal(v2, ay[1]) {
-		t.Errorf("%v, %v", ay[1], errs[1])
+		t.Errorf("%v, %v", ay[1], v2)
 	}
 
 	key3 := []byte("test:testdb_kv_range")
 
-	if n, err := db.Append(key3, []byte("Hello")); err != nil {
+	if n, err := db.Append(0, key3, []byte("Hello")); err != nil {
 		t.Fatal(err)
 	} else if n != 5 {
 		t.Fatal(n)
 	}
 
-	if n, err := db.Append(key3, []byte(" World")); err != nil {
+	if n, err := db.Append(0, key3, []byte(" World")); err != nil {
 		t.Fatal(err)
 	} else if n != 11 {
 		t.Fatal(n)
@@ -101,7 +101,7 @@ func TestDBKV(t *testing.T) {
 		t.Fatal(string(v))
 	}
 
-	if n, err := db.SetRange(key3, 6, []byte("Redis")); err != nil {
+	if n, err := db.SetRange(0, key3, 6, []byte("Redis")); err != nil {
 		t.Fatal(err)
 	} else if n != 11 {
 		t.Fatal(n)
@@ -114,7 +114,7 @@ func TestDBKV(t *testing.T) {
 	}
 
 	key4 := []byte("test:testdb_kv_range_none")
-	if n, err := db.SetRange(key4, 6, []byte("Redis")); err != nil {
+	if n, err := db.SetRange(0, key4, 6, []byte("Redis")); err != nil {
 		t.Fatal(err)
 	} else if n != 11 {
 		t.Fatal(n)
@@ -123,7 +123,7 @@ func TestDBKV(t *testing.T) {
 	if r == 0 {
 		t.Errorf("key should exist: %v", r)
 	}
-	r, err = db.SetNX(key3, []byte(""))
+	r, err = db.SetNX(0, key3, []byte(""))
 	if err != nil {
 		t.Errorf("setnx failed: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestDBKV(t *testing.T) {
 
 	key5 := []byte("test:test_kv_mset_key5")
 	key6 := []byte("test:test_kv_mset_key6")
-	err = db.MSet(common.KVRecord{key3, []byte("key3")},
+	err = db.MSet(0, common.KVRecord{key3, []byte("key3")},
 		common.KVRecord{key5, []byte("key5")}, common.KVRecord{key6, []byte("key6")})
 	if err != nil {
 		t.Errorf("fail mset: %v", err)
@@ -191,13 +191,13 @@ func TestDBKVWithNoTable(t *testing.T) {
 
 	key1 := []byte("testdb_kv_a")
 
-	if err := db.KVSet(key1, []byte("hello world 1")); err == nil {
+	if err := db.KVSet(0, key1, []byte("hello world 1")); err == nil {
 		t.Error("should error without table")
 	}
 
 	key2 := []byte("test:testdb_kv_b")
 
-	if err := db.KVSet(key2, []byte("hello world 2")); err != nil {
+	if err := db.KVSet(0, key2, []byte("hello world 2")); err != nil {
 		t.Fatal(err)
 	}
 	v1, _ := db.KVGet(key1)
@@ -216,13 +216,13 @@ func TestDBKVWithNoTable(t *testing.T) {
 
 	key3 := []byte("testdb_kv_range")
 
-	if _, err := db.Append(key3, []byte("Hello")); err == nil {
+	if _, err := db.Append(0, key3, []byte("Hello")); err == nil {
 		t.Error("should failed")
 	}
 
 	key5 := []byte("test_kv_mset_key5")
 	key6 := []byte("test:test_kv_mset_key6")
-	err = db.MSet(common.KVRecord{key3, []byte("key3")},
+	err = db.MSet(0, common.KVRecord{key3, []byte("key3")},
 		common.KVRecord{key5, []byte("key5")}, common.KVRecord{key6, []byte("key6")})
 	if err == nil {
 		t.Error("should failed")

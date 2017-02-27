@@ -63,6 +63,7 @@ func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
 
 // query the raft peers if the nid already in the raft group for the namespace
 func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid string) bool {
+	//TODO:
 	return true
 }
 

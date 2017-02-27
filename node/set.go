@@ -68,17 +68,17 @@ func (self *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v inter
 	}
 }
 
-func (self *KVNode) localSadd(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.SAdd(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localSrem(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localSrem(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.SRem(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localSclear(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.SClear(cmd.Args[1])
 }
-func (self *KVNode) localSmclear(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.SMclear(cmd.Args[1:]...)
 }

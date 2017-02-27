@@ -502,7 +502,7 @@ func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
 	return mlist, nil
 }
 
-func (self *KVNode) localZaddCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localZaddCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) < 4 || len(cmd.Args)%2 != 0 {
 		return nil, common.ErrInvalidArgs
 	}
@@ -518,7 +518,7 @@ func (self *KVNode) localZaddCommand(cmd redcon.Command) (interface{}, error) {
 	return v, nil
 }
 
-func (self *KVNode) localZincrbyCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localZincrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) != 4 {
 		return nil, common.ErrInvalidArgs
 	}
@@ -530,7 +530,7 @@ func (self *KVNode) localZincrbyCommand(cmd redcon.Command) (interface{}, error)
 	return self.store.ZIncrBy(cmd.Args[1], delta, cmd.Args[3])
 }
 
-func (self *KVNode) localZremCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localZremCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) < 3 {
 		return nil, common.ErrInvalidArgs
 	}
@@ -538,7 +538,7 @@ func (self *KVNode) localZremCommand(cmd redcon.Command) (interface{}, error) {
 	return self.store.ZRem(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localZremrangebyrankCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localZremrangebyrankCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) != 4 {
 		return nil, common.ErrInvalidArgs
 	}
@@ -554,7 +554,7 @@ func (self *KVNode) localZremrangebyrankCommand(cmd redcon.Command) (interface{}
 	return self.store.ZRemRangeByRank(cmd.Args[1], int(start), int(stop))
 }
 
-func (self *KVNode) localZremrangebyscoreCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localZremrangebyscoreCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) != 4 {
 		return nil, common.ErrInvalidArgs
 	}
@@ -566,7 +566,7 @@ func (self *KVNode) localZremrangebyscoreCommand(cmd redcon.Command) (interface{
 	return self.store.ZRemRangeByScore(cmd.Args[1], min, max)
 }
 
-func (self *KVNode) localZremrangebylexCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localZremrangebylexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) != 4 {
 		return nil, common.ErrInvalidArgs
 	}
@@ -578,7 +578,7 @@ func (self *KVNode) localZremrangebylexCommand(cmd redcon.Command) (interface{},
 	return self.store.ZRemRangeByLex(cmd.Args[1], min, max, rt)
 }
 
-func (self *KVNode) localZclearCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localZclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) != 2 {
 		return nil, common.ErrInvalidArgs
 	}

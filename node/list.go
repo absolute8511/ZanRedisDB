@@ -150,15 +150,15 @@ func (self *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interf
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (self *KVNode) localLpopCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localLpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.LPop(cmd.Args[1])
 }
 
-func (self *KVNode) localLpushCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localLpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.LPush(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localLsetCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localLsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	index, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
@@ -167,7 +167,7 @@ func (self *KVNode) localLsetCommand(cmd redcon.Command) (interface{}, error) {
 	return nil, self.store.LSet(cmd.Args[1], index, cmd.Args[3])
 }
 
-func (self *KVNode) localLtrimCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	start, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
@@ -180,14 +180,14 @@ func (self *KVNode) localLtrimCommand(cmd redcon.Command) (interface{}, error) {
 	return nil, self.store.LTrim(cmd.Args[1], start, stop)
 }
 
-func (self *KVNode) localRpopCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localRpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.RPop(cmd.Args[1])
 }
 
-func (self *KVNode) localRpushCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localRpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.RPush(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localLclearCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.LClear(cmd.Args[1])
 }

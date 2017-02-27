@@ -75,8 +75,8 @@ func (s *KVStore) LocalDelete(key []byte) error {
 	return s.KVDel(key)
 }
 
-func (s *KVStore) LocalPut(key []byte, value []byte) error {
-	err := s.KVSet(key, value)
+func (s *KVStore) LocalPut(ts int64, key []byte, value []byte) error {
+	err := s.KVSet(ts, key, value)
 	return err
 }
 

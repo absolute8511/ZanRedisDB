@@ -35,8 +35,9 @@ var (
 )
 
 const (
-	RedisReq int8 = 0
-	HTTPReq  int8 = 1
+	RedisReq       int8 = 0
+	HTTPReq        int8 = 1
+	proposeTimeout      = time.Second * 10
 )
 
 type nodeProgress struct {
@@ -349,8 +350,8 @@ func (self *KVNode) handleProposeReq() {
 			lastReq.done = make(chan struct{})
 			//self.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
-			start := time.Now()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			start := lastReq.reqData.Header.Timestamp
+			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
 			self.rn.node.Propose(ctx, buffer)
 			select {
 			case <-lastReq.done:
@@ -364,8 +365,8 @@ func (self *KVNode) handleProposeReq() {
 				return
 			}
 			cancel()
-			cost := time.Since(start)
-			if len(reqList.Reqs) >= 100 && cost >= time.Second || (cost >= time.Second*2) {
+			cost := (time.Now().UnixNano() - start) / 1000 / 1000 / 1000
+			if cost >= int64(proposeTimeout.Seconds())/2 {
 				self.rn.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
 			}
 			reqList.Reqs = reqList.Reqs[:0]
@@ -376,6 +377,7 @@ func (self *KVNode) handleProposeReq() {
 
 func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	start := time.Now()
+	req.reqData.Header.Timestamp = start.UnixNano()
 	ch := self.w.Register(req.reqData.Header.ID)
 	select {
 	case self.reqProposeC <- req:
@@ -384,7 +386,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		case self.reqProposeC <- req:
 		case <-self.stopChan:
 			self.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
-		case <-time.After(time.Second * 3):
+		case <-time.After(proposeTimeout):
 			self.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
 		}
 	}
@@ -641,9 +643,9 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 								self.w.Trigger(reqID, common.ErrInvalidCommand)
 							} else {
 								cmdStart := time.Now()
-								v, err := h(cmd)
+								v, err := h(cmd, req.Header.Timestamp)
 								cmdCost := time.Since(cmdStart)
-								if cmdCost >= time.Millisecond*500 {
+								if cmdCost >= time.Second {
 									self.rn.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 								}
 								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
@@ -663,7 +665,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 					}
 				}
 				cost := time.Since(start)
-				if len(reqList.Reqs) >= 100 && cost > time.Second || (cost > time.Second*2) {
+				if cost >= proposeTimeout/2 {
 					self.rn.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
 				}
 

@@ -11,6 +11,7 @@ option (gogoproto.goproto_getters_all) = false;
 message RequestHeader {
     uint64 ID = 1 [(gogoproto.nullable) = false]; 
     int32 data_type = 2 [(gogoproto.nullable) = false];
+    int64 timestamp = 3 [(gogoproto.nullable) = false];
 }
 
 message InternalRaftRequest {

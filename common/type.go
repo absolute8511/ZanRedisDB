@@ -104,7 +104,7 @@ type ScorePair struct {
 
 type CommandFunc func(redcon.Conn, redcon.Command)
 type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
-type InternalCommandFunc func(redcon.Command) (interface{}, error)
+type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
 
 type CmdRouter struct {
 	cmds         map[string]CommandFunc

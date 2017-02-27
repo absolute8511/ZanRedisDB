@@ -80,32 +80,32 @@ func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (self *KVNode) localSetCommand(cmd redcon.Command) (interface{}, error) {
-	err := self.store.LocalPut(cmd.Args[1], cmd.Args[2])
+func (self *KVNode) localSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	err := self.store.KVSet(ts, cmd.Args[1], cmd.Args[2])
 	return nil, err
 }
 
-func (self *KVNode) localSetnxCommand(cmd redcon.Command) (interface{}, error) {
-	v, err := self.store.SetNX(cmd.Args[1], cmd.Args[2])
+func (self *KVNode) localSetnxCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := self.store.SetNX(ts, cmd.Args[1], cmd.Args[2])
 	return v, err
 }
 
-func (self *KVNode) localMSetCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localMSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	args := cmd.Args[1:]
 	kvlist := make([]common.KVRecord, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
 		kvlist = append(kvlist, common.KVRecord{Key: args[i], Value: args[i+1]})
 	}
-	err := self.store.MSet(kvlist...)
+	err := self.store.MSet(ts, kvlist...)
 	return nil, err
 }
 
-func (self *KVNode) localIncrCommand(cmd redcon.Command) (interface{}, error) {
-	v, err := self.store.Incr(cmd.Args[1])
+func (self *KVNode) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := self.store.Incr(ts, cmd.Args[1])
 	return v, err
 }
 
-func (self *KVNode) localDelCommand(cmd redcon.Command) (interface{}, error) {
+func (self *KVNode) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	self.store.DelKeys(cmd.Args[1:]...)
 	return int64(len(cmd.Args[1:])), nil
 }

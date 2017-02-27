@@ -5,7 +5,12 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 )
 
+const (
+	tsLen = 8
+)
+
 var errKVKey = errors.New("invalid encode kv key")
+var errInvalidDBValue = errors.New("invalide db value")
 
 func convertRedisKeyToDBKVKey(key []byte) ([]byte, []byte, error) {
 	table := extractTableFromRedisKey(key)
@@ -65,24 +70,31 @@ func encodeKVMaxKey() []byte {
 	return ek
 }
 
-func (db *RockDB) incr(key []byte, delta int64) (int64, error) {
+func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
 		return 0, err
 	}
 	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
 	created := false
+	n := int64(0)
 	if v == nil {
 		created = true
-	}
-	var n int64
-	n, err = StrInt64(v, err)
-	if err != nil {
-		return 0, err
+	} else {
+		if len(v) < tsLen {
+			return 0, errIntNumber
+		}
+		n, err = StrInt64(v[:len(v)-tsLen], err)
+		if err != nil {
+			return 0, err
+		}
 	}
 	db.wb.Clear()
 	n += delta
-	db.wb.Put(key, FormatInt64ToSlice(n))
+	buf := FormatInt64ToSlice(n)
+	tsBuf := PutInt64(ts)
+	buf = append(buf, tsBuf...)
+	db.wb.Put(key, buf)
 	if created {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
@@ -108,12 +120,12 @@ func (db *RockDB) KVDel(key []byte) error {
 	return db.eng.Write(db.defaultWriteOpts, db.wb)
 }
 
-func (db *RockDB) Decr(key []byte) (int64, error) {
-	return db.incr(key, -1)
+func (db *RockDB) Decr(ts int64, key []byte) (int64, error) {
+	return db.incr(ts, key, -1)
 }
 
-func (db *RockDB) DecrBy(key []byte, decrement int64) (int64, error) {
-	return db.incr(key, -decrement)
+func (db *RockDB) DecrBy(ts int64, key []byte, decrement int64) (int64, error) {
+	return db.incr(ts, key, -decrement)
 }
 
 func (db *RockDB) DelKeys(keys ...[]byte) {
@@ -146,15 +158,21 @@ func (db *RockDB) KVGet(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	return db.eng.GetBytes(db.defaultReadOpts, key)
+	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
+	if v == nil {
+		return nil, err
+	} else if len(v) < tsLen {
+		return nil, errInvalidDBValue
+	}
+	return v[:len(v)-tsLen], err
 }
 
-func (db *RockDB) Incr(key []byte) (int64, error) {
-	return db.incr(key, 1)
+func (db *RockDB) Incr(ts int64, key []byte) (int64, error) {
+	return db.incr(ts, key, 1)
 }
 
-func (db *RockDB) IncrBy(key []byte, increment int64) (int64, error) {
-	return db.incr(key, increment)
+func (db *RockDB) IncrBy(ts int64, key []byte, increment int64) (int64, error) {
+	return db.incr(ts, key, increment)
 }
 
 func (db *RockDB) MGet(keys ...[]byte) ([][]byte, []error) {
@@ -170,10 +188,15 @@ func (db *RockDB) MGet(keys ...[]byte) ([][]byte, []error) {
 		}
 	}
 	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, keyList, errs)
+	for i, v := range keyList {
+		if len(v) >= tsLen {
+			keyList[i] = v[:len(v)-tsLen]
+		}
+	}
 	return keyList, errs
 }
 
-func (db *RockDB) MSet(args ...common.KVRecord) error {
+func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -189,6 +212,8 @@ func (db *RockDB) MSet(args ...common.KVRecord) error {
 	var value []byte
 	tableCnt := make(map[string]int)
 	var table []byte
+
+	tsBuf := PutInt64(ts)
 	for i := 0; i < len(args); i++ {
 		table, key, err = convertRedisKeyToDBKVKey(args[i].Key)
 		if err != nil {
@@ -203,6 +228,7 @@ func (db *RockDB) MSet(args ...common.KVRecord) error {
 			n++
 			tableCnt[string(table)] = n
 		}
+		value = append(value, tsBuf...)
 		wb.Put(key, value)
 	}
 	for t, num := range tableCnt {
@@ -216,7 +242,7 @@ func (db *RockDB) MSet(args ...common.KVRecord) error {
 	return err
 }
 
-func (db *RockDB) KVSet(key []byte, value []byte) error {
+func (db *RockDB) KVSet(ts int64, key []byte, value []byte) error {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
 		return err
@@ -231,12 +257,14 @@ func (db *RockDB) KVSet(key []byte, value []byte) error {
 			return err
 		}
 	}
+	tsBuf := PutInt64(ts)
+	value = append(value, tsBuf...)
 	db.wb.Put(key, value)
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	return err
 }
 
-func (db *RockDB) SetNX(key []byte, value []byte) (int64, error) {
+func (db *RockDB) SetNX(ts int64, key []byte, value []byte) (int64, error) {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
 		return 0, err
@@ -257,13 +285,14 @@ func (db *RockDB) SetNX(key []byte, value []byte) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
+		value = append(value, PutInt64(ts)...)
 		db.wb.Put(key, value)
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	}
 	return n, err
 }
 
-func (db *RockDB) SetRange(key []byte, offset int, value []byte) (int64, error) {
+func (db *RockDB) SetRange(ts int64, key []byte, offset int, value []byte) (int64, error) {
 	if len(value) == 0 {
 		return 0, nil
 	}
@@ -285,6 +314,10 @@ func (db *RockDB) SetRange(key []byte, offset int, value []byte) (int64, error) 
 		if err != nil {
 			return 0, err
 		}
+	} else if len(oldValue) < tsLen {
+		return 0, errInvalidDBValue
+	} else {
+		oldValue = oldValue[:len(oldValue)-tsLen]
 	}
 
 	extra := offset + len(value) - len(oldValue)
@@ -292,6 +325,7 @@ func (db *RockDB) SetRange(key []byte, offset int, value []byte) (int64, error) 
 		oldValue = append(oldValue, make([]byte, extra)...)
 	}
 	copy(oldValue[offset:], value)
+	oldValue = append(oldValue, PutInt64(ts)...)
 	db.wb.Put(key, oldValue)
 
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
@@ -299,7 +333,7 @@ func (db *RockDB) SetRange(key []byte, offset int, value []byte) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
-	return int64(len(oldValue)), nil
+	return int64(len(oldValue) - tsLen), nil
 }
 
 func getRange(start int, end int, valLen int) (int, int) {
@@ -351,7 +385,7 @@ func (db *RockDB) StrLen(key []byte) (int64, error) {
 	return int64(n), nil
 }
 
-func (db *RockDB) Append(key []byte, value []byte) (int64, error) {
+func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 	if len(value) == 0 {
 		return 0, nil
 	}
@@ -375,9 +409,14 @@ func (db *RockDB) Append(key []byte, value []byte) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
+	} else if len(oldValue) < tsLen {
+		return 0, errInvalidDBValue
+	} else {
+		oldValue = oldValue[:len(oldValue)-tsLen]
 	}
 
 	oldValue = append(oldValue, value...)
+	oldValue = append(oldValue, PutInt64(ts)...)
 
 	db.wb.Put(key, oldValue)
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
@@ -385,5 +424,5 @@ func (db *RockDB) Append(key []byte, value []byte) (int64, error) {
 		return 0, err
 	}
 
-	return int64(len(oldValue)), nil
+	return int64(len(oldValue) - tsLen), nil
 }

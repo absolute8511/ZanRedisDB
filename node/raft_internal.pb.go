@@ -31,6 +31,7 @@ var _ = math.Inf
 type RequestHeader struct {
 	ID               uint64 `protobuf:"varint,1,opt" json:"ID"`
 	DataType         int32  `protobuf:"varint,2,opt,name=data_type" json:"data_type"`
+	Timestamp        int64  `protobuf:"varint,3,opt,name=timestamp" json:"timestamp"`
 	XXX_unrecognized []byte `json:"-"`
 }
 
@@ -105,6 +106,21 @@ func (m *RequestHeader) Unmarshal(data []byte) error {
 				b := data[index]
 				index++
 				m.DataType |= (int32(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timestamp", wireType)
+			}
+			for shift := uint(0); ; shift += 7 {
+				if index >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[index]
+				index++
+				m.Timestamp |= (int64(b) & 0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -310,6 +326,7 @@ func (m *RequestHeader) Size() (n int) {
 	_ = l
 	n += 1 + sovRaftInternal(uint64(m.ID))
 	n += 1 + sovRaftInternal(uint64(m.DataType))
+	n += 1 + sovRaftInternal(uint64(m.Timestamp))
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
 	}
@@ -383,6 +400,9 @@ func (m *RequestHeader) MarshalTo(data []byte) (n int, err error) {
 	data[i] = 0x10
 	i++
 	i = encodeVarintRaftInternal(data, i, uint64(m.DataType))
+	data[i] = 0x18
+	i++
+	i = encodeVarintRaftInternal(data, i, uint64(m.Timestamp))
 	if m.XXX_unrecognized != nil {
 		i += copy(data[i:], m.XXX_unrecognized)
 	}

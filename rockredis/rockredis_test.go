@@ -33,7 +33,7 @@ func TestRockDB(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	key := []byte("test:test_kv_key")
 	value := []byte("value")
-	if err := db.KVSet(key, value); err != nil {
+	if err := db.KVSet(0, key, value); err != nil {
 		t.Fatal(err)
 	}
 
