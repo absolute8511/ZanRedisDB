@@ -155,17 +155,28 @@ func TestKVM(t *testing.T) {
 		t.Fatal(ok)
 	}
 
+	if v, err := goredis.String(c.Do("get", key1)); err != nil {
+		t.Fatal(err)
+	} else if v != "1" {
+		t.Error(v)
+	}
+	if v, err := goredis.String(c.Do("get", key2)); err != nil {
+		t.Fatal(err)
+	} else if v != "2" {
+		t.Error(v)
+	}
+
 	if v, err := goredis.MultiBulk(c.Do("mget", key1, key2, key3)); err != nil {
 		t.Fatal(err)
 	} else if len(v) != 3 {
 		t.Fatal(len(v))
 	} else {
 		if vv, ok := v[0].([]byte); !ok || string(vv) != "1" {
-			t.Fatal("not 1")
+			t.Fatal("not 1, %v", v)
 		}
 
 		if vv, ok := v[1].([]byte); !ok || string(vv) != "2" {
-			t.Fatal("not 2")
+			t.Errorf("not 2, %v", v[1])
 		}
 
 		if v[2] != nil {

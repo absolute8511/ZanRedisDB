@@ -159,12 +159,10 @@ func (db *RockDB) KVGet(key []byte) ([]byte, error) {
 	}
 
 	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
-	if v == nil {
-		return nil, err
-	} else if len(v) < tsLen {
-		return nil, errInvalidDBValue
+	if len(v) >= tsLen {
+		v = v[:len(v)-tsLen]
 	}
-	return v[:len(v)-tsLen], err
+	return v, err
 }
 
 func (db *RockDB) Incr(ts int64, key []byte) (int64, error) {
@@ -188,9 +186,10 @@ func (db *RockDB) MGet(keys ...[]byte) ([][]byte, []error) {
 		}
 	}
 	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, keyList, errs)
+	//log.Printf("mget: %v", keyList)
 	for i, v := range keyList {
-		if len(v) >= tsLen {
-			keyList[i] = v[:len(v)-tsLen]
+		if errs[i] == nil && len(v) >= tsLen {
+			keyList[i] = keyList[i][:len(v)-tsLen]
 		}
 	}
 	return keyList, errs
@@ -221,7 +220,8 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		} else if err = checkValueSize(args[i].Value); err != nil {
 			return err
 		}
-		value = args[i].Value
+		value = value[:0]
+		value = append(value, args[i].Value...)
 		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
 		if v == nil {
 			n := tableCnt[string(table)]
