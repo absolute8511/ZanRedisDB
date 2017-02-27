@@ -13,6 +13,7 @@ type ServerConfig struct {
 	HttpAPIPort          int                   `json:"http_api_port"`
 	DataDir              string                `json:"data_dir"`
 	LocalRaftAddr        string                `json:"local_raft_addr"`
+	Tags                 []string              `json:"tags"`
 	Namespaces           []NamespaceNodeConfig `json:"namespaces"`
 }
 

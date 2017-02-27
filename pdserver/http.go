@@ -6,6 +6,7 @@ import (
 	_ "net/http/pprof"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -322,6 +323,11 @@ func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, 
 	if err != nil {
 		return nil, common.HttpErr{400, "INVALID_ARG_REPLICATOR"}
 	}
+	tagStr := reqParams.Get("tags")
+	var tagList []string
+	if tagStr != "" {
+		tagList = strings.Split(tagStr, ",")
+	}
 
 	if !self.pdCoord.IsMineLeader() {
 		return nil, common.HttpErr{400, cluster.ErrFailedOnNotLeader}
@@ -330,6 +336,12 @@ func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, 
 	meta.PartitionNum = pnum
 	meta.Replica = replicator
 	meta.EngType = engType
+	meta.Tags = make(map[string]bool)
+	for _, tag := range tagList {
+		if strings.TrimSpace(tag) != "" {
+			meta.Tags[strings.TrimSpace(tag)] = true
+		}
+	}
 
 	err = self.pdCoord.CreateNamespace(ns, meta)
 	if err != nil {

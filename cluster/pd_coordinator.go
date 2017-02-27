@@ -190,13 +190,23 @@ func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	}()
 }
 
-func (self *PDCoordinator) getCurrentNodes() map[string]NodeInfo {
+func (self *PDCoordinator) getCurrentNodes(tags map[string]bool) map[string]NodeInfo {
 	self.nodesMutex.RLock()
 	currentNodes := self.dataNodes
-	if len(self.removingNodes) > 0 {
+	if len(self.removingNodes) > 0 || len(tags) > 0 {
 		currentNodes = make(map[string]NodeInfo)
 		for nid, n := range self.dataNodes {
 			if _, ok := self.removingNodes[nid]; ok {
+				continue
+			}
+			filtered := false
+			for tag, _ := range tags {
+				if _, ok := n.Tags[tag]; !ok {
+					filtered = true
+					break
+				}
+			}
+			if filtered {
 				continue
 			}
 			currentNodes[nid] = n
@@ -214,15 +224,26 @@ func (self *PDCoordinator) getCurrentNodesWithRemoving() (map[string]NodeInfo, i
 	return currentNodes, currentNodesEpoch
 }
 
-func (self *PDCoordinator) getCurrentNodesWithEpoch() (map[string]NodeInfo, int64) {
+func (self *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]bool) (map[string]NodeInfo, int64) {
 	self.nodesMutex.RLock()
 	currentNodes := self.dataNodes
-	if len(self.removingNodes) > 0 {
+	if len(self.removingNodes) > 0 || len(tags) > 0 {
 		currentNodes = make(map[string]NodeInfo)
 		for nid, n := range self.dataNodes {
 			if _, ok := self.removingNodes[nid]; ok {
 				continue
 			}
+			filtered := false
+			for tag, _ := range tags {
+				if _, ok := n.Tags[tag]; !ok {
+					filtered = true
+					break
+				}
+			}
+			if filtered {
+				continue
+			}
+
 			currentNodes[nid] = n
 		}
 	}
@@ -312,7 +333,7 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 			if len(removingNodes) == 0 {
 				continue
 			}
-			currentNodes := self.getCurrentNodes()
+			currentNodes := self.getCurrentNodes(nil)
 			nodeNameList := make([]string, 0, len(currentNodes))
 			for _, s := range currentNodes {
 				nodeNameList = append(nodeNameList, s.ID)
@@ -514,7 +535,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			if (aliveCount <= t.Replica/2) ||
 				partitions[t.Partition].Before(time.Now().Add(-1*waitMigrateInterval)) {
 				coordLog.Infof("begin migrate the namespace :%v", t.GetDesp())
-				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch()
+				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch(t.Tags)
 				if aliveEpoch != currentNodesEpoch {
 					go self.triggerCheckNamespaces(t.Name, t.Partition, time.Second)
 					continue

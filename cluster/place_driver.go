@@ -100,7 +100,7 @@ func (self *DataPlacement) DoBalance(monitorChan chan struct{}) {
 				continue
 			}
 			coordLog.Infof("begin checking balance of namespace data...")
-			currentNodes := self.pdCoord.getCurrentNodes()
+			currentNodes := self.pdCoord.getCurrentNodes(nil)
 			validNum := len(currentNodes)
 			if validNum < 2 {
 				continue
@@ -290,7 +290,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 		if movedNamespace != "" && movedNamespace != namespaceInfo.Name {
 			continue
 		}
-		currentNodes := self.pdCoord.getCurrentNodes()
+		currentNodes := self.pdCoord.getCurrentNodes(namespaceInfo.Tags)
 		nodeNameList = nodeNameList[0:0]
 		for _, n := range currentNodes {
 			nodeNameList = append(nodeNameList, n.ID)

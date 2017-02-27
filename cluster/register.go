@@ -22,6 +22,7 @@ type NodeInfo struct {
 	RpcPort           string
 	RaftTransportAddr string
 	Version           string
+	Tags              map[string]bool
 	Epoch             EpochType
 }
 
@@ -46,6 +47,7 @@ type NamespaceMetaInfo struct {
 	MinGID    int64
 	MetaEpoch EpochType
 	EngType   string
+	Tags      map[string]bool
 }
 
 type PartitionReplicaInfo struct {

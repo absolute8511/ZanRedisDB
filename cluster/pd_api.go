@@ -152,7 +152,7 @@ func (self *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newReplica
 			coordLog.Infof("get namespace key %v failed :%v", namespace, err)
 			return err
 		}
-		currentNodes := self.getCurrentNodes()
+		currentNodes := self.getCurrentNodes(oldMeta.Tags)
 		meta = oldMeta
 		if newReplicator > 0 {
 			meta.Replica = newReplicator
@@ -190,7 +190,7 @@ func (self *PDCoordinator) CreateNamespace(namespace string, meta NamespaceMetaI
 		return errors.New("max partition allowed exceed")
 	}
 
-	currentNodes := self.getCurrentNodes()
+	currentNodes := self.getCurrentNodes(meta.Tags)
 	if len(currentNodes) < meta.Replica {
 		coordLog.Infof("nodes %v is less than replica %v", len(currentNodes), meta)
 		return ErrNodeUnavailable.ToErrorType()

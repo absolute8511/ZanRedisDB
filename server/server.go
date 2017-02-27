@@ -60,6 +60,7 @@ func NewServer(conf ServerConfig) *Server {
 		RedisPort: strconv.Itoa(conf.RedisAPIPort),
 		HttpPort:  strconv.Itoa(conf.HttpAPIPort),
 		Version:   common.VerBinary,
+		Tags:      make(map[string]bool),
 	}
 	if conf.ClusterID == "" {
 		sLog.Fatalf("cluster id can not be empty")
@@ -76,6 +77,9 @@ func NewServer(conf ServerConfig) *Server {
 		sLog.Fatalf("can not decide the broadcast ip: %v", myNode.NodeIP)
 	}
 	myNode.RaftTransportAddr = conf.LocalRaftAddr
+	for _, tag := range conf.Tags {
+		myNode.Tags[tag] = true
+	}
 	os.MkdirAll(conf.DataDir, common.DIR_PERM)
 
 	s := &Server{
