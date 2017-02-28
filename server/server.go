@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -76,6 +77,7 @@ func NewServer(conf ServerConfig) *Server {
 	if myNode.NodeIP == "0.0.0.0" || myNode.NodeIP == "" {
 		sLog.Fatalf("can not decide the broadcast ip: %v", myNode.NodeIP)
 	}
+	conf.LocalRaftAddr = strings.Replace(conf.LocalRaftAddr, "0.0.0.0", myNode.NodeIP, 1)
 	myNode.RaftTransportAddr = conf.LocalRaftAddr
 	for _, tag := range conf.Tags {
 		myNode.Tags[tag] = true
