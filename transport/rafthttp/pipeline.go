@@ -16,8 +16,8 @@ package rafthttp
 
 import (
 	"bytes"
-	"context"
 	"errors"
+	"golang.org/x/net/context"
 	"io/ioutil"
 	"sync"
 	"time"
