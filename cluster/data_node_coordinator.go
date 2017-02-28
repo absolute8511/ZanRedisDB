@@ -253,6 +253,29 @@ func (self *DataCoordinator) checkAndFixLocalNamespaceData(nsInfo *PartitionMeta
 	return nil
 }
 
+func (self *DataCoordinator) removeNamespaceRaftMember(nsInfo *PartitionMetaInfo, m *node.MemberInfo) {
+	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+	if nsNode == nil {
+		coordLog.Infof("namespace %v not found while remove member", nsInfo.GetDesp())
+		return
+	}
+
+	err := nsNode.Node.ProposeRemoveMember(*m)
+	if err != nil {
+		coordLog.Infof("propose remove %v failed: %v", m, err)
+	} else {
+		coordLog.Infof("namespace %v propose remove member %v", nsInfo.GetDesp(), m)
+	}
+}
+
+func (self *DataCoordinator) getNamespaceRaftMembers(nsInfo *PartitionMetaInfo) []*node.MemberInfo {
+	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+	if nsNode == nil {
+		return nil
+	}
+	return nsNode.Node.GetMembers()
+}
+
 func (self *DataCoordinator) getNamespaceRaftLeader(nsInfo *PartitionMetaInfo) uint64 {
 	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
@@ -322,13 +345,32 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				}
 			} else if len(namespaceMeta.RaftNodes) >= namespaceMeta.Replica {
 				leader := self.getNamespaceRaftLeader(namespaceMeta)
-				if leader == self.GetMyRegID() {
-					if namespaceMeta.RaftNodes[0] != self.GetMyID() {
-						// the raft leader check if I am the expected sharding leader,
-						// if not, try to transfer the leader to expected node. We need do this
-						// because we should make all the sharding leaders balanced on
-						// all the cluster nodes.
-						self.transferMyNamespaceLeader(namespaceMeta, namespaceMeta.RaftNodes[0])
+				if leader != self.GetMyRegID() {
+					continue
+				}
+				if namespaceMeta.RaftNodes[0] != self.GetMyID() {
+					// the raft leader check if I am the expected sharding leader,
+					// if not, try to transfer the leader to expected node. We need do this
+					// because we should make all the sharding leaders balanced on
+					// all the cluster nodes.
+					self.transferMyNamespaceLeader(namespaceMeta, namespaceMeta.RaftNodes[0])
+				} else {
+					members := self.getNamespaceRaftMembers(namespaceMeta)
+					for _, m := range members {
+						found := false
+						for nid, rid := range namespaceMeta.RaftIDs {
+							if m.ID == rid {
+								found = true
+								if m.NodeID != ExtractRegIDFromGenID(nid) {
+									coordLog.Infof("found raft member %v mismatch the replica node: %v", m, nid)
+								}
+								break
+							}
+						}
+						if !found {
+							coordLog.Infof("raft member %v not found in meta: %v", m, namespaceMeta.RaftNodes)
+							self.removeNamespaceRaftMember(namespaceMeta, m)
+						}
 					}
 				}
 			}

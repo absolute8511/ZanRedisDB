@@ -23,8 +23,9 @@ var (
 	ErrRaftConfMismatch           = errors.New("raft config mismatch")
 	errTimeoutLeaderTransfer      = errors.New("raft leader transfer failed")
 	errStopping                   = errors.New("the namespace is stopping")
-	ErrNamespaceNotFound          = errors.New("namespace is not found")
-	ErrNamespacePartitionNotFound = errors.New("partition of the namespace is not found")
+	ErrNamespaceNotFound          = errors.New("ERR_CLUSTER_CHANGED: namespace is not found")
+	ErrNamespacePartitionNotFound = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not found")
+	ErrNamespaceNotLeader         = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not leader on the node")
 )
 
 type NamespaceNode struct {

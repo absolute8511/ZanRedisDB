@@ -3,7 +3,10 @@ package cluster
 import (
 	"errors"
 	"fmt"
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/spaolacci/murmur3"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,8 +66,27 @@ func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
 
 // query the raft peers if the nid already in the raft group for the namespace
 func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid string) bool {
-	//TODO:
-	return true
+	if len(nsInfo.RaftNodes) == 0 {
+		return false
+	}
+	remoteNode := nsInfo.RaftNodes[0]
+	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+	var rsp []*node.MemberInfo
+	err := common.APIRequest("GET",
+		"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
+		nil, time.Second*3, &rsp)
+	if err != nil {
+		coordLog.Infof("failed to get members for namespace: %v", err)
+		return false
+	}
+
+	for _, m := range rsp {
+		if m.NodeID == ExtractRegIDFromGenID(nid) && m.ID == nsInfo.RaftIDs[nid] {
+			return true
+		}
+	}
+	coordLog.Infof("namespace %v members is %v, still waiting %v join", nsInfo.GetDesp(), rsp, nid)
+	return false
 }
 
 func (self *DataPlacement) SetBalanceInterval(start int, end int) {

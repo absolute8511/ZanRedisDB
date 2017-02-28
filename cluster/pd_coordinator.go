@@ -646,7 +646,6 @@ func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, ni
 		return &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
 	} else {
 		coordLog.Infof("namespace %v replica removed from node:%v", nsInfo.GetDesp(), nid)
-		// TODO: send remove request to the raft group
 	}
 	return nil
 }

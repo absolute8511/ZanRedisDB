@@ -51,7 +51,7 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		if err == nil {
 			h(conn, cmd)
 		} else {
-			conn.WriteError("ERR handle command '" + string(cmd.Args[0]) + "' : " + err.Error())
+			conn.WriteError(err.Error() + " : ERR handle command " + string(cmd.Args[0]))
 		}
 	}
 }

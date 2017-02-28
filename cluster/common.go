@@ -7,8 +7,7 @@ import (
 )
 
 const (
-	ErrFailedOnNotLeader   = "E_FAILED_ON_NOT_LEADER"
-	ErrFailedOnNotWritable = "E_FAILED_ON_NOT_WRITABLE"
+	ErrFailedOnNotLeader = "E_FAILED_ON_NOT_LEADER"
 )
 
 const (
