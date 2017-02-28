@@ -540,6 +540,7 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 				return ErrNamespaceExiting
 			case <-time.After(time.Second):
 			}
+			retry++
 			joinErr = ErrNamespaceWaitingSync
 		} else {
 			joinErr = ErrNamespaceWaitingSync

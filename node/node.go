@@ -673,9 +673,9 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange
 			cc.Unmarshal(evnt.Data)
-			removeSelf, _ := self.rn.applyConfChange(cc, &np.confState)
+			removeSelf, changed, _ := self.rn.applyConfChange(cc, &np.confState)
+			confChanged = changed
 			shouldStop = shouldStop || removeSelf
-			confChanged = true
 		}
 		np.appliedi = evnt.Index
 		if evnt.Index == self.rn.lastIndex {

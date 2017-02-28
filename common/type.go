@@ -174,3 +174,24 @@ type MemberInfo struct {
 	RaftURLs    []string `json:"peer_urls"`
 	DataDir     string   `json:"data_dir"`
 }
+
+func (self *MemberInfo) IsEqual(other *MemberInfo) bool {
+	if self == nil || other == nil {
+		return false
+	}
+	if self.ID != other.ID || self.NodeID != other.NodeID ||
+		self.GroupName != other.GroupName || self.GroupID != other.GroupID ||
+		self.Broadcast != other.Broadcast || self.RpcPort != other.RpcPort ||
+		self.HttpAPIPort != other.HttpAPIPort || self.DataDir != other.DataDir {
+		return false
+	}
+	if len(self.RaftURLs) != len(other.RaftURLs) {
+		return false
+	}
+	for i, v := range self.RaftURLs {
+		if v != other.RaftURLs[i] {
+			return false
+		}
+	}
+	return true
+}

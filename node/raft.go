@@ -495,9 +495,11 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot
 	}
 }
 
-func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.ConfState) (bool, error) {
+// return (self removed, any conf changed, error)
+func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.ConfState) (bool, bool, error) {
 	// TODO: validate configure change here
 	*confState = *rc.node.ApplyConfChange(cc)
+	confChanged := false
 	switch cc.Type {
 	case raftpb.ConfChangeAddNode:
 		rc.Infof("conf change : node add : %v\n", cc.String())
@@ -510,13 +512,14 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 				m.ID = cc.ReplicaID
 				if m.NodeID == 0 {
 					nodeLog.Fatalf("invalid member info: %v", m)
-					return false, errors.New("add member should include node id ")
+					return false, confChanged, errors.New("add member should include node id ")
 				}
 				rc.memMutex.Lock()
 				if _, ok := rc.members[m.ID]; ok {
 					rc.Infof("node already exist in cluster: %v\n", m)
 					rc.memMutex.Unlock()
 				} else {
+					confChanged = true
 					rc.members[m.ID] = &m
 					rc.memMutex.Unlock()
 					if m.NodeID != rc.config.nodeConfig.NodeID {
@@ -529,10 +532,11 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 	case raftpb.ConfChangeRemoveNode:
 		rc.memMutex.Lock()
 		delete(rc.members, cc.ReplicaID)
+		confChanged = true
 		rc.memMutex.Unlock()
 		if cc.ReplicaID == uint64(rc.config.ID) {
 			rc.Infof("I've been removed from the cluster! Shutting down.")
-			return true, nil
+			return true, confChanged, nil
 		}
 		// TODO: check if all replicas is deleted on the node
 		// if no any replica we can remove peer from transport
@@ -542,14 +546,18 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		json.Unmarshal(cc.Context, &m)
 		rc.Infof("node updated to the cluster: %v-%v\n", cc.String(), m)
 		rc.memMutex.Lock()
+		oldm := rc.members[cc.ReplicaID]
 		rc.members[cc.ReplicaID] = &m
+		if oldm != nil && !oldm.IsEqual(&m) {
+			confChanged = true
+		}
 		rc.memMutex.Unlock()
 
 		if cc.NodeGroup.NodeId != uint64(rc.config.nodeConfig.NodeID) {
 			rc.transport.UpdatePeer(types.ID(cc.NodeGroup.NodeId), m.RaftURLs)
 		}
 	}
-	return false, nil
+	return false, confChanged, nil
 }
 
 func (rc *raftNode) serveChannels() {
