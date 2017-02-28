@@ -106,13 +106,15 @@ type NamespaceMeta struct {
 }
 
 type NamespaceMgr struct {
-	mutex         sync.Mutex
+	mutex         sync.RWMutex
 	kvNodes       map[string]*NamespaceNode
 	nsMetas       map[string]NamespaceMeta
 	groups        map[uint64]string
 	machineConf   *MachineConfig
 	raftTransport *rafthttp.Transport
 	stopping      int32
+	stopC         chan struct{}
+	wg            sync.WaitGroup
 }
 
 func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *NamespaceMgr {
@@ -122,6 +124,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 		nsMetas:       make(map[string]NamespaceMeta),
 		raftTransport: transport,
 		machineConf:   conf,
+		stopC:         make(chan struct{}),
 	}
 	regID, err := ns.LoadMachineRegID()
 	if err != nil {
@@ -129,7 +132,6 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	} else if regID > 0 {
 		ns.machineConf.NodeID = regID
 	}
-
 	return ns
 }
 
@@ -161,23 +163,33 @@ func (self *NamespaceMgr) Start() {
 		kv.Start()
 	}
 	self.mutex.Unlock()
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.clearUnusedRaftPeer()
+	}()
 }
 
 func (self *NamespaceMgr) Stop() {
-	atomic.StoreInt32(&self.stopping, 1)
+	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
+		return
+	}
+	close(self.stopC)
 	tmp := self.GetNamespaces()
 	for _, n := range tmp {
 		n.Close()
 	}
+	self.wg.Wait()
+	nodeLog.Infof("namespace manager stopped")
 }
 
 func (self *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 	tmp := make(map[string]*NamespaceNode)
-	self.mutex.Lock()
+	self.mutex.RLock()
 	for k, n := range self.kvNodes {
 		tmp[k] = n
 	}
-	self.mutex.Unlock()
+	self.mutex.RUnlock()
 	return tmp
 }
 
@@ -243,8 +255,8 @@ func GetHashedPartitionID(pk []byte, pnum int) int {
 }
 
 func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []byte) (*NamespaceNode, error) {
-	self.mutex.Lock()
-	defer self.mutex.Unlock()
+	self.mutex.RLock()
+	defer self.mutex.RUnlock()
 	v, ok := self.nsMetas[nsBaseName]
 	if !ok {
 		nodeLog.Infof("namespace %v meta not found", nsBaseName)
@@ -259,15 +271,15 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 }
 
 func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {
-	self.mutex.Lock()
+	self.mutex.RLock()
 	v, _ := self.kvNodes[ns]
-	self.mutex.Unlock()
+	self.mutex.RUnlock()
 	return v
 }
 
 func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
-	self.mutex.Lock()
-	defer self.mutex.Unlock()
+	self.mutex.RLock()
+	defer self.mutex.RUnlock()
 	gn, ok := self.groups[gid]
 	if !ok {
 		nodeLog.Errorf("group name not found %v ", gid)
@@ -283,7 +295,7 @@ func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 }
 
 func (self *NamespaceMgr) GetStats() []common.NamespaceStats {
-	self.mutex.Lock()
+	self.mutex.RLock()
 	nsStats := make([]common.NamespaceStats, 0, len(self.kvNodes))
 	for k, n := range self.kvNodes {
 		ns := n.Node.GetStats()
@@ -292,18 +304,22 @@ func (self *NamespaceMgr) GetStats() []common.NamespaceStats {
 		ns.IsLeader = n.Node.IsLead()
 		nsStats = append(nsStats, ns)
 	}
-	self.mutex.Unlock()
+	self.mutex.RUnlock()
 	return nsStats
 }
 
 func (self *NamespaceMgr) OptimizeDB() {
-	self.mutex.Lock()
+	self.mutex.RLock()
 	nodeList := make([]*NamespaceNode, 0, len(self.kvNodes))
 	for _, n := range self.kvNodes {
 		nodeList = append(nodeList, n)
 	}
-	self.mutex.Unlock()
+	self.mutex.RUnlock()
 	for _, n := range nodeList {
+		if atomic.LoadInt32(&self.stopping) == 1 {
+			return
+		}
+
 		n.Node.OptimizeDB()
 	}
 }
@@ -323,14 +339,14 @@ func (self *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
 
 func (self *NamespaceMgr) ProcessRaftTick() {
 	// send tick for all raft group
-	self.mutex.Lock()
+	self.mutex.RLock()
 	nodes := make([]*KVNode, 0, len(self.kvNodes))
 	for _, v := range self.kvNodes {
 		if v.IsReady() {
 			nodes = append(nodes, v.Node)
 		}
 	}
-	self.mutex.Unlock()
+	self.mutex.RUnlock()
 	for _, n := range nodes {
 		n.Tick()
 	}
@@ -353,7 +369,34 @@ func (self *NamespaceMgr) ForceDeleteNamespaceData(ns string) error {
 	return nil
 }
 
-func (self *NamespaceMgr) ClearUnusedRaftPeer() {
-	// TODO: while close or remove raft node, we need check if any remote transport peer
+func (self *NamespaceMgr) clearUnusedRaftPeer() {
+	// while close or remove raft node, we need check if any remote transport peer
 	// should be closed.
+	doCheck := func() {
+		self.mutex.RLock()
+		defer self.mutex.RUnlock()
+		peers := self.raftTransport.GetAllPeers()
+		currentNodeIDs := make(map[uint64]bool)
+		for _, v := range self.kvNodes {
+			mems := v.Node.GetMembers()
+			for _, m := range mems {
+				currentNodeIDs[m.NodeID] = true
+			}
+		}
+		for _, p := range peers {
+			if _, ok := currentNodeIDs[uint64(p)]; !ok {
+				nodeLog.Infof("remove peer %v from transport since no any raft is related", p)
+				self.raftTransport.RemovePeer(p)
+			}
+		}
+	}
+
+	for {
+		select {
+		case <-time.After(time.Minute):
+			doCheck()
+		case <-self.stopC:
+			return
+		}
+	}
 }

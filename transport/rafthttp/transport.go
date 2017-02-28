@@ -305,6 +305,16 @@ func (t *Transport) RemoveAllPeers() {
 	}
 }
 
+func (t *Transport) GetAllPeers() []types.ID {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ids := make([]types.ID, 0, len(t.peers))
+	for id := range t.peers {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // the caller of this function must have the peers mutex.
 func (t *Transport) removePeer(id types.ID) {
 	if peer, ok := t.peers[id]; ok {
