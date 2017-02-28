@@ -1,7 +1,8 @@
-package cluster
+package pdnode_coord
 
 import (
 	"errors"
+	. "github.com/absolute8511/ZanRedisDB/cluster"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -26,11 +27,6 @@ var (
 const (
 	waitMigrateInterval = time.Minute * 10
 )
-
-type Options struct {
-	BalanceStart int
-	BalanceEnd   int
-}
 
 type PDCoordinator struct {
 	register               PDRegister
@@ -79,7 +75,7 @@ func (self *PDCoordinator) Start() error {
 		self.register.InitClusterID(self.clusterKey)
 		err := self.register.Register(&self.myNode)
 		if err != nil {
-			coordLog.Warningf("failed to register pd coordinator: %v", err)
+			CoordLog().Warningf("failed to register pd coordinator: %v", err)
 			return err
 		}
 	}
@@ -95,7 +91,7 @@ func (self *PDCoordinator) Stop() {
 		self.register.Stop()
 	}
 	self.wg.Wait()
-	coordLog.Infof("coordinator stopped.")
+	CoordLog().Infof("coordinator stopped.")
 }
 
 func (self *PDCoordinator) handleLeadership() {
@@ -109,10 +105,10 @@ func (self *PDCoordinator) handleLeadership() {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			coordLog.Errorf("panic %s:%v", buf, e)
+			CoordLog().Errorf("panic %s:%v", buf, e)
 		}
 
-		coordLog.Warningf("leadership watch exit.")
+		CoordLog().Warningf("leadership watch exit.")
 		if self.monitorChan != nil {
 			close(self.monitorChan)
 			self.monitorChan = nil
@@ -122,16 +118,16 @@ func (self *PDCoordinator) handleLeadership() {
 		select {
 		case l, ok := <-leaderChan:
 			if !ok {
-				coordLog.Warningf("leader chan closed.")
+				CoordLog().Warningf("leader chan closed.")
 				return
 			}
 			if l == nil {
-				coordLog.Warningf("leader is lost.")
+				CoordLog().Warningf("leader is lost.")
 				continue
 			}
 			if l.GetID() != self.leaderNode.GetID() ||
 				l.Epoch != self.leaderNode.Epoch {
-				coordLog.Infof("leader changed from %v to %v", self.leaderNode, *l)
+				CoordLog().Infof("leader changed from %v to %v", self.leaderNode, *l)
 				self.leaderNode = *l
 				if self.leaderNode.GetID() != self.myNode.GetID() {
 					// remove watchers.
@@ -143,7 +139,7 @@ func (self *PDCoordinator) handleLeadership() {
 				self.notifyLeaderChanged(self.monitorChan)
 			}
 			if self.leaderNode.GetID() == "" {
-				coordLog.Warningf("leader is missing.")
+				CoordLog().Warningf("leader is missing.")
 			}
 		}
 	}
@@ -151,20 +147,20 @@ func (self *PDCoordinator) handleLeadership() {
 
 func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
-		coordLog.Infof("I am slave (%v). Leader is: %v", self.myNode, self.leaderNode)
+		CoordLog().Infof("I am slave (%v). Leader is: %v", self.myNode, self.leaderNode)
 		self.nodesMutex.Lock()
 		self.removingNodes = make(map[string]string)
 		self.nodesMutex.Unlock()
 		return
 	}
-	coordLog.Infof("I am master now.")
+	CoordLog().Infof("I am master now.")
 	// reload namespace information
 	if self.register != nil {
 		newNamespaces, _, err := self.register.GetAllNamespaces()
 		if err != nil {
-			coordLog.Errorf("load namespace info failed: %v", err)
+			CoordLog().Errorf("load namespace info failed: %v", err)
 		} else {
-			coordLog.Infof("namespace loaded : %v", len(newNamespaces))
+			CoordLog().Infof("namespace loaded : %v", len(newNamespaces))
 		}
 	}
 
@@ -257,9 +253,9 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 	if self.register != nil {
 		go self.register.WatchDataNodes(nodesChan, monitorChan)
 	}
-	coordLog.Debugf("start watch the nodes.")
+	CoordLog().Debugf("start watch the nodes.")
 	defer func() {
-		coordLog.Infof("stop watch the nodes.")
+		CoordLog().Infof("stop watch the nodes.")
 	}()
 	for {
 		select {
@@ -268,11 +264,11 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 				return
 			}
 			// check if any node changed.
-			coordLog.Debugf("Current data nodes: %v", len(nodes))
+			CoordLog().Debugf("Current data nodes: %v", len(nodes))
 			oldNodes := self.dataNodes
 			newNodes := make(map[string]NodeInfo)
 			for _, v := range nodes {
-				//coordLog.Infof("node %v : %v", v.GetID(), v)
+				//CoordLog().Infof("node %v : %v", v.GetID(), v)
 				newNodes[v.GetID()] = v
 			}
 			self.nodesMutex.Lock()
@@ -280,7 +276,7 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 			check := false
 			for oldID, oldNode := range oldNodes {
 				if _, ok := newNodes[oldID]; !ok {
-					coordLog.Warningf("node failed: %v, %v", oldID, oldNode)
+					CoordLog().Warningf("node failed: %v, %v", oldID, oldNode)
 					// if node is missing we need check election immediately.
 					check = true
 				}
@@ -296,7 +292,7 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 			}
 			for newID, newNode := range newNodes {
 				if _, ok := oldNodes[newID]; !ok {
-					coordLog.Infof("new node joined: %v, %v", newID, newNode)
+					CoordLog().Infof("new node joined: %v, %v", newID, newNode)
 					check = true
 				}
 			}
@@ -310,9 +306,9 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 }
 
 func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
-	coordLog.Debugf("start handle the removing nodes.")
+	CoordLog().Debugf("start handle the removing nodes.")
 	defer func() {
-		coordLog.Infof("stop handle the removing nodes.")
+		CoordLog().Infof("stop handle the removing nodes.")
 	}()
 	ticker := time.NewTicker(time.Second * 30)
 	defer ticker.Stop()
@@ -345,7 +341,7 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 			}
 			for nid, _ := range removingNodes {
 				anyPending := false
-				coordLog.Infof("handle removing node %v ", nid)
+				CoordLog().Infof("handle removing node %v ", nid)
 				// only check the namespace with one replica left
 				// because the doCheckNamespaces will check the others
 				// we add a new replica for the removing node
@@ -361,17 +357,17 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							err := self.dpm.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 								nodeNameList)
 							if err != nil {
-								coordLog.Infof("namespace %v data on node %v transfered failed, waiting next time", namespaceInfo.GetDesp(), nid)
+								CoordLog().Infof("namespace %v data on node %v transfered failed, waiting next time", namespaceInfo.GetDesp(), nid)
 								continue
 							}
-							coordLog.Infof("namespace %v data on node %v transfered success", namespaceInfo.GetDesp(), nid)
+							CoordLog().Infof("namespace %v data on node %v transfered success", namespaceInfo.GetDesp(), nid)
 							anyStateChanged = true
 						}
 						self.removeNamespaceFromNode(&namespaceInfo, nid)
 					}
 					if !anyPending {
 						anyStateChanged = true
-						coordLog.Infof("node %v data has been transfered, it can be removed from cluster: state: %v", nid, removingNodes[nid])
+						CoordLog().Infof("node %v data has been transfered, it can be removed from cluster: state: %v", nid, removingNodes[nid])
 						if removingNodes[nid] != "data_transfered" && removingNodes[nid] != "done" {
 							removingNodes[nid] = "data_transfered"
 						} else {
@@ -382,7 +378,7 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 								_, ok := self.dataNodes[nid]
 								if !ok {
 									delete(removingNodes, nid)
-									coordLog.Infof("the node %v is removed finally since not alive in cluster", nid)
+									CoordLog().Infof("the node %v is removed finally since not alive in cluster", nid)
 								}
 								self.nodesMutex.Unlock()
 							}
@@ -420,7 +416,7 @@ func (self *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
 	waitingMigrateNamespace := make(map[string]map[int]time.Time)
 	defer func() {
 		ticker.Stop()
-		coordLog.Infof("check namespaces quit.")
+		CoordLog().Infof("check namespaces quit.")
 	}()
 
 	for {
@@ -448,27 +444,27 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		return
 	}
 	time.Sleep(time.Millisecond * 10)
-	coordLog.Infof("do check namespaces...")
+	CoordLog().Infof("do check namespaces...")
 	defer atomic.StoreInt32(&self.doChecking, 0)
 
 	namespaces := []PartitionMetaInfo{}
 	if failedInfo == nil || failedInfo.NamespaceName == "" || failedInfo.NamespacePartition < 0 {
 		allNamespaces, _, commonErr := self.register.GetAllNamespaces()
 		if commonErr != nil {
-			coordLog.Infof("scan namespaces failed. %v", commonErr)
+			CoordLog().Infof("scan namespaces failed. %v", commonErr)
 			return
 		}
 		for _, parts := range allNamespaces {
 			namespaces = append(namespaces, parts...)
 		}
-		coordLog.Debugf("scan found namespaces: %v", namespaces)
+		CoordLog().Debugf("scan found namespaces: %v", namespaces)
 	} else {
 		var err error
-		coordLog.Infof("check single namespace : %v ", failedInfo)
+		CoordLog().Infof("check single namespace : %v ", failedInfo)
 		var t *PartitionMetaInfo
 		t, err = self.register.GetNamespacePartInfo(failedInfo.NamespaceName, failedInfo.NamespacePartition)
 		if err != nil {
-			coordLog.Infof("get namespace info failed: %v, %v", failedInfo, err)
+			CoordLog().Infof("get namespace info failed: %v, %v", failedInfo, err)
 			return
 		}
 		namespaces = append(namespaces, *t)
@@ -481,7 +477,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 	checkOK := true
 	for _, t := range namespaces {
 		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
-			coordLog.Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
+			CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
 			return
 		}
 		select {
@@ -493,7 +489,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 
 		needMigrate := false
 		if len(t.RaftNodes) < t.Replica {
-			coordLog.Infof("replicas is not enough for namespace %v, isr is :%v", t.GetDesp(), t.RaftNodes)
+			CoordLog().Infof("replicas is not enough for namespace %v, isr is :%v", t.GetDesp(), t.RaftNodes)
 			needMigrate = true
 			checkOK = false
 		}
@@ -501,7 +497,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		aliveCount := 0
 		for _, replica := range t.RaftNodes {
 			if _, ok := currentNodes[replica]; !ok {
-				coordLog.Warningf("namespace %v isr node %v is lost.", t.GetDesp(), replica)
+				CoordLog().Warningf("namespace %v isr node %v is lost.", t.GetDesp(), replica)
 				needMigrate = true
 				checkOK = false
 			} else {
@@ -509,7 +505,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			}
 		}
 		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
-			coordLog.Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
+			CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
 			return
 		}
 		// should copy to avoid reused
@@ -528,13 +524,13 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			}
 
 			if atomic.LoadInt32(&self.isUpgrading) == 1 {
-				coordLog.Infof("wait checking namespaces since the cluster is upgrading")
+				CoordLog().Infof("wait checking namespaces since the cluster is upgrading")
 				continue
 			}
 
 			if (aliveCount <= t.Replica/2) ||
 				partitions[t.Partition].Before(time.Now().Add(-1*waitMigrateInterval)) {
-				coordLog.Infof("begin migrate the namespace :%v", t.GetDesp())
+				CoordLog().Infof("begin migrate the namespace :%v", t.GetDesp())
 				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch(t.Tags)
 				if aliveEpoch != currentNodesEpoch {
 					go self.triggerCheckNamespaces(t.Name, t.Partition, time.Second)
@@ -543,7 +539,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 				self.handleNamespaceMigrate(&namespaceInfo, aliveNodes, aliveEpoch)
 				delete(partitions, t.Partition)
 			} else {
-				coordLog.Infof("waiting migrate the namespace :%v since time: %v", t.GetDesp(), partitions[t.Partition])
+				CoordLog().Infof("waiting migrate the namespace :%v since time: %v", t.GetDesp(), partitions[t.Partition])
 			}
 		} else {
 			delete(partitions, t.Partition)
@@ -551,12 +547,12 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 
 		if aliveCount > t.Replica && atomic.LoadInt32(&self.balanceWaiting) == 0 {
 			//remove the unwanted node in isr
-			coordLog.Infof("isr is more than replicator: %v, %v", aliveCount, t.Replica)
+			CoordLog().Infof("isr is more than replicator: %v, %v", aliveCount, t.Replica)
 			removeNode := self.dpm.decideUnwantedRaftNode(&namespaceInfo, currentNodes)
 			if removeNode != "" {
 				coordErr := self.removeNamespaceFromNode(&namespaceInfo, removeNode)
 				if coordErr == nil {
-					coordLog.Infof("node %v removed by plan from namespace : %v", removeNode, t)
+					CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, t)
 				}
 			}
 		}
@@ -586,7 +582,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 	for i := aliveReplicas; i < nsInfo.Replica; i++ {
 		n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
 		if err != nil {
-			coordLog.Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
+			CoordLog().Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
 		} else {
 			nsInfo.MaxRaftID++
 			nsInfo.RaftIDs[n.GetID()] = uint64(nsInfo.MaxRaftID)
@@ -598,10 +594,10 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
 		if err != nil {
-			coordLog.Infof("update namespace replica info failed: %v", err.Error())
+			CoordLog().Infof("update namespace replica info failed: %v", err.Error())
 			return
 		} else {
-			coordLog.Infof("namespace %v migrate to replicas : %v", nsInfo.GetDesp(), nsInfo.RaftNodes)
+			CoordLog().Infof("namespace %v migrate to replicas : %v", nsInfo.GetDesp(), nsInfo.RaftNodes)
 		}
 	}
 }
@@ -617,10 +613,10 @@ func (self *PDCoordinator) addNamespaceToNode(nsInfo *PartitionMetaInfo, nid str
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
 	if err != nil {
-		coordLog.Infof("add namespace replica info failed: %v", err.Error())
+		CoordLog().Infof("add namespace replica info failed: %v", err.Error())
 		return &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
 	} else {
-		coordLog.Infof("namespace %v replica : %v added", nsInfo.GetDesp(), nid)
+		CoordLog().Infof("namespace %v replica : %v added", nsInfo.GetDesp(), nid)
 	}
 	return nil
 }
@@ -634,7 +630,7 @@ func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, ni
 		nodes = append(nodes, replica)
 	}
 	if len(nodes) < 1 {
-		coordLog.Infof("single replica can not be removed from namespace %v ", nsInfo.GetDesp())
+		CoordLog().Infof("single replica can not be removed from namespace %v ", nsInfo.GetDesp())
 		return ErrNamespaceReplicaNotEnough
 	}
 	nsInfo.RaftNodes = nodes
@@ -642,10 +638,10 @@ func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, ni
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
 	if err != nil {
-		coordLog.Infof("update namespace replica info failed: %v", err.Error())
+		CoordLog().Infof("update namespace replica info failed: %v", err.Error())
 		return &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
 	} else {
-		coordLog.Infof("namespace %v replica removed from node:%v", nsInfo.GetDesp(), nid)
+		CoordLog().Infof("namespace %v replica removed from node:%v", nsInfo.GetDesp(), nid)
 	}
 	return nil
 }

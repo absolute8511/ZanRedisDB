@@ -6,6 +6,10 @@ import (
 
 var coordLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("cluster"))
 
+func CoordLog() *common.LevelLogger {
+	return coordLog
+}
+
 func SetLogLevel(level int) {
 	coordLog.SetLevel(int32(level))
 }

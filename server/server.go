@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/cluster/datanode_coord"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/raft"
@@ -45,7 +46,7 @@ type Server struct {
 	wg            sync.WaitGroup
 	router        http.Handler
 	raftTransport *rafthttp.Transport
-	dataCoord     *cluster.DataCoordinator
+	dataCoord     *datanode_coord.DataCoordinator
 	nsMgr         *node.NamespaceMgr
 	startTime     time.Time
 }
@@ -113,7 +114,7 @@ func NewServer(conf ServerConfig) *Server {
 
 	if conf.EtcdClusterAddresses != "" {
 		r := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
-		s.dataCoord = cluster.NewDataCoordinator(conf.ClusterID, myNode, s.nsMgr)
+		s.dataCoord = datanode_coord.NewDataCoordinator(conf.ClusterID, myNode, s.nsMgr)
 		if err := s.dataCoord.SetRegister(r); err != nil {
 			sLog.Fatalf("failed to init register for coordinator: %v", err)
 		}

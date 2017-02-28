@@ -68,28 +68,13 @@ type applyInfo struct {
 	raftDone chan struct{}
 }
 
-type MemberInfo struct {
-	// the replica id
-	ID uint64 `json:"id"`
-	// the node id replica belong
-	NodeID    uint64 `json:"node_id"`
-	GroupName string `json:"group_name"`
-	// group id the replica belong (different from namespace)
-	GroupID     uint64   `json:"group_id"`
-	Broadcast   string   `json:"broadcast"`
-	RpcPort     int      `json:"rpc_port"`
-	HttpAPIPort int      `json:"http_api_port"`
-	RaftURLs    []string `json:"peer_urls"`
-	DataDir     string   `json:"data_dir"`
-}
-
 // A key-value stream backed by raft
 type raftNode struct {
 	commitC chan<- applyInfo // entries committed to log (k,v)
 	config  *RaftConfig
 
 	memMutex  sync.Mutex
-	members   map[uint64]*MemberInfo
+	members   map[uint64]*common.MemberInfo
 	join      bool   // node is joining an existing cluster
 	lastIndex uint64 // index of log at start
 	lead      uint64
@@ -131,7 +116,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	rc := &raftNode{
 		commitC:     commitC,
 		config:      rconfig,
-		members:     make(map[uint64]*MemberInfo),
+		members:     make(map[uint64]*common.MemberInfo),
 		join:        join,
 		raftStorage: raft.NewMemoryStorage(),
 		stopc:       make(chan struct{}),
@@ -160,7 +145,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 			nodeLog.Fatalf("cannot create dir for wal (%v)", err)
 		}
 
-		var m MemberInfo
+		var m common.MemberInfo
 		m.ID = uint64(rc.config.ID)
 		m.GroupName = rc.config.GroupName
 		m.GroupID = rc.config.GroupID
@@ -193,7 +178,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 		nodeLog.Fatalf("failed to read WAL (%v)", err)
 	}
 	rc.Infof("wal meta: %v, restart with: %v", string(meta), st.String())
-	var m MemberInfo
+	var m common.MemberInfo
 	err = json.Unmarshal(meta, &m)
 	if err != nil {
 		w.Close()
@@ -244,7 +229,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		rc.wal = rc.openWAL(nil)
 		rpeers := make([]raft.Peer, 0, len(rc.config.RaftPeers))
 		for _, v := range rc.config.RaftPeers {
-			var m MemberInfo
+			var m common.MemberInfo
 			m.GroupID = rc.config.GroupID
 			m.GroupName = rc.config.GroupName
 			m.ID = v.ReplicaID
@@ -256,7 +241,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		}
 
 		startPeers := rpeers
-		var m MemberInfo
+		var m common.MemberInfo
 		m.ID = uint64(rc.config.ID)
 		m.NodeID = uint64(rc.config.nodeConfig.NodeID)
 		m.GroupID = rc.config.GroupID
@@ -517,7 +502,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 	case raftpb.ConfChangeAddNode:
 		rc.Infof("conf change : node add : %v\n", cc.String())
 		if len(cc.Context) > 0 {
-			var m MemberInfo
+			var m common.MemberInfo
 			err := json.Unmarshal(cc.Context, &m)
 			if err != nil {
 				nodeLog.Fatalf("error conf context: %v", err)
@@ -553,7 +538,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		// if no any replica we can remove peer from transport
 		// rc.transport.RemovePeer(types.ID(cc.NodeID))
 	case raftpb.ConfChangeUpdateNode:
-		var m MemberInfo
+		var m common.MemberInfo
 		json.Unmarshal(cc.Context, &m)
 		rc.Infof("node updated to the cluster: %v-%v\n", cc.String(), m)
 		rc.memMutex.Lock()
@@ -654,7 +639,7 @@ func (rc *raftNode) sendMessages(msgs []raftpb.Message) {
 func (rc *raftNode) Lead() uint64 { return atomic.LoadUint64(&rc.lead) }
 func (rc *raftNode) IsLead() bool { return atomic.LoadUint64(&rc.lead) == uint64(rc.config.ID) }
 
-type memberSorter []*MemberInfo
+type memberSorter []*common.MemberInfo
 
 func (self memberSorter) Less(i, j int) bool {
 	return self[i].ID < self[j].ID
@@ -666,7 +651,7 @@ func (self memberSorter) Len() int {
 	return len(self)
 }
 
-func (rc *raftNode) GetMembers() []*MemberInfo {
+func (rc *raftNode) GetMembers() []*common.MemberInfo {
 	rc.memMutex.Lock()
 	mems := make(memberSorter, 0, len(rc.members))
 	for id, m := range rc.members {
@@ -678,7 +663,7 @@ func (rc *raftNode) GetMembers() []*MemberInfo {
 	return mems
 }
 
-func (rc *raftNode) GetLeadMember() *MemberInfo {
+func (rc *raftNode) GetLeadMember() *common.MemberInfo {
 	rc.memMutex.Lock()
 	m, ok := rc.members[rc.Lead()]
 	rc.memMutex.Unlock()
@@ -688,9 +673,9 @@ func (rc *raftNode) GetLeadMember() *MemberInfo {
 	return nil
 }
 
-func (rc *raftNode) RestoreMembers(mems []*MemberInfo) {
+func (rc *raftNode) RestoreMembers(mems []*common.MemberInfo) {
 	rc.memMutex.Lock()
-	rc.members = make(map[uint64]*MemberInfo)
+	rc.members = make(map[uint64]*common.MemberInfo)
 	for _, m := range mems {
 		if _, ok := rc.members[m.ID]; ok {
 		} else {

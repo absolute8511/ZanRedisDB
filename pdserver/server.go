@@ -2,6 +2,7 @@ package pdserver
 
 import (
 	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/cluster/pdnode_coord"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"net"
 	"net/http"
@@ -26,7 +27,7 @@ type Server struct {
 	stopC            chan struct{}
 	wg               sync.WaitGroup
 	router           http.Handler
-	pdCoord          *cluster.PDCoordinator
+	pdCoord          *pdnode_coord.PDCoordinator
 	dataMutex        sync.Mutex
 	tombstonePDNodes map[string]bool
 }
@@ -82,7 +83,7 @@ func NewServer(conf *ServerConfig) *Server {
 	s := &Server{
 		conf:             conf,
 		stopC:            make(chan struct{}),
-		pdCoord:          cluster.NewPDCoordinator(conf.ClusterID, myNode, clusterOpts),
+		pdCoord:          pdnode_coord.NewPDCoordinator(conf.ClusterID, myNode, clusterOpts),
 		tombstonePDNodes: make(map[string]bool),
 	}
 

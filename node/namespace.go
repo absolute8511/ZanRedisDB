@@ -76,7 +76,7 @@ func (self *NamespaceNode) IsRaftSynced() bool {
 	return self.Node.IsRaftSynced()
 }
 
-func (self *NamespaceNode) GetMembers() []*MemberInfo {
+func (self *NamespaceNode) GetMembers() []*common.MemberInfo {
 	return self.Node.GetMembers()
 }
 

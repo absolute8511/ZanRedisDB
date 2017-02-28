@@ -239,3 +239,8 @@ type NamespaceNameInfo struct {
 func (self *NamespaceNameInfo) String() string {
 	return self.NamespaceName + "-" + strconv.Itoa(self.NamespacePartition)
 }
+
+type Options struct {
+	BalanceStart int
+	BalanceEnd   int
+}

@@ -159,3 +159,18 @@ const (
 	MAX_PARTITION_NUM = 1024
 	MAX_REPLICATOR    = 5
 )
+
+type MemberInfo struct {
+	// the replica id
+	ID uint64 `json:"id"`
+	// the node id replica belong
+	NodeID    uint64 `json:"node_id"`
+	GroupName string `json:"group_name"`
+	// group id the replica belong (different from namespace)
+	GroupID     uint64   `json:"group_id"`
+	Broadcast   string   `json:"broadcast"`
+	RpcPort     int      `json:"rpc_port"`
+	HttpAPIPort int      `json:"http_api_port"`
+	RaftURLs    []string `json:"peer_urls"`
+	DataDir     string   `json:"data_dir"`
+}

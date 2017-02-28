@@ -20,8 +20,8 @@ import (
 )
 
 type RaftStatus struct {
-	LeaderInfo *node.MemberInfo
-	Members    []*node.MemberInfo
+	LeaderInfo *common.MemberInfo
+	Members    []*common.MemberInfo
 	RaftStat   raft.Status
 }
 
@@ -61,7 +61,7 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	}
 	sLog.Infof("got add node request: %v", string(data))
 
-	var m node.MemberInfo
+	var m common.MemberInfo
 	err = json.Unmarshal(data, &m)
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}

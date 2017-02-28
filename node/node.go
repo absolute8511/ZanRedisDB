@@ -72,9 +72,9 @@ type KVNode struct {
 
 type KVSnapInfo struct {
 	*rockredis.BackupInfo
-	BackupMeta []byte        `json:"backup_meta"`
-	LeaderInfo *MemberInfo   `json:"leader_info"`
-	Members    []*MemberInfo `json:"members"`
+	BackupMeta []byte               `json:"backup_meta"`
+	LeaderInfo *common.MemberInfo   `json:"leader_info"`
+	Members    []*common.MemberInfo `json:"members"`
 }
 
 func (self *KVSnapInfo) GetData() ([]byte, error) {
@@ -150,10 +150,10 @@ func (self *KVNode) GetRaftStatus() raft.Status {
 	return self.rn.node.Status()
 }
 
-func (self *KVNode) GetLeadMember() *MemberInfo {
+func (self *KVNode) GetLeadMember() *common.MemberInfo {
 	return self.rn.GetLeadMember()
 }
-func (self *KVNode) GetMembers() []*MemberInfo {
+func (self *KVNode) GetMembers() []*common.MemberInfo {
 	return self.rn.GetMembers()
 }
 
@@ -442,14 +442,14 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	return self.queueRequest(req)
 }
 
-func (self *KVNode) FillMyMemberInfo(m *MemberInfo) {
+func (self *KVNode) FillMyMemberInfo(m *common.MemberInfo) {
 	m.DataDir = self.rn.config.DataDir
 	m.Broadcast = self.machineConfig.BroadcastAddr
 	m.HttpAPIPort = self.machineConfig.HttpAPIPort
 	m.RaftURLs = append(m.RaftURLs, self.machineConfig.LocalRaftAddr)
 }
 
-func (self *KVNode) ProposeAddMember(m MemberInfo) error {
+func (self *KVNode) ProposeAddMember(m common.MemberInfo) error {
 	if m.NodeID == self.machineConfig.NodeID {
 		self.FillMyMemberInfo(&m)
 	}
@@ -467,7 +467,7 @@ func (self *KVNode) ProposeAddMember(m MemberInfo) error {
 	return self.proposeConfChange(cc)
 }
 
-func (self *KVNode) ProposeRemoveMember(m MemberInfo) error {
+func (self *KVNode) ProposeRemoveMember(m common.MemberInfo) error {
 	cc := raftpb.ConfChange{
 		Type:      raftpb.ConfChangeRemoveNode,
 		ReplicaID: m.ID,
@@ -475,7 +475,7 @@ func (self *KVNode) ProposeRemoveMember(m MemberInfo) error {
 	return self.proposeConfChange(cc)
 }
 
-func (self *KVNode) ProposeUpdateMember(m MemberInfo) error {
+func (self *KVNode) ProposeUpdateMember(m common.MemberInfo) error {
 	if m.NodeID == self.machineConfig.NodeID {
 		self.FillMyMemberInfo(&m)
 	}
@@ -861,7 +861,7 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 		return "", ""
 	}
 	remoteLeader := si.LeaderInfo
-	members := make([]*MemberInfo, 0)
+	members := make([]*common.MemberInfo, 0)
 	members = append(members, remoteLeader)
 	members = append(members, si.Members...)
 	curMembers := self.rn.GetMembers()
