@@ -16,7 +16,7 @@ package rafthttp
 
 import (
 	"bytes"
-	"context"
+	"golang.org/x/net/context"
 	"io"
 	"io/ioutil"
 	"net/http"
