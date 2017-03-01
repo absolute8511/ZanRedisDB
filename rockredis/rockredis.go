@@ -228,7 +228,7 @@ func (r *RockDB) Close() {
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
 	}
-	dbLog.Infof("rocksdb closed")
+	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
 
 func (r *RockDB) SetPerfLevel(level int) {

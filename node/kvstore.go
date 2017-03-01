@@ -30,7 +30,7 @@ func NewKVStore(kvopts *KVOptions) *KVStore {
 
 func (s *KVStore) openDB() error {
 	var err error
-	if s.opts.EngType == "rockredis" {
+	if s.opts.EngType == rockredis.EngType {
 		cfg := rockredis.NewRockConfig()
 		cfg.DataDir = s.opts.DataDir
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
@@ -45,6 +45,7 @@ func (s *KVStore) CleanData() error {
 		nodeLog.Warningf("the db is not opened while clean data")
 		return nil
 	}
+	nodeLog.Infof("the store %v is cleaning data", s.opts.DataDir)
 	dataPath := s.GetDataDir()
 	s.Close()
 	os.RemoveAll(dataPath)
@@ -58,7 +59,7 @@ func (s *KVStore) Destroy() error {
 		s.RockDB = nil
 		return os.RemoveAll(dataPath)
 	} else {
-		if s.opts.EngType == "rocksdb" {
+		if s.opts.EngType == rockredis.EngType {
 			f := rockredis.GetDataDirFromBase(s.opts.DataDir)
 			return os.RemoveAll(f)
 		}

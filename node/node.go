@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path"
 	"runtime"
 	"strconv"
@@ -180,7 +181,10 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 
 func (self *KVNode) Destroy() error {
 	self.Stop()
-	return self.store.Destroy()
+	self.store.Destroy()
+	ts := strconv.Itoa(int(time.Now().UnixNano()))
+	return os.Rename(self.rn.config.DataDir,
+		self.rn.config.DataDir+"-deleted-"+ts)
 }
 
 func (self *KVNode) CleanData() error {
@@ -528,9 +532,7 @@ func (self *KVNode) IsRaftSynced() bool {
 		nodeLog.Warningf("failed to get the read index from raft: %v", err)
 		return false
 	}
-	nodeLog.Infof("send read index request ")
 	cancel()
-	nodeLog.Infof("send read index request done")
 
 	var rs raft.ReadState
 	var (
@@ -554,10 +556,10 @@ func (self *KVNode) IsRaftSynced() bool {
 		return false
 	}
 	ci := self.GetCommittedIndex()
-	nodeLog.Infof("local committed %v, read index %v", ci, rs.Index)
 	if rs.Index <= 0 || ci >= rs.Index-1 {
 		return true
 	}
+	nodeLog.Infof("not synced, committed %v, read index %v", ci, rs.Index)
 	return false
 }
 

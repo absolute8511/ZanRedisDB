@@ -207,7 +207,6 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 	for namespaceName, namespaceParts := range namespaceMap {
 		CoordLog().Infof("loading namespace %v, %v", namespaceName, namespaceParts)
 		for _, nsInfo := range namespaceParts {
-			CoordLog().Infof("namespace: %v", nsInfo)
 			shouldLoad := FindSlice(nsInfo.RaftNodes, self.myNode.GetID()) != -1
 			if !shouldLoad {
 				if len(nsInfo.RaftNodes) >= nsInfo.Replica {
@@ -215,13 +214,13 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 				}
 				continue
 			}
-			CoordLog().Infof("loading namespace: %v", nsInfo.GetDesp())
 			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 			if localNamespace != nil {
 				// already loaded
-				self.ensureJoinNamespaceGroup(&nsInfo, localNamespace)
+				self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
 				continue
 			}
+			CoordLog().Infof("loading namespace: %v", nsInfo.GetDesp())
 			if namespaceName == "" {
 				continue
 			}
@@ -244,7 +243,7 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 				CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)
 				localNamespace.SetDataFixState(true)
 			}
-			go self.ensureJoinNamespaceGroup(&nsInfo, localNamespace)
+			self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
 		}
 	}
 	return nil
@@ -491,7 +490,7 @@ func (self *DataCoordinator) tryCheckNamespaces() {
 	}
 }
 
-func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
+func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 	localNamespace *node.NamespaceNode) *CoordErr {
 	// check if in local raft group
 	myRunning := atomic.AddInt32(&self.catchupRunning, 1)
@@ -502,7 +501,6 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 		return ErrCatchupRunningBusy
 	}
 
-	CoordLog().Infof("ensure local namespace %v join raft group", nsInfo.GetDesp())
 	dyConf := &node.NamespaceDynamicConf{}
 	localNamespace.SetDynamicInfo(*dyConf)
 	if localNamespace.IsDataNeedFix() {
@@ -530,7 +528,6 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 		}
 		if alreadyJoined {
 			if localNamespace.IsRaftSynced() {
-				CoordLog().Infof("namespace %v is synced", nsInfo.GetDesp())
 				joinErr = nil
 				break
 			}
@@ -543,6 +540,7 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 			retry++
 			joinErr = ErrNamespaceWaitingSync
 		} else {
+			CoordLog().Infof("request namespace %v join raft group", nsInfo.GetDesp())
 			joinErr = ErrNamespaceWaitingSync
 			remote := nsInfo.RaftNodes[retry%len(nsInfo.RaftNodes)]
 			retry++
@@ -554,7 +552,7 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 				return ErrNamespaceExiting
 			case <-time.After(time.Second):
 			}
-			self.requestJoinNamespaceGroup(raftID, nsInfo, localNamespace, remote)
+			self.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
 			select {
 			case <-self.stopChan:
 				return ErrNamespaceExiting
@@ -565,7 +563,7 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo *PartitionMetaInfo,
 	if joinErr != nil {
 		self.tryCheckNamespaces()
 		CoordLog().Infof("local namespace join failed: %v, retry later: %v", joinErr, nsInfo.GetDesp())
-	} else {
+	} else if retry > 0 {
 		CoordLog().Infof("local namespace join done: %v", nsInfo.GetDesp())
 	}
 	return joinErr

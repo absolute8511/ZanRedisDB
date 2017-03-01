@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/siddontang/goredis"
 	"io/ioutil"
 	"path"
@@ -45,7 +46,7 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
 	nsConf.BaseName = "default"
-	nsConf.EngType = "rockredis"
+	nsConf.EngType = rockredis.EngType
 	nsConf.PartitionNum = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)

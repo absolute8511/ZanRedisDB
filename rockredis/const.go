@@ -4,6 +4,10 @@ import (
 	"errors"
 )
 
+const (
+	EngType = "rockredis"
+)
+
 type ErrType int64
 
 const (
