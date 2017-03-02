@@ -207,14 +207,14 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 	for namespaceName, namespaceParts := range namespaceMap {
 		CoordLog().Infof("loading namespace %v, %v", namespaceName, namespaceParts)
 		for _, nsInfo := range namespaceParts {
+			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 			shouldLoad := FindSlice(nsInfo.RaftNodes, self.myNode.GetID()) != -1
 			if !shouldLoad {
-				if len(nsInfo.RaftNodes) >= nsInfo.Replica {
+				if len(nsInfo.RaftNodes) >= nsInfo.Replica && localNamespace != nil {
 					self.forceCleanNamespaceData(nsInfo.GetDesp())
 				}
 				continue
 			}
-			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 			if localNamespace != nil {
 				// already loaded
 				self.ensureJoinNamespaceGroup(nsInfo, localNamespace)

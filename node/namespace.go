@@ -363,7 +363,7 @@ func (self *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error
 func (self *NamespaceMgr) ForceDeleteNamespaceData(ns string) error {
 	nsNode := self.GetNamespaceNode(ns)
 	if nsNode == nil {
-		return errors.New("namespace not found: " + ns)
+		return ErrNamespaceNotFound
 	}
 	nsNode.Destroy()
 	return nil
