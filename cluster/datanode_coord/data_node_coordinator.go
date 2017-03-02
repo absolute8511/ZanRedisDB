@@ -515,15 +515,22 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 	}
 	var joinErr *CoordErr
 	retry := 0
-	for retry < 2*len(nsInfo.RaftNodes) {
+	startCheck := time.Now()
+	for time.Since(startCheck) < time.Second*5 {
 		mems := localNamespace.GetMembers()
+		memsMap := make(map[uint64]*common.MemberInfo)
 		alreadyJoined := false
 		for _, m := range mems {
+			memsMap[m.NodeID] = m
 			if m.NodeID == self.GetMyRegID() &&
 				m.GroupName == nsInfo.GetDesp() &&
 				m.ID == raftID {
-				CoordLog().Infof("namespace %v is in raft group, wait sync", nsInfo.GetDesp())
-				alreadyJoined = true
+				if len(mems) > len(nsInfo.RaftNodes)/2 {
+					alreadyJoined = true
+				} else {
+					CoordLog().Infof("namespace %v is in the small raft group %v, need join large group:%v",
+						nsInfo.GetDesp(), mems, nsInfo.RaftNodes)
+				}
 			}
 		}
 		if alreadyJoined {
@@ -535,28 +542,30 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 			select {
 			case <-self.stopChan:
 				return ErrNamespaceExiting
-			case <-time.After(time.Second):
+			case <-time.After(time.Second / 2):
 			}
-			retry++
 			joinErr = ErrNamespaceWaitingSync
 		} else {
-			CoordLog().Infof("request namespace %v join raft group", nsInfo.GetDesp())
 			joinErr = ErrNamespaceWaitingSync
-			remote := nsInfo.RaftNodes[retry%len(nsInfo.RaftNodes)]
-			retry++
-			if remote == self.GetMyID() {
-				continue
+			var remote string
+			cnt := 0
+			for cnt <= len(nsInfo.RaftNodes) {
+				remote = nsInfo.RaftNodes[retry%len(nsInfo.RaftNodes)]
+				retry++
+				cnt++
+				if remote == self.GetMyID() {
+					continue
+				}
+				if _, ok := memsMap[ExtractRegIDFromGenID(remote)]; !ok {
+					break
+				}
 			}
-			select {
-			case <-self.stopChan:
-				return ErrNamespaceExiting
-			case <-time.After(time.Second):
-			}
+			CoordLog().Infof("request to %v for joining self to group: %v", remote, nsInfo.GetDesp())
 			self.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
 			select {
 			case <-self.stopChan:
 				return ErrNamespaceExiting
-			case <-time.After(time.Second):
+			case <-time.After(time.Second / 2):
 			}
 		}
 	}
