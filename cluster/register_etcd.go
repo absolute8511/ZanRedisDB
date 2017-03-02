@@ -111,7 +111,7 @@ type EtcdRegister struct {
 	namespaceRoot        string
 	clusterPath          string
 	pdNodeRootPath       string
-	allNamespaceInfos    map[string][]PartitionMetaInfo
+	allNamespaceInfos    map[string]map[int]PartitionMetaInfo
 	nsEpoch              EpochType
 	namespaceMetaMap     map[string]NamespaceMetaInfo
 	ifNamespaceChanged   int32
@@ -122,7 +122,7 @@ type EtcdRegister struct {
 func NewEtcdRegister(host string) *EtcdRegister {
 	client := etcdlock.NewEClient(host)
 	r := &EtcdRegister{
-		allNamespaceInfos:    make(map[string][]PartitionMetaInfo),
+		allNamespaceInfos:    make(map[string]map[int]PartitionMetaInfo),
 		namespaceMetaMap:     make(map[string]NamespaceMetaInfo),
 		watchNamespaceStopCh: make(chan bool),
 		client:               client,
@@ -165,7 +165,7 @@ func (self *EtcdRegister) GetAllPDNodes() ([]NodeInfo, error) {
 	return nodeList, nil
 }
 
-func (self *EtcdRegister) GetAllNamespaces() (map[string][]PartitionMetaInfo, EpochType, error) {
+func (self *EtcdRegister) GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
 	if atomic.LoadInt32(&self.ifNamespaceChanged) == 1 {
 		return self.scanNamespaces()
 	}
@@ -221,7 +221,7 @@ func (self *EtcdRegister) watchNamespaces() {
 	}
 }
 
-func (self *EtcdRegister) scanNamespaces() (map[string][]PartitionMetaInfo, EpochType, error) {
+func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
 	rsp, err := self.client.Get(self.namespaceRoot, true, true)
 	if err != nil {
 		atomic.StoreInt32(&self.ifNamespaceChanged, 1)
@@ -236,7 +236,7 @@ func (self *EtcdRegister) scanNamespaces() (map[string][]PartitionMetaInfo, Epoc
 	replicasMap := make(map[string]map[string]PartitionReplicaInfo)
 	self.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap)
 
-	nsInfos := make(map[string][]PartitionMetaInfo)
+	nsInfos := make(map[string]map[int]PartitionMetaInfo)
 	nsEpoch := EpochType(rsp.Node.ModifiedIndex)
 	for k, v := range replicasMap {
 		meta, ok := metaMap[k]
@@ -245,7 +245,7 @@ func (self *EtcdRegister) scanNamespaces() (map[string][]PartitionMetaInfo, Epoc
 		}
 		partInfos, ok := nsInfos[k]
 		if !ok {
-			partInfos = make([]PartitionMetaInfo, 0, meta.PartitionNum)
+			partInfos = make(map[int]PartitionMetaInfo, meta.PartitionNum)
 			nsInfos[k] = partInfos
 		}
 		for k2, v2 := range v {
@@ -262,8 +262,7 @@ func (self *EtcdRegister) scanNamespaces() (map[string][]PartitionMetaInfo, Epoc
 			info.Partition = partition
 			info.NamespaceMetaInfo = meta
 			info.PartitionReplicaInfo = v2
-			partInfos = append(partInfos, info)
-			nsInfos[k] = partInfos
+			partInfos[partition] = info
 		}
 	}
 
@@ -327,10 +326,16 @@ func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*Parti
 	self.nsMutex.Lock()
 	nsInfo, ok := self.allNamespaceInfos[ns]
 	self.nsMutex.Unlock()
-	if !ok || partition >= len(nsInfo) {
+	if !ok {
 		return nil, ErrKeyNotFound
 	}
-	p := nsInfo[partition]
+	p, ok := nsInfo[partition]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	if p.Partition != partition {
+		panic(p)
+	}
 	return &p, nil
 }
 
@@ -341,7 +346,11 @@ func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, erro
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
-	return nsInfo, nil
+	parts := make([]PartitionMetaInfo, 0, len(nsInfo))
+	for _, v := range nsInfo {
+		parts = append(parts, v)
+	}
+	return parts, nil
 }
 
 func (self *EtcdRegister) GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, error) {

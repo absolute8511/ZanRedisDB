@@ -370,6 +370,8 @@ func (self *NamespaceMgr) ForceDeleteNamespaceData(ns string) error {
 }
 
 func (self *NamespaceMgr) clearUnusedRaftPeer() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	// while close or remove raft node, we need check if any remote transport peer
 	// should be closed.
 	doCheck := func() {
@@ -393,7 +395,7 @@ func (self *NamespaceMgr) clearUnusedRaftPeer() {
 
 	for {
 		select {
-		case <-time.After(time.Minute):
+		case <-ticker.C:
 			doCheck()
 		case <-self.stopC:
 			return

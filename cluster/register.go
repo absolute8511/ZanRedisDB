@@ -84,7 +84,7 @@ type Register interface {
 	// get  meta info only
 	GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, error)
 	GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error)
-	GetAllNamespaces() (map[string][]PartitionMetaInfo, EpochType, error)
+	GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error)
 	GetNamespacesNotifyChan() chan struct{}
 }
 

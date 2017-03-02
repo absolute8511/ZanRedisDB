@@ -181,18 +181,6 @@ func (self *DataCoordinator) checkLocalNamespaceMagicCode(nsInfo *PartitionMetaI
 	return nil
 }
 
-func (self *DataCoordinator) forceCleanNamespaceData(name string) *CoordErr {
-	// check if any data on local and try remove
-	localErr := self.localNSMgr.ForceDeleteNamespaceData(name)
-	if localErr != nil {
-		if !os.IsNotExist(localErr) {
-			CoordLog().Infof("delete namespace %v local data failed : %v", name, localErr)
-			return &CoordErr{localErr.Error(), RpcCommonErr, CoordLocalErr}
-		}
-	}
-	return nil
-}
-
 func (self *DataCoordinator) loadLocalNamespaceData() error {
 	if self.localNSMgr == nil {
 		return nil
@@ -205,13 +193,12 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 		return err
 	}
 	for namespaceName, namespaceParts := range namespaceMap {
-		CoordLog().Infof("loading namespace %v, %v", namespaceName, namespaceParts)
 		for _, nsInfo := range namespaceParts {
 			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 			shouldLoad := FindSlice(nsInfo.RaftNodes, self.myNode.GetID()) != -1
 			if !shouldLoad {
 				if len(nsInfo.RaftNodes) >= nsInfo.Replica && localNamespace != nil {
-					self.forceCleanNamespaceData(nsInfo.GetDesp())
+					self.removeLocalNamespace(nsInfo.GetDesp(), true)
 				}
 				continue
 			}
@@ -396,7 +383,13 @@ func (self *DataCoordinator) removeLocalNamespace(name string, removeData bool) 
 	if removeData {
 		CoordLog().Infof("removing namespace : %v", name)
 		// check if any data on local and try remove
-		self.forceCleanNamespaceData(name)
+		localErr := self.localNSMgr.ForceDeleteNamespaceData(name)
+		if localErr != nil {
+			if !os.IsNotExist(localErr) {
+				CoordLog().Infof("delete namespace %v local data failed : %v", name, localErr)
+				return &CoordErr{localErr.Error(), RpcCommonErr, CoordLocalErr}
+			}
+		}
 	} else {
 		localNamespace := self.localNSMgr.GetNamespaceNode(name)
 		if localNamespace == nil {
@@ -560,7 +553,6 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 					break
 				}
 			}
-			CoordLog().Infof("request to %v for joining self to group: %v", remote, nsInfo.GetDesp())
 			self.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
 			select {
 			case <-self.stopChan:

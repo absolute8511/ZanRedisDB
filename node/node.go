@@ -741,6 +741,9 @@ func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
 		// replaying local log
 		return
 	}
+	if self.rn.Lead() == raft.None {
+		return
+	}
 
 	self.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
 	err := self.rn.beginSnapshot(np.appliedi, np.confState)
