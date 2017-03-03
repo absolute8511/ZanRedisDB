@@ -498,6 +498,20 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot
 	}
 }
 
+func (rc *raftNode) maybeTryElection() {
+	// to avoid election at the same time, we only allow the smallest node to elect
+	smallest := rc.config.ID
+	for _, v := range rc.config.RaftPeers {
+		if v.ReplicaID < smallest {
+			smallest = v.ReplicaID
+		}
+	}
+	rc.Infof("replica %v should advance to elect, mine is: %v", smallest, rc.config.ID)
+	if smallest == rc.config.ID {
+		advanceTicksForElection(rc.node, rc.config.ElectionTick*2)
+	}
+}
+
 // return (self removed, any conf changed, error)
 func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.ConfState) (bool, bool, error) {
 	// TODO: validate configure change here
@@ -533,17 +547,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 					rc.Infof("node added to the cluster: %v\n", m)
 				}
 				if rc.Lead() == raft.None && memNum >= 2 && memNum >= len(rc.config.RaftPeers) {
-					// to avoid election at the same time, we only allow the smallest node to elect
-					smallest := rc.config.ID
-					for _, v := range rc.config.RaftPeers {
-						if v.ReplicaID < smallest {
-							smallest = v.ReplicaID
-						}
-					}
-					rc.Infof("replica %v should advance to elect, mine is: %v", smallest, rc.config.ID)
-					if smallest == rc.config.ID {
-						advanceTicksForElection(rc.node, rc.config.ElectionTick*2)
-					}
+					rc.maybeTryElection()
 				}
 			}
 		}

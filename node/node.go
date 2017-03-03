@@ -524,6 +524,7 @@ func (self *KVNode) SetCommittedIndex(ci uint64) {
 func (self *KVNode) IsRaftSynced() bool {
 	if self.rn.Lead() == raft.None {
 		nodeLog.Infof("not synced, since no leader ")
+		self.rn.maybeTryElection()
 		return false
 	}
 	to := time.Second * 2
