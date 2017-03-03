@@ -508,6 +508,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		}
 		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
 			CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
+			atomic.StoreInt32(&self.isClusterUnstable, 1)
 			return
 		}
 		// should copy to avoid reused
@@ -532,14 +533,22 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 
 			if (aliveCount <= t.Replica/2) ||
 				partitions[t.Partition].Before(time.Now().Add(-1*waitMigrateInterval)) {
-				CoordLog().Infof("begin migrate the namespace :%v", t.GetDesp())
 				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch(t.Tags)
 				if aliveEpoch != currentNodesEpoch {
 					go self.triggerCheckNamespaces(t.Name, t.Partition, time.Second)
 					continue
 				}
+				CoordLog().Infof("begin migrate the namespace :%v", t.GetDesp())
 				self.handleNamespaceMigrate(&namespaceInfo, aliveNodes, aliveEpoch)
 				delete(partitions, t.Partition)
+				// migrate only one at once to reduce the migrate traffic
+				atomic.StoreInt32(&self.isClusterUnstable, 1)
+				for _, parts := range waitingMigrateNamespace {
+					for pid, _ := range parts {
+						parts[pid] = time.Now()
+					}
+				}
+				return
 			} else {
 				CoordLog().Infof("waiting migrate the namespace :%v since time: %v", t.GetDesp(), partitions[t.Partition])
 			}

@@ -67,7 +67,8 @@ func RunFileSync(remote string, srcPath string, dstPath string) error {
 	} else {
 		// TODO: we need do ssh without password on the cluster nodes
 		log.Printf("copy from remote :%v\n", remote)
-		cmd = exec.Command("scp", "-rp", "-l", "409600", remote+":"+srcPath, dstPath)
+		// limit rate to Kbit/s
+		cmd = exec.Command("scp", "-rp", "-l", "204800", remote+":"+srcPath, dstPath)
 	}
 	err := cmd.Run()
 	if err != nil {

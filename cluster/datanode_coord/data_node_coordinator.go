@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,7 +23,7 @@ var (
 )
 
 const (
-	MAX_RAFT_JOIN_RUNNING = 3
+	MAX_RAFT_JOIN_RUNNING = 5
 )
 
 func GetNamespacePartitionFileName(namespace string, partition int, suffix string) string {
@@ -181,6 +182,16 @@ func (self *DataCoordinator) checkLocalNamespaceMagicCode(nsInfo *PartitionMetaI
 	return nil
 }
 
+type PartitionList []PartitionMetaInfo
+
+func (self PartitionList) Len() int { return len(self) }
+func (self PartitionList) Less(i, j int) bool {
+	return self[i].Partition < self[j].Partition
+}
+func (self PartitionList) Swap(i, j int) {
+	self[i], self[j] = self[j], self[i]
+}
+
 func (self *DataCoordinator) loadLocalNamespaceData() error {
 	if self.localNSMgr == nil {
 		return nil
@@ -192,8 +203,14 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 		}
 		return err
 	}
+	sortedParts := make(PartitionList, 0)
 	for namespaceName, namespaceParts := range namespaceMap {
-		for _, nsInfo := range namespaceParts {
+		sortedParts = sortedParts[:0]
+		for _, part := range namespaceParts {
+			sortedParts = append(sortedParts, part)
+		}
+		sort.Sort(sortedParts)
+		for _, nsInfo := range sortedParts {
 			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 			shouldLoad := FindSlice(nsInfo.RaftNodes, self.myNode.GetID()) != -1
 			if !shouldLoad {
@@ -204,7 +221,11 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 			}
 			if localNamespace != nil {
 				// already loaded
-				self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
+				joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
+				if joinErr != nil && joinErr != ErrNamespaceConfInvalid {
+					// we ensure join group as order for partitions
+					break
+				}
 				continue
 			}
 			CoordLog().Infof("loading namespace: %v", nsInfo.GetDesp())
@@ -230,7 +251,11 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 				CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)
 				localNamespace.SetDataFixState(true)
 			}
-			self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
+			joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
+			if joinErr != nil && joinErr != ErrNamespaceConfInvalid {
+				// we ensure join group as order for partitions
+				break
+			}
 		}
 	}
 	return nil
@@ -509,7 +534,7 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 	var joinErr *CoordErr
 	retry := 0
 	startCheck := time.Now()
-	for time.Since(startCheck) < time.Second*5 {
+	for time.Since(startCheck) < time.Second*30 {
 		mems := localNamespace.GetMembers()
 		memsMap := make(map[uint64]*common.MemberInfo)
 		alreadyJoined := false
