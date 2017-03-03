@@ -540,9 +540,9 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 							smallest = v.ReplicaID
 						}
 					}
-					rc.Infof("replica %v should advance to elect", smallest)
+					rc.Infof("replica %v should advance to elect, mine is: %v", smallest, rc.config.ID)
 					if smallest == rc.config.ID {
-						advanceTicksForElection(rc.node, rc.config.ElectionTick)
+						advanceTicksForElection(rc.node, rc.config.ElectionTick*2)
 					}
 				}
 			}
