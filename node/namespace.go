@@ -26,6 +26,7 @@ var (
 	ErrNamespaceNotFound          = errors.New("ERR_CLUSTER_CHANGED: namespace is not found")
 	ErrNamespacePartitionNotFound = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not found")
 	ErrNamespaceNotLeader         = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not leader on the node")
+	ErrRaftGroupNotReady          = errors.New("raft group not ready")
 )
 
 type NamespaceNode struct {
@@ -267,6 +268,9 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 	if !ok {
 		return nil, ErrNamespacePartitionNotFound
 	}
+	if !n.IsReady() {
+		return nil, ErrRaftGroupNotReady
+	}
 	return n, nil
 }
 
@@ -274,6 +278,11 @@ func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {
 	self.mutex.RLock()
 	v, _ := self.kvNodes[ns]
 	self.mutex.RUnlock()
+	if v != nil {
+		if !v.IsReady() {
+			return nil
+		}
+	}
 	return v
 }
 
@@ -291,6 +300,9 @@ func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 		return nil
 	}
 
+	if !kv.IsReady() {
+		return nil
+	}
 	return kv
 }
 
@@ -319,8 +331,9 @@ func (self *NamespaceMgr) OptimizeDB() {
 		if atomic.LoadInt32(&self.stopping) == 1 {
 			return
 		}
-
-		n.Node.OptimizeDB()
+		if n.IsReady() {
+			n.Node.OptimizeDB()
+		}
 	}
 }
 

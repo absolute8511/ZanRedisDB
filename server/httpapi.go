@@ -36,7 +36,7 @@ func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprout
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	kv, err := self.GetNamespace(ns, realKey)
-	if err != nil {
+	if err != nil || !kv.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: err.Error()}
 	}
 	if v, err := kv.Node.Lookup(realKey); err == nil {
@@ -67,7 +67,7 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	nsNode := self.GetNamespaceFromFullName(m.GroupName)
-	if nsNode == nil {
+	if nsNode == nil || !nsNode.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: node.ErrNamespacePartitionNotFound.Error()}
 	}
 	err = nsNode.Node.ProposeAddMember(m)
@@ -81,7 +81,7 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := self.GetNamespaceFromFullName(ns)
-	if v == nil {
+	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
 	l := v.Node.GetLeadMember()
@@ -94,7 +94,7 @@ func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httpr
 func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := self.GetNamespaceFromFullName(ns)
-	if v == nil {
+	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
 	return v.Node.GetMembers(), nil
@@ -103,7 +103,7 @@ func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps http
 func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := self.GetNamespaceFromFullName(ns)
-	if v == nil {
+	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
 	meta, err := ioutil.ReadAll(req.Body)
@@ -174,6 +174,9 @@ func (self *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps htt
 	rstat := make([]*RaftStatus, 0)
 	for name, nsNode := range nsList {
 		if !strings.HasPrefix(name, ns) {
+			continue
+		}
+		if !nsNode.IsReady() {
 			continue
 		}
 		var s RaftStatus
