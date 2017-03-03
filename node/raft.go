@@ -530,10 +530,21 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 					if m.NodeID != rc.config.nodeConfig.NodeID {
 						rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
 					}
+					rc.Infof("node added to the cluster: %v\n", m)
 				}
-				rc.Infof("node added to the cluster: %v\n", m)
 				if rc.Lead() == raft.None && memNum >= 2 && memNum > len(rc.config.RaftPeers)/2 {
-					advanceTicksForElection(rc.node, rc.config.ElectionTick)
+					// to avoid election at the same time, we only allow the smallest node to elect
+					smallest := rc.config.ID
+					rc.memMutex.Lock()
+					for _, m := range rc.members {
+						if m.ID < smallest {
+							smallest = m.ID
+						}
+					}
+					rc.memMutex.Unlock()
+					if smallest == rc.config.ID {
+						advanceTicksForElection(rc.node, rc.config.ElectionTick)
+					}
 				}
 			}
 		}

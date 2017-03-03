@@ -522,9 +522,14 @@ func (self *KVNode) SetCommittedIndex(ci uint64) {
 }
 
 func (self *KVNode) IsRaftSynced() bool {
+	if self.rn.Lead() == raft.None {
+		nodeLog.Infof("not synced, since no leader ")
+		return false
+	}
+	to := time.Second * 2
 	req := make([]byte, 8)
 	binary.BigEndian.PutUint64(req, self.rn.reqIDGen.Next())
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), to)
 	if err := self.rn.node.ReadIndex(ctx, req); err != nil {
 		cancel()
 		if err == raft.ErrStopped {
@@ -545,7 +550,7 @@ func (self *KVNode) IsRaftSynced() bool {
 			done = bytes.Equal(rs.RequestCtx, req)
 			if !done {
 			}
-		case <-time.After(time.Second * 3):
+		case <-time.After(to):
 			nodeLog.Infof("timeout waiting for read index response")
 			timeout = true
 		case <-self.stopChan:
