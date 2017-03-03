@@ -49,12 +49,13 @@ type RaftConfig struct {
 	ID uint64 `json:"id"`
 	// local server transport address, it
 	// can be used by several raft group
-	RaftAddr    string                 `json:"raft_addr"`
-	DataDir     string                 `json:"data_dir"`
-	WALDir      string                 `json:"wal_dir"`
-	SnapDir     string                 `json:"snap_dir"`
-	RaftPeers   map[uint64]ReplicaInfo `json:"raft_peers"`
-	SnapCount   int                    `json:"snap_count"`
-	SnapCatchup int                    `json:"snap_catchup"`
-	nodeConfig  *MachineConfig
+	RaftAddr     string                 `json:"raft_addr"`
+	DataDir      string                 `json:"data_dir"`
+	WALDir       string                 `json:"wal_dir"`
+	SnapDir      string                 `json:"snap_dir"`
+	RaftPeers    map[uint64]ReplicaInfo `json:"raft_peers"`
+	ElectionTick int                    `json:"election_tick"`
+	SnapCount    int                    `json:"snap_count"`
+	SnapCatchup  int                    `json:"snap_catchup"`
+	nodeConfig   *MachineConfig
 }

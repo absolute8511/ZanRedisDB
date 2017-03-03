@@ -208,10 +208,13 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	walDir := rc.config.WALDir
 	oldwal := wal.Exist(walDir)
 
+	if rc.config.ElectionTick < 50 {
+		rc.config.ElectionTick = 50
+	}
 	c := &raft.Config{
 		ID:              uint64(rc.config.ID),
-		ElectionTick:    50,
-		HeartbeatTick:   5,
+		ElectionTick:    rc.config.ElectionTick,
+		HeartbeatTick:   rc.config.ElectionTick / 10,
 		Storage:         rc.raftStorage,
 		MaxSizePerMsg:   1024 * 1024,
 		MaxInflightMsgs: 256,
@@ -515,18 +518,23 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 					return false, confChanged, errors.New("add member should include node id ")
 				}
 				rc.memMutex.Lock()
+				memNum := len(rc.members)
 				if _, ok := rc.members[m.ID]; ok {
 					rc.Infof("node already exist in cluster: %v\n", m)
 					rc.memMutex.Unlock()
 				} else {
 					confChanged = true
 					rc.members[m.ID] = &m
+					memNum++
 					rc.memMutex.Unlock()
 					if m.NodeID != rc.config.nodeConfig.NodeID {
 						rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
 					}
 				}
 				rc.Infof("node added to the cluster: %v\n", m)
+				if rc.Lead() == raft.None && memNum >= 2 && memNum > len(rc.config.RaftPeers)/2 {
+					advanceTicksForElection(rc.node, rc.config.ElectionTick)
+				}
 			}
 		}
 	case raftpb.ConfChangeRemoveNode:
