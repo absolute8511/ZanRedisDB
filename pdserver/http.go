@@ -155,8 +155,13 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 	if ns == "" {
 		return nil, common.HttpErr{400, "MISSING_ARG_NAMESPACE"}
 	}
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+	}
+	epoch := reqParams.Get("epoch")
 
-	namespaces, _, err := self.pdCoord.GetAllNamespaces()
+	namespaces, curEpoch, err := self.pdCoord.GetAllNamespaces()
 	if err != nil {
 		return nil, common.HttpErr{500, err.Error()}
 	}
@@ -164,8 +169,10 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 	if !ok {
 		return nil, common.HttpErr{404, "NAMESPACE not found"}
 	}
+	if epoch == strconv.FormatInt(curEpoch, 10) {
+		return nil, common.HttpErr{304, "cluster namespaces unchanged"}
+	}
 	dns, _ := self.pdCoord.GetAllDataNodes()
-	maxEpoch := int64(0)
 	partNodes := make(map[int]PartitionNodeInfo)
 
 	pnum := 0
@@ -173,9 +180,6 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 	for _, nsInfo := range nsPartsInfo {
 		pnum = nsInfo.PartitionNum
 		engType = nsInfo.EngType
-		if int64(nsInfo.Epoch) > maxEpoch {
-			maxEpoch = int64(nsInfo.Epoch)
-		}
 		var pn PartitionNodeInfo
 		for i, nid := range nsInfo.RaftNodes {
 			n, ok := dns[nid]
@@ -197,7 +201,7 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 		partNodes[nsInfo.Partition] = pn
 	}
 	return map[string]interface{}{
-		"epoch":         maxEpoch,
+		"epoch":         curEpoch,
 		"partition_num": pnum,
 		"eng_type":      engType,
 		"partitions":    partNodes,

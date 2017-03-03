@@ -291,7 +291,9 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 	}
 	namespaceList := make([]PartitionMetaInfo, 0)
 	for _, parts := range allNamespaces {
-		namespaceList = append(namespaceList, parts...)
+		for _, p := range parts {
+			namespaceList = append(namespaceList, p)
+		}
 	}
 	nodeNameList := make([]string, 0)
 	movedNamespace := ""

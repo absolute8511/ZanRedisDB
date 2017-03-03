@@ -222,6 +222,7 @@ func (self *EtcdRegister) watchNamespaces() {
 }
 
 func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
+	atomic.StoreInt32(&self.ifNamespaceChanged, 0)
 	rsp, err := self.client.Get(self.namespaceRoot, true, true)
 	if err != nil {
 		atomic.StoreInt32(&self.ifNamespaceChanged, 1)
@@ -230,14 +231,15 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 		}
 		return nil, 0, err
 	}
-	atomic.StoreInt32(&self.ifNamespaceChanged, 0)
 
 	metaMap := make(map[string]NamespaceMetaInfo)
 	replicasMap := make(map[string]map[string]PartitionReplicaInfo)
-	self.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap)
+	maxEpoch := self.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap)
 
 	nsInfos := make(map[string]map[int]PartitionMetaInfo)
-	nsEpoch := EpochType(rsp.Node.ModifiedIndex)
+	if EpochType(rsp.Node.ModifiedIndex) > maxEpoch {
+		maxEpoch = EpochType(rsp.Node.ModifiedIndex)
+	}
 	for k, v := range replicasMap {
 		meta, ok := metaMap[k]
 		if !ok {
@@ -268,19 +270,24 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 
 	self.nsMutex.Lock()
 	self.allNamespaceInfos = nsInfos
-	self.nsEpoch = nsEpoch
+	self.nsEpoch = maxEpoch
 	self.nsMutex.Unlock()
 
-	return nsInfos, nsEpoch, nil
+	return nsInfos, maxEpoch, nil
 }
 
 func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 	metaMap map[string]NamespaceMetaInfo,
-	replicasMap map[string]map[string]PartitionReplicaInfo) {
+	replicasMap map[string]map[string]PartitionReplicaInfo) EpochType {
+	maxEpoch := EpochType(0)
 	for _, node := range nodes {
 		if node.Nodes != nil {
-			self.processNamespaceNode(node.Nodes, metaMap, replicasMap)
+			maxEpoch = self.processNamespaceNode(node.Nodes, metaMap, replicasMap)
 		}
+		if EpochType(node.ModifiedIndex) > maxEpoch {
+			maxEpoch = EpochType(node.ModifiedIndex)
+		}
+
 		if node.Dir {
 			continue
 		}
@@ -320,6 +327,7 @@ func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 			metaMap[nsName] = mInfo
 		}
 	}
+	return maxEpoch
 }
 
 func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*PartitionMetaInfo, error) {

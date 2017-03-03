@@ -455,7 +455,9 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			return
 		}
 		for _, parts := range allNamespaces {
-			namespaces = append(namespaces, parts...)
+			for _, p := range parts {
+				namespaces = append(namespaces, p)
+			}
 		}
 		CoordLog().Debugf("scan found namespaces: %v", namespaces)
 	} else {
