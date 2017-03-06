@@ -367,7 +367,7 @@ func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*Parti
 	if p.Partition != partition {
 		panic(p)
 	}
-	return &p, nil
+	return p.GetCopy(), nil
 }
 
 func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error) {
@@ -379,7 +379,7 @@ func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, erro
 	}
 	parts := make([]PartitionMetaInfo, 0, len(nsInfo))
 	for _, v := range nsInfo {
-		parts = append(parts, v)
+		parts = append(parts, *v.GetCopy())
 	}
 	return parts, nil
 }

@@ -64,6 +64,17 @@ type PartitionMetaInfo struct {
 	PartitionReplicaInfo
 }
 
+func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
+	newp := *self
+	newp.RaftNodes = make([]string, len(self.RaftNodes))
+	copy(newp.RaftNodes, self.RaftNodes)
+	newp.RaftIDs = make(map[string]uint64, len(self.RaftIDs))
+	for k, v := range self.RaftIDs {
+		newp.RaftIDs[k] = v
+	}
+	return &newp
+}
+
 func (self *PartitionMetaInfo) GetDesp() string {
 	return common.GetNsDesp(self.Name, self.Partition)
 }

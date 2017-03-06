@@ -178,7 +178,11 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 				continue
 			} else {
 				CoordLog().Infof("node: %v is added for namespace %v", nid, namespaceInfo.GetDesp())
-				self.pdCoord.addNamespaceToNode(namespaceInfo, nid)
+				err := self.pdCoord.addNamespaceToNode(namespaceInfo, nid)
+				if err != nil {
+					CoordLog().Infof("node: %v added for namespace %v failed: %v", nid,
+						namespaceInfo.GetDesp(), err)
+				}
 			}
 		}
 		select {
