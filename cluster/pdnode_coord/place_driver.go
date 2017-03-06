@@ -367,6 +367,8 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			(namespaceInfo.RaftNodes[0] != expectLeader) {
 			for index, nid := range namespaceInfo.RaftNodes {
 				if nid == expectLeader {
+					CoordLog().Infof("need move leader for namespace %v since %v not expected leader: %v",
+						namespaceInfo.GetDesp(), namespaceInfo.RaftNodes[0], expectLeader)
 					namespaceInfo.RaftNodes[0], namespaceInfo.RaftNodes[index] = namespaceInfo.RaftNodes[index], namespaceInfo.RaftNodes[0]
 					self.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
 						&namespaceInfo.PartitionReplicaInfo, namespaceInfo.PartitionReplicaInfo.Epoch)

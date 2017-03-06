@@ -852,7 +852,7 @@ func stepLeader(r *raft, m pb.Message) {
 			return
 		}
 		if r.leadTransferee != None {
-			r.logger.Debugf("%x [term %d] transfer leadership to %x is in progress; dropping proposal", r.id, r.Term, r.leadTransferee)
+			//r.logger.Debugf("%x [term %d] transfer leadership to %x is in progress; dropping proposal", r.id, r.Term, r.leadTransferee)
 			return
 		}
 
@@ -904,7 +904,7 @@ func stepLeader(r *raft, m pb.Message) {
 	// All other message types require a progress for m.From (pr).
 	pr, prOk := r.prs[m.From]
 	if !prOk {
-		r.logger.Debugf("%x no progress available for %x", r.id, m.From)
+		//r.logger.Debugf("%x no progress available for %x", r.id, m.From)
 		return
 	}
 	switch m.Type {
