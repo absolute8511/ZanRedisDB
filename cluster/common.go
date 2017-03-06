@@ -210,25 +210,25 @@ func FindSlice(in []string, e string) int {
 }
 
 func MergeList(l []string, r []string) []string {
+	newl := make([]string, len(l))
+	copy(newl, l)
 	for _, e := range r {
 		if FindSlice(l, e) == -1 {
-			l = append(l, e)
+			newl = append(newl, e)
 		}
 	}
-	return l
+	return newl
 }
 
 func FilterList(l []string, filter []string) []string {
-	for _, e := range filter {
-		for i, v := range l {
-			if e == v {
-				copy(l[i:], l[i+1:])
-				l = l[:len(l)-1]
-				break
-			}
+	newl := make([]string, 0, len(l))
+	for _, e := range l {
+		if FindSlice(filter, e) != -1 {
+			continue
 		}
+		newl = append(newl, e)
 	}
-	return l
+	return newl
 }
 
 type NamespaceNameInfo struct {

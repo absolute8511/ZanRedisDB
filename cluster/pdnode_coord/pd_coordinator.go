@@ -608,8 +608,10 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		}
 	}
 	if len(nsInfo.RaftNodes) > nsInfo.Replica {
-		nsInfo.RaftNodes = FilterList(nsInfo.RaftNodes, failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica])
-		for _, n := range failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica] {
+		failedList = failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica]
+		nsInfo.RaftNodes = FilterList(nsInfo.RaftNodes, failedList)
+		CoordLog().Infof("remove failed raft node %v for namespace: %v", failedList, nsInfo.GetDesp())
+		for _, n := range failedList {
 			delete(nsInfo.RaftIDs, n)
 			CoordLog().Infof("remove failed raft node %v for namespace: %v", n, nsInfo.GetDesp())
 			isrChanged = true
