@@ -25,7 +25,8 @@ var (
 )
 
 const (
-	waitMigrateInterval = time.Minute * 10
+	waitMigrateInterval          = time.Minute * 30
+	waitEmergencyMigrateInterval = time.Second * 30
 )
 
 type PDCoordinator struct {
@@ -530,9 +531,10 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 				CoordLog().Infof("wait checking namespaces since the cluster is upgrading")
 				continue
 			}
-
-			if (aliveCount <= t.Replica/2) ||
-				partitions[t.Partition].Before(time.Now().Add(-1*waitMigrateInterval)) {
+			failedTime := partitions[t.Partition]
+			emergency := (aliveCount <= t.Replica/2) && failedTime.Before(time.Now().Add(-1*waitEmergencyMigrateInterval))
+			if emergency ||
+				failedTime.Before(time.Now().Add(-1*waitMigrateInterval)) {
 				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch(t.Tags)
 				if aliveEpoch != currentNodesEpoch {
 					go self.triggerCheckNamespaces(t.Name, t.Partition, time.Second)
@@ -545,7 +547,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 				atomic.StoreInt32(&self.isClusterUnstable, 1)
 				for _, parts := range waitingMigrateNamespace {
 					for pid, _ := range parts {
-						parts[pid] = time.Now()
+						parts[pid].Add(time.Second * 10)
 					}
 				}
 				return
