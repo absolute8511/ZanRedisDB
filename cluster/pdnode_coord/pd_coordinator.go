@@ -25,7 +25,7 @@ var (
 )
 
 const (
-	waitMigrateInterval          = time.Minute * 30
+	waitMigrateInterval          = time.Minute * 3
 	waitEmergencyMigrateInterval = time.Second * 30
 )
 
@@ -610,6 +610,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		nsInfo.RaftNodes = FilterList(nsInfo.RaftNodes, failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica])
 		for _, n := range failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica] {
 			delete(nsInfo.RaftIDs, n)
+			isrChanged = true
 		}
 	}
 
