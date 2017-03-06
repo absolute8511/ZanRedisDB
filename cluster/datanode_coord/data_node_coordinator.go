@@ -368,6 +368,10 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					self.transferMyNamespaceLeader(namespaceMeta, namespaceMeta.RaftNodes[0])
 				} else {
 					members := self.getNamespaceRaftMembers(namespaceMeta)
+					if len(members) <= namespaceMeta.Replica {
+						continue
+					}
+					// the members is more than replica, we need to remove the member that is not necessary anymore
 					for _, m := range members {
 						found := false
 						for nid, rid := range namespaceMeta.RaftIDs {

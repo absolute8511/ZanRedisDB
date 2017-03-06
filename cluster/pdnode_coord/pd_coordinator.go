@@ -445,7 +445,6 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		return
 	}
 	time.Sleep(time.Millisecond * 10)
-	CoordLog().Infof("do check namespaces...")
 	defer atomic.StoreInt32(&self.doChecking, 0)
 
 	namespaces := []PartitionMetaInfo{}
@@ -477,8 +476,9 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 	// some partition when creating namespace.
 
 	currentNodes, currentNodesEpoch := self.getCurrentNodesWithRemoving()
+	CoordLog().Infof("do check namespaces, current nodes: %v, ...", currentNodes)
 	checkOK := true
-	for _, t := range namespaces {
+	for _, nsInfo := range namespaces {
 		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
 			CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
 			return
@@ -491,16 +491,16 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		}
 
 		needMigrate := false
-		if len(t.RaftNodes) < t.Replica {
-			CoordLog().Infof("replicas is not enough for namespace %v, isr is :%v", t.GetDesp(), t.RaftNodes)
+		if len(nsInfo.RaftNodes) < nsInfo.Replica {
+			CoordLog().Infof("replicas is not enough for namespace %v, isr is :%v", nsInfo.GetDesp(), nsInfo.RaftNodes)
 			needMigrate = true
 			checkOK = false
 		}
 
 		aliveCount := 0
-		for _, replica := range t.RaftNodes {
+		for _, replica := range nsInfo.RaftNodes {
 			if _, ok := currentNodes[replica]; !ok {
-				CoordLog().Warningf("namespace %v isr node %v is lost.", t.GetDesp(), replica)
+				CoordLog().Warningf("namespace %v isr node %v is lost.", nsInfo.GetDesp(), replica)
 				needMigrate = true
 				checkOK = false
 			} else {
@@ -513,16 +513,16 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			return
 		}
 		// should copy to avoid reused
-		namespaceInfo := t
+		namespaceInfo := nsInfo
 
-		partitions, ok := waitingMigrateNamespace[t.Name]
+		partitions, ok := waitingMigrateNamespace[nsInfo.Name]
 		if !ok {
 			partitions = make(map[int]time.Time)
-			waitingMigrateNamespace[t.Name] = partitions
+			waitingMigrateNamespace[nsInfo.Name] = partitions
 		}
 		if needMigrate {
-			if _, ok := partitions[t.Partition]; !ok {
-				partitions[t.Partition] = time.Now()
+			if _, ok := partitions[nsInfo.Partition]; !ok {
+				partitions[nsInfo.Partition] = time.Now()
 				// migrate next time
 				continue
 			}
@@ -531,18 +531,18 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 				CoordLog().Infof("wait checking namespaces since the cluster is upgrading")
 				continue
 			}
-			failedTime := partitions[t.Partition]
-			emergency := (aliveCount <= t.Replica/2) && failedTime.Before(time.Now().Add(-1*waitEmergencyMigrateInterval))
+			failedTime := partitions[nsInfo.Partition]
+			emergency := (aliveCount <= nsInfo.Replica/2) && failedTime.Before(time.Now().Add(-1*waitEmergencyMigrateInterval))
 			if emergency ||
 				failedTime.Before(time.Now().Add(-1*waitMigrateInterval)) {
-				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch(t.Tags)
+				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch(nsInfo.Tags)
 				if aliveEpoch != currentNodesEpoch {
-					go self.triggerCheckNamespaces(t.Name, t.Partition, time.Second)
+					go self.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second)
 					continue
 				}
-				CoordLog().Infof("begin migrate the namespace :%v", t.GetDesp())
+				CoordLog().Infof("begin migrate the namespace :%v", nsInfo.GetDesp())
 				self.handleNamespaceMigrate(&namespaceInfo, aliveNodes, aliveEpoch)
-				delete(partitions, t.Partition)
+				delete(partitions, nsInfo.Partition)
 				// migrate only one at once to reduce the migrate traffic
 				atomic.StoreInt32(&self.isClusterUnstable, 1)
 				for _, parts := range waitingMigrateNamespace {
@@ -552,20 +552,21 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 				}
 				return
 			} else {
-				CoordLog().Infof("waiting migrate the namespace :%v since time: %v", t.GetDesp(), partitions[t.Partition])
+				CoordLog().Infof("waiting migrate the namespace :%v since time: %v", nsInfo.GetDesp(), partitions[nsInfo.Partition])
 			}
 		} else {
-			delete(partitions, t.Partition)
+			delete(partitions, nsInfo.Partition)
 		}
 
-		if aliveCount > t.Replica && atomic.LoadInt32(&self.balanceWaiting) == 0 {
+		if aliveCount > nsInfo.Replica && atomic.LoadInt32(&self.balanceWaiting) == 0 {
 			//remove the unwanted node in isr
-			CoordLog().Infof("isr is more than replicator: %v, %v", aliveCount, t.Replica)
+			CoordLog().Infof("namespace %v isr %v is more than replicator: %v, %v", namespaceInfo.GetDesp(),
+				namespaceInfo.RaftNodes, aliveCount, nsInfo.Replica)
 			removeNode := self.dpm.decideUnwantedRaftNode(&namespaceInfo, currentNodes)
 			if removeNode != "" {
 				coordErr := self.removeNamespaceFromNode(&namespaceInfo, removeNode)
 				if coordErr == nil {
-					CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, t)
+					CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, nsInfo)
 				}
 			}
 		}
@@ -610,6 +611,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		nsInfo.RaftNodes = FilterList(nsInfo.RaftNodes, failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica])
 		for _, n := range failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica] {
 			delete(nsInfo.RaftIDs, n)
+			CoordLog().Infof("remove failed raft node %v for namespace: %v", n, nsInfo.GetDesp())
 			isrChanged = true
 		}
 	}
