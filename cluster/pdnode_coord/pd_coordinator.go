@@ -586,9 +586,12 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 	}
 	isrChanged := false
 	aliveReplicas := 0
+	failedList := make([]string, 0)
 	for _, replica := range nsInfo.RaftNodes {
 		if _, ok := currentNodes[replica]; ok {
 			aliveReplicas++
+		} else {
+			failedList = append(failedList, replica)
 		}
 	}
 
@@ -603,6 +606,13 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 			isrChanged = true
 		}
 	}
+	if len(nsInfo.RaftNodes) > nsInfo.Replica {
+		nsInfo.RaftNodes = FilterList(nsInfo.RaftNodes, failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica])
+		for _, n := range failedList[:len(nsInfo.RaftNodes)-nsInfo.Replica] {
+			delete(nsInfo.RaftIDs, n)
+		}
+	}
+
 	if isrChanged {
 		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
