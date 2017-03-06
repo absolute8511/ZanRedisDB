@@ -14,13 +14,20 @@
 
 package raft
 
-import pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+import (
+	"bytes"
+	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+)
 
 // ReadState provides state for read only query.
 // It's caller's responsibility to call ReadIndex first before getting
 // this state from ready, It's also caller's duty to differentiate if this
 // state is what it requests through RequestCtx, eg. given a unique id as
 // RequestCtx
+var (
+	empty = []byte("")
+)
+
 type ReadState struct {
 	Index      uint64
 	RequestCtx []byte
@@ -35,13 +42,15 @@ type readIndexStatus struct {
 type readOnly struct {
 	option           ReadOnlyOption
 	pendingReadIndex map[string]*readIndexStatus
-	readIndexQueue   []string
+	readIndexQueue   [][]byte
+	buf              [][]byte
 }
 
 func newReadOnly(option ReadOnlyOption) *readOnly {
 	return &readOnly{
 		option:           option,
 		pendingReadIndex: make(map[string]*readIndexStatus),
+		buf:              make([][]byte, 0, 10),
 	}
 }
 
@@ -50,12 +59,11 @@ func newReadOnly(option ReadOnlyOption) *readOnly {
 // the read only request.
 // `m` is the original read only request message from the local or remote node.
 func (ro *readOnly) addRequest(index uint64, m pb.Message) {
-	ctx := string(m.Entries[0].Data)
-	if _, ok := ro.pendingReadIndex[ctx]; ok {
+	if _, ok := ro.pendingReadIndex[string(m.Entries[0].Data)]; ok {
 		return
 	}
-	ro.pendingReadIndex[ctx] = &readIndexStatus{index: index, req: m, acks: make(map[uint64]struct{})}
-	ro.readIndexQueue = append(ro.readIndexQueue, ctx)
+	ro.pendingReadIndex[string(m.Entries[0].Data)] = &readIndexStatus{index: index, req: m, acks: make(map[uint64]struct{})}
+	ro.readIndexQueue = append(ro.readIndexQueue, m.Entries[0].Data)
 }
 
 // recvAck notifies the readonly struct that the raft state machine received
@@ -81,17 +89,16 @@ func (ro *readOnly) advance(m pb.Message) []*readIndexStatus {
 		found bool
 	)
 
-	ctx := string(m.Context)
 	rss := []*readIndexStatus{}
 
 	for _, okctx := range ro.readIndexQueue {
 		i++
-		rs, ok := ro.pendingReadIndex[okctx]
+		rs, ok := ro.pendingReadIndex[string(okctx)]
 		if !ok {
 			panic("cannot find corresponding read state from pending map")
 		}
 		rss = append(rss, rs)
-		if okctx == ctx {
+		if bytes.Equal(okctx, m.Context) {
 			found = true
 			break
 		}
@@ -102,6 +109,14 @@ func (ro *readOnly) advance(m pb.Message) []*readIndexStatus {
 		for _, rs := range rss {
 			delete(ro.pendingReadIndex, string(rs.req.Context))
 		}
+		if len(ro.readIndexQueue) == 0 {
+			ro.readIndexQueue = ro.buf
+		}
+		if cap(ro.readIndexQueue) > 1024 && len(ro.readIndexQueue) < cap(ro.buf) {
+			tmp := ro.readIndexQueue
+			ro.readIndexQueue = ro.buf
+			ro.readIndexQueue = append(ro.readIndexQueue, tmp...)
+		}
 		return rss
 	}
 
@@ -110,9 +125,9 @@ func (ro *readOnly) advance(m pb.Message) []*readIndexStatus {
 
 // lastPendingRequestCtx returns the context of the last pending read only
 // request in readonly struct.
-func (ro *readOnly) lastPendingRequestCtx() string {
+func (ro *readOnly) lastPendingRequestCtx() []byte {
 	if len(ro.readIndexQueue) == 0 {
-		return ""
+		return empty
 	}
 	return ro.readIndexQueue[len(ro.readIndexQueue)-1]
 }

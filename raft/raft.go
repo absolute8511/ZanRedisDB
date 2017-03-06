@@ -502,7 +502,7 @@ func (r *raft) bcastHeartbeat() {
 	if len(lastCtx) == 0 {
 		r.bcastHeartbeatWithCtx(nil)
 	} else {
-		r.bcastHeartbeatWithCtx([]byte(lastCtx))
+		r.bcastHeartbeatWithCtx(lastCtx)
 	}
 }
 
