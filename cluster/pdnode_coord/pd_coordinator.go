@@ -632,7 +632,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 
 func (self *PDCoordinator) addNamespaceToNode(nsInfo *PartitionMetaInfo, nid string) *CoordErr {
 	nsInfo.RaftNodes = append(nsInfo.RaftNodes, nid)
-	if self.dpm.checkNamespaceNodeConflict(nsInfo) {
+	if !self.dpm.checkNamespaceNodeConflict(nsInfo) {
 		return ErrNamespaceNodeConflict
 	}
 	nsInfo.MaxRaftID++
