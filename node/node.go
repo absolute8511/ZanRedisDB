@@ -583,12 +583,19 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	defer self.rn.Infof("finished applying snapshot at index %d\n", np)
 
 	if applyEvent.snapshot.Metadata.Index <= np.appliedi {
-		nodeLog.Fatalf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
+		nodeLog.Panicf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
 
 	if err := self.RestoreFromSnapshot(false, applyEvent.snapshot); err != nil {
-		nodeLog.Panic(err)
+		nodeLog.Error(err)
+		go func() {
+			select {
+			case <-self.stopChan:
+			default:
+				self.Stop()
+			}
+		}()
 	}
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
@@ -791,32 +798,38 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
-	hasBackup, _ := self.checkLocalBackup(raftSnapshot)
-	if !startup {
-		// TODO: currently, we use the backup id as meta, this can be
-		// the same even the snap applied index is different, so we can not
-		// tell if the local backup id is exactly the desired snap.
-		// we need clear and copy from remote.
-		// In order to avoid this, we need write some meta to backup,
-		// such as write snap term and index to backup, or name the backup id
-		// using the snap term+index
-		// hasBackup = false
-	}
-	if !hasBackup {
-		self.rn.Infof("local no backup for snapshot, copy from remote\n")
-		syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
-		if syncAddr == "" && syncDir == "" {
-			panic("no backup can be found from others")
+	retry := 0
+	for retry < 3 {
+		hasBackup, _ := self.checkLocalBackup(raftSnapshot)
+		if !hasBackup {
+			self.rn.Infof("local no backup for snapshot, copy from remote\n")
+			syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
+			if syncAddr == "" && syncDir == "" {
+				panic("no backup can be found from others")
+			}
+			// copy backup data from the remote leader node, and recovery backup from it
+			// if local has some old backup data, we should use rsync to sync the data file
+			// use the rocksdb backup/checkpoint interface to backup data
+			err = common.RunFileSync(syncAddr,
+				path.Join(rockredis.GetBackupDir(syncDir),
+					rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
+				self.store.GetBackupDir())
+			if err != nil {
+				self.rn.Infof("failed to copy snapshot: %v", err)
+				retry++
+				time.Sleep(time.Second)
+				continue
+			}
 		}
-		// copy backup data from the remote leader node, and recovery backup from it
-		// if local has some old backup data, we should use rsync to sync the data file
-		// use the rocksdb backup/checkpoint interface to backup data
-		common.RunFileSync(syncAddr,
-			path.Join(rockredis.GetBackupDir(syncDir),
-				rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
-			self.store.GetBackupDir())
+		err = self.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
+		if err == nil {
+			return nil
+		}
+		retry++
+		time.Sleep(time.Second)
+		self.rn.Infof("failed to restore snapshot: %v", err)
 	}
-	return self.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
+	return err
 }
 
 func (self *KVNode) CheckLocalBackup(snapData []byte) (bool, error) {
@@ -876,6 +889,7 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	if err != nil {
 		return "", ""
 	}
+	// TODO: try to get leader and members from register
 	remoteLeader := si.LeaderInfo
 	members := make([]*common.MemberInfo, 0)
 	members = append(members, remoteLeader)
