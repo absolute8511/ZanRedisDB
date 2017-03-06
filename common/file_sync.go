@@ -70,9 +70,9 @@ func RunFileSync(remote string, srcPath string, dstPath string) error {
 		// limit rate to Kbit/s
 		cmd = exec.Command("scp", "-rp", "-l", "204800", remote+":"+srcPath, dstPath)
 	}
-	err := cmd.Run()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("cmd %v error: %v\n", cmd, err)
+		log.Printf("cmd %v error: %v, output: %v\n", cmd, err, string(output))
 	}
 	return err
 	//fs := &gosync.BasicSummary{}
