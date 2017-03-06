@@ -138,6 +138,13 @@ func (self *EtcdRegister) InitClusterID(id string) {
 	self.clusterPath = self.getClusterPath()
 	self.pdNodeRootPath = self.getPDNodeRootPath()
 	go self.watchNamespaces()
+	go self.refreshNamespaces()
+}
+
+func (self *EtcdRegister) Stop() {
+	if self.watchNamespaceStopCh != nil {
+		close(self.watchNamespaceStopCh)
+	}
 }
 
 func (self *EtcdRegister) updateNamespaceMeta(ns string, meta NamespaceMetaInfo) {
@@ -181,6 +188,21 @@ func (self *EtcdRegister) GetNamespacesNotifyChan() chan struct{} {
 	return self.nsChangedChan
 }
 
+func (self *EtcdRegister) refreshNamespaces() {
+	ticker := time.NewTicker(time.Second * 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-self.watchNamespaceStopCh:
+			return
+		case <-ticker.C:
+			if atomic.LoadInt32(&self.ifNamespaceChanged) == 1 {
+				self.scanNamespaces()
+			}
+		}
+	}
+}
+
 func (self *EtcdRegister) watchNamespaces() {
 	watcher := self.client.Watch(self.namespaceRoot, 0, true)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -222,6 +244,7 @@ func (self *EtcdRegister) watchNamespaces() {
 }
 
 func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
+	coordLog.Infof("refreshing namespaces")
 	atomic.StoreInt32(&self.ifNamespaceChanged, 0)
 	rsp, err := self.client.Get(self.namespaceRoot, true, true)
 	if err != nil {
@@ -332,8 +355,8 @@ func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 
 func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*PartitionMetaInfo, error) {
 	self.nsMutex.Lock()
+	defer self.nsMutex.Unlock()
 	nsInfo, ok := self.allNamespaceInfos[ns]
-	self.nsMutex.Unlock()
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
@@ -349,8 +372,8 @@ func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*Parti
 
 func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error) {
 	self.nsMutex.Lock()
+	defer self.nsMutex.Unlock()
 	nsInfo, ok := self.allNamespaceInfos[ns]
-	self.nsMutex.Unlock()
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
@@ -501,9 +524,7 @@ func (self *PDEtcdRegister) Stop() {
 	if self.watchNodesStopCh != nil {
 		close(self.watchNodesStopCh)
 	}
-	if self.watchNamespaceStopCh != nil {
-		close(self.watchNamespaceStopCh)
-	}
+	self.EtcdRegister.Stop()
 }
 
 func (self *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
@@ -761,6 +782,7 @@ func (self *PDEtcdRegister) UpdateNamespaceMetaInfo(ns string, meta *NamespaceMe
 func (self *PDEtcdRegister) DeleteWholeNamespace(ns string) error {
 	self.nsMutex.Lock()
 	delete(self.namespaceMetaMap, ns)
+	atomic.StoreInt32(&self.ifNamespaceChanged, 1)
 	rsp, err := self.client.Delete(self.getNamespacePath(ns), true)
 	coordLog.Infof("delete whole topic: %v, %v, %v", ns, err, rsp)
 	self.nsMutex.Unlock()

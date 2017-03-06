@@ -708,6 +708,7 @@ func (self *DataCoordinator) prepareLeavingCluster() {
 	if self.register != nil {
 		atomic.StoreInt32(&self.stopping, 1)
 		self.register.Unregister(&self.myNode)
+		self.register.Stop()
 	}
 }
 

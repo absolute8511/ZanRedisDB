@@ -476,7 +476,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 	// some partition when creating namespace.
 
 	currentNodes, currentNodesEpoch := self.getCurrentNodesWithRemoving()
-	CoordLog().Infof("do check namespaces, current nodes: %v, ...", currentNodes)
+	CoordLog().Infof("do check namespaces (%v), current nodes: %v, ...", len(namespaces), len(currentNodes))
 	checkOK := true
 	for _, nsInfo := range namespaces {
 		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {

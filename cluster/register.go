@@ -86,6 +86,7 @@ type Register interface {
 	GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error)
 	GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error)
 	GetNamespacesNotifyChan() chan struct{}
+	Stop()
 }
 
 // We need check leader before do any modify to etcd.
@@ -94,7 +95,6 @@ type PDRegister interface {
 	Register
 	Register(nodeData *NodeInfo) error // update
 	Unregister(nodeData *NodeInfo) error
-	Stop()
 	// the cluster root modify index
 	GetClusterEpoch() (EpochType, error)
 	AcquireAndWatchLeader(leader chan *NodeInfo, stop chan struct{})
