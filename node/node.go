@@ -475,6 +475,11 @@ func (self *KVNode) ProposeRemoveMember(m common.MemberInfo) error {
 	cc := raftpb.ConfChange{
 		Type:      raftpb.ConfChangeRemoveNode,
 		ReplicaID: m.ID,
+		NodeGroup: raftpb.Group{
+			NodeId:        m.NodeID,
+			Name:          m.GroupName,
+			GroupId:       uint64(m.GroupID),
+			RaftReplicaId: m.ID},
 	}
 	return self.proposeConfChange(cc)
 }

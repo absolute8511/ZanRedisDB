@@ -265,6 +265,20 @@ func (self *DataCoordinator) checkAndFixLocalNamespaceData(nsInfo *PartitionMeta
 	return nil
 }
 
+func (self *DataCoordinator) addNamespaceRaftMember(nsInfo *PartitionMetaInfo, m *common.MemberInfo) {
+	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+	if nsNode == nil {
+		CoordLog().Infof("namespace %v not found while add member", nsInfo.GetDesp())
+		return
+	}
+	err := nsNode.Node.ProposeAddMember(*m)
+	if err != nil {
+		CoordLog().Infof("%v propose add %v failed: %v", nsInfo.GetDesp(), m, err)
+	} else {
+		CoordLog().Infof("namespace %v propose add member %v", nsInfo.GetDesp(), m)
+	}
+}
+
 func (self *DataCoordinator) removeNamespaceRaftMember(nsInfo *PartitionMetaInfo, m *common.MemberInfo) {
 	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
@@ -355,38 +369,71 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					CoordLog().Infof("the namespace should be clean since not relevance to me: %v", namespaceMeta)
 					self.removeLocalNamespace(name, true)
 				}
-			} else if len(namespaceMeta.RaftNodes) >= namespaceMeta.Replica {
-				leader := self.getNamespaceRaftLeader(namespaceMeta)
-				if leader != self.GetMyRegID() {
+				continue
+			}
+			// only leader check the follower status
+			leader := self.getNamespaceRaftLeader(namespaceMeta)
+			if leader != self.GetMyRegID() {
+				continue
+			}
+			isReplicasEnough := len(namespaceMeta.RaftNodes) >= namespaceMeta.Replica
+
+			if isReplicasEnough && namespaceMeta.RaftNodes[0] != self.GetMyID() {
+				// the raft leader check if I am the expected sharding leader,
+				// if not, try to transfer the leader to expected node. We need do this
+				// because we should make all the sharding leaders balanced on
+				// all the cluster nodes.
+				self.transferMyNamespaceLeader(namespaceMeta, namespaceMeta.RaftNodes[0])
+			} else {
+				members := self.getNamespaceRaftMembers(namespaceMeta)
+				// check if any replica is not joined to members
+				anyJoined := false
+				for nid, rid := range namespaceMeta.RaftIDs {
+					found := false
+					for _, m := range members {
+						if m.ID == rid {
+							found = true
+							if m.NodeID != ExtractRegIDFromGenID(nid) {
+								CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
+							}
+							break
+						}
+					}
+					if !found {
+						anyJoined = true
+						var m common.MemberInfo
+						m.ID = rid
+						m.NodeID = ExtractRegIDFromGenID(nid)
+						m.GroupID = uint64(namespaceMeta.MinGID) + uint64(namespaceMeta.Partition)
+						m.GroupName = namespaceMeta.GetDesp()
+						raddr, err := self.getRaftAddrForNode(nid)
+						if err != nil {
+							CoordLog().Infof("failed to get raft address for node: %v, %v", nid, err)
+						} else {
+							m.RaftURLs = append(m.RaftURLs, raddr)
+							self.addNamespaceRaftMember(namespaceMeta, &m)
+						}
+					}
+				}
+				if anyJoined || len(members) <= namespaceMeta.Replica || !isReplicasEnough {
+					go self.tryCheckNamespaces()
 					continue
 				}
-				if namespaceMeta.RaftNodes[0] != self.GetMyID() {
-					// the raft leader check if I am the expected sharding leader,
-					// if not, try to transfer the leader to expected node. We need do this
-					// because we should make all the sharding leaders balanced on
-					// all the cluster nodes.
-					self.transferMyNamespaceLeader(namespaceMeta, namespaceMeta.RaftNodes[0])
-				} else {
-					members := self.getNamespaceRaftMembers(namespaceMeta)
-					if len(members) <= namespaceMeta.Replica {
-						continue
-					}
-					// the members is more than replica, we need to remove the member that is not necessary anymore
-					for _, m := range members {
-						found := false
-						for nid, rid := range namespaceMeta.RaftIDs {
-							if m.ID == rid {
-								found = true
-								if m.NodeID != ExtractRegIDFromGenID(nid) {
-									CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
-								}
-								break
+				// the members is more than replica, we need to remove the member that is not necessary anymore
+				for _, m := range members {
+					found := false
+					for nid, rid := range namespaceMeta.RaftIDs {
+						if m.ID == rid {
+							found = true
+							if m.NodeID != ExtractRegIDFromGenID(nid) {
+								CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
 							}
+							break
 						}
-						if !found {
-							CoordLog().Infof("raft member %v not found in meta: %v", m, namespaceMeta.RaftNodes)
-							self.removeNamespaceRaftMember(namespaceMeta, m)
-						}
+					}
+					if !found {
+						CoordLog().Infof("raft member %v not found in meta: %v", m, namespaceMeta.RaftNodes)
+						self.removeNamespaceRaftMember(namespaceMeta, m)
 					}
 				}
 			}

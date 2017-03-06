@@ -304,6 +304,9 @@ func (rc *raftNode) initForTransport() {
 func (rc *raftNode) proposeMyself(cc raftpb.ConfChange) {
 	for {
 		time.Sleep(time.Second)
+		if rc.Lead() == raft.None {
+			continue
+		}
 		cc.ID = rc.reqIDGen.Next()
 		rc.Infof("propose myself conf : %v", cc.String())
 		err := rc.node.ProposeConfChange(context.TODO(), cc)
