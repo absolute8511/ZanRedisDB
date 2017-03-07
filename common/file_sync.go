@@ -3,7 +3,9 @@ package common
 import (
 	//"github.com/Redundancy/go-sync"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
@@ -61,6 +63,13 @@ func Run(retries int, f func() error) error {
 
 func RunFileSync(remote string, srcPath string, dstPath string) error {
 	var cmd *exec.Cmd
+	if filepath.Base(srcPath) == filepath.Base(dstPath) {
+		dir := filepath.Dir(dstPath)
+		os.MkdirAll(dir, DIR_PERM)
+	} else {
+		os.MkdirAll(dstPath, DIR_PERM)
+	}
+	var cmdRsync *exec.Cmd
 	if remote == "" {
 		log.Printf("copy local :%v to %v\n", srcPath, dstPath)
 		cmd = exec.Command("cp", "-rp", srcPath, dstPath)
@@ -69,10 +78,25 @@ func RunFileSync(remote string, srcPath string, dstPath string) error {
 		log.Printf("copy from remote :%v\n", remote)
 		// limit rate to Kbit/s
 		cmd = exec.Command("scp", "-rp", "-l", "204800", remote+":"+srcPath, dstPath)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		// limit rate in kilobytes
+		cmdRsync = exec.Command("rsync", "-avP", "--bwlimit=25600", remote+":"+srcPath, dstPath)
+		cmdRsync.Stdout = os.Stdout
+		cmdRsync.Stderr = os.Stderr
 	}
-	output, err := cmd.CombinedOutput()
+	var err error
+	if cmdRsync != nil {
+		err = cmdRsync.Run()
+		if err != nil {
+			log.Printf("cmd %v error: %v", cmd, err)
+		}
+	}
 	if err != nil {
-		log.Printf("cmd %v error: %v, output: %v\n", cmd, err, string(output))
+		err = cmd.Run()
+		if err != nil {
+			log.Printf("cmd %v error: %v", cmd, err)
+		}
 	}
 	return err
 	//fs := &gosync.BasicSummary{}
