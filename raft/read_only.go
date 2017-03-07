@@ -47,11 +47,13 @@ type readOnly struct {
 }
 
 func newReadOnly(option ReadOnlyOption) *readOnly {
-	return &readOnly{
+	r := &readOnly{
 		option:           option,
 		pendingReadIndex: make(map[string]*readIndexStatus),
-		buf:              make([][]byte, 0, 10),
+		buf:              make([][]byte, 0, 32),
 	}
+	r.readIndexQueue = r.buf
+	return r
 }
 
 // addRequest adds a read only reuqest into readonly struct.
@@ -111,11 +113,17 @@ func (ro *readOnly) advance(m pb.Message) []*readIndexStatus {
 		}
 		if len(ro.readIndexQueue) == 0 {
 			ro.readIndexQueue = ro.buf
-		}
-		if cap(ro.readIndexQueue) > 1024 && len(ro.readIndexQueue) < cap(ro.buf) {
-			tmp := ro.readIndexQueue
-			ro.readIndexQueue = ro.buf
-			ro.readIndexQueue = append(ro.readIndexQueue, tmp...)
+		} else {
+			left := cap(ro.readIndexQueue) - len(ro.readIndexQueue)
+			if cap(ro.readIndexQueue) > 2*cap(ro.buf) && cap(ro.readIndexQueue) < 1024 {
+				ro.buf = make([][]byte, 0, cap(ro.readIndexQueue))
+			}
+			if len(ro.readIndexQueue) < cap(ro.buf)/2 &&
+				left < 1+cap(ro.readIndexQueue)/8 {
+				tmp := ro.readIndexQueue
+				ro.readIndexQueue = ro.buf
+				ro.readIndexQueue = append(ro.readIndexQueue, tmp...)
+			}
 		}
 		return rss
 	}
