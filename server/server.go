@@ -114,6 +114,8 @@ func NewServer(conf ServerConfig) *Server {
 		HttpAPIPort:   conf.HttpAPIPort,
 		LocalRaftAddr: conf.LocalRaftAddr,
 		DataRootDir:   conf.DataDir,
+		TickDuration:  200 * time.Millisecond,
+		ElectionTick:  50,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID
