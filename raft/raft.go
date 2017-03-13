@@ -338,8 +338,8 @@ func newRaft(c *Config) *raft {
 		nodesStrs = append(nodesStrs, fmt.Sprintf("%x", n))
 	}
 
-	r.logger.Infof("newRaft %x [peers: [%s], term: %d, commit: %d, applied: %d, lastindex: %d, lastterm: %d]",
-		r.id, strings.Join(nodesStrs, ","), r.Term, r.raftLog.committed, r.raftLog.applied, r.raftLog.lastIndex(), r.raftLog.lastTerm())
+	r.logger.Infof("newRaft %x(%v) [peers: [%s], term: %d, commit: %d, applied: %d, lastindex: %d, lastterm: %d]",
+		r.id, r.group.Name, strings.Join(nodesStrs, ","), r.Term, r.raftLog.committed, r.raftLog.applied, r.raftLog.lastIndex(), r.raftLog.lastTerm())
 	return r
 }
 
@@ -607,7 +607,7 @@ func (r *raft) becomeFollower(term uint64, lead uint64) {
 	r.tick = r.tickElection
 	r.lead = lead
 	r.state = StateFollower
-	r.logger.Infof("%x became follower at term %d", r.id, r.Term)
+	r.logger.Infof("%x(%v) became follower at term %d", r.id, r.group.Name, r.Term)
 }
 
 func (r *raft) becomeCandidate() {
@@ -620,7 +620,7 @@ func (r *raft) becomeCandidate() {
 	r.tick = r.tickElection
 	r.Vote = r.id
 	r.state = StateCandidate
-	r.logger.Infof("%x became candidate at term %d", r.id, r.Term)
+	r.logger.Infof("%x(%v) became candidate at term %d", r.id, r.group.Name, r.Term)
 }
 
 func (r *raft) becomePreCandidate() {
@@ -634,7 +634,7 @@ func (r *raft) becomePreCandidate() {
 	r.step = stepCandidate
 	r.tick = r.tickElection
 	r.state = StatePreCandidate
-	r.logger.Infof("%x became pre-candidate at term %d", r.id, r.Term)
+	r.logger.Infof("%x(%v) became pre-candidate at term %d", r.id, r.group.Name, r.Term)
 }
 
 func (r *raft) becomeLeader() {
@@ -661,7 +661,7 @@ func (r *raft) becomeLeader() {
 	}
 
 	r.appendEntry(pb.Entry{Data: nil})
-	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
+	r.logger.Infof("%x(%v) became leader at term %d", r.id, r.group.Name, r.Term)
 }
 
 func (r *raft) campaign(t CampaignType) {
@@ -691,8 +691,8 @@ func (r *raft) campaign(t CampaignType) {
 		if id == r.id {
 			continue
 		}
-		r.logger.Infof("%x [logterm: %d, index: %d] sent %s request to %x (%v) at term %d",
-			r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), voteMsg, id, p.group, r.Term)
+		r.logger.Infof("%x(%v) [logterm: %d, index: %d] sent %s request to %x (%v) at term %d",
+			r.id, r.group.Name, r.raftLog.lastTerm(), r.raftLog.lastIndex(), voteMsg, id, p.group, r.Term)
 
 		var ctx []byte
 		if t == campaignTransfer {
@@ -705,9 +705,9 @@ func (r *raft) campaign(t CampaignType) {
 
 func (r *raft) poll(id uint64, t pb.MessageType, v bool) (granted int) {
 	if v {
-		r.logger.Infof("%x received %s from %x at term %d", r.id, t, id, r.Term)
+		r.logger.Infof("%x(%v) received %s from %x at term %d", r.id, r.group.Name, t, id, r.Term)
 	} else {
-		r.logger.Infof("%x received %s rejection from %x at term %d", r.id, t, id, r.Term)
+		r.logger.Infof("%x(%v) received %s rejection from %x at term %d", r.id, r.group.Name, t, id, r.Term)
 	}
 	if _, ok := r.votes[id]; !ok {
 		r.votes[id] = v
@@ -736,8 +736,8 @@ func (r *raft) Step(m pb.Message) error {
 			if !force && inLease {
 				// If a server receives a RequestVote request within the minimum election timeout
 				// of hearing from a current leader, it does not update its term or grant its vote
-				r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] ignored %s from %x [logterm: %d, index: %d] at term %d: lease is not expired (remaining ticks: %d)",
-					r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term, r.electionTimeout-r.electionElapsed)
+				r.logger.Infof("%x(%v) [logterm: %d, index: %d, vote: %x] ignored %s from %x [logterm: %d, index: %d] at term %d: lease is not expired (remaining ticks: %d)",
+					r.id, r.group.Name, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term, r.electionTimeout-r.electionElapsed)
 				return nil
 			}
 			lead = None
@@ -752,8 +752,8 @@ func (r *raft) Step(m pb.Message) error {
 			// rejected our vote so we should become a follower at the new
 			// term.
 		default:
-			r.logger.Infof("%x [term: %d] received a %s message with higher term from %x [term: %d]",
-				r.id, r.Term, m.Type, m.From, m.Term)
+			r.logger.Infof("%x(%v) [term: %d] received a %s message with higher term from %x [term: %d]",
+				r.id, r.group.Name, r.Term, m.Type, m.From, m.Term)
 			r.becomeFollower(m.Term, lead)
 		}
 
@@ -775,8 +775,8 @@ func (r *raft) Step(m pb.Message) error {
 			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgAppResp})
 		} else {
 			// ignore other cases
-			r.logger.Infof("%x [term: %d] ignored a %s message with lower term from %x [term: %d]",
-				r.id, r.Term, m.Type, m.From, m.Term)
+			r.logger.Infof("%x(%v) [term: %d] ignored a %s message with lower term from %x [term: %d]",
+				r.id, r.group.Name, r.Term, m.Type, m.From, m.Term)
 		}
 		return nil
 	}
@@ -793,7 +793,7 @@ func (r *raft) Step(m pb.Message) error {
 				return nil
 			}
 
-			r.logger.Infof("%x is starting a new election at term %d", r.id, r.Term)
+			r.logger.Infof("%x(%v) is starting a new election at term %d", r.id, r.group.Name, r.Term)
 			if r.preVote {
 				r.campaign(campaignPreElection)
 			} else {
@@ -807,8 +807,8 @@ func (r *raft) Step(m pb.Message) error {
 		// The m.Term > r.Term clause is for MsgPreVote. For MsgVote m.Term should
 		// always equal r.Term.
 		if (r.Vote == None || m.Term > r.Term || r.Vote == m.From) && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
-			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] cast %s for %x [logterm: %d, index: %d] at term %d",
-				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
+			r.logger.Infof("%x(%v) [logterm: %d, index: %d, vote: %x] cast %s for %x [logterm: %d, index: %d] at term %d",
+				r.id, r.group.Name, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
 			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: voteRespMsgType(m.Type)})
 			if m.Type == pb.MsgVote {
 				// Only record real votes.
@@ -816,8 +816,8 @@ func (r *raft) Step(m pb.Message) error {
 				r.Vote = m.From
 			}
 		} else {
-			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
-				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
+			r.logger.Infof("%x(%v) [logterm: %d, index: %d, vote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
+				r.id, r.group.Name, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
 			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: voteRespMsgType(m.Type), Reject: true})
 		}
 
@@ -861,6 +861,8 @@ func stepLeader(r *raft, m pb.Message) {
 				if r.pendingConf {
 					r.logger.Infof("propose conf %s ignored since pending unapplied configuration", e.String())
 					m.Entries[i] = pb.Entry{Type: pb.EntryNormal}
+				} else {
+					r.logger.Infof("propose conf change %s ", e.String())
 				}
 				r.pendingConf = true
 			}
@@ -912,8 +914,8 @@ func stepLeader(r *raft, m pb.Message) {
 		pr.RecentActive = true
 
 		if m.Reject {
-			r.logger.Debugf("%x received msgApp rejection(lastindex: %d) from %x for index %d",
-				r.id, m.RejectHint, m.From, m.Index)
+			r.logger.Debugf("%x(%v) received msgApp rejection(lastindex: %d) from %x for index %d",
+				r.id, r.group.Name, m.RejectHint, m.From, m.Index)
 			if pr.maybeDecrTo(m.Index, m.RejectHint) {
 				r.logger.Debugf("%x decreased progress of %x to [%s]", r.id, m.From, pr)
 				if pr.State == ProgressStateReplicate {
@@ -943,7 +945,7 @@ func stepLeader(r *raft, m pb.Message) {
 				}
 				// Transfer leadership is in progress.
 				if m.From == r.leadTransferee && pr.Match == r.raftLog.lastIndex() {
-					r.logger.Infof("%x sent MsgTimeoutNow to %x after received MsgAppResp", r.id, m.From)
+					r.logger.Infof("%x(%v) sent MsgTimeoutNow to %x after received MsgAppResp", r.id, r.group.Name, m.From)
 					r.sendTimeoutNow(m.From, m.FromGroup)
 				}
 			}
@@ -1007,19 +1009,19 @@ func stepLeader(r *raft, m pb.Message) {
 		lastLeadTransferee := r.leadTransferee
 		if lastLeadTransferee != None {
 			if lastLeadTransferee == leadTransferee {
-				r.logger.Infof("%x [term %d] transfer leadership to %x is in progress, ignores request to same node %x",
-					r.id, r.Term, leadTransferee, leadTransferee)
+				r.logger.Infof("%x(%v) [term %d] transfer leadership to %x is in progress, ignores request to same node %x",
+					r.id, r.group.Name, r.Term, leadTransferee, leadTransferee)
 				return
 			}
 			r.abortLeaderTransfer()
-			r.logger.Infof("%x [term %d] abort previous transferring leadership to %x", r.id, r.Term, lastLeadTransferee)
+			r.logger.Infof("%x(%v) [term %d] abort previous transferring leadership to %x", r.id, r.group.Name, r.Term, lastLeadTransferee)
 		}
 		if leadTransferee == r.id {
-			r.logger.Debugf("%x is already leader. Ignored transferring leadership to self", r.id)
+			r.logger.Debugf("%x(%v) is already leader. Ignored transferring leadership to self", r.id, r.group.Name)
 			return
 		}
 		// Transfer leadership to third party.
-		r.logger.Infof("%x [term %d] starts to transfer leadership to %x", r.id, r.Term, leadTransferee)
+		r.logger.Infof("%x(%v) [term %d] starts to transfer leadership to %x", r.id, r.group.Name, r.Term, leadTransferee)
 		// Transfer leadership should be finished in one electionTimeout, so reset r.electionElapsed.
 		r.electionElapsed = 0
 		r.leadTransferee = leadTransferee
