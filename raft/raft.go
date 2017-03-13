@@ -1084,7 +1084,9 @@ func stepFollower(r *raft, m pb.Message) {
 			return
 		}
 		m.To = r.lead
-		m.ToGroup = r.prs[m.To].group
+		if g, ok := r.prs[m.To]; ok {
+			m.ToGroup = g.group
+		}
 		r.send(m)
 	case pb.MsgApp:
 		r.electionElapsed = 0
