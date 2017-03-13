@@ -110,15 +110,16 @@ type NamespaceMeta struct {
 }
 
 type NamespaceMgr struct {
-	mutex         sync.RWMutex
-	kvNodes       map[string]*NamespaceNode
-	nsMetas       map[string]NamespaceMeta
-	groups        map[uint64]string
-	machineConf   *MachineConfig
-	raftTransport *rafthttp.Transport
-	stopping      int32
-	stopC         chan struct{}
-	wg            sync.WaitGroup
+	mutex             sync.RWMutex
+	kvNodes           map[string]*NamespaceNode
+	nsMetas           map[string]NamespaceMeta
+	groups            map[uint64]string
+	machineConf       *MachineConfig
+	raftTransport     *rafthttp.Transport
+	stopping          int32
+	stopC             chan struct{}
+	wg                sync.WaitGroup
+	clusterInfoGetter common.IClusterInfoGetter
 }
 
 func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *NamespaceMgr {
@@ -137,6 +138,10 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 		ns.machineConf.NodeID = regID
 	}
 	return ns
+}
+
+func (self *NamespaceMgr) SetClusterInfoGetter(getter common.IClusterInfoGetter) {
+	self.clusterInfoGetter = getter
 }
 
 func (self *NamespaceMgr) LoadMachineRegID() (uint64, error) {
@@ -244,7 +249,8 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		SnapCatchup: conf.SnapCatchup,
 	}
 	kv := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
-		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name))
+		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name),
+		self.clusterInfoGetter)
 	n := &NamespaceNode{
 		Node: kv,
 		conf: conf,

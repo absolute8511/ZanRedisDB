@@ -57,13 +57,19 @@ func NewServer(conf ServerConfig) *Server {
 		sLog.Fatal(err)
 	}
 	myNode := &cluster.NodeInfo{
-		NodeIP:    conf.BroadcastAddr,
-		Hostname:  hname,
-		RedisPort: strconv.Itoa(conf.RedisAPIPort),
-		HttpPort:  strconv.Itoa(conf.HttpAPIPort),
-		Version:   common.VerBinary,
-		Tags:      make(map[string]bool),
+		NodeIP:      conf.BroadcastAddr,
+		Hostname:    hname,
+		RedisPort:   strconv.Itoa(conf.RedisAPIPort),
+		HttpPort:    strconv.Itoa(conf.HttpAPIPort),
+		Version:     common.VerBinary,
+		Tags:        make(map[string]bool),
+		DataRoot:    conf.DataDir,
+		RsyncModule: "zanredisdb",
 	}
+	if conf.DataRsyncModule != "" {
+		myNode.RsyncModule = conf.DataRsyncModule
+	}
+
 	if conf.ClusterID == "" {
 		sLog.Fatalf("cluster id can not be empty")
 	}
@@ -119,6 +125,7 @@ func NewServer(conf ServerConfig) *Server {
 			sLog.Fatalf("failed to init register for coordinator: %v", err)
 		}
 		s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
+		s.nsMgr.SetClusterInfoGetter(s.dataCoord)
 	} else {
 		s.raftTransport.ID = types.ID(myNode.RegID)
 	}

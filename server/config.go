@@ -12,6 +12,7 @@ type ServerConfig struct {
 	RedisAPIPort         int                   `json:"redis_api_port"`
 	HttpAPIPort          int                   `json:"http_api_port"`
 	DataDir              string                `json:"data_dir"`
+	DataRsyncModule      string                `json:"data_rsync_module"`
 	LocalRaftAddr        string                `json:"local_raft_addr"`
 	Tags                 []string              `json:"tags"`
 	Namespaces           []NamespaceNodeConfig `json:"namespaces"`

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -342,15 +341,9 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 		// check local namespaces with cluster to remove the unneed data
 		tmpChecks := self.localNSMgr.GetNamespaces()
 		for name, _ := range tmpChecks {
-			splits := strings.SplitN(name, "-", 2)
-			if len(splits) != 2 {
+			namespace, pid := common.GetNamespaceAndPartition(name)
+			if namespace == "" {
 				CoordLog().Warningf("namespace invalid: %v", name)
-				continue
-			}
-			namespace := splits[0]
-			pid, err := strconv.Atoi(splits[1])
-			if err != nil {
-				CoordLog().Warningf("namespace invalid: %v, %v", name, splits)
 				continue
 			}
 			namespaceMeta, err := self.register.GetNamespacePartInfo(namespace, pid)
@@ -684,6 +677,34 @@ func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo) (*n
 		return nil, ErrLocalInitNamespaceFailed
 	}
 	return localNode, nil
+}
+
+func (self *DataCoordinator) GetSnapshotSyncInfo(fullNamespace string) ([]common.SnapshotSyncInfo, error) {
+	namespace, pid := common.GetNamespaceAndPartition(fullNamespace)
+	if namespace == "" {
+		CoordLog().Warningf("namespace invalid: %v", fullNamespace)
+		return nil, nil
+	}
+	nsInfo, err := self.register.GetNamespacePartInfo(namespace, pid)
+	if err != nil {
+		return nil, err
+	}
+	var ssiList []common.SnapshotSyncInfo
+	for _, nid := range nsInfo.RaftNodes {
+		node, err := self.register.GetNodeInfo(nid)
+		if err != nil {
+			continue
+		}
+		var ssi common.SnapshotSyncInfo
+		ssi.NodeID = node.RegID
+		ssi.DataRoot = node.DataRoot
+		ssi.ReplicaID = nsInfo.RaftIDs[nid]
+		ssi.RemoteAddr = node.NodeIP
+		ssi.HttpAPIPort = node.HttpPort
+		ssi.RsyncModule = node.RsyncModule
+		ssiList = append(ssiList, ssi)
+	}
+	return ssiList, nil
 }
 
 // before shutdown, we transfer the leader to others to reduce

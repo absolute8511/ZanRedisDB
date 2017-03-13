@@ -167,12 +167,8 @@ type MemberInfo struct {
 	NodeID    uint64 `json:"node_id"`
 	GroupName string `json:"group_name"`
 	// group id the replica belong (different from namespace)
-	GroupID     uint64   `json:"group_id"`
-	Broadcast   string   `json:"broadcast"`
-	RpcPort     int      `json:"rpc_port"`
-	HttpAPIPort int      `json:"http_api_port"`
-	RaftURLs    []string `json:"peer_urls"`
-	DataDir     string   `json:"data_dir"`
+	GroupID  uint64   `json:"group_id"`
+	RaftURLs []string `json:"peer_urls"`
 }
 
 func (self *MemberInfo) IsEqual(other *MemberInfo) bool {
@@ -180,9 +176,7 @@ func (self *MemberInfo) IsEqual(other *MemberInfo) bool {
 		return false
 	}
 	if self.ID != other.ID || self.NodeID != other.NodeID ||
-		self.GroupName != other.GroupName || self.GroupID != other.GroupID ||
-		self.Broadcast != other.Broadcast || self.RpcPort != other.RpcPort ||
-		self.HttpAPIPort != other.HttpAPIPort || self.DataDir != other.DataDir {
+		self.GroupName != other.GroupName || self.GroupID != other.GroupID {
 		return false
 	}
 	if len(self.RaftURLs) != len(other.RaftURLs) {
@@ -194,4 +188,17 @@ func (self *MemberInfo) IsEqual(other *MemberInfo) bool {
 		}
 	}
 	return true
+}
+
+type SnapshotSyncInfo struct {
+	ReplicaID   uint64
+	NodeID      uint64
+	RemoteAddr  string
+	HttpAPIPort string
+	DataRoot    string
+	RsyncModule string
+}
+
+type IClusterInfoGetter interface {
+	GetSnapshotSyncInfo(string) ([]SnapshotSyncInfo, error)
 }

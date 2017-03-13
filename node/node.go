@@ -69,6 +69,7 @@ type KVNode struct {
 	wg                sync.WaitGroup
 	commitC           <-chan applyInfo
 	committedIndex    uint64
+	clusterInfoGetter common.IClusterInfoGetter
 }
 
 type KVSnapInfo struct {
@@ -89,7 +90,8 @@ func (self *KVSnapInfo) GetData() ([]byte, error) {
 }
 
 func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConfig,
-	transport *rafthttp.Transport, join bool, deleteCb func()) *KVNode {
+	transport *rafthttp.Transport, join bool, deleteCb func(),
+	getter common.IClusterInfoGetter) *KVNode {
 	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
 	config.nodeConfig = machineConfig
@@ -104,6 +106,7 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		ns:            config.GroupName,
 		machineConfig: machineConfig,
 	}
+	s.clusterInfoGetter = getter
 	s.registerHandler()
 	commitC, raftNode := newRaftNode(config, transport,
 		join, s)
@@ -451,9 +454,6 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 }
 
 func (self *KVNode) FillMyMemberInfo(m *common.MemberInfo) {
-	m.DataDir = self.rn.config.DataDir
-	m.Broadcast = self.machineConfig.BroadcastAddr
-	m.HttpAPIPort = self.machineConfig.HttpAPIPort
 	m.RaftURLs = append(m.RaftURLs, self.machineConfig.LocalRaftAddr)
 }
 
@@ -809,17 +809,13 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 			self.rn.Infof("local no backup for snapshot, copy from remote\n")
 			syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
 			if syncAddr == "" && syncDir == "" {
-				panic("no backup can be found from others")
+				return errors.New("no backup available from others")
 			}
 			// copy backup data from the remote leader node, and recovery backup from it
 			// if local has some old backup data, we should use rsync to sync the data file
 			// use the rocksdb backup/checkpoint interface to backup data
-			srcPath := syncDir
-			if syncAddr != "" {
-				srcPath = self.ns
-			}
 			err = common.RunFileSync(syncAddr,
-				path.Join(rockredis.GetBackupDir(srcPath),
+				path.Join(rockredis.GetBackupDir(syncDir),
 					rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
 				self.store.GetBackupDir())
 			if err != nil {
@@ -891,51 +887,58 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	// we need find the right backup data match with the raftsnapshot
 	// for each cluster member, it need check the term+index and the backup meta to
 	// make sure the data is valid
-	snapshot := raftSnapshot.Data
-	var si KVSnapInfo
-	err := json.Unmarshal(snapshot, &si)
-	if err != nil {
-		return "", ""
-	}
-	// TODO: try to get leader and members from register
-	remoteLeader := si.LeaderInfo
-	members := make([]*common.MemberInfo, 0)
-	members = append(members, remoteLeader)
-	members = append(members, si.Members...)
-	curMembers := self.rn.GetMembers()
-	members = append(members, curMembers...)
 	syncAddr := ""
 	syncDir := ""
 	h := self.machineConfig.BroadcastAddr
-	for _, m := range members {
-		if m == nil {
+
+	retry := 0
+	var snapSyncInfoList []common.SnapshotSyncInfo
+	var err error
+	for retry < 3 {
+		retry++
+		snapSyncInfoList, err = self.clusterInfoGetter.GetSnapshotSyncInfo(self.ns)
+		if err != nil {
+			self.rn.Infof("get snapshot info failed: %v", err)
+			select {
+			case <-self.stopChan:
+				break
+			case <-time.After(time.Second):
+			}
+		} else {
+			break
+		}
+	}
+
+	self.rn.Infof("current cluster raft nodes info: %v", snapSyncInfoList)
+	for _, ssi := range snapSyncInfoList {
+		if ssi.ReplicaID == uint64(self.rn.config.ID) {
 			continue
 		}
-		if m.ID == uint64(self.rn.config.ID) {
-			continue
-		}
+
 		c := http.Client{Transport: newDeadlineTransport(time.Second)}
 		body, _ := raftSnapshot.Marshal()
-		req, _ := http.NewRequest("GET", "http://"+m.Broadcast+":"+
-			strconv.Itoa(m.HttpAPIPort)+common.APICheckBackup+"/"+self.ns, bytes.NewBuffer(body))
+		req, _ := http.NewRequest("GET", "http://"+ssi.RemoteAddr+":"+
+			ssi.HttpAPIPort+common.APICheckBackup+"/"+self.ns, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
 		if err != nil {
 			self.rn.Infof("request error: %v", err)
 			continue
 		}
 		rsp.Body.Close()
-		if m.Broadcast == h {
-			if m.DataDir == self.store.GetBackupBase() {
+		if ssi.RemoteAddr == h {
+			if ssi.DataRoot == self.machineConfig.DataRootDir {
 				// the leader is old mine, try find another leader
-				self.rn.Infof("data dir can not be same if on local: %v, %v", m, self.store.GetBackupBase())
+				self.rn.Infof("data dir can not be same if on local: %v, %v", ssi, self.machineConfig)
 				continue
 			}
 			// local node with different directory
 			syncAddr = ""
+			syncDir = path.Join(ssi.DataRoot, self.ns)
 		} else {
-			syncAddr = m.Broadcast
+			// for remote snapshot, we do rsync from remote module
+			syncAddr = ssi.RemoteAddr
+			syncDir = path.Join(ssi.RsyncModule, self.ns)
 		}
-		syncDir = m.DataDir
 		break
 	}
 	self.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)

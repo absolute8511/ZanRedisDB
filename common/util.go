@@ -3,6 +3,7 @@ package common
 import (
 	"net"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -37,4 +38,18 @@ func IsValidNamespaceName(ns string) bool {
 
 func GetNsDesp(ns string, part int) string {
 	return ns + "-" + strconv.Itoa(part)
+}
+
+func GetNamespaceAndPartition(fullNamespace string) (string, int) {
+	splits := strings.SplitN(fullNamespace, "-", 2)
+	if len(splits) != 2 {
+		return "", 0
+	}
+	namespace := splits[0]
+	pid, err := strconv.Atoi(splits[1])
+	if err != nil {
+		return "", 0
+	}
+
+	return namespace, pid
 }

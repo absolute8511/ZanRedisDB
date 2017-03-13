@@ -247,37 +247,8 @@ func (rc *raftNode) startRaft(ds DataStorage) error {
 		}
 
 		startPeers := rpeers
-		var m common.MemberInfo
-		m.ID = uint64(rc.config.ID)
-		m.NodeID = uint64(rc.config.nodeConfig.NodeID)
-		m.GroupID = rc.config.GroupID
-		m.GroupName = rc.config.GroupName
-		m.DataDir = rc.config.DataDir
-		m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
-		m.Broadcast = rc.config.nodeConfig.BroadcastAddr
-		m.HttpAPIPort = rc.config.nodeConfig.HttpAPIPort
-		data, _ := json.Marshal(m)
-
 		if rc.join {
 			startPeers = nil
-		} else {
-			// always update myself to cluster while first start, to allow all the members in
-			// the cluster be notified the newest info of this node.
-			_, ok := rc.config.RaftPeers[uint64(rc.config.ID)]
-			if ok {
-				cc := &raftpb.ConfChange{
-					Type:      raftpb.ConfChangeUpdateNode,
-					ReplicaID: m.ID,
-					NodeGroup: raftpb.Group{NodeId: m.NodeID, Name: m.GroupName,
-						GroupId: uint64(rc.config.GroupID), RaftReplicaId: m.ID},
-					Context: data,
-				}
-				rc.wg.Add(1)
-				go func(confChange raftpb.ConfChange) {
-					defer rc.wg.Done()
-					rc.proposeMyself(confChange)
-				}(*cc)
-			}
 		}
 		rc.node = raft.StartNode(c, startPeers)
 	}
@@ -301,39 +272,6 @@ func (rc *raftNode) initForTransport() {
 	for _, m := range rc.members {
 		if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
 			rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
-		}
-	}
-}
-
-func (rc *raftNode) proposeMyself(cc raftpb.ConfChange) {
-	for {
-		time.Sleep(time.Second)
-		select {
-		case <-rc.stopc:
-			return
-		default:
-		}
-		if rc.Lead() == raft.None {
-			continue
-		}
-		cc.ID = rc.reqIDGen.Next()
-		rc.Infof("propose myself conf : %v", cc.String())
-		err := rc.node.ProposeConfChange(context.TODO(), cc)
-		if err != nil {
-			rc.Infof("failed to propose the conf : %v", err)
-		}
-		// check if ok
-		time.Sleep(time.Second)
-		rc.memMutex.Lock()
-		mine, ok := rc.members[uint64(rc.config.ID)]
-		rc.memMutex.Unlock()
-		if ok {
-			if mine.DataDir != "" &&
-				mine.GroupName != "" &&
-				mine.Broadcast != "" &&
-				mine.HttpAPIPort > 0 {
-				return
-			}
 		}
 	}
 }

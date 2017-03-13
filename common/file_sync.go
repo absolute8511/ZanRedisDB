@@ -73,11 +73,10 @@ func RunFileSync(remote string, srcPath string, dstPath string) error {
 		log.Printf("copy local :%v to %v\n", srcPath, dstPath)
 		cmd = exec.Command("cp", "-rp", srcPath, dstPath)
 	} else {
-		// TODO: we need do ssh without password on the cluster nodes
-		log.Printf("copy from remote :%v\n", remote)
+		log.Printf("copy from remote :%v/%v to local: %v\n", remote, srcPath, dstPath)
 		// limit rate in kilobytes
 		cmd = exec.Command("rsync", "-avP", "--bwlimit=25600",
-			"rsync://"+remote+"/zanredisdb/"+srcPath, dstPath)
+			"rsync://"+remote+"/"+srcPath, dstPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}

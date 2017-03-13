@@ -23,6 +23,8 @@ type NodeInfo struct {
 	RaftTransportAddr string
 	Version           string
 	Tags              map[string]bool
+	DataRoot          string
+	RsyncModule       string
 	Epoch             EpochType
 }
 
