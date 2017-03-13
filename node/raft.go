@@ -308,6 +308,11 @@ func (rc *raftNode) initForTransport() {
 func (rc *raftNode) proposeMyself(cc raftpb.ConfChange) {
 	for {
 		time.Sleep(time.Second)
+		select {
+		case <-rc.stopc:
+			return
+		default:
+		}
 		if rc.Lead() == raft.None {
 			continue
 		}
@@ -316,11 +321,6 @@ func (rc *raftNode) proposeMyself(cc raftpb.ConfChange) {
 		err := rc.node.ProposeConfChange(context.TODO(), cc)
 		if err != nil {
 			rc.Infof("failed to propose the conf : %v", err)
-		}
-		select {
-		case <-rc.stopc:
-			return
-		default:
 		}
 		// check if ok
 		time.Sleep(time.Second)
