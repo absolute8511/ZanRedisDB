@@ -204,7 +204,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	return w
 }
 
-func (rc *raftNode) startRaft(ds DataStorage) {
+func (rc *raftNode) startRaft(ds DataStorage) error {
 	walDir := rc.config.WALDir
 	oldwal := wal.Exist(walDir)
 
@@ -226,7 +226,10 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 	}
 
 	if oldwal {
-		rc.restartNode(c, ds)
+		err := rc.restartNode(c, ds)
+		if err != nil {
+			return err
+		}
 	} else {
 		rc.ds.CleanData()
 		rc.wal = rc.openWAL(nil)
@@ -284,6 +287,7 @@ func (rc *raftNode) startRaft(ds DataStorage) {
 		defer rc.wg.Done()
 		rc.serveChannels()
 	}()
+	return nil
 }
 
 func (rc *raftNode) initForTransport() {
@@ -334,10 +338,11 @@ func (rc *raftNode) proposeMyself(cc raftpb.ConfChange) {
 	}
 }
 
-func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) {
+func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) error {
 	snapshot, err := rc.snapshotter.Load()
 	if err != nil && err != snap.ErrNoSnapshot {
-		nodeLog.Panic(err)
+		nodeLog.Warning(err)
+		return err
 	}
 	if err == snap.ErrNoSnapshot || raft.IsEmptySnap(*snapshot) {
 		rc.Infof("loading no snapshot \n")
@@ -347,13 +352,15 @@ func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) {
 			snapshot.Metadata.Term,
 			snapshot.Metadata.Index, snapshot.Metadata.ConfState)
 		if err := rc.ds.RestoreFromSnapshot(true, *snapshot); err != nil {
-			nodeLog.Panic(err)
+			nodeLog.Error(err)
+			return err
 		}
 	}
 
 	rc.wal = rc.replayWAL(snapshot)
 	rc.node = raft.RestartNode(c)
 	advanceTicksForElection(rc.node, c.ElectionTick)
+	return nil
 }
 
 func advanceTicksForElection(n raft.Node, electionTicks int) {

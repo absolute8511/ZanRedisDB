@@ -81,9 +81,12 @@ func (self *NamespaceNode) GetMembers() []*common.MemberInfo {
 	return self.Node.GetMembers()
 }
 
-func (self *NamespaceNode) Start() {
-	self.Node.Start()
+func (self *NamespaceNode) Start() error {
+	if err := self.Node.Start(); err != nil {
+		return err
+	}
 	atomic.StoreInt32(&self.ready, 1)
+	return nil
 }
 
 func (self *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {

@@ -679,7 +679,10 @@ func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo) (*n
 	}
 	dyConf := &node.NamespaceDynamicConf{}
 	localNode.SetDynamicInfo(*dyConf)
-	localNode.Start()
+	if err := localNode.Start(); err != nil {
+		self.localNSMgr.ForceDeleteNamespaceData(nsConf.Name)
+		return nil, ErrLocalInitNamespaceFailed
+	}
 	return localNode, nil
 }
 

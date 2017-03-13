@@ -112,8 +112,11 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	return s
 }
 
-func (self *KVNode) Start() {
-	self.rn.startRaft(self)
+func (self *KVNode) Start() error {
+	err := self.rn.startRaft(self)
+	if err != nil {
+		return err
+	}
 	// read commits from raft into KVStore map until error
 	self.wg.Add(1)
 	go func() {
@@ -125,6 +128,7 @@ func (self *KVNode) Start() {
 		defer self.wg.Done()
 		self.handleProposeReq()
 	}()
+	return nil
 }
 
 func (self *KVNode) Stop() {
@@ -810,8 +814,12 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 			// copy backup data from the remote leader node, and recovery backup from it
 			// if local has some old backup data, we should use rsync to sync the data file
 			// use the rocksdb backup/checkpoint interface to backup data
+			srcPath := syncDir
+			if syncAddr != "" {
+				srcPath = self.ns
+			}
 			err = common.RunFileSync(syncAddr,
-				path.Join(rockredis.GetBackupDir(syncDir),
+				path.Join(rockredis.GetBackupDir(srcPath),
 					rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
 				self.store.GetBackupDir())
 			if err != nil {
