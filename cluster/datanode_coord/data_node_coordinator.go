@@ -725,6 +725,18 @@ func (self *DataCoordinator) prepareLeavingCluster() {
 				CoordLog().Infof("The isr nodes in namespace %v is not enough while leaving: %v",
 					nsInfo.GetDesp(), nsInfo.RaftNodes)
 			}
+			// only leader check the follower status
+			leader := self.getNamespaceRaftLeader(nsInfo.GetCopy())
+			if leader != self.GetMyRegID() {
+				continue
+			}
+			for _, newLeader := range nsInfo.RaftNodes {
+				if newLeader == self.GetMyID() {
+					continue
+				}
+				self.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader)
+				break
+			}
 		}
 	}
 	CoordLog().Infof("prepare leaving finished.")
