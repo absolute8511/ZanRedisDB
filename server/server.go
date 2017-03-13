@@ -244,7 +244,9 @@ func (self *Server) serveRaft() {
 
 // implement the Raft interface for transport
 func (self *Server) Process(ctx context.Context, m raftpb.Message) error {
-	//sLog.Infof("got message from raft transport %v ", m.String())
+	if m.Type == raftpb.MsgVoteResp {
+		sLog.Infof("got message from raft transport %v ", m.String())
+	}
 	kv := self.nsMgr.GetNamespaceNodeFromGID(m.ToGroup.GroupId)
 	if kv == nil {
 		sLog.Errorf("kv namespace not found while processing %v ", m.String())
