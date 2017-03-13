@@ -177,6 +177,12 @@ func (self *NamespaceMgr) Start() {
 		defer self.wg.Done()
 		self.clearUnusedRaftPeer()
 	}()
+
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.processRaftTick()
+	}()
 }
 
 func (self *NamespaceMgr) Stop() {
@@ -359,18 +365,28 @@ func (self *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
 	}
 }
 
-func (self *NamespaceMgr) ProcessRaftTick() {
-	// send tick for all raft group
-	self.mutex.RLock()
-	nodes := make([]*KVNode, 0, len(self.kvNodes))
-	for _, v := range self.kvNodes {
-		if v.IsReady() {
-			nodes = append(nodes, v.Node)
+func (self *NamespaceMgr) processRaftTick() {
+	ticker := time.NewTicker(self.machineConf.TickDuration)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			// send tick for all raft group
+			self.mutex.RLock()
+			nodes := make([]*KVNode, 0, len(self.kvNodes))
+			for _, v := range self.kvNodes {
+				if v.IsReady() {
+					nodes = append(nodes, v.Node)
+				}
+			}
+			self.mutex.RUnlock()
+			for _, n := range nodes {
+				n.Tick()
+			}
+
+		case <-self.stopC:
+			return
 		}
-	}
-	self.mutex.RUnlock()
-	for _, n := range nodes {
-		n.Tick()
 	}
 }
 

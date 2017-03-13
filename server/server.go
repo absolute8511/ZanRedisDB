@@ -169,10 +169,10 @@ func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig) (*nod
 }
 
 func (self *Server) Start() {
+	self.raftTransport.Start()
 	self.wg.Add(1)
 	go func() {
 		defer self.wg.Done()
-		self.raftTransport.Start()
 		self.serveRaft()
 	}()
 
@@ -185,11 +185,6 @@ func (self *Server) Start() {
 		self.nsMgr.Start()
 	}
 
-	self.wg.Add(1)
-	go func() {
-		defer self.wg.Done()
-		self.processRaftTick()
-	}()
 	// api server should disable the api request while starting until replay log finished and
 	// also while we recovery we need to disable api.
 	self.wg.Add(2)
@@ -224,19 +219,6 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 		return nil, cmd, common.ErrInvalidCommand
 	}
 	return h, cmd, nil
-}
-
-func (self *Server) processRaftTick() {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			self.nsMgr.ProcessRaftTick()
-		case <-self.stopC:
-			return
-		}
-	}
 }
 
 func (self *Server) serveRaft() {

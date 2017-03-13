@@ -1,5 +1,9 @@
 package node
 
+import (
+	"time"
+)
+
 type NamespaceConfig struct {
 	// namespace full name with partition
 	Name string `json:"name"`
@@ -29,11 +33,13 @@ type RaftGroupConfig struct {
 
 type MachineConfig struct {
 	// server node id
-	NodeID        uint64 `json:"node_id"`
-	BroadcastAddr string `json:"broadcast_addr"`
-	HttpAPIPort   int    `json:"http_api_port"`
-	LocalRaftAddr string `json:"local_raft_addr"`
-	DataRootDir   string `json:data_root_dir`
+	NodeID        uint64        `json:"node_id"`
+	BroadcastAddr string        `json:"broadcast_addr"`
+	HttpAPIPort   int           `json:"http_api_port"`
+	LocalRaftAddr string        `json:"local_raft_addr"`
+	DataRootDir   string        `json:data_root_dir`
+	ElectionTick  int           `json:"election_tick"`
+	TickDuration  time.Duration `json:"tick_duration"`
 }
 
 type ReplicaInfo struct {
@@ -49,13 +55,12 @@ type RaftConfig struct {
 	ID uint64 `json:"id"`
 	// local server transport address, it
 	// can be used by several raft group
-	RaftAddr     string                 `json:"raft_addr"`
-	DataDir      string                 `json:"data_dir"`
-	WALDir       string                 `json:"wal_dir"`
-	SnapDir      string                 `json:"snap_dir"`
-	RaftPeers    map[uint64]ReplicaInfo `json:"raft_peers"`
-	ElectionTick int                    `json:"election_tick"`
-	SnapCount    int                    `json:"snap_count"`
-	SnapCatchup  int                    `json:"snap_catchup"`
-	nodeConfig   *MachineConfig
+	RaftAddr    string                 `json:"raft_addr"`
+	DataDir     string                 `json:"data_dir"`
+	WALDir      string                 `json:"wal_dir"`
+	SnapDir     string                 `json:"snap_dir"`
+	RaftPeers   map[uint64]ReplicaInfo `json:"raft_peers"`
+	SnapCount   int                    `json:"snap_count"`
+	SnapCatchup int                    `json:"snap_catchup"`
+	nodeConfig  *MachineConfig
 }

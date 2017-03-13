@@ -209,13 +209,14 @@ func (rc *raftNode) startRaft(ds DataStorage) error {
 	walDir := rc.config.WALDir
 	oldwal := wal.Exist(walDir)
 
-	if rc.config.ElectionTick < 50 {
-		rc.config.ElectionTick = 50
+	elecTick := rc.config.nodeConfig.ElectionTick
+	if elecTick < 50 {
+		elecTick = 50
 	}
 	c := &raft.Config{
 		ID:              uint64(rc.config.ID),
-		ElectionTick:    rc.config.ElectionTick,
-		HeartbeatTick:   rc.config.ElectionTick / 10,
+		ElectionTick:    elecTick,
+		HeartbeatTick:   elecTick / 10,
 		Storage:         rc.raftStorage,
 		MaxSizePerMsg:   1024 * 1024,
 		MaxInflightMsgs: 256,
@@ -451,7 +452,7 @@ func (rc *raftNode) maybeTryElection() {
 	}
 	rc.Infof("replica %v should advance to elect, mine is: %v", smallest, rc.config.ID)
 	if smallest == rc.config.ID {
-		advanceTicksForElection(rc.node, rc.config.ElectionTick*2)
+		advanceTicksForElection(rc.node, rc.config.nodeConfig.ElectionTick*2)
 	}
 }
 
@@ -608,6 +609,8 @@ func (rc *raftNode) sendMessages(msgs []raftpb.Message) {
 				// drop msgSnap if the inflight chan if full.
 			}
 			msgs[i].To = 0
+		} else if msgs[i].Type == raftpb.MsgVoteResp {
+			rc.Infof("send vote resp : %v", msgs[i].String())
 		}
 	}
 	rc.transport.Send(msgs)
