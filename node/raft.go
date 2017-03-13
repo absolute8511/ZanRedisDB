@@ -89,7 +89,8 @@ type raftNode struct {
 	transport         *rafthttp.Transport
 	stopc             chan struct{} // signals proposal channel closed
 	reqIDGen          *idutil.Generator
-	wg                sync.WaitGroup
+	wgAsync           sync.WaitGroup
+	wgServe           sync.WaitGroup
 	ds                DataStorage
 	msgSnapC          chan raftpb.Message
 	inflightSnapshots int64
@@ -253,9 +254,9 @@ func (rc *raftNode) startRaft(ds DataStorage) error {
 		rc.node = raft.StartNode(c, startPeers)
 	}
 	rc.initForTransport()
-	rc.wg.Add(1)
+	rc.wgServe.Add(1)
 	go func() {
-		defer rc.wg.Done()
+		defer rc.wgServe.Done()
 		rc.serveChannels()
 	}()
 	return nil
@@ -309,14 +310,8 @@ func advanceTicksForElection(n raft.Node, electionTicks int) {
 
 func (rc *raftNode) StopNode() {
 	close(rc.stopc)
-	rc.wg.Wait()
+	rc.wgServe.Wait()
 	rc.Infof("raft node stopped")
-}
-
-func (rc *raftNode) stop() {
-	close(rc.commitC)
-	rc.node.Stop()
-	rc.Infof("raft node stopping")
 }
 
 func newSnapshotReaderCloser() io.ReadCloser {
@@ -349,9 +344,9 @@ func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 		snapMsg := snap.NewMessage(m, snapRC, 0)
 		rc.Infof("begin send snapshot: %v", snapMsg.String())
 		rc.transport.SendSnapshot(*snapMsg)
-		rc.wg.Add(1)
+		rc.wgAsync.Add(1)
 		go func() {
-			defer rc.wg.Done()
+			defer rc.wgAsync.Done()
 			select {
 			case isOK := <-snapMsg.CloseNotify():
 				if isOK {
@@ -385,9 +380,9 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 	}
 	rc.Infof("get snapshot object done: %v", snapi)
 
-	rc.wg.Add(1)
+	rc.wgAsync.Add(1)
 	go func() {
-		defer rc.wg.Done()
+		defer rc.wgAsync.Done()
 		data, err := sn.GetData()
 		if err != nil {
 			panic(err)
@@ -536,7 +531,11 @@ func (rc *raftNode) serveChannels() {
 	defer func() {
 		// wait purge stopped to avoid purge the files after wal closed
 		<-purgeDone
-		rc.stop()
+		close(rc.commitC)
+		rc.Infof("raft node stopping")
+		// wait all async operation done
+		rc.wgAsync.Wait()
+		rc.node.Stop()
 		rc.wal.Close()
 	}()
 
