@@ -52,11 +52,31 @@ type NamespaceMetaInfo struct {
 	Tags      map[string]bool
 }
 
+type RemovingInfo struct {
+	RemoveTime      int64
+	RemoveReplicaID uint64
+}
+
 type PartitionReplicaInfo struct {
 	RaftNodes []string
 	RaftIDs   map[string]uint64
+	Removings map[string]RemovingInfo
 	MaxRaftID int64
 	Epoch     EpochType
+}
+
+func (self *PartitionReplicaInfo) GetISR() []string {
+	if len(self.Removings) == 0 {
+		return self.RaftNodes
+	}
+	isr := make([]string, 0, len(self.RaftNodes))
+	for _, v := range self.RaftNodes {
+		if _, ok := self.Removings[v]; ok {
+			continue
+		}
+		isr = append(isr, v)
+	}
+	return isr
 }
 
 type PartitionMetaInfo struct {
@@ -73,6 +93,10 @@ func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
 	newp.RaftIDs = make(map[string]uint64, len(self.RaftIDs))
 	for k, v := range self.RaftIDs {
 		newp.RaftIDs[k] = v
+	}
+	newp.Removings = make(map[string]RemovingInfo, len(self.Removings))
+	for k, v := range self.Removings {
+		newp.Removings[k] = v
 	}
 	return &newp
 }

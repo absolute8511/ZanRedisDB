@@ -69,20 +69,24 @@ func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid strin
 	if len(nsInfo.RaftNodes) == 0 {
 		return false
 	}
-	remoteNode := nsInfo.RaftNodes[0]
-	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
-	var rsp []*common.MemberInfo
-	err := common.APIRequest("GET",
-		"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
-		nil, time.Second*3, &rsp)
-	if err != nil {
-		CoordLog().Infof("failed to get members for namespace: %v", err)
-		return false
-	}
+	for _, remoteNode := range nsInfo.GetISR() {
+		if remoteNode == nid {
+			continue
+		}
+		nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+		var rsp []*common.MemberInfo
+		err := common.APIRequest("GET",
+			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
+			nil, time.Second*3, &rsp)
+		if err != nil {
+			CoordLog().Infof("failed to get members for namespace: %v", err)
+			continue
+		}
 
-	for _, m := range rsp {
-		if m.NodeID == ExtractRegIDFromGenID(nid) && m.ID == nsInfo.RaftIDs[nid] {
-			return true
+		for _, m := range rsp {
+			if m.NodeID == ExtractRegIDFromGenID(nid) && m.ID == nsInfo.RaftIDs[nid] {
+				return true
+			}
 		}
 	}
 	CoordLog().Infof("namespace %v members is %v, still waiting %v join", nsInfo.GetDesp(), rsp, nid)
@@ -146,6 +150,7 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 	if err != nil {
 		return err.ToErrorType()
 	}
+	fullName := namespaceInfo.GetDesp()
 	selectedCatchup := make([]string, 0)
 	for _, nid := range partitionNodes[namespaceInfo.Partition] {
 		if FindSlice(namespaceInfo.RaftNodes, nid) != -1 {
@@ -157,31 +162,31 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 	for {
 		if currentSelect >= len(selectedCatchup) {
 			CoordLog().Infof("currently no any node %v can be balanced for namespace: %v, expect isr: %v, nodes:%v",
-				selectedCatchup, namespaceName, partitionNodes[namespaceInfo.Partition], nodeNameList)
+				selectedCatchup, fullName, partitionNodes[partitionID], nodeNameList)
 			return ErrBalanceNodeUnavailable
 		}
 		nid := selectedCatchup[currentSelect]
-		namespaceInfo, err := self.pdCoord.register.GetNamespacePartInfo(namespaceName, partitionID)
+		nInfo, err := self.pdCoord.register.GetNamespacePartInfo(namespaceName, partitionID)
 		if err != nil {
-			CoordLog().Infof("failed to get namespace %v info: %v", namespaceInfo.GetDesp(), err)
+			CoordLog().Infof("failed to get namespace %v info: %v", fullName, err)
 		} else {
-			if self.IsRaftNodeJoined(namespaceInfo, nid) {
+			if self.IsRaftNodeJoined(nInfo, nid) {
 				break
-			} else if FindSlice(namespaceInfo.RaftNodes, nid) != -1 {
+			} else if FindSlice(nInfo.RaftNodes, nid) != -1 {
 				// wait ready
 				select {
 				case <-monitorChan:
 					return errors.New("quiting")
 				case <-time.After(time.Second * 5):
-					CoordLog().Infof("node: %v is added for namespace %v , still waiting catchup", nid, namespaceInfo.GetDesp())
+					CoordLog().Infof("node: %v is added for namespace %v , still waiting catchup", nid, nInfo.GetDesp())
 				}
 				continue
 			} else {
-				CoordLog().Infof("node: %v is added for namespace %v: (%v)", nid, namespaceInfo.GetDesp(), namespaceInfo.RaftNodes)
-				err := self.pdCoord.addNamespaceToNode(namespaceInfo, nid)
+				CoordLog().Infof("node: %v is added for namespace %v: (%v)", nid, nInfo.GetDesp(), nInfo.RaftNodes)
+				err := self.pdCoord.addNamespaceToNode(nInfo, nid)
 				if err != nil {
 					CoordLog().Infof("node: %v added for namespace %v (%v) failed: %v", nid,
-						namespaceInfo.GetDesp(), namespaceInfo.RaftNodes, err)
+						nInfo.GetDesp(), nInfo.RaftNodes, err)
 					currentSelect++
 				}
 			}
@@ -192,7 +197,7 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 		case <-time.After(time.Second * 5):
 		}
 		if retry > 5 {
-			CoordLog().Infof("add catchup and wait timeout : %v", namespaceName)
+			CoordLog().Infof("add catchup and wait timeout : %v", fullName)
 			return errors.New("wait timeout")
 		}
 		retry++
@@ -334,7 +339,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			continue
 		}
 		moveNodes := make([]string, 0)
-		for _, nid := range namespaceInfo.RaftNodes {
+		for _, nid := range namespaceInfo.GetISR() {
 			found := false
 			for _, expectedNode := range partitionNodes[namespaceInfo.Partition] {
 				if nid == expectedNode {
@@ -351,7 +356,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			CoordLog().Infof("node %v need move for namespace %v since %v not in expected isr list: %v", nid,
 				namespaceInfo.GetDesp(), namespaceInfo.RaftNodes, partitionNodes[namespaceInfo.Partition])
 			var err error
-			if len(namespaceInfo.RaftNodes) <= namespaceInfo.Replica {
+			if len(namespaceInfo.GetISR()) <= namespaceInfo.Replica {
 				err = self.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 					nodeNameList)
 			}
@@ -363,21 +368,27 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			}
 		}
 		expectLeader := partitionNodes[namespaceInfo.Partition][0]
-		if len(moveNodes) == 0 && (len(namespaceInfo.RaftNodes) >= namespaceInfo.Replica) &&
-			(namespaceInfo.RaftNodes[0] != expectLeader) {
-			for index, nid := range namespaceInfo.RaftNodes {
-				if nid == expectLeader {
-					CoordLog().Infof("need move leader for namespace %v since %v not expected leader: %v",
-						namespaceInfo.GetDesp(), namespaceInfo.RaftNodes[0], expectLeader)
-					namespaceInfo.RaftNodes[0], namespaceInfo.RaftNodes[index] = namespaceInfo.RaftNodes[index], namespaceInfo.RaftNodes[0]
-					self.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
-						&namespaceInfo.PartitionReplicaInfo, namespaceInfo.PartitionReplicaInfo.Epoch)
-					moved = true
+		if _, ok := namespaceInfo.Removings[expectLeader]; ok {
+			CoordLog().Infof("namespace %v expected leader: %v is marked as removing", namespaceInfo.GetDesp(),
+				expectLeader)
+		} else {
+			isrList := namespaceInfo.GetISR()
+			if len(moveNodes) == 0 && (len(isrList) >= namespaceInfo.Replica) &&
+				(namespaceInfo.RaftNodes[0] != expectLeader) {
+				for index, nid := range namespaceInfo.RaftNodes {
+					if nid == expectLeader {
+						CoordLog().Infof("need move leader for namespace %v since %v not expected leader: %v",
+							namespaceInfo.GetDesp(), namespaceInfo.RaftNodes, expectLeader)
+						namespaceInfo.RaftNodes[0], namespaceInfo.RaftNodes[index] = namespaceInfo.RaftNodes[index], namespaceInfo.RaftNodes[0]
+						self.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
+							&namespaceInfo.PartitionReplicaInfo, namespaceInfo.PartitionReplicaInfo.Epoch)
+						moved = true
+					}
 				}
-			}
-			select {
-			case <-monitorChan:
-			case <-time.After(time.Second):
+				select {
+				case <-monitorChan:
+				case <-time.After(time.Second):
+				}
 			}
 		}
 		if len(moveNodes) > 0 || moved {

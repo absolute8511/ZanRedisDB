@@ -52,16 +52,14 @@ func (self *NamespaceNode) SetDataFixState(needFix bool) {
 func (self *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) error {
 	if self.conf.EngType != conf.EngType ||
 		self.conf.RaftGroupConf.GroupID != conf.RaftGroupConf.GroupID {
+		nodeLog.Infof("mine :%v, check raft conf:%v", self.conf, conf)
 		return ErrRaftConfMismatch
 	}
 	if raftID != self.Node.rn.config.ID {
+		nodeLog.Infof("mine :%v, check raft conf:%v", self.Node.rn.config.ID, raftID)
 		return ErrRaftIDMismatch
 	}
 	return nil
-}
-
-func (self *NamespaceNode) Destroy() {
-	self.Node.Destroy()
 }
 
 func (self *NamespaceNode) Close() {
@@ -395,15 +393,6 @@ func (self *NamespaceMgr) SetNamespaceMagicCode(node *NamespaceNode, magic int64
 }
 
 func (self *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error {
-	return nil
-}
-
-func (self *NamespaceMgr) ForceDeleteNamespaceData(ns string) error {
-	nsNode := self.GetNamespaceNode(ns)
-	if nsNode == nil {
-		return ErrNamespaceNotFound
-	}
-	nsNode.Destroy()
 	return nil
 }
 

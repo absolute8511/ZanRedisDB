@@ -165,6 +165,19 @@ func (self *KVNode) GetMembers() []*common.MemberInfo {
 	return self.rn.GetMembers()
 }
 
+func (self *KVNode) GetLocalMemberInfo() *common.MemberInfo {
+	if self.rn == nil {
+		return nil
+	}
+	var m common.MemberInfo
+	m.ID = uint64(self.rn.config.ID)
+	m.NodeID = self.rn.config.nodeConfig.NodeID
+	m.GroupID = self.rn.config.GroupID
+	m.GroupName = self.rn.config.GroupName
+	m.RaftURLs = append(m.RaftURLs, self.rn.config.RaftAddr)
+	return &m
+}
+
 func (self *KVNode) GetStats() common.NamespaceStats {
 	tbs := self.store.GetTables()
 	var ns common.NamespaceStats
@@ -186,7 +199,7 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 	return ns
 }
 
-func (self *KVNode) Destroy() error {
+func (self *KVNode) destroy() error {
 	self.Stop()
 	self.store.Destroy()
 	ts := strconv.Itoa(int(time.Now().UnixNano()))
@@ -714,12 +727,13 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 		}
 	}
 	if shouldStop {
+		self.rn.Infof("I am removed from raft group: %v", self.ns)
 		go func() {
 			time.Sleep(time.Second)
 			select {
 			case <-self.stopChan:
 			default:
-				self.Stop()
+				self.destroy()
 			}
 		}()
 	}
