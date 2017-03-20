@@ -29,10 +29,11 @@ import (
 )
 
 var (
-	errInvalidResponse  = errors.New("Invalid response type")
-	errSyntaxError      = errors.New("syntax error")
-	errUnknownData      = errors.New("unknown request data type")
-	errTooMuchBatchSize = errors.New("the batch size exceed the limit")
+	errInvalidResponse      = errors.New("Invalid response type")
+	errSyntaxError          = errors.New("syntax error")
+	errUnknownData          = errors.New("unknown request data type")
+	errTooMuchBatchSize     = errors.New("the batch size exceed the limit")
+	errRaftNotReadyForWrite = errors.New("the raft is not ready for write")
 )
 
 const (
@@ -399,7 +400,14 @@ func (self *KVNode) handleProposeReq() {
 	}
 }
 
+func (self *KVNode) IsWriteReady() bool {
+	return atomic.LoadInt32(&self.rn.memberCnt) > int32(self.rn.config.Replicator/2)
+}
+
 func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
+	if !self.IsWriteReady() {
+		return nil, errRaftNotReadyForWrite
+	}
 	start := time.Now()
 	req.reqData.Header.Timestamp = start.UnixNano()
 	ch := self.w.Register(req.reqData.Header.ID)
@@ -433,6 +441,11 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		err = common.ErrStopped
 	}
 	self.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), time.Since(start).Nanoseconds()/1000)
+	if err == nil && !self.IsWriteReady() {
+		self.rn.Infof("write request %v on raft success but raft member is less than replicator",
+			req.reqData.String())
+		return nil, errRaftNotReadyForWrite
+	}
 	return rsp, err
 }
 

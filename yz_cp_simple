@@ -4,6 +4,7 @@
     "partition_num":1,
     "snap_count": 50000,
     "snap_catchup": 10000,
+    "replicator": 2,
     "raft_group_conf":{
         "group_id": 1000,
         "seed_nodes":[

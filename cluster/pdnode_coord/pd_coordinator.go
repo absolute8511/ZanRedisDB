@@ -600,6 +600,9 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 			}
 		}
 	}
+	// TODO: before add new to instead removing, we need check if all old node is removed
+	// and all the old nodes has the new cluster info.
+	// Otherwise, it may happen the new nodes and the old nodes can not be joined in the same cluster
 
 	for i := aliveReplicas; i < nsInfo.Replica; i++ {
 		n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
@@ -613,7 +616,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		}
 	}
 
-	if isrChanged {
+	if isrChanged && len(nsInfo.GetISR()) > nsInfo.Replica/2 {
 		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
 		if err != nil {

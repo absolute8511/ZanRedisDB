@@ -96,6 +96,9 @@ func (p *program) Start() error {
 		if nsConf.Name != nsNodeConf.Name {
 			panic("namespace name not match the config file")
 		}
+		if nsConf.Replicator <= 0 {
+			panic("namespace replicator should be set")
+		}
 
 		id := nsNodeConf.LocalReplicaID
 		clusterNodes := make(map[uint64]node.ReplicaInfo)

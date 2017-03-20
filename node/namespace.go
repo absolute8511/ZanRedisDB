@@ -27,6 +27,7 @@ var (
 	ErrNamespacePartitionNotFound = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not found")
 	ErrNamespaceNotLeader         = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not leader on the node")
 	ErrRaftGroupNotReady          = errors.New("raft group not ready")
+	errNamespaceConfInvalid       = errors.New("namespace config is invalid")
 )
 
 type NamespaceNode struct {
@@ -65,6 +66,10 @@ func (self *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) e
 func (self *NamespaceNode) Close() {
 	self.Node.Stop()
 	nodeLog.Infof("namespace stopped: %v", self.conf.Name)
+}
+
+func (self *NamespaceNode) Destroy() error {
+	return self.Node.destroy()
 }
 
 func (self *NamespaceNode) IsDataNeedFix() bool {
@@ -220,8 +225,11 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		DataDir: path.Join(self.machineConf.DataRootDir, conf.Name),
 		EngType: conf.EngType,
 	}
-	if conf.PartitionNum == 0 {
-		conf.PartitionNum = 1
+	if conf.PartitionNum <= 0 {
+		return nil, errNamespaceConfInvalid
+	}
+	if conf.Replicator <= 0 {
+		return nil, errNamespaceConfInvalid
 	}
 	clusterNodes := make(map[uint64]ReplicaInfo)
 	for _, v := range conf.RaftGroupConf.SeedNodes {
@@ -251,6 +259,7 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		RaftPeers:   clusterNodes,
 		SnapCount:   conf.SnapCount,
 		SnapCatchup: conf.SnapCatchup,
+		Replicator:  conf.Replicator,
 	}
 	kv := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
 		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name),

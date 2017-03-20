@@ -211,10 +211,10 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 		sort.Sort(sortedParts)
 		for _, nsInfo := range sortedParts {
 			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
-			shouldLoad := FindSlice(nsInfo.GetISR(), self.myNode.GetID()) != -1
+			shouldLoad := self.isNamespaceShouldStart(nsInfo)
 			if !shouldLoad {
 				if len(nsInfo.GetISR()) >= nsInfo.Replica && localNamespace != nil {
-					self.removeLocalNamespace(localNamespace, true)
+					self.removeLocalNamespaceFromRaft(localNamespace, true)
 				}
 				continue
 			}
@@ -260,11 +260,91 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 	return nil
 }
 
+func (self *DataCoordinator) isMeInRaftGroup(nsInfo *PartitionMetaInfo) (bool, error) {
+	var lastErr error
+	for _, remoteNode := range nsInfo.GetISR() {
+		if remoteNode == self.GetMyID() {
+			continue
+		}
+		nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+		var rsp []*common.MemberInfo
+		err := common.APIRequest("GET",
+			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
+			nil, time.Second*3, &rsp)
+		if err != nil {
+			CoordLog().Infof("failed to get members from %v for namespace: %v, %v", nip, nsInfo.GetDesp(), err)
+			lastErr = err
+			continue
+		}
+
+		for _, m := range rsp {
+			if m.NodeID == self.GetMyRegID() && m.ID == nsInfo.RaftIDs[self.GetMyID()] {
+				return true, lastErr
+			}
+		}
+	}
+	return false, lastErr
+}
+
+func (self *DataCoordinator) isNamespaceShouldStart(nsInfo PartitionMetaInfo) bool {
+	// it may happen that the node marked as removing can not be removed because
+	// the raft group has not enough quorum to do the proposal to change the configure.
+	// In this way we need start the removing node to join the raft group and then
+	// the leader can remove the node from the raft group, and then we can safely remove
+	// the removing node finally
+	shouldLoad := FindSlice(nsInfo.RaftNodes, self.GetMyID()) != -1
+	if !shouldLoad {
+		return false
+	}
+	rm, ok := nsInfo.Removings[self.GetMyID()]
+	if !ok {
+		return true
+	}
+	if rm.RemoveReplicaID != nsInfo.RaftIDs[self.GetMyID()] {
+		return true
+	}
+
+	inRaft, _ := self.isMeInRaftGroup(&nsInfo)
+	if inRaft {
+		CoordLog().Infof("removing node %v-%v should join namespace %v since still in raft",
+			self.GetMyID(), rm.RemoveReplicaID, nsInfo.GetDesp())
+	}
+	return inRaft
+}
+
+func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, localNamespace *node.NamespaceNode) bool {
+	// removing node can stop local raft only when all the other members
+	// are notified to remove this node
+	// Mostly, the remove node proposal will handle the raft node stop, however
+	// there are some situations to be checked here.
+	rm, ok := nsInfo.Removings[self.GetMyID()]
+	if !ok {
+		return false
+	}
+	if rm.RemoveReplicaID != nsInfo.RaftIDs[self.GetMyID()] {
+		return false
+	}
+
+	inRaft, err := self.isMeInRaftGroup(&nsInfo)
+	if inRaft || err != nil {
+		return false
+	}
+	CoordLog().Infof("removing node %v-%v should stop namespace %v since not in any raft group anymore",
+		self.GetMyID(), rm.RemoveReplicaID, nsInfo.GetDesp())
+	return false
+}
+
 func (self *DataCoordinator) checkAndFixLocalNamespaceData(nsInfo *PartitionMetaInfo, localNamespace *node.NamespaceNode) error {
 	return nil
 }
 
 func (self *DataCoordinator) addNamespaceRaftMember(nsInfo *PartitionMetaInfo, m *common.MemberInfo) {
+	for nid, removing := range nsInfo.Removings {
+		if m.ID == removing.RemoveReplicaID && m.NodeID == ExtractRegIDFromGenID(nid) {
+			CoordLog().Infof("raft member %v is marked as removing in meta: %v, ignore add raft member", m, nsInfo.Removings)
+			return
+		}
+	}
 	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
 		CoordLog().Infof("namespace %v not found while add member", nsInfo.GetDesp())
@@ -352,9 +432,15 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					CoordLog().Infof("the namespace should be clean since not found in register: %v", name)
 					_, err = self.register.GetNamespaceMetaInfo(namespace)
 					if err == ErrKeyNotFound {
-						self.removeLocalNamespace(localNamespace, true)
+						self.removeLocalNamespaceFromRaft(localNamespace, true)
+						self.forceRemoveLocalNamespace(localNamespace)
 					}
 				}
+				go self.tryCheckNamespaces()
+				continue
+			}
+			if self.isNamespaceShouldStop(*namespaceMeta, localNamespace) {
+				self.forceRemoveLocalNamespace(localNamespace)
 				continue
 			}
 			leader := self.getNamespaceRaftLeader(namespaceMeta)
@@ -365,7 +451,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 			if FindSlice(isrList, self.myNode.GetID()) == -1 {
 				if len(isrList) > 0 {
 					CoordLog().Infof("the namespace should be clean : %v", namespaceMeta)
-					self.removeLocalNamespace(localNamespace, true)
+					self.removeLocalNamespaceFromRaft(localNamespace, true)
 				}
 				continue
 			}
@@ -459,7 +545,14 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 	}
 }
 
-func (self *DataCoordinator) removeLocalNamespace(localNamespace *node.NamespaceNode, removeData bool) *CoordErr {
+func (self *DataCoordinator) forceRemoveLocalNamespace(localNamespace *node.NamespaceNode) {
+	err := localNamespace.Destroy()
+	if err != nil {
+		CoordLog().Infof("failed to force remove local data: %v", err)
+	}
+}
+
+func (self *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.NamespaceNode, removeData bool) *CoordErr {
 	if removeData {
 		if !localNamespace.IsReady() {
 			return ErrNamespaceNotReady
@@ -501,6 +594,7 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.Name = nsInfo.GetDesp()
 	nsConf.EngType = nsInfo.EngType
 	nsConf.PartitionNum = nsInfo.PartitionNum
+	nsConf.Replicator = nsInfo.Replica
 	nsConf.RaftGroupConf.GroupID = uint64(nsInfo.MinGID) + uint64(nsInfo.Partition)
 	nsConf.RaftGroupConf.SeedNodes = make([]node.ReplicaInfo, 0)
 	for _, nid := range nsInfo.GetISR() {
@@ -566,6 +660,13 @@ func (self *DataCoordinator) tryCheckNamespaces() {
 
 func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 	localNamespace *node.NamespaceNode) *CoordErr {
+
+	if rm, ok := nsInfo.Removings[self.GetMyID()]; ok {
+		if rm.RemoveReplicaID == nsInfo.RaftIDs[self.GetMyID()] {
+			CoordLog().Infof("ignore join namespace %v since it removing node: %v", nsInfo.GetDesp(), rm)
+			return nil
+		}
+	}
 	// check if in local raft group
 	myRunning := atomic.AddInt32(&self.catchupRunning, 1)
 	defer atomic.AddInt32(&self.catchupRunning, -1)

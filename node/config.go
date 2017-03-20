@@ -13,6 +13,7 @@ type NamespaceConfig struct {
 	PartitionNum  int             `json:"partition_num"`
 	SnapCount     int             `json:"snap_count"`
 	SnapCatchup   int             `json:"snap_catchup"`
+	Replicator    int             `json:"replicator"`
 	RaftGroupConf RaftGroupConfig `json:"raft_group_conf"`
 }
 
@@ -62,5 +63,6 @@ type RaftConfig struct {
 	RaftPeers   map[uint64]ReplicaInfo `json:"raft_peers"`
 	SnapCount   int                    `json:"snap_count"`
 	SnapCatchup int                    `json:"snap_catchup"`
+	Replicator  int                    `json:"replicator"`
 	nodeConfig  *MachineConfig
 }

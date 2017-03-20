@@ -96,6 +96,7 @@ type raftNode struct {
 	inflightSnapshots int64
 	description       string
 	readStateC        chan raft.ReadState
+	memberCnt         int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -484,6 +485,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 					confChanged = true
 					rc.members[m.ID] = &m
 					memNum++
+					atomic.StoreInt32(&rc.memberCnt, int32(memNum))
 					rc.memMutex.Unlock()
 					if m.NodeID != rc.config.nodeConfig.NodeID {
 						rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
@@ -499,6 +501,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		rc.memMutex.Lock()
 		delete(rc.members, cc.ReplicaID)
 		confChanged = true
+		atomic.StoreInt32(&rc.memberCnt, int32(len(rc.members)))
 		rc.memMutex.Unlock()
 		if cc.ReplicaID == uint64(rc.config.ID) {
 			rc.Infof("I've been removed from the cluster! Shutting down.")
@@ -517,6 +520,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		if oldm != nil && !oldm.IsEqual(&m) {
 			confChanged = true
 		}
+		atomic.StoreInt32(&rc.memberCnt, int32(len(rc.members)))
 		rc.memMutex.Unlock()
 
 		if cc.NodeGroup.NodeId != uint64(rc.config.nodeConfig.NodeID) {
@@ -663,6 +667,7 @@ func (rc *raftNode) RestoreMembers(mems []*common.MemberInfo) {
 			rc.Infof("node added to the cluster: %v\n", m)
 		}
 	}
+	atomic.StoreInt32(&rc.memberCnt, int32(len(rc.members)))
 	if rc.transport != nil && rc.transport.IsStarted() {
 		for _, m := range rc.members {
 			if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
