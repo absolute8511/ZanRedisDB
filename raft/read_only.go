@@ -17,6 +17,7 @@ package raft
 import (
 	"bytes"
 	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"log"
 )
 
 // ReadState provides state for read only query.
@@ -66,6 +67,9 @@ func (ro *readOnly) addRequest(index uint64, m pb.Message) {
 	}
 	ro.pendingReadIndex[string(m.Entries[0].Data)] = &readIndexStatus{index: index, req: m, acks: make(map[uint64]struct{})}
 	ro.readIndexQueue = append(ro.readIndexQueue, m.Entries[0].Data)
+	if len(ro.readIndexQueue) > 1024 || len(ro.pendingReadIndex) > 1024 || cap(ro.readIndexQueue) > 1024 {
+		log.Printf("too much read index:%v, %v %v, %v", cap(ro.readIndexQueue), cap(ro.buf), ro.pendingReadIndex)
+	}
 }
 
 // recvAck notifies the readonly struct that the raft state machine received
