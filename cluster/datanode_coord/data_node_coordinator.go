@@ -220,7 +220,7 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 			}
 			if localNamespace != nil {
 				// already loaded
-				joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
+				joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace, false)
 				if joinErr != nil && joinErr != ErrNamespaceConfInvalid {
 					// we ensure join group as order for partitions
 					break
@@ -250,7 +250,7 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 				CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)
 				localNamespace.SetDataFixState(true)
 			}
-			joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace)
+			joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace, true)
 			if joinErr != nil && joinErr != ErrNamespaceConfInvalid {
 				// we ensure join group as order for partitions
 				break
@@ -415,6 +415,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 	ticker := time.NewTicker(time.Minute * 10)
 	defer self.wg.Done()
 	doWork := func() {
+		CoordLog().Infof("check for namespace sync...")
 		// try load local namespace if any namespace raft group changed
 		self.loadLocalNamespaceData()
 
@@ -540,6 +541,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 		case <-ticker.C:
 			doWork()
 		case <-nsChangedChan:
+			CoordLog().Infof("trigger check by namespace changed")
 			doWork()
 		}
 	}
@@ -563,7 +565,7 @@ func (self *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.N
 		localErr := localNamespace.Node.ProposeRemoveMember(*m)
 		if localErr != nil {
 			CoordLog().Infof("propose remove self %v failed : %v", m, localErr)
-			return &CoordErr{localErr.Error(), RpcCommonErr, CoordLocalErr}
+			return &CoordErr{ErrMsg: localErr.Error(), ErrCode: RpcCommonErr, ErrType: CoordLocalErr}
 		}
 	} else {
 		if localNamespace == nil {
@@ -577,7 +579,7 @@ func (self *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.N
 func (self *DataCoordinator) getRaftAddrForNode(nid string) (string, *CoordErr) {
 	node, err := self.register.GetNodeInfo(nid)
 	if err != nil {
-		return "", &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
+		return "", &CoordErr{ErrMsg: err.Error(), ErrCode: RpcNoErr, ErrType: CoordRegisterErr}
 	}
 	return node.RaftTransportAddr, nil
 }
@@ -659,7 +661,7 @@ func (self *DataCoordinator) tryCheckNamespaces() {
 }
 
 func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
-	localNamespace *node.NamespaceNode) *CoordErr {
+	localNamespace *node.NamespaceNode, firstLoad bool) *CoordErr {
 
 	if rm, ok := nsInfo.Removings[self.GetMyID()]; ok {
 		if rm.RemoveReplicaID == nsInfo.RaftIDs[self.GetMyID()] {
@@ -709,7 +711,7 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 			}
 		}
 		if alreadyJoined {
-			if localNamespace.IsRaftSynced() {
+			if localNamespace.IsRaftSynced(firstLoad) {
 				joinErr = nil
 				break
 			}
@@ -773,7 +775,7 @@ func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo) (*n
 	if localNode != nil {
 		if checkErr := localNode.CheckRaftConf(raftID, nsConf); checkErr != nil {
 			CoordLog().Infof("local namespace %v mismatch with the new raft config removing: %v", nsInfo.GetDesp(), checkErr)
-			return nil, &CoordErr{checkErr.Error(), RpcNoErr, CoordLocalErr}
+			return nil, &CoordErr{ErrMsg: checkErr.Error(), ErrCode: RpcNoErr, ErrType: CoordLocalErr}
 		}
 	}
 	if localNode == nil {

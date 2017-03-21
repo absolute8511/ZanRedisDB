@@ -21,8 +21,8 @@ var (
 	ErrClusterNodeRemoving       = NewCoordErr("the node is mark as removed", CoordTmpErr)
 	ErrNamespaceNodeConflict     = NewCoordErr("the namespace node info is conflicted", CoordClusterErr)
 	ErrRegisterServiceUnstable   = NewCoordErr("the register service is unstable", CoordTmpErr)
-	ErrNamespaceReplicaNotEnough = NewCoordErr("the replica nodes is not enough", CoordTmpErr)
 	ErrNamespaceRaftIDNotFound   = NewCoordErr("the namespace raft id is not found", CoordClusterErr)
+	ErrNamespaceReplicaNotEnough = NewCoordErr("the replicas in the namespace is not enough", CoordTmpErr)
 )
 
 const (
@@ -402,7 +402,7 @@ func (self *PDCoordinator) triggerCheckNamespaces(namespace string, part int, de
 	time.Sleep(delay)
 
 	select {
-	case self.checkNamespaceFailChan <- NamespaceNameInfo{namespace, part}:
+	case self.checkNamespaceFailChan <- NamespaceNameInfo{NamespaceName: namespace, NamespacePartition: part}:
 	case <-self.stopChan:
 		return
 	case <-time.After(time.Second):
@@ -640,7 +640,7 @@ func (self *PDCoordinator) addNamespaceToNode(nsInfo *PartitionMetaInfo, nid str
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
 	if err != nil {
 		CoordLog().Infof("add namespace replica info failed: %v", err.Error())
-		return &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
+		return &CoordErr{ErrMsg: err.Error(), ErrCode: RpcNoErr, ErrType: CoordRegisterErr}
 	} else {
 		CoordLog().Infof("namespace %v replica : %v added", nsInfo.GetDesp(), nid)
 	}
@@ -656,50 +656,52 @@ func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, ni
 	if _, ok := nsInfo.RaftIDs[nid]; !ok {
 		return ErrNamespaceRaftIDNotFound
 	}
-	nsInfo.Removings[nid] = RemovingInfo{time.Now().UnixNano(), nsInfo.RaftIDs[nid]}
+	if len(nsInfo.GetISR()) <= 1 {
+		return ErrNamespaceReplicaNotEnough
+	}
+	nsInfo.Removings[nid] = RemovingInfo{RemoveTime: time.Now().UnixNano(), RemoveReplicaID: nsInfo.RaftIDs[nid]}
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
 	if err != nil {
 		CoordLog().Infof("update namespace replica info failed: %v", err.Error())
-		return &CoordErr{err.Error(), RpcNoErr, CoordRegisterErr}
+		return &CoordErr{ErrMsg: err.Error(), ErrCode: RpcNoErr, ErrType: CoordRegisterErr}
 	} else {
 		CoordLog().Infof("namespace %v: mark replica removing from node:%v", nsInfo.GetDesp(), nid)
 	}
 	return nil
 }
 
-func (self *PDCoordinator) removeNamespaceFromRemovings(nsInfo *PartitionMetaInfo, nid string) {
+func (self *PDCoordinator) removeNamespaceFromRemovings(nsInfo *PartitionMetaInfo) {
 	// make sure all the current members are notified the newest cluster info and
 	// have the raft synced
-	rinfo, ok := nsInfo.Removings[nid]
-	if !ok {
-		CoordLog().Infof("namespace %v try to remove node %v not in removing", nsInfo.GetDesp(), nid)
-		return
-	}
-	if time.Now().UnixNano()-rinfo.RemoveTime < time.Hour.Nanoseconds() {
-		return
-	}
-	nodes := make([]string, 0, len(nsInfo.RaftNodes))
-	for _, replica := range nsInfo.RaftNodes {
-		if nid == replica {
+	for nid, rinfo := range nsInfo.Removings {
+		if time.Now().UnixNano()-rinfo.RemoveTime < 5*time.Minute.Nanoseconds() {
 			continue
 		}
-		nodes = append(nodes, replica)
+		inRaft, err := self.dpm.IsRaftNodeJoined(nsInfo, nid)
+		if inRaft || err != nil {
+			continue
+		}
+		nodes := make([]string, 0, len(nsInfo.RaftNodes))
+		for _, replica := range nsInfo.RaftNodes {
+			if nid == replica {
+				continue
+			}
+			nodes = append(nodes, replica)
+		}
+		if len(nodes) < 1 {
+			CoordLog().Infof("single replica can not be removed from namespace %v ", nsInfo.GetDesp())
+			continue
+		}
+		nsInfo.RaftNodes = nodes
+		delete(nsInfo.RaftIDs, nid)
+		delete(nsInfo.Removings, nid)
+		err = self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
+		if err != nil {
+			CoordLog().Infof("update namespace replica info failed: %v", err.Error())
+		} else {
+			CoordLog().Infof("namespace %v replica removed from removing node:%v, %v", nsInfo.GetDesp(), nid, rinfo)
+		}
 	}
-	if len(nodes) < 1 {
-		CoordLog().Infof("single replica can not be removed from namespace %v ", nsInfo.GetDesp())
-		return
-	}
-	nsInfo.RaftNodes = nodes
-	delete(nsInfo.RaftIDs, nid)
-	delete(nsInfo.Removings, nid)
-	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
-		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
-	if err != nil {
-		CoordLog().Infof("update namespace replica info failed: %v", err.Error())
-		return
-	} else {
-		CoordLog().Infof("namespace %v replica removed from node:%v", nsInfo.GetDesp(), nid)
-	}
-	return
 }

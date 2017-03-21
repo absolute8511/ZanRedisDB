@@ -556,7 +556,7 @@ func (self *KVNode) SetCommittedIndex(ci uint64) {
 	atomic.StoreUint64(&self.committedIndex, ci)
 }
 
-func (self *KVNode) IsRaftSynced() bool {
+func (self *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	if self.rn.Lead() == raft.None {
 		select {
 		case <-time.After(time.Duration(self.machineConfig.ElectionTick/10) * self.machineConfig.TickDuration):
@@ -568,6 +568,9 @@ func (self *KVNode) IsRaftSynced() bool {
 			self.rn.maybeTryElection()
 			return false
 		}
+	}
+	if !checkCommitIndex {
+		return true
 	}
 	to := time.Second * 2
 	req := make([]byte, 8)

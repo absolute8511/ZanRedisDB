@@ -76,8 +76,8 @@ func (self *NamespaceNode) IsDataNeedFix() bool {
 	return false
 }
 
-func (self *NamespaceNode) IsRaftSynced() bool {
-	return self.Node.IsRaftSynced()
+func (self *NamespaceNode) IsRaftSynced(checkCommitIndex bool) bool {
+	return self.Node.IsRaftSynced(checkCommitIndex)
 }
 
 func (self *NamespaceNode) GetMembers() []*common.MemberInfo {

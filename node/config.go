@@ -38,7 +38,7 @@ type MachineConfig struct {
 	BroadcastAddr string        `json:"broadcast_addr"`
 	HttpAPIPort   int           `json:"http_api_port"`
 	LocalRaftAddr string        `json:"local_raft_addr"`
-	DataRootDir   string        `json:data_root_dir`
+	DataRootDir   string        `json:"data_root_dir"`
 	ElectionTick  int           `json:"election_tick"`
 	TickDuration  time.Duration `json:"tick_duration"`
 }

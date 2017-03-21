@@ -65,10 +65,11 @@ func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
 }
 
 // query the raft peers if the nid already in the raft group for the namespace
-func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid string) bool {
+func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid string) (bool, error) {
 	if len(nsInfo.RaftNodes) == 0 {
-		return false
+		return false, nil
 	}
+	var lastErr error
 	for _, remoteNode := range nsInfo.GetISR() {
 		if remoteNode == nid {
 			continue
@@ -80,17 +81,17 @@ func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid strin
 			nil, time.Second*3, &rsp)
 		if err != nil {
 			CoordLog().Infof("failed to get members for namespace: %v", err)
+			lastErr = err
 			continue
 		}
 
 		for _, m := range rsp {
 			if m.NodeID == ExtractRegIDFromGenID(nid) && m.ID == nsInfo.RaftIDs[nid] {
-				return true
+				return true, nil
 			}
 		}
 	}
-	CoordLog().Infof("namespace %v members is %v, still waiting %v join", nsInfo.GetDesp(), rsp, nid)
-	return false
+	return false, lastErr
 }
 
 func (self *DataPlacement) SetBalanceInterval(start int, end int) {
@@ -170,7 +171,7 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 		if err != nil {
 			CoordLog().Infof("failed to get namespace %v info: %v", fullName, err)
 		} else {
-			if self.IsRaftNodeJoined(nInfo, nid) {
+			if inRaft, _ := self.IsRaftNodeJoined(nInfo, nid); inRaft {
 				break
 			} else if FindSlice(nInfo.RaftNodes, nid) != -1 {
 				// wait ready
