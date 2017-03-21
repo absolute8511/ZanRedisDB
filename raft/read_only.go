@@ -67,14 +67,6 @@ func (ro *readOnly) addRequest(index uint64, m pb.Message) {
 	}
 	ro.pendingReadIndex[string(m.Entries[0].Data)] = &readIndexStatus{index: index, req: m, acks: make(map[uint64]struct{})}
 	ro.readIndexQueue = append(ro.readIndexQueue, m.Entries[0].Data)
-	if len(ro.readIndexQueue) > 1024 || len(ro.pendingReadIndex) > 1024 || cap(ro.readIndexQueue) > 1024 {
-		log.Printf("too much read index:%v, %v, %v, %v",
-			cap(ro.readIndexQueue), len(ro.readIndexQueue), cap(ro.buf), len(ro.pendingReadIndex))
-		log.Printf("%v", ro.readIndexQueue)
-		for k, _ := range ro.pendingReadIndex {
-			log.Printf("%v", []byte(k))
-		}
-	}
 }
 
 // recvAck notifies the readonly struct that the raft state machine received
@@ -119,7 +111,7 @@ func (ro *readOnly) advance(m pb.Message) []*readIndexStatus {
 		ro.readIndexQueue = ro.readIndexQueue[i:]
 		log.Printf("adv to readindex %v", m.Context)
 		for _, rs := range rss {
-			delete(ro.pendingReadIndex, string(rs.req.Context))
+			delete(ro.pendingReadIndex, string(rs.req.Entries[0].Data))
 		}
 		if len(ro.readIndexQueue) == 0 {
 			ro.readIndexQueue = ro.buf
