@@ -493,13 +493,13 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 
 		needMigrate := false
 		if len(nsInfo.GetISR()) < nsInfo.Replica {
-			CoordLog().Infof("replicas is not enough for namespace %v, isr is :%v", nsInfo.GetDesp(), nsInfo.RaftNodes)
+			CoordLog().Infof("replicas is not enough for namespace %v, isr is :%v", nsInfo.GetDesp(), nsInfo.GetISR())
 			needMigrate = true
 			checkOK = false
 		}
 
 		aliveCount := 0
-		for _, replica := range nsInfo.RaftNodes {
+		for _, replica := range nsInfo.GetISR() {
 			if _, ok := currentNodes[replica]; !ok {
 				CoordLog().Warningf("namespace %v isr node %v is lost.", nsInfo.GetDesp(), replica)
 				needMigrate = true
@@ -559,15 +559,20 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			delete(partitions, nsInfo.Partition)
 		}
 
-		if aliveCount > nsInfo.Replica && atomic.LoadInt32(&self.balanceWaiting) == 0 {
-			//remove the unwanted node in isr
-			CoordLog().Infof("namespace %v isr %v is more than replicator: %v, %v", namespaceInfo.GetDesp(),
-				namespaceInfo.RaftNodes, aliveCount, nsInfo.Replica)
-			removeNode := self.dpm.decideUnwantedRaftNode(&namespaceInfo, currentNodes)
-			if removeNode != "" {
-				coordErr := self.removeNamespaceFromNode(&namespaceInfo, removeNode)
-				if coordErr == nil {
-					CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, nsInfo)
+		if atomic.LoadInt32(&self.balanceWaiting) == 0 {
+			if len(nsInfo.Removings) > 0 {
+				self.removeNamespaceFromRemovings(&nsInfo)
+			}
+			if aliveCount > nsInfo.Replica && !needMigrate {
+				//remove the unwanted node in isr
+				CoordLog().Infof("namespace %v isr %v is more than replicator: %v, %v", namespaceInfo.GetDesp(),
+					namespaceInfo.RaftNodes, aliveCount, nsInfo.Replica)
+				removeNode := self.dpm.decideUnwantedRaftNode(&namespaceInfo, currentNodes)
+				if removeNode != "" {
+					coordErr := self.removeNamespaceFromNode(&namespaceInfo, removeNode)
+					if coordErr == nil {
+						CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, nsInfo)
+					}
 				}
 			}
 		}

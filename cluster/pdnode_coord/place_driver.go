@@ -490,7 +490,7 @@ func (self *DataPlacement) decideUnwantedRaftNode(namespaceInfo *PartitionMetaIn
 	if err != nil {
 		return unwantedNode
 	}
-	for _, nid := range namespaceInfo.RaftNodes {
+	for _, nid := range namespaceInfo.GetISR() {
 		found := false
 		for _, validNode := range partitionNodes[namespaceInfo.Partition] {
 			if nid == validNode {
