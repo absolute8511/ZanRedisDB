@@ -124,15 +124,15 @@ func (self *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps htt
 func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
 	levelStr := reqParams.Get("loglevel")
 	if levelStr == "" {
-		return nil, common.HttpErr{400, "MISSING_ARG_LEVEL"}
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_LEVEL"}
 	}
 	level, err := strconv.Atoi(levelStr)
 	if err != nil {
-		return nil, common.HttpErr{400, "BAD_LEVEL_STRING"}
+		return nil, common.HttpErr{Code: 400, Text: "BAD_LEVEL_STRING"}
 	}
 	sLog.SetLevel(int32(level))
 	rafthttp.SetLogLevel(level)
@@ -144,7 +144,7 @@ func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps h
 func (self *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, common.HttpErr{500, err.Error()}
+		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
 	return struct {
 		Version          string `json:"version"`
@@ -167,7 +167,7 @@ func (self *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps htt
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
-		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
 	ns := reqParams.Get("namespace")
 	nsList := self.nsMgr.GetNamespaces()
@@ -192,7 +192,7 @@ func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprou
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
-		return nil, common.HttpErr{400, "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)

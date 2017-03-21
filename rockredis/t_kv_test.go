@@ -156,8 +156,8 @@ func TestDBKV(t *testing.T) {
 
 	key5 := []byte("test:test_kv_mset_key5")
 	key6 := []byte("test:test_kv_mset_key6")
-	err = db.MSet(0, common.KVRecord{key3, []byte("key3")},
-		common.KVRecord{key5, []byte("key5")}, common.KVRecord{key6, []byte("key6")})
+	err = db.MSet(0, common.KVRecord{Key: key3, Value: []byte("key3")},
+		common.KVRecord{Key: key5, Value: []byte("key5")}, common.KVRecord{Key: key6, Value: []byte("key6")})
 	if err != nil {
 		t.Errorf("fail mset: %v", err)
 	}
@@ -222,8 +222,8 @@ func TestDBKVWithNoTable(t *testing.T) {
 
 	key5 := []byte("test_kv_mset_key5")
 	key6 := []byte("test:test_kv_mset_key6")
-	err = db.MSet(0, common.KVRecord{key3, []byte("key3")},
-		common.KVRecord{key5, []byte("key5")}, common.KVRecord{key6, []byte("key6")})
+	err = db.MSet(0, common.KVRecord{Key: key3, Value: []byte("key3")},
+		common.KVRecord{Key: key5, Value: []byte("key5")}, common.KVRecord{Key: key6, Value: []byte("key6")})
 	if err == nil {
 		t.Error("should failed")
 	}

@@ -173,7 +173,7 @@ func TestKVM(t *testing.T) {
 		t.Fatal(len(v))
 	} else {
 		if vv, ok := v[0].([]byte); !ok || string(vv) != "1" {
-			t.Fatal("not 1, %v", v)
+			t.Fatalf("not 1, %v", v)
 		}
 
 		if vv, ok := v[1].([]byte); !ok || string(vv) != "2" {
@@ -256,19 +256,19 @@ func TestKVErrorParams(t *testing.T) {
 	}
 
 	if _, err := c.Do("del"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("mset"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("mset", key1, key2, key3); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("mget"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 }
@@ -499,63 +499,63 @@ func TestHashErrorParams(t *testing.T) {
 
 	key := "default:test:hash_err_param"
 	if _, err := c.Do("hset", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hget", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hexists", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hdel", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hlen", key, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hincrby", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hmset", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hmset", key, "f1", "v1", "f2"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hmget", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hgetall"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hkeys"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hvals"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hclear", key, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("hmclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 }
 
@@ -920,47 +920,47 @@ func TestListErrorParams(t *testing.T) {
 
 	key := "default:test:list_err_param"
 	if _, err := c.Do("lpush", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("rpush", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("lpop", key, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("rpop", key, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("llen", key, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("lindex", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("lrange", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("lclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("lmclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("ltrim_front", key, "-1"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("ltrim_back", key, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 }
 
@@ -1034,51 +1034,51 @@ func TestSetErrorParams(t *testing.T) {
 
 	key := "default:test:set_error_param"
 	if _, err := c.Do("sadd", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("scard"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("scard", key, key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("sismember", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("sismember", key, "m1", "m2"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("smembers"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("smembers", key, key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("srem"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("srem", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("sclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("sclear", key, key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("smclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 }
@@ -1526,147 +1526,147 @@ func TestZsetErrorParams(t *testing.T) {
 	key := "default:test:zset_error_param"
 	//zadd
 	if _, err := c.Do("zadd", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zadd", key, "a", "b", "c"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zadd", key, "-a", "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zadd", key, "0.1", "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zcard
 	if _, err := c.Do("zcard"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zscore
 	if _, err := c.Do("zscore", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zrem
 	if _, err := c.Do("zrem", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zincrby
 	if _, err := c.Do("zincrby", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zincrby", key, 0.1, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zcount
 	if _, err := c.Do("zcount", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zcount", key, "-inf", "=inf"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zcount", key, 0.1, 0.1); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zrank
 	if _, err := c.Do("zrank", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zrevzrank
 	if _, err := c.Do("zrevrank", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zremrangebyrank
 	if _, err := c.Do("zremrangebyrank", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zremrangebyrank", key, 0.1, 0.1); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zremrangebyscore
 	if _, err := c.Do("zremrangebyscore", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zremrangebyscore", key, "-inf", "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zremrangebyscore", key, 0, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zrange
 	if _, err := c.Do("zrange", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zrange", key, 0, 1, "withscore"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zrange", key, 0, 1, "withscores", "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zrevrange, almost same as zrange
 	if _, err := c.Do("zrevrange", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zrangebyscore
 
 	if _, err := c.Do("zrangebyscore", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscore"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limit"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limi", 1, 1); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limit", "a", 1); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zrangebyscore", key, 0, 1, "withscores", "limit", 1, "a"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zrevrangebyscore, almost same as zrangebyscore
 	if _, err := c.Do("zrevrangebyscore", key); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zclear
 	if _, err := c.Do("zclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 
 	//zmclear
 	if _, err := c.Do("zmclear"); err == nil {
-		t.Fatal("invalid err of %v", err)
+		t.Fatalf("invalid err of %v", err)
 	}
 }
 
@@ -1683,19 +1683,19 @@ func TestZSetLex(t *testing.T) {
 	if ay, err := goredis.Strings(c.Do("zrangebylex", key, "-", "[c")); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ay, []string{"a", "b", "c"}) {
-		t.Fatal("must equal")
+		t.Fatalf("must equal")
 	}
 
 	if ay, err := goredis.Strings(c.Do("zrangebylex", key, "-", "(c")); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ay, []string{"a", "b"}) {
-		t.Fatal("must equal")
+		t.Fatalf("must equal")
 	}
 
 	if ay, err := goredis.Strings(c.Do("zrangebylex", key, "[aaa", "(g")); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ay, []string{"b", "c", "d", "e", "f"}) {
-		t.Fatal("must equal")
+		t.Fatalf("must equal")
 	}
 
 	if n, err := goredis.Int64(c.Do("zlexcount", key, "-", "(c")); err != nil {

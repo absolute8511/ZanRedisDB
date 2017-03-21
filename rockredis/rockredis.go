@@ -268,7 +268,7 @@ func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {
 	go func() {
 		it := NewDBRangeLimitIterator(r.eng, sKey, eKey, common.RangeClose, 0, maxNum, false)
 		defer it.Close()
-		for it = it; it.Valid(); it.Next() {
+		for ; it.Valid(); it.Next() {
 			key := it.Key()
 			value := it.Value()
 			retChan <- common.KVRecord{Key: key, Value: value}

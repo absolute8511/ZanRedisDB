@@ -431,8 +431,8 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 		for ; it.Valid(); it.Next() {
 			_, f, err := hDecodeHashKey(it.Key())
 			v <- common.KVRecordRet{
-				common.KVRecord{Key: f, Value: it.Value()},
-				err,
+				Rec: common.KVRecord{Key: f, Value: it.Value()},
+				Err: err,
 			}
 		}
 	}()
@@ -463,8 +463,8 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 		for ; it.Valid(); it.Next() {
 			_, f, err := hDecodeHashKey(it.Key())
 			v <- common.KVRecordRet{
-				common.KVRecord{Key: f, Value: nil},
-				err,
+				Rec: common.KVRecord{Key: f, Value: nil},
+				Err: err,
 			}
 		}
 	}()
@@ -495,8 +495,8 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 		defer close(v)
 		for ; it.Valid(); it.Next() {
 			v <- common.KVRecordRet{
-				common.KVRecord{Key: nil, Value: it.Value()},
-				nil,
+				Rec: common.KVRecord{Key: nil, Value: it.Value()},
+				Err: nil,
 			}
 		}
 	}()

@@ -38,7 +38,9 @@ func NewPeersStats() *PeersStats {
 
 func (ls *PeersStats) JSON() []byte {
 	ls.Lock()
-	stats := *ls
+	stats := PeersStats{
+		Peers: ls.Peers,
+	}
 	ls.Unlock()
 	b, err := json.Marshal(stats)
 	// TODO(jonboulle): appropriate error handling?

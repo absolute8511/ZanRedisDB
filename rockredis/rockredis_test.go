@@ -81,7 +81,8 @@ func TestRockDB(t *testing.T) {
 	}
 
 	key = []byte("test:test_zset_key")
-	if _, err := db.ZAdd(key, common.ScorePair{1, []byte("a")}, common.ScorePair{2, []byte("b")}); err != nil {
+	if _, err := db.ZAdd(key, common.ScorePair{Score: 1, Member: []byte("a")},
+		common.ScorePair{Score: 2, Member: []byte("b")}); err != nil {
 		t.Fatal(err)
 	}
 

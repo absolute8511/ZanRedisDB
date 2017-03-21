@@ -17,7 +17,7 @@ func bin(sz string) []byte {
 }
 
 func pair(memb string, score int) common.ScorePair {
-	return common.ScorePair{int64(score), bin(memb)}
+	return common.ScorePair{Score: int64(score), Member: bin(memb)}
 }
 
 func TestZSetCodec(t *testing.T) {
@@ -230,13 +230,13 @@ func TestZLex(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 
 	key := []byte("test:myzset")
-	if _, err := db.ZAdd(key, common.ScorePair{0, []byte("a")},
-		common.ScorePair{0, []byte("b")},
-		common.ScorePair{0, []byte("c")},
-		common.ScorePair{0, []byte("d")},
-		common.ScorePair{0, []byte("e")},
-		common.ScorePair{0, []byte("f")},
-		common.ScorePair{0, []byte("g")}); err != nil {
+	if _, err := db.ZAdd(key, common.ScorePair{Score: 0, Member: []byte("a")},
+		common.ScorePair{Score: 0, Member: []byte("b")},
+		common.ScorePair{Score: 0, Member: []byte("c")},
+		common.ScorePair{Score: 0, Member: []byte("d")},
+		common.ScorePair{Score: 0, Member: []byte("e")},
+		common.ScorePair{Score: 0, Member: []byte("f")},
+		common.ScorePair{Score: 0, Member: []byte("g")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -289,7 +289,7 @@ func TestZKeyExists(t *testing.T) {
 		t.Fatal("invalid value ", n)
 	}
 
-	db.ZAdd(key, common.ScorePair{0, []byte("a")}, common.ScorePair{0, []byte("b")})
+	db.ZAdd(key, common.ScorePair{Score: 0, Member: []byte("a")}, common.ScorePair{Score: 0, Member: []byte("b")})
 
 	if n, err := db.ZKeyExists(key); err != nil {
 		t.Fatal(err.Error())
