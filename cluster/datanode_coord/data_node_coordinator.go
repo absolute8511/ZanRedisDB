@@ -415,7 +415,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 	ticker := time.NewTicker(time.Minute * 10)
 	defer self.wg.Done()
 	doWork := func() {
-		CoordLog().Infof("check for namespace sync...")
+		CoordLog().Debugf("check for namespace sync...")
 		// try load local namespace if any namespace raft group changed
 		self.loadLocalNamespaceData()
 
@@ -437,6 +437,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 						self.forceRemoveLocalNamespace(localNamespace)
 					}
 				}
+				CoordLog().Infof("got namespace %v meta failed: %v", name, err)
 				go self.tryCheckNamespaces()
 				continue
 			}
@@ -499,7 +500,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 						}
 					}
 				}
-				if anyJoined || len(members) <= namespaceMeta.Replica || !isReplicasEnough {
+				if anyJoined || len(members) < len(isrList) {
 					go self.tryCheckNamespaces()
 					continue
 				}
