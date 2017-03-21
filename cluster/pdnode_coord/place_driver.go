@@ -274,6 +274,7 @@ func (self *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[s
 		} else {
 			replicaInfo.RaftNodes = partitionNodes[p]
 			replicaInfo.RaftIDs = make(map[string]uint64)
+			replicaInfo.Removings = make(map[string]RemovingInfo)
 			for _, nid := range replicaInfo.RaftNodes {
 				replicaInfo.MaxRaftID++
 				replicaInfo.RaftIDs[nid] = uint64(replicaInfo.MaxRaftID)

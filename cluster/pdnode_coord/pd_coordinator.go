@@ -597,6 +597,9 @@ func (self *PDCoordinator) handleNamespaceMigrate(nsInfo *PartitionMetaInfo,
 		if _, ok := currentNodes[replica]; ok {
 			aliveReplicas++
 		} else {
+			if nsInfo.Removings == nil {
+				nsInfo.Removings = make(map[string]RemovingInfo)
+			}
 			if _, ok := nsInfo.Removings[replica]; !ok {
 				CoordLog().Infof("mark removing for failed raft node %v for namespace: %v", replica, nsInfo.GetDesp())
 				nsInfo.Removings[replica] = RemovingInfo{RemoveTime: time.Now().UnixNano(),
@@ -663,6 +666,9 @@ func (self *PDCoordinator) removeNamespaceFromNode(nsInfo *PartitionMetaInfo, ni
 	}
 	if len(nsInfo.GetISR()) <= 1 {
 		return ErrNamespaceReplicaNotEnough
+	}
+	if nsInfo.Removings == nil {
+		nsInfo.Removings = make(map[string]RemovingInfo)
 	}
 	nsInfo.Removings[nid] = RemovingInfo{RemoveTime: time.Now().UnixNano(), RemoveReplicaID: nsInfo.RaftIDs[nid]}
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
