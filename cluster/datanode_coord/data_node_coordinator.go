@@ -474,6 +474,9 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				// check if any replica is not joined to members
 				anyJoined := false
 				for nid, rid := range namespaceMeta.RaftIDs {
+					if _, ok := namespaceMeta.Removings[nid]; ok {
+						continue
+					}
 					found := false
 					for _, m := range members {
 						if m.ID == rid {
