@@ -309,7 +309,7 @@ func (n *node) run(r *raft) {
 				}
 				propc = n.propc
 			} else {
-				r.logger.Infof("raft.node: %x lost leader %x at term %d", r.id, r.group.Name, lead, r.Term)
+				r.logger.Infof("raft.node: %x(%v) lost leader %x at term %d", r.id, r.group.Name, lead, r.Term)
 				propc = nil
 			}
 			lead = r.lead

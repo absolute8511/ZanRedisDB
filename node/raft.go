@@ -222,6 +222,7 @@ func (rc *raftNode) startRaft(ds DataStorage) error {
 		MaxSizePerMsg:   1024 * 1024,
 		MaxInflightMsgs: 256,
 		CheckQuorum:     true,
+		PreVote:         true,
 		Logger:          nodeLog,
 		Group: raftpb.Group{NodeId: rc.config.nodeConfig.NodeID,
 			Name: rc.config.GroupName, GroupId: rc.config.GroupID,

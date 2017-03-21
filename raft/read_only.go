@@ -17,7 +17,6 @@ package raft
 import (
 	"bytes"
 	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"log"
 )
 
 // ReadState provides state for read only query.
@@ -109,7 +108,6 @@ func (ro *readOnly) advance(m pb.Message) []*readIndexStatus {
 
 	if found {
 		ro.readIndexQueue = ro.readIndexQueue[i:]
-		log.Printf("adv to readindex %v", m.Context)
 		for _, rs := range rss {
 			delete(ro.pendingReadIndex, string(rs.req.Entries[0].Data))
 		}
