@@ -48,13 +48,17 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.BaseName = "default"
 	nsConf.EngType = rockredis.EngType
 	nsConf.PartitionNum = 1
+	nsConf.Replicator = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
 	kv := NewServer(kvOpts)
-	kv.InitKVNamespace(1, nsConf)
+	_, err = kv.InitKVNamespace(1, nsConf)
+	if err != nil {
+		t.Fatalf("failed to init namespace: %v", err)
+	}
 
 	kv.Start()
-	time.Sleep(time.Millisecond * 10)
+	time.Sleep(time.Second)
 	return kv, redisport, tmpDir
 }
 

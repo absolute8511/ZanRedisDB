@@ -23,10 +23,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/wal/walpb"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/raft/raftpb"
 )
 
 func TestNew(t *testing.T) {
