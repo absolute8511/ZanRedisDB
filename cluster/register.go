@@ -86,6 +86,10 @@ type PartitionMetaInfo struct {
 	PartitionReplicaInfo
 }
 
+func (self *PartitionMetaInfo) IsISRQuorum() bool {
+	return len(self.GetISR()) > self.Replica/2
+}
+
 func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
 	newp := *self
 	newp.RaftNodes = make([]string, len(self.RaftNodes))
