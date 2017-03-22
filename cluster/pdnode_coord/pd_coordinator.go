@@ -356,11 +356,13 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							anyPending = true
 							// find new catchup and wait isr ready
 							removingNodes[nid] = "pending"
-							err := self.dpm.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
+							newInfo, err := self.dpm.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 								nodeNameList)
 							if err != nil {
 								CoordLog().Infof("namespace %v data on node %v transfered failed, waiting next time", namespaceInfo.GetDesp(), nid)
 								continue
+							} else if newInfo != nil {
+								namespaceInfo = *newInfo
 							}
 							CoordLog().Infof("namespace %v data on node %v transfered success", namespaceInfo.GetDesp(), nid)
 							anyStateChanged = true

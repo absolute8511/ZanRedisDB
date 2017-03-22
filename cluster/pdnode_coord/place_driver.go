@@ -138,18 +138,18 @@ func (self *DataPlacement) DoBalance(monitorChan chan struct{}) {
 }
 
 func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{}, namespaceInfo *PartitionMetaInfo,
-	nodeNameList []string) error {
+	nodeNameList []string) (*PartitionMetaInfo, error) {
 	retry := 0
 	currentSelect := 0
 	namespaceName := namespaceInfo.Name
 	partitionID := namespaceInfo.Partition
 	// since we need add new catchup, we make the replica as replica+1
-	partitionNodes, err := self.getRebalancedPartitionsFromNameList(
+	partitionNodes, coordErr := self.getRebalancedPartitionsFromNameList(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica+1, nodeNameList)
-	if err != nil {
-		return err.ToErrorType()
+	if coordErr != nil {
+		return namespaceInfo, coordErr.ToErrorType()
 	}
 	fullName := namespaceInfo.GetDesp()
 	selectedCatchup := make([]string, 0)
@@ -160,14 +160,16 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 		}
 		selectedCatchup = append(selectedCatchup, nid)
 	}
+	var nInfo *PartitionMetaInfo
+	var err error
 	for {
 		if currentSelect >= len(selectedCatchup) {
 			CoordLog().Infof("currently no any node %v can be balanced for namespace: %v, expect isr: %v, nodes:%v",
 				selectedCatchup, fullName, partitionNodes[partitionID], nodeNameList)
-			return ErrBalanceNodeUnavailable
+			return nInfo, ErrBalanceNodeUnavailable
 		}
 		nid := selectedCatchup[currentSelect]
-		nInfo, err := self.pdCoord.register.GetNamespacePartInfo(namespaceName, partitionID)
+		nInfo, err = self.pdCoord.register.GetNamespacePartInfo(namespaceName, partitionID)
 		if err != nil {
 			CoordLog().Infof("failed to get namespace %v info: %v", fullName, err)
 		} else {
@@ -177,33 +179,33 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 				// wait ready
 				select {
 				case <-monitorChan:
-					return errors.New("quiting")
+					return nInfo, errors.New("quiting")
 				case <-time.After(time.Second * 5):
 					CoordLog().Infof("node: %v is added for namespace %v , still waiting catchup", nid, nInfo.GetDesp())
 				}
 				continue
 			} else {
 				CoordLog().Infof("node: %v is added for namespace %v: (%v)", nid, nInfo.GetDesp(), nInfo.RaftNodes)
-				err := self.pdCoord.addNamespaceToNode(nInfo, nid)
-				if err != nil {
+				coordErr = self.pdCoord.addNamespaceToNode(nInfo, nid)
+				if coordErr != nil {
 					CoordLog().Infof("node: %v added for namespace %v (%v) failed: %v", nid,
-						nInfo.GetDesp(), nInfo.RaftNodes, err)
+						nInfo.GetDesp(), nInfo.RaftNodes, coordErr)
 					currentSelect++
 				}
 			}
 		}
 		select {
 		case <-monitorChan:
-			return errors.New("quiting")
+			return nInfo, errors.New("quiting")
 		case <-time.After(time.Second * 5):
 		}
 		if retry > 5 {
 			CoordLog().Infof("add catchup and wait timeout : %v", fullName)
-			return errors.New("wait timeout")
+			return nInfo, errors.New("wait timeout")
 		}
 		retry++
 	}
-	return nil
+	return nInfo, nil
 }
 
 func (self *DataPlacement) getExcludeNodesForNamespace(namespaceInfo *PartitionMetaInfo) (map[string]struct{}, error) {
@@ -358,13 +360,17 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			CoordLog().Infof("node %v need move for namespace %v since %v not in expected isr list: %v", nid,
 				namespaceInfo.GetDesp(), namespaceInfo.RaftNodes, partitionNodes[namespaceInfo.Partition])
 			var err error
+			var newInfo *PartitionMetaInfo
 			if len(namespaceInfo.GetISR()) <= namespaceInfo.Replica {
-				err = self.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
+				newInfo, err = self.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 					nodeNameList)
 			}
 			if err != nil {
 				continue
 			} else {
+				if newInfo != nil {
+					namespaceInfo = *newInfo
+				}
 				self.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 				moved = true
 			}
@@ -419,7 +425,7 @@ func (self *DataPlacement) getRebalancedNamespacePartitions(ns string,
 	if len(currentNodes) < replica {
 		return nil, ErrNodeUnavailable
 	}
-	// for ordered namespace we have much partitions than nodes,
+	// for namespace we have much partitions than nodes,
 	// so we need make all the nodes have the almost the same leader partitions,
 	// and also we need make all the nodes have the almost the same followers.
 	// and to avoid the data migration, we should keep the data as much as possible
