@@ -56,8 +56,8 @@ func NewServer(conf ServerConfig) *Server {
 	if err != nil {
 		sLog.Fatal(err)
 	}
-	if conf.TickDuration < 100*time.Millisecond {
-		conf.TickDuration = 100 * time.Millisecond
+	if conf.TickMs < 100 {
+		conf.TickMs = 100
 	}
 	if conf.ElectionTick < 5 {
 		conf.ElectionTick = 5
@@ -120,7 +120,7 @@ func NewServer(conf ServerConfig) *Server {
 		HttpAPIPort:   conf.HttpAPIPort,
 		LocalRaftAddr: conf.LocalRaftAddr,
 		DataRootDir:   conf.DataDir,
-		TickDuration:  conf.TickDuration,
+		TickMs:        conf.TickMs,
 		ElectionTick:  conf.ElectionTick,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)

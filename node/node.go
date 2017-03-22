@@ -559,7 +559,7 @@ func (self *KVNode) SetCommittedIndex(ci uint64) {
 func (self *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	if self.rn.Lead() == raft.None {
 		select {
-		case <-time.After(time.Duration(self.machineConfig.ElectionTick/10) * self.machineConfig.TickDuration):
+		case <-time.After(time.Duration(self.machineConfig.ElectionTick/10) * time.Millisecond * time.Duration(self.machineConfig.TickMs)):
 		case <-self.stopChan:
 			return false
 		}

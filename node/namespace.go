@@ -373,7 +373,7 @@ func (self *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
 }
 
 func (self *NamespaceMgr) processRaftTick() {
-	ticker := time.NewTicker(self.machineConf.TickDuration)
+	ticker := time.NewTicker(time.Duration(self.machineConf.TickMs) * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {

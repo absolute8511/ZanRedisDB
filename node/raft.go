@@ -211,8 +211,8 @@ func (rc *raftNode) startRaft(ds DataStorage) error {
 	oldwal := wal.Exist(walDir)
 
 	elecTick := rc.config.nodeConfig.ElectionTick
-	if elecTick < 50 {
-		elecTick = 50
+	if elecTick < 10 {
+		elecTick = 10
 	}
 	c := &raft.Config{
 		ID:              uint64(rc.config.ID),

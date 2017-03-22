@@ -1,8 +1,6 @@
 package server
 
-import (
-	"time"
-)
+import ()
 
 type ServerConfig struct {
 	// this cluster id is used for server transport to tell
@@ -19,7 +17,7 @@ type ServerConfig struct {
 	Tags                 []string `json:"tags"`
 
 	ElectionTick int                   `json:"election_tick"`
-	TickDuration time.Duration         `json:"tick_duration"`
+	TickMs       int                   `json:"tick_ms"`
 	Namespaces   []NamespaceNodeConfig `json:"namespaces"`
 }
 
