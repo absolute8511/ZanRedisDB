@@ -64,8 +64,8 @@ func (p *program) Start() error {
 	glog.InitWithFlag(flagSet)
 
 	flagSet.Parse(os.Args[1:])
+	fmt.Println(common.VerString("placedriver"))
 	if *showVersion {
-		fmt.Println(common.VerString("placedriver"))
 		os.Exit(0)
 	}
 

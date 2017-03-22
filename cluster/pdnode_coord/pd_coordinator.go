@@ -367,7 +367,10 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							CoordLog().Infof("namespace %v data on node %v transfered success", namespaceInfo.GetDesp(), nid)
 							anyStateChanged = true
 						}
-						self.removeNamespaceFromNode(&namespaceInfo, nid)
+						err := self.removeNamespaceFromNode(&namespaceInfo, nid)
+						if err != nil {
+							anyPending = true
+						}
 					}
 					if !anyPending {
 						anyStateChanged = true
@@ -541,7 +544,10 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 					continue
 				}
 				CoordLog().Infof("begin migrate the namespace :%v", nsInfo.GetDesp())
-				self.handleNamespaceMigrate(&nsInfo, aliveNodes, aliveEpoch)
+				if coordErr := self.handleNamespaceMigrate(&nsInfo, aliveNodes, aliveEpoch); coordErr != nil {
+					go self.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second)
+					continue
+				}
 				delete(partitions, nsInfo.Partition)
 				// migrate only one at once to reduce the migrate traffic
 				atomic.StoreInt32(&self.isClusterUnstable, 1)
@@ -561,8 +567,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		if atomic.LoadInt32(&self.balanceWaiting) == 0 {
 			if len(nsInfo.Removings) > 0 {
 				self.removeNamespaceFromRemovings(&nsInfo)
-			}
-			if aliveCount > nsInfo.Replica && !needMigrate {
+			} else if aliveCount > nsInfo.Replica && !needMigrate {
 				//remove the unwanted node in isr
 				CoordLog().Infof("namespace %v isr %v is more than replicator: %v, %v", nsInfo.GetDesp(),
 					nsInfo.RaftNodes, aliveCount, nsInfo.Replica)

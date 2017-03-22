@@ -366,13 +366,16 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 					nodeNameList)
 			}
 			if err != nil {
-				continue
+				return moved, false
 			} else {
 				if newInfo != nil {
 					namespaceInfo = *newInfo
 				}
-				self.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
+				coordErr := self.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 				moved = true
+				if coordErr != nil {
+					return moved, false
+				}
 			}
 		}
 		expectLeader := partitionNodes[namespaceInfo.Partition][0]
@@ -388,9 +391,13 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 						CoordLog().Infof("need move leader for namespace %v since %v not expected leader: %v",
 							namespaceInfo.GetDesp(), namespaceInfo.RaftNodes, expectLeader)
 						namespaceInfo.RaftNodes[0], namespaceInfo.RaftNodes[index] = namespaceInfo.RaftNodes[index], namespaceInfo.RaftNodes[0]
-						self.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
+						err := self.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
 							&namespaceInfo.PartitionReplicaInfo, namespaceInfo.PartitionReplicaInfo.Epoch)
 						moved = true
+						if err != nil {
+							CoordLog().Infof("move leader for namespace %v failed: %v", namespaceInfo.GetDesp(), err)
+							return moved, false
+						}
 					}
 				}
 				select {

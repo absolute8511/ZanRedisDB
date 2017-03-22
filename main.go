@@ -46,8 +46,8 @@ func (p *program) Init(env svc.Environment) error {
 func (p *program) Start() error {
 	flagSet.Parse(os.Args[1:])
 
+	fmt.Println(common.VerString("ZanRedisDB"))
 	if *showVersion {
-		fmt.Println(common.VerString("ZanRedisDB"))
 		os.Exit(0)
 	}
 	var configFile server.ConfigFile
