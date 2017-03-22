@@ -56,6 +56,12 @@ func NewServer(conf ServerConfig) *Server {
 	if err != nil {
 		sLog.Fatal(err)
 	}
+	if conf.TickDuration < 100*time.Millisecond {
+		conf.TickDuration = 100 * time.Millisecond
+	}
+	if conf.ElectionTick < 5 {
+		conf.ElectionTick = 5
+	}
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
 		Hostname:    hname,
@@ -114,8 +120,8 @@ func NewServer(conf ServerConfig) *Server {
 		HttpAPIPort:   conf.HttpAPIPort,
 		LocalRaftAddr: conf.LocalRaftAddr,
 		DataRootDir:   conf.DataDir,
-		TickDuration:  200 * time.Millisecond,
-		ElectionTick:  50,
+		TickDuration:  conf.TickDuration,
+		ElectionTick:  conf.ElectionTick,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID

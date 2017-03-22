@@ -19,7 +19,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
+	"path/filepath"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/coreos/etcd/pkg/fileutil"
@@ -43,7 +43,7 @@ func (s *Snapshotter) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error)
 		os.Remove(f.Name())
 		return n, err
 	}
-	fn := path.Join(s.dir, fmt.Sprintf("%016x.snap.db", id))
+	fn := filepath.Join(s.dir, fmt.Sprintf("%016x.snap.db", id))
 	if fileutil.Exist(fn) {
 		os.Remove(f.Name())
 		return n, nil
@@ -59,7 +59,7 @@ func (s *Snapshotter) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error)
 	return n, nil
 }
 
-// DBFilePath returns the file path for the snapshot of the database with
+// DBFilePath returns the file filepath for the snapshot of the database with
 // given id. If the snapshot does not exist, it returns error.
 func (s *Snapshotter) DBFilePath(id uint64) (string, error) {
 	fns, err := fileutil.ReadDir(s.dir)
@@ -69,7 +69,7 @@ func (s *Snapshotter) DBFilePath(id uint64) (string, error) {
 	wfn := fmt.Sprintf("%016x.snap.db", id)
 	for _, fn := range fns {
 		if fn == wfn {
-			return path.Join(s.dir, fn), nil
+			return filepath.Join(s.dir, fn), nil
 		}
 	}
 	return "", fmt.Errorf("snap: snapshot file doesn't exist")

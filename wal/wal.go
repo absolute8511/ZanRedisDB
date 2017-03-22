@@ -21,7 +21,7 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
-	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -96,7 +96,7 @@ func Create(dirpath string, metadata []byte) (*WAL, error) {
 	}
 
 	// keep temporary wal directory so WAL initialization appears atomic
-	tmpdirpath := path.Clean(dirpath) + ".tmp"
+	tmpdirpath := filepath.Clean(dirpath) + ".tmp"
 	if fileutil.Exist(tmpdirpath) {
 		if err := os.RemoveAll(tmpdirpath); err != nil {
 			return nil, err
@@ -106,12 +106,12 @@ func Create(dirpath string, metadata []byte) (*WAL, error) {
 		return nil, err
 	}
 
-	p := path.Join(tmpdirpath, walName(0, 0))
+	p := filepath.Join(tmpdirpath, walName(0, 0))
 	f, err := fileutil.LockFile(p, os.O_WRONLY|os.O_CREATE, fileutil.PrivateFileMode)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = f.Seek(0, os.SEEK_END); err != nil {
+	if _, err = f.Seek(0, io.SeekEnd); err != nil {
 		return nil, err
 	}
 	if err = fileutil.Preallocate(f.File, SegmentSizeBytes, true); err != nil {
@@ -142,7 +142,7 @@ func Create(dirpath string, metadata []byte) (*WAL, error) {
 	}
 
 	// directory was renamed; sync parent dir to persist rename
-	pdir, perr := fileutil.OpenDir(path.Dir(w.dir))
+	pdir, perr := fileutil.OpenDir(filepath.Dir(w.dir))
 	if perr != nil {
 		return nil, perr
 	}
@@ -195,7 +195,7 @@ func openAtIndex(dirpath string, snap walpb.Snapshot, write bool) (*WAL, error) 
 	rs := make([]io.Reader, 0)
 	ls := make([]*fileutil.LockedFile, 0)
 	for _, name := range names[nameIndex:] {
-		p := path.Join(dirpath, name)
+		p := filepath.Join(dirpath, name)
 		if write {
 			l, err := fileutil.TryLockFile(p, os.O_RDWR, fileutil.PrivateFileMode)
 			if err != nil {
@@ -231,7 +231,7 @@ func openAtIndex(dirpath string, snap walpb.Snapshot, write bool) (*WAL, error) 
 		// write reuses the file descriptors from read; don't close so
 		// WAL can append without dropping the file lock
 		w.readClose = nil
-		if _, _, err := parseWalName(path.Base(w.tail().Name())); err != nil {
+		if _, _, err := parseWalName(filepath.Base(w.tail().Name())); err != nil {
 			closer()
 			return nil, err
 		}
@@ -321,7 +321,7 @@ func (w *WAL) ReadAll() (metadata []byte, state raftpb.HardState, ents []raftpb.
 		// not all, will cause CRC errors on WAL open. Since the records
 		// were never fully synced to disk in the first place, it's safe
 		// to zero them out to avoid any CRC errors from new writes.
-		if _, err = w.tail().Seek(w.decoder.lastOffset(), os.SEEK_SET); err != nil {
+		if _, err = w.tail().Seek(w.decoder.lastOffset(), io.SeekStart); err != nil {
 			return nil, state, nil, err
 		}
 		if err = fileutil.ZeroToEnd(w.tail().File); err != nil {
@@ -360,7 +360,7 @@ func (w *WAL) ReadAll() (metadata []byte, state raftpb.HardState, ents []raftpb.
 // Then cut atomically rename temp wal file to a wal file.
 func (w *WAL) cut() error {
 	// close old wal file; truncate to avoid wasting space if an early cut
-	off, serr := w.tail().Seek(0, os.SEEK_CUR)
+	off, serr := w.tail().Seek(0, io.SeekCurrent)
 	if serr != nil {
 		return serr
 	}
@@ -371,7 +371,7 @@ func (w *WAL) cut() error {
 		return err
 	}
 
-	fpath := path.Join(w.dir, walName(w.seq()+1, w.enti+1))
+	fpath := filepath.Join(w.dir, walName(w.seq()+1, w.enti+1))
 
 	// create a temp wal file with name sequence + 1, or truncate the existing one
 	newTail, err := w.fp.Open()
@@ -400,7 +400,7 @@ func (w *WAL) cut() error {
 		return err
 	}
 
-	off, err = w.tail().Seek(0, os.SEEK_CUR)
+	off, err = w.tail().Seek(0, io.SeekCurrent)
 	if err != nil {
 		return err
 	}
@@ -417,7 +417,7 @@ func (w *WAL) cut() error {
 	if newTail, err = fileutil.LockFile(fpath, os.O_WRONLY, fileutil.PrivateFileMode); err != nil {
 		return err
 	}
-	if _, err = newTail.Seek(off, os.SEEK_SET); err != nil {
+	if _, err = newTail.Seek(off, io.SeekStart); err != nil {
 		return err
 	}
 
@@ -463,7 +463,7 @@ func (w *WAL) ReleaseLockTo(index uint64) error {
 	found := false
 
 	for i, l := range w.locks {
-		_, lockIndex, err := parseWalName(path.Base(l.Name()))
+		_, lockIndex, err := parseWalName(filepath.Base(l.Name()))
 		if err != nil {
 			return err
 		}
@@ -563,7 +563,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 		return err
 	}
 
-	curOff, err := w.tail().Seek(0, os.SEEK_CUR)
+	curOff, err := w.tail().Seek(0, io.SeekCurrent)
 	if err != nil {
 		return err
 	}
@@ -610,7 +610,7 @@ func (w *WAL) seq() uint64 {
 	if t == nil {
 		return 0
 	}
-	seq, _, err := parseWalName(path.Base(t.Name()))
+	seq, _, err := parseWalName(filepath.Base(t.Name()))
 	if err != nil {
 		plog.Fatalf("bad wal name %s (%v)", t.Name(), err)
 	}
