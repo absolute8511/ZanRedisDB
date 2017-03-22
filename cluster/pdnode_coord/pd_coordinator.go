@@ -26,8 +26,8 @@ var (
 )
 
 const (
-	waitMigrateInterval          = time.Minute * 3
-	waitEmergencyMigrateInterval = time.Second * 30
+	waitMigrateInterval          = time.Minute * 8
+	waitEmergencyMigrateInterval = time.Second * 20
 )
 
 type PDCoordinator struct {
@@ -312,7 +312,7 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 	defer func() {
 		CoordLog().Infof("stop handle the removing nodes.")
 	}()
-	ticker := time.NewTicker(time.Second * 30)
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
