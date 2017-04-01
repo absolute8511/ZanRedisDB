@@ -17,7 +17,7 @@ func (self *KVNode) Lookup(key []byte) ([]byte, error) {
 
 func (self *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	val, err := self.store.LocalLookup(cmd.Args[1])
-	if err != nil {
+	if err != nil || val == nil {
 		conn.WriteNull()
 	} else {
 		conn.WriteBulk(val)
