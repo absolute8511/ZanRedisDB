@@ -123,7 +123,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto.SetBlockSize(1024 * 64)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 1024))
+	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 128))
 	// for hdd , we nee cache index and filter blocks
 	bbto.SetCacheIndexAndFilterBlocks(true)
 	filter := gorocksdb.NewBloomFilter(10)
@@ -133,10 +133,10 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size = max_bytes_for_level_base to minimize write amplification
-	opts.SetWriteBufferSize(1024 * 1024 * 128)
-	opts.SetMaxWriteBufferNumber(8)
+	opts.SetWriteBufferSize(1024 * 1024 * 32)
+	opts.SetMaxWriteBufferNumber(4)
 	opts.SetLevel0FileNumCompactionTrigger(4)
-	opts.SetMaxBytesForLevelBase(1024 * 1024 * 1024 * 2)
+	opts.SetMaxBytesForLevelBase(1024 * 1024 * 512)
 	opts.SetMinWriteBufferNumberToMerge(2)
 	opts.SetTargetFileSizeBase(1024 * 1024 * 128)
 	opts.SetMaxBackgroundFlushes(2)

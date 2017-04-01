@@ -49,6 +49,8 @@ func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err e
 
 // SCAN cursor [MATCH match] [COUNT count]
 // scan only kv type, cursor is table:key
+
+// TODO: for scan we act like the prefix scan, if the prefix changed , we should stop scan
 func (self *KVNode) scanCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
