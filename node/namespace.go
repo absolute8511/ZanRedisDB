@@ -50,6 +50,10 @@ func (self *NamespaceNode) SetMagicCode(magic int64) error {
 func (self *NamespaceNode) SetDataFixState(needFix bool) {
 }
 
+func (self *NamespaceNode) GetRaftID() uint64 {
+	return self.Node.rn.config.ID
+}
+
 func (self *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) error {
 	if self.conf.EngType != conf.EngType ||
 		self.conf.RaftGroupConf.GroupID != conf.RaftGroupConf.GroupID {

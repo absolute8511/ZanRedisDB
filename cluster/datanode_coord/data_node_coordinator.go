@@ -329,9 +329,15 @@ func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, loc
 	if inRaft || err != nil {
 		return false
 	}
+	mems := localNamespace.GetMembers()
+	for _, m := range mems {
+		if m.ID == rm.RemoveReplicaID {
+			return false
+		}
+	}
 	CoordLog().Infof("removing node %v-%v should stop namespace %v since not in any raft group anymore",
 		self.GetMyID(), rm.RemoveReplicaID, nsInfo.GetDesp())
-	return false
+	return true
 }
 
 func (self *DataCoordinator) checkAndFixLocalNamespaceData(nsInfo *PartitionMetaInfo, localNamespace *node.NamespaceNode) error {
@@ -450,7 +456,10 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				continue
 			}
 			isrList := namespaceMeta.GetISR()
-			if FindSlice(isrList, self.myNode.GetID()) == -1 {
+			localRID := localNamespace.GetRaftID()
+
+			if FindSlice(isrList, self.myNode.GetID()) == -1 ||
+				localRID != namespaceMeta.RaftIDs[self.myNode.GetID()] {
 				if len(isrList) > 0 {
 					CoordLog().Infof("the namespace should be clean : %v", namespaceMeta)
 					self.removeLocalNamespaceFromRaft(localNamespace, true)
