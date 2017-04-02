@@ -866,6 +866,11 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		if err == nil {
 			return nil
 		}
+		select {
+		case <-self.stopChan:
+			return err
+		default:
+		}
 		retry++
 		time.Sleep(time.Second)
 		self.rn.Infof("failed to restore snapshot: %v", err)

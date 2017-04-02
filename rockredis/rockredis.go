@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -107,6 +108,7 @@ type RockDB struct {
 	quit             chan struct{}
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
+	engOpened        int32
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -165,6 +167,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, err
 	}
 	db.eng = eng
+	atomic.StoreInt32(&db.engOpened, 1)
 	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
 
 	db.wg.Add(1)
@@ -198,6 +201,9 @@ func (r *RockDB) GetDataDir() string {
 func (r *RockDB) reOpenEng() error {
 	var err error
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
+	if err == nil {
+		atomic.StoreInt32(&r.engOpened, 1)
+	}
 	return err
 }
 
@@ -208,7 +214,9 @@ func (r *RockDB) CompactRange() {
 
 func (r *RockDB) closeEng() {
 	if r.eng != nil {
-		r.eng.Close()
+		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
+			r.eng.Close()
+		}
 	}
 }
 
@@ -430,6 +438,11 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 	start := time.Now()
 	dbLog.Infof("begin restore from checkpoint: %v\n", checkpointDir)
 	r.closeEng()
+	select {
+	case <-r.quit:
+		return errors.New("db is quiting")
+	default:
+	}
 	// 1. remove all files in current db except sst files
 	// 2. get the list of sst in checkpoint
 	// 3. remove all the sst files not in the checkpoint list
