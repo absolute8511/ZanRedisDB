@@ -676,12 +676,6 @@ func (self *DataCoordinator) tryCheckNamespaces() {
 func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 	localNamespace *node.NamespaceNode, firstLoad bool) *CoordErr {
 
-	if rm, ok := nsInfo.Removings[self.GetMyID()]; ok {
-		if rm.RemoveReplicaID == nsInfo.RaftIDs[self.GetMyID()] {
-			CoordLog().Infof("ignore join namespace %v since it removing node: %v", nsInfo.GetDesp(), rm)
-			return nil
-		}
-	}
 	// check if in local raft group
 	myRunning := atomic.AddInt32(&self.catchupRunning, 1)
 	defer atomic.AddInt32(&self.catchupRunning, -1)
@@ -753,6 +747,10 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 				if _, ok := memsMap[ExtractRegIDFromGenID(remote)]; !ok {
 					break
 				}
+			}
+			time.Sleep(time.Millisecond * 100)
+			if !self.isNamespaceShouldStart(nsInfo) {
+				return ErrNamespaceExiting
 			}
 			self.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
 			select {

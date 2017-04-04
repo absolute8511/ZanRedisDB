@@ -150,6 +150,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.EnableStatistics()
 	opts.SetMaxLogFileSize(1024 * 1024 * 32)
 	opts.SetLogFileTimeToRoll(3600 * 24 * 3)
+	opts.SetVerifyChecksumsInCompaction(false)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
 
