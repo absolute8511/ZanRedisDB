@@ -136,9 +136,9 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size = max_bytes_for_level_base to minimize write amplification
 	opts.SetWriteBufferSize(1024 * 1024 * 64)
-	opts.SetMaxWriteBufferNumber(4)
+	opts.SetMaxWriteBufferNumber(8)
 	opts.SetLevel0FileNumCompactionTrigger(4)
-	opts.SetMaxBytesForLevelBase(1024 * 1024 * 256)
+	opts.SetMaxBytesForLevelBase(1024 * 1024 * 512)
 	opts.SetMinWriteBufferNumberToMerge(2)
 	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
 	opts.SetMaxBackgroundFlushes(2)
