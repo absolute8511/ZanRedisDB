@@ -125,14 +125,16 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto.SetBlockSize(1024 * 64)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 128))
-	// for hdd , we nee cache index and filter blocks
-	bbto.SetCacheIndexAndFilterBlocks(true)
+	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 256))
+	// cache index and filter blocks can save some memory,
+	// if not cache, the index and filter will be pre-loaded in memory
+	bbto.SetCacheIndexAndFilterBlocks(false)
 	// /* filter should not block_based, use sst based to reduce cpu */
 	filter := gorocksdb.NewBloomFilter(10, false)
 	bbto.SetFilterPolicy(filter)
 	opts := gorocksdb.NewDefaultOptions()
-	// optimize filter for hit
+	// optimize filter for hit, use less memory since last level will has no bloom filter
+	// opts.OptimizeFilterForHits(true)
 	opts.SetBlockBasedTableFactory(bbto)
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
