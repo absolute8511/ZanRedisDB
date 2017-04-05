@@ -80,14 +80,19 @@ func (self *PartitionReplicaInfo) GetISR() []string {
 }
 
 type PartitionMetaInfo struct {
-	Name      string
-	Partition int
+	Name          string
+	Partition     int
+	currentLeader string
 	NamespaceMetaInfo
 	PartitionReplicaInfo
 }
 
 func (self *PartitionMetaInfo) IsISRQuorum() bool {
 	return len(self.GetISR()) > self.Replica/2
+}
+
+func (self *PartitionMetaInfo) GetLeader() string {
+	return self.currentLeader
 }
 
 func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
@@ -168,5 +173,9 @@ type DataNodeRegister interface {
 	// get the newest pd leader and watch the change of it.
 	WatchPDLeader(leader chan *NodeInfo, stop chan struct{}) error
 	GetNodeInfo(nid string) (NodeInfo, error)
+	// while losing leader, update to empty nid
+	// while became the new leader, update to my node
+	//UpdateNamespaceLeader(ns string, partition int, nid string, oldGen EpochType) (EpochType, error)
+	//GetNamespaceLeader(ns string, partition int) (string, EpochType, error)
 	NewRegisterNodeID() (uint64, error)
 }

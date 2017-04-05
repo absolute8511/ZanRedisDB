@@ -554,6 +554,7 @@ func (rc *raftNode) serveChannels() {
 			if rd.SoftState != nil {
 				if lead := atomic.LoadUint64(&rc.lead); rd.SoftState.Lead != raft.None && lead != rd.SoftState.Lead {
 					rc.Infof("leader changed from %v to %v", lead, rd.SoftState)
+					// TODO: trigger report to lookup service that leader changed
 				}
 				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
 				isLeader = rd.RaftState == raft.StateLeader
