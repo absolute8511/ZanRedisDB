@@ -128,18 +128,20 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 128))
 	// for hdd , we nee cache index and filter blocks
 	bbto.SetCacheIndexAndFilterBlocks(true)
-	filter := gorocksdb.NewBloomFilter(10)
+	// /* filter should not block_based, use sst based to reduce cpu */
+	filter := gorocksdb.NewBloomFilter(10, false)
 	bbto.SetFilterPolicy(filter)
 	opts := gorocksdb.NewDefaultOptions()
+	// optimize filter for hit
 	opts.SetBlockBasedTableFactory(bbto)
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size = max_bytes_for_level_base to minimize write amplification
 	opts.SetWriteBufferSize(1024 * 1024 * 64)
 	opts.SetMaxWriteBufferNumber(8)
-	opts.SetLevel0FileNumCompactionTrigger(4)
-	opts.SetMaxBytesForLevelBase(1024 * 1024 * 512)
-	opts.SetMinWriteBufferNumberToMerge(2)
+	opts.SetMinWriteBufferNumberToMerge(1)
+	opts.SetLevel0FileNumCompactionTrigger(2)
+	opts.SetMaxBytesForLevelBase(1024 * 1024 * 256)
 	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
 	opts.SetMaxBackgroundFlushes(2)
 	opts.SetMaxBackgroundCompactions(4)
@@ -150,7 +152,6 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.EnableStatistics()
 	opts.SetMaxLogFileSize(1024 * 1024 * 32)
 	opts.SetLogFileTimeToRoll(3600 * 24 * 3)
-	opts.SetVerifyChecksumsInCompaction(false)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
 
