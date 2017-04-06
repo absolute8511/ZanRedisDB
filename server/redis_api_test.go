@@ -30,7 +30,7 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	raftAddr := "127.0.0.1:12345"
+	raftAddr := "http://127.0.0.1:12345"
 	redisport := 22345
 	var replica node.ReplicaInfo
 	replica.NodeID = 1
