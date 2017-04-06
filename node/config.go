@@ -1,6 +1,8 @@
 package node
 
-import ()
+import (
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+)
 
 type NamespaceConfig struct {
 	// namespace full name with partition
@@ -32,13 +34,14 @@ type RaftGroupConfig struct {
 
 type MachineConfig struct {
 	// server node id
-	NodeID        uint64 `json:"node_id"`
-	BroadcastAddr string `json:"broadcast_addr"`
-	HttpAPIPort   int    `json:"http_api_port"`
-	LocalRaftAddr string `json:"local_raft_addr"`
-	DataRootDir   string `json:"data_root_dir"`
-	ElectionTick  int    `json:"election_tick"`
-	TickMs        int    `json:"tick_ms"`
+	NodeID        uint64                `json:"node_id"`
+	BroadcastAddr string                `json:"broadcast_addr"`
+	HttpAPIPort   int                   `json:"http_api_port"`
+	LocalRaftAddr string                `json:"local_raft_addr"`
+	DataRootDir   string                `json:"data_root_dir"`
+	ElectionTick  int                   `json:"election_tick"`
+	TickMs        int                   `json:"tick_ms"`
+	RocksDBOpts   rockredis.RockOptions `json:"rocksdb_opts"`
 }
 
 type ReplicaInfo struct {

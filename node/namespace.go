@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/net/context"
@@ -226,9 +227,12 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 	}
 
 	kvOpts := &KVOptions{
-		DataDir: path.Join(self.machineConf.DataRootDir, conf.Name),
-		EngType: conf.EngType,
+		DataDir:  path.Join(self.machineConf.DataRootDir, conf.Name),
+		EngType:  conf.EngType,
+		RockOpts: self.machineConf.RocksDBOpts,
 	}
+	rockredis.FillDefaultOptions(&kvOpts.RockOpts)
+
 	if conf.PartitionNum <= 0 {
 		return nil, errNamespaceConfInvalid
 	}

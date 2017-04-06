@@ -91,7 +91,7 @@ func (self *PartitionMetaInfo) IsISRQuorum() bool {
 	return len(self.GetISR()) > self.Replica/2
 }
 
-func (self *PartitionMetaInfo) GetLeader() string {
+func (self *PartitionMetaInfo) GetRealLeader() string {
 	return self.currentLeader
 }
 
@@ -175,7 +175,7 @@ type DataNodeRegister interface {
 	GetNodeInfo(nid string) (NodeInfo, error)
 	// while losing leader, update to empty nid
 	// while became the new leader, update to my node
-	//UpdateNamespaceLeader(ns string, partition int, nid string, oldGen EpochType) (EpochType, error)
-	//GetNamespaceLeader(ns string, partition int) (string, EpochType, error)
+	UpdateNamespaceLeader(ns string, partition int, nid string, oldGen EpochType) (EpochType, error)
+	GetNamespaceLeader(ns string, partition int) (string, EpochType, error)
 	NewRegisterNodeID() (uint64, error)
 }

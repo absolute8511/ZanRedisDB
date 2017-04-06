@@ -1,6 +1,8 @@
 package server
 
-import ()
+import (
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+)
 
 type ServerConfig struct {
 	// this cluster id is used for server transport to tell
@@ -16,9 +18,11 @@ type ServerConfig struct {
 	LocalRaftAddr        string   `json:"local_raft_addr"`
 	Tags                 []string `json:"tags"`
 
-	ElectionTick int                   `json:"election_tick"`
-	TickMs       int                   `json:"tick_ms"`
-	Namespaces   []NamespaceNodeConfig `json:"namespaces"`
+	ElectionTick int `json:"election_tick"`
+	TickMs       int `json:"tick_ms"`
+	// default rocksdb options, can be override by namespace config
+	RocksDBOpts rockredis.RockOptions `json:"rocksdb_opts"`
+	Namespaces  []NamespaceNodeConfig `json:"namespaces"`
 }
 
 type NamespaceNodeConfig struct {

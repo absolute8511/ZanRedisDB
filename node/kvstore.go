@@ -15,8 +15,9 @@ type KVStore struct {
 }
 
 type KVOptions struct {
-	DataDir string
-	EngType string
+	DataDir  string
+	EngType  string
+	RockOpts rockredis.RockOptions
 }
 
 func NewKVStore(kvopts *KVOptions) *KVStore {
@@ -33,6 +34,7 @@ func (s *KVStore) openDB() error {
 	if s.opts.EngType == rockredis.EngType {
 		cfg := rockredis.NewRockConfig()
 		cfg.DataDir = s.opts.DataDir
+		cfg.RockOptions = s.opts.RockOpts
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
 	} else {
 		return errors.New("Not recognized engine type:" + s.opts.EngType)

@@ -902,6 +902,14 @@ func (self *DNEtcdRegister) Unregister(nodeData *NodeInfo) error {
 	return nil
 }
 
+func (self *DNEtcdRegister) GetNamespaceLeader(ns string, partition int) (string, EpochType, error) {
+	return "", 0, nil
+}
+
+func (self *DNEtcdRegister) UpdateNamespaceLeader(ns string, partition int, nid string, oldGen EpochType) (EpochType, error) {
+	return 0, nil
+}
+
 func (self *DNEtcdRegister) GetNodeInfo(nid string) (NodeInfo, error) {
 	var node NodeInfo
 	rsp, err := self.client.Get(self.getDataNodePathFromID(nid), false, false)

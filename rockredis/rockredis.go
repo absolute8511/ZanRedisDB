@@ -32,10 +32,72 @@ func GetCheckpointDir(term uint64, index uint64) string {
 	return fmt.Sprintf("%016x-%016x", term, index)
 }
 
+type RockOptions struct {
+	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
+	BlockSize                      int    `json:"block_size"`
+	BlockCache                     int    `json:"block_cache"`
+	CacheIndexAndFilterBlocks      bool   `json:"cache_index_and_filter_blocks"`
+	WriteBufferSize                int    `json:"write_buffer_size"`
+	MaxWriteBufferNumber           int    `json:"max_write_buffer_number"`
+	MinWriteBufferNumberToMerge    int    `json:"min_write_buffer_number_to_merge"`
+	Level0FileNumCompactionTrigger int    `json:"level0_file_num_compaction_trigger"`
+	MaxBytesForLevelBase           uint64 `json:"max_bytes_for_level_base"`
+	TargetFileSizeBase             uint64 `json:"target_file_size_base"`
+	MaxBackgroundFlushes           int    `json:"max_background_flushes"`
+	MaxBackgroundCompactions       int    `json:"max_background_compactions"`
+	MinLevelToCompress             int    `json:"min_level_to_compress"`
+	MaxMainifestFileSize           uint64 `json:"max_mainifest_file_size"`
+}
+
+func FillDefaultOptions(opts *RockOptions) {
+	// use large block to reduce index block size for hdd
+	// if using ssd, should use the default value
+	if opts.BlockSize <= 0 {
+		opts.BlockSize = 1024 * 64
+	}
+	// should about 20% less than host RAM
+	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
+	if opts.BlockCache <= 0 {
+		opts.BlockCache = 1024 * 1024 * 256
+	}
+	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
+	if opts.WriteBufferSize <= 0 {
+		opts.WriteBufferSize = 1024 * 1024 * 64
+	}
+	if opts.MaxWriteBufferNumber <= 0 {
+		opts.MaxWriteBufferNumber = 6
+	}
+	if opts.MinWriteBufferNumberToMerge <= 0 {
+		opts.MinWriteBufferNumberToMerge = 2
+	}
+	if opts.Level0FileNumCompactionTrigger <= 0 {
+		opts.Level0FileNumCompactionTrigger = 2
+	}
+	if opts.MaxBytesForLevelBase <= 0 {
+		opts.MaxBytesForLevelBase = 1024 * 1024 * 256
+	}
+	if opts.TargetFileSizeBase <= 0 {
+		opts.TargetFileSizeBase = 1024 * 1024 * 64
+	}
+	if opts.MaxBackgroundFlushes <= 0 {
+		opts.MaxBackgroundFlushes = 2
+	}
+	if opts.MaxBackgroundCompactions <= 0 {
+		opts.MaxBackgroundCompactions = 4
+	}
+	if opts.MinLevelToCompress <= 0 {
+		opts.MinLevelToCompress = 3
+	}
+	if opts.MaxMainifestFileSize <= 0 {
+		opts.MaxMainifestFileSize = 1024 * 1024 * 32
+	}
+}
+
 type RockConfig struct {
 	DataDir          string
 	DefaultReadOpts  *gorocksdb.ReadOptions
 	DefaultWriteOpts *gorocksdb.WriteOptions
+	RockOptions
 }
 
 func NewRockConfig() *RockConfig {
@@ -44,6 +106,7 @@ func NewRockConfig() *RockConfig {
 		DefaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
 	}
 	c.DefaultReadOpts.SetVerifyChecksums(false)
+	FillDefaultOptions(&c.RockOptions)
 	return c
 }
 
@@ -122,13 +185,13 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	// use large block to reduce index block size for hdd
 	// if using ssd, should use the default value
-	bbto.SetBlockSize(1024 * 64)
+	bbto.SetBlockSize(cfg.BlockSize)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(1024 * 1024 * 256))
+	bbto.SetBlockCache(gorocksdb.NewLRUCache(cfg.BlockCache))
 	// cache index and filter blocks can save some memory,
 	// if not cache, the index and filter will be pre-loaded in memory
-	bbto.SetCacheIndexAndFilterBlocks(false)
+	bbto.SetCacheIndexAndFilterBlocks(cfg.CacheIndexAndFilterBlocks)
 	// /* filter should not block_based, use sst based to reduce cpu */
 	filter := gorocksdb.NewBloomFilter(10, false)
 	bbto.SetFilterPolicy(filter)
@@ -138,22 +201,23 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetBlockBasedTableFactory(bbto)
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
-	// keep level0_file_num_compaction_trigger * write_buffer_size = max_bytes_for_level_base to minimize write amplification
-	opts.SetWriteBufferSize(1024 * 1024 * 64)
-	opts.SetMaxWriteBufferNumber(8)
-	opts.SetMinWriteBufferNumberToMerge(1)
-	opts.SetLevel0FileNumCompactionTrigger(2)
-	opts.SetMaxBytesForLevelBase(1024 * 1024 * 256)
-	opts.SetTargetFileSizeBase(1024 * 1024 * 64)
-	opts.SetMaxBackgroundFlushes(2)
-	opts.SetMaxBackgroundCompactions(4)
-	opts.SetMinLevelToCompress(3)
+	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
+	opts.SetWriteBufferSize(cfg.WriteBufferSize)
+	opts.SetMaxWriteBufferNumber(cfg.MaxWriteBufferNumber)
+	opts.SetMinWriteBufferNumberToMerge(cfg.MinWriteBufferNumberToMerge)
+	opts.SetLevel0FileNumCompactionTrigger(cfg.Level0FileNumCompactionTrigger)
+	opts.SetMaxBytesForLevelBase(cfg.MaxBytesForLevelBase)
+	opts.SetTargetFileSizeBase(cfg.TargetFileSizeBase)
+	opts.SetMaxBackgroundFlushes(cfg.MaxBackgroundFlushes)
+	opts.SetMaxBackgroundCompactions(cfg.MaxBackgroundCompactions)
+	opts.SetMinLevelToCompress(cfg.MinLevelToCompress)
 	// we use table, so we use prefix seek feature
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
 	opts.SetMemtablePrefixBloomSizeRatio(0.1)
 	opts.EnableStatistics()
 	opts.SetMaxLogFileSize(1024 * 1024 * 32)
 	opts.SetLogFileTimeToRoll(3600 * 24 * 3)
+	opts.SetMaxManifestFileSize(cfg.MaxMainifestFileSize)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
 

@@ -42,7 +42,7 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		RedisAPIPort:  redisport,
 		LocalRaftAddr: raftAddr,
 		BroadcastAddr: "127.0.0.1",
-		TickDuration:  time.Millisecond * 100,
+		TickMs:        100,
 		ElectionTick:  5,
 	}
 	nsConf := node.NewNSConfig()

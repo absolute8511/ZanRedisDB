@@ -122,6 +122,7 @@ func NewServer(conf ServerConfig) *Server {
 		DataRootDir:   conf.DataDir,
 		TickMs:        conf.TickMs,
 		ElectionTick:  conf.ElectionTick,
+		RocksDBOpts:   conf.RocksDBOpts,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID
