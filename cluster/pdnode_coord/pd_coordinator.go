@@ -128,7 +128,7 @@ func (self *PDCoordinator) handleLeadership() {
 				continue
 			}
 			if l.GetID() != self.leaderNode.GetID() ||
-				l.Epoch != self.leaderNode.Epoch {
+				l.Epoch() != self.leaderNode.Epoch() {
 				CoordLog().Infof("leader changed from %v to %v", self.leaderNode, *l)
 				self.leaderNode = *l
 				if self.leaderNode.GetID() != self.myNode.GetID() {
@@ -631,7 +631,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 
 	if isrChanged && nsInfo.IsISRQuorum() {
 		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
-			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
+			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 		if err != nil {
 			CoordLog().Infof("update namespace replica info failed: %v", err.Error())
 			return ErrRegisterServiceUnstable
@@ -653,7 +653,7 @@ func (self *PDCoordinator) addNamespaceToNode(origNSInfo *PartitionMetaInfo, nid
 	nsInfo.RaftIDs[nid] = uint64(nsInfo.MaxRaftID)
 
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
-		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
+		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 	if err != nil {
 		CoordLog().Infof("add namespace replica info failed: %v", err.Error())
 		return &CoordErr{ErrMsg: err.Error(), ErrCode: RpcNoErr, ErrType: CoordRegisterErr}
@@ -684,7 +684,7 @@ func (self *PDCoordinator) removeNamespaceFromNode(origNSInfo *PartitionMetaInfo
 		nsInfo.GetISR())
 	nsInfo.Removings[nid] = RemovingInfo{RemoveTime: time.Now().UnixNano(), RemoveReplicaID: nsInfo.RaftIDs[nid]}
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
-		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
+		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 	if err != nil {
 		CoordLog().Infof("update namespace replica info failed: %v", err.Error())
 		return &CoordErr{ErrMsg: err.Error(), ErrCode: RpcNoErr, ErrType: CoordRegisterErr}
@@ -728,7 +728,7 @@ func (self *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *PartitionMet
 	}
 	if changed {
 		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
-			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch)
+			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 		if err != nil {
 			CoordLog().Infof("update namespace replica info failed: %v", err.Error())
 		} else {

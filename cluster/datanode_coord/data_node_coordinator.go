@@ -19,6 +19,7 @@ import (
 var (
 	MaxRetryWait         = time.Second * 3
 	ErrNamespaceNotReady = NewCoordErr("namespace node is not ready", CoordLocalErr)
+	ErrNamespaceInvalid  = errors.New("namespace name is invalid")
 )
 
 const (
@@ -160,7 +161,7 @@ func (self *DataCoordinator) watchPD() {
 			}
 			self.pdMutex.Lock()
 			if n.GetID() != self.pdLeader.GetID() ||
-				n.Epoch != self.pdLeader.Epoch {
+				n.Epoch() != self.pdLeader.Epoch() {
 				CoordLog().Infof("pd leader changed: %v", n)
 				self.pdLeader = *n
 			}
@@ -811,7 +812,7 @@ func (self *DataCoordinator) GetSnapshotSyncInfo(fullNamespace string) ([]common
 	namespace, pid := common.GetNamespaceAndPartition(fullNamespace)
 	if namespace == "" {
 		CoordLog().Warningf("namespace invalid: %v", fullNamespace)
-		return nil, nil
+		return nil, ErrNamespaceInvalid
 	}
 	nsInfo, err := self.register.GetNamespacePartInfo(namespace, pid)
 	if err != nil {
@@ -833,6 +834,32 @@ func (self *DataCoordinator) GetSnapshotSyncInfo(fullNamespace string) ([]common
 		ssiList = append(ssiList, ssi)
 	}
 	return ssiList, nil
+}
+
+func (self *DataCoordinator) GetNamespaceLeader(fullNS string) (uint64, int64, error) {
+	namespace, pid := common.GetNamespaceAndPartition(fullNS)
+	if namespace == "" {
+		CoordLog().Warningf("namespace invalid: %v", fullNS)
+		return 0, 0, ErrNamespaceInvalid
+	}
+	nid, epoch, err := self.register.GetNamespaceLeader(namespace, pid)
+	if err != nil {
+		return 0, 0, err
+	}
+	regID := ExtractRegIDFromGenID(nid)
+	return regID, int64(epoch), nil
+}
+
+func (self *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error) {
+	namespace, pid := common.GetNamespaceAndPartition(fullNS)
+	if namespace == "" {
+		CoordLog().Warningf("namespace invalid: %v", fullNS)
+		return 0, ErrNamespaceInvalid
+	}
+	var rl RealLeader
+	rl.Leader = self.GetMyID()
+	epoch, err := self.register.UpdateNamespaceLeader(namespace, pid, rl, EpochType(oldEpoch))
+	return int64(epoch), err
 }
 
 // before shutdown, we transfer the leader to others to reduce

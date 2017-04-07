@@ -118,16 +118,17 @@ type NamespaceMeta struct {
 }
 
 type NamespaceMgr struct {
-	mutex             sync.RWMutex
-	kvNodes           map[string]*NamespaceNode
-	nsMetas           map[string]NamespaceMeta
-	groups            map[uint64]string
-	machineConf       *MachineConfig
-	raftTransport     *rafthttp.Transport
-	stopping          int32
-	stopC             chan struct{}
-	wg                sync.WaitGroup
-	clusterInfoGetter common.IClusterInfoGetter
+	mutex         sync.RWMutex
+	kvNodes       map[string]*NamespaceNode
+	nsMetas       map[string]NamespaceMeta
+	groups        map[uint64]string
+	machineConf   *MachineConfig
+	raftTransport *rafthttp.Transport
+	stopping      int32
+	stopC         chan struct{}
+	wg            sync.WaitGroup
+	clusterInfo   common.IClusterInfo
+	newLeaderChan chan string
 }
 
 func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *NamespaceMgr {
@@ -137,6 +138,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 		nsMetas:       make(map[string]NamespaceMeta),
 		raftTransport: transport,
 		machineConf:   conf,
+		newLeaderChan: make(chan string, 16),
 		stopC:         make(chan struct{}),
 	}
 	regID, err := ns.LoadMachineRegID()
@@ -148,8 +150,8 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	return ns
 }
 
-func (self *NamespaceMgr) SetClusterInfoGetter(getter common.IClusterInfoGetter) {
-	self.clusterInfoGetter = getter
+func (self *NamespaceMgr) SetClusterInfoInterface(clusterInfo common.IClusterInfo) {
+	self.clusterInfo = clusterInfo
 }
 
 func (self *NamespaceMgr) LoadMachineRegID() (uint64, error) {
@@ -184,6 +186,12 @@ func (self *NamespaceMgr) Start() {
 	go func() {
 		defer self.wg.Done()
 		self.clearUnusedRaftPeer()
+	}()
+
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.checkNamespaceRaftLeader()
 	}()
 
 	self.wg.Add(1)
@@ -271,7 +279,7 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 	}
 	kv := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
 		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name),
-		self.clusterInfoGetter)
+		self.clusterInfo, self.newLeaderChan)
 	n := &NamespaceNode{
 		Node: kv,
 		conf: conf,
@@ -336,10 +344,16 @@ func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 	return kv
 }
 
-func (self *NamespaceMgr) GetStats() []common.NamespaceStats {
+func (self *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
 	self.mutex.RLock()
 	nsStats := make([]common.NamespaceStats, 0, len(self.kvNodes))
 	for k, n := range self.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
 		ns := n.Node.GetStats()
 		ns.Name = k
 		ns.EngType = n.conf.EngType
@@ -405,12 +419,52 @@ func (self *NamespaceMgr) processRaftTick() {
 	}
 }
 
+// TODO:
 func (self *NamespaceMgr) SetNamespaceMagicCode(node *NamespaceNode, magic int64) error {
 	return nil
 }
 
 func (self *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error {
 	return nil
+}
+
+func (self *NamespaceMgr) checkNamespaceRaftLeader() {
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+	leaderNodes := make([]*NamespaceNode, 0)
+	// while close or remove raft node, we need check if any remote transport peer
+	// should be closed.
+	doCheck := func() {
+		leaderNodes = leaderNodes[:0]
+		self.mutex.RLock()
+		for _, v := range self.kvNodes {
+			if v.IsReady() && v.Node.IsLead() {
+				leaderNodes = append(leaderNodes, v)
+			}
+		}
+		self.mutex.RUnlock()
+		for _, v := range leaderNodes {
+			v.Node.ReportMeRaftLeader()
+		}
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			doCheck()
+		case ns := <-self.newLeaderChan:
+			self.mutex.RLock()
+			v, ok := self.kvNodes[ns]
+			self.mutex.RUnlock()
+			if !ok {
+				nodeLog.Infof("leader changed namespace not found: %v", ns)
+			} else if v.IsReady() {
+				v.Node.ReportMeRaftLeader()
+			}
+		case <-self.stopC:
+			return
+		}
+	}
 }
 
 func (self *NamespaceMgr) clearUnusedRaftPeer() {

@@ -30,6 +30,7 @@ const (
 	NAMESPACE_DIR          = "Namespaces"
 	NAMESPACE_META         = "NamespaceMeta"
 	NAMESPACE_REPLICA_INFO = "ReplicaInfo"
+	NAMESPACE_REAL_LEADER  = "RealLeader"
 	DATA_NODE_DIR          = "DataNodes"
 	PD_ROOT_DIR            = "PDInfo"
 	PD_NODE_DIR            = "PDNodes"
@@ -257,7 +258,8 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 
 	metaMap := make(map[string]NamespaceMetaInfo)
 	replicasMap := make(map[string]map[string]PartitionReplicaInfo)
-	maxEpoch := self.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap)
+	leaderMap := make(map[string]map[string]RealLeader)
+	maxEpoch := self.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap, leaderMap)
 
 	nsInfos := make(map[string]map[int]PartitionMetaInfo)
 	if EpochType(rsp.Node.ModifiedIndex) > maxEpoch {
@@ -287,6 +289,9 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 			info.Partition = partition
 			info.NamespaceMetaInfo = meta
 			info.PartitionReplicaInfo = v2
+			if leaders, ok := leaderMap[k]; ok {
+				info.currentLeader = leaders[k2]
+			}
 			partInfos[partition] = info
 		}
 	}
@@ -301,11 +306,12 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 
 func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 	metaMap map[string]NamespaceMetaInfo,
-	replicasMap map[string]map[string]PartitionReplicaInfo) EpochType {
+	replicasMap map[string]map[string]PartitionReplicaInfo,
+	leaderMap map[string]map[string]RealLeader) EpochType {
 	maxEpoch := EpochType(0)
 	for _, node := range nodes {
 		if node.Nodes != nil {
-			maxEpoch = self.processNamespaceNode(node.Nodes, metaMap, replicasMap)
+			maxEpoch = self.processNamespaceNode(node.Nodes, metaMap, replicasMap, leaderMap)
 		}
 		if EpochType(node.ModifiedIndex) > maxEpoch {
 			maxEpoch = EpochType(node.ModifiedIndex)
@@ -320,7 +326,7 @@ func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 			if err := json.Unmarshal([]byte(node.Value), &rInfo); err != nil {
 				continue
 			}
-			rInfo.Epoch = EpochType(node.ModifiedIndex)
+			rInfo.epoch = EpochType(node.ModifiedIndex)
 			keys := strings.Split(node.Key, "/")
 			keyLen := len(keys)
 			if keyLen < 3 {
@@ -348,6 +354,27 @@ func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 			}
 			nsName := keys[keyLen-2]
 			metaMap[nsName] = mInfo
+		} else if key == NAMESPACE_REAL_LEADER {
+			var rInfo RealLeader
+			if err := json.Unmarshal([]byte(node.Value), &rInfo); err != nil {
+				continue
+			}
+			rInfo.epoch = EpochType(node.ModifiedIndex)
+			keys := strings.Split(node.Key, "/")
+			keyLen := len(keys)
+			if keyLen < 3 {
+				continue
+			}
+			nsName := keys[keyLen-3]
+			partition := keys[keyLen-2]
+			v, ok := leaderMap[nsName]
+			if ok {
+				v[partition] = rInfo
+			} else {
+				pMap := make(map[string]RealLeader)
+				pMap[partition] = rInfo
+				leaderMap[nsName] = pMap
+			}
 		}
 	}
 	return maxEpoch
@@ -407,19 +434,19 @@ func (self *EtcdRegister) getPDNodePath(value *NodeInfo) string {
 }
 
 func (self *EtcdRegister) getPDNodeRootPath() string {
-	return path.Join("/", ROOT_DIR, self.clusterID, PD_ROOT_DIR, PD_NODE_DIR)
+	return path.Join(self.getClusterPath(), PD_ROOT_DIR, PD_NODE_DIR)
 }
 
 func (self *EtcdRegister) getPDLeaderPath() string {
-	return path.Join("/", ROOT_DIR, self.clusterID, PD_ROOT_DIR, PD_LEADER_SESSION)
+	return path.Join(self.getClusterPath(), PD_ROOT_DIR, PD_LEADER_SESSION)
 }
 
 func (self *EtcdRegister) getDataNodeRootPath() string {
-	return path.Join("/", ROOT_DIR, self.clusterID, DATA_NODE_DIR)
+	return path.Join(self.getClusterPath(), DATA_NODE_DIR)
 }
 
 func (self *EtcdRegister) getNamespaceRootPath() string {
-	return path.Join("/", ROOT_DIR, self.clusterID, NAMESPACE_DIR)
+	return path.Join(self.getClusterPath(), NAMESPACE_DIR)
 }
 
 func (self *EtcdRegister) getNamespacePath(ns string) string {
@@ -427,15 +454,15 @@ func (self *EtcdRegister) getNamespacePath(ns string) string {
 }
 
 func (self *EtcdRegister) getNamespaceMetaPath(ns string) string {
-	return path.Join(self.namespaceRoot, ns, NAMESPACE_META)
+	return path.Join(self.getNamespacePath(ns), NAMESPACE_META)
 }
 
 func (self *EtcdRegister) getNamespacePartitionPath(ns string, partition int) string {
-	return path.Join(self.namespaceRoot, ns, strconv.Itoa(partition))
+	return path.Join(self.getNamespacePath(ns), strconv.Itoa(partition))
 }
 
 func (self *EtcdRegister) getNamespaceReplicaInfoPath(ns string, partition int) string {
-	return path.Join(self.namespaceRoot, ns, strconv.Itoa(partition), NAMESPACE_REPLICA_INFO)
+	return path.Join(self.getNamespacePartitionPath(ns, partition), NAMESPACE_REPLICA_INFO)
 }
 
 // placement driver register
@@ -724,7 +751,7 @@ func (self *PDEtcdRegister) CreateNamespace(ns string, meta *NamespaceMetaInfo) 
 		return err
 	}
 
-	meta.MetaEpoch = EpochType(rsp.Node.ModifiedIndex)
+	meta.metaEpoch = EpochType(rsp.Node.ModifiedIndex)
 	self.updateNamespaceMeta(ns, *meta)
 	return nil
 }
@@ -773,7 +800,7 @@ func (self *PDEtcdRegister) UpdateNamespaceMetaInfo(ns string, meta *NamespaceMe
 		coordLog.Errorf("unmarshal meta info failed: %v, %v", err, rsp.Node.Value)
 		return err
 	}
-	meta.MetaEpoch = EpochType(rsp.Node.ModifiedIndex)
+	meta.metaEpoch = EpochType(rsp.Node.ModifiedIndex)
 	self.namespaceMetaMap[ns] = *meta
 
 	return nil
@@ -811,14 +838,14 @@ func (self *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partition 
 		if err != nil {
 			return err
 		}
-		replicaInfo.Epoch = EpochType(rsp.Node.ModifiedIndex)
+		replicaInfo.epoch = EpochType(rsp.Node.ModifiedIndex)
 		return nil
 	}
 	rsp, err := self.client.CompareAndSwap(self.getNamespaceReplicaInfoPath(ns, partition), string(value), 0, "", uint64(oldGen))
 	if err != nil {
 		return err
 	}
-	replicaInfo.Epoch = EpochType(rsp.Node.ModifiedIndex)
+	replicaInfo.epoch = EpochType(rsp.Node.ModifiedIndex)
 	return nil
 }
 
@@ -903,11 +930,38 @@ func (self *DNEtcdRegister) Unregister(nodeData *NodeInfo) error {
 }
 
 func (self *DNEtcdRegister) GetNamespaceLeader(ns string, partition int) (string, EpochType, error) {
-	return "", 0, nil
+	self.nsMutex.Lock()
+	defer self.nsMutex.Unlock()
+	nsInfo, ok := self.allNamespaceInfos[ns]
+	if !ok {
+		return "", 0, ErrKeyNotFound
+	}
+	p, ok := nsInfo[partition]
+	if !ok {
+		return "", 0, ErrKeyNotFound
+	}
+	return p.GetRealLeader(), p.currentLeader.epoch, nil
 }
 
-func (self *DNEtcdRegister) UpdateNamespaceLeader(ns string, partition int, nid string, oldGen EpochType) (EpochType, error) {
-	return 0, nil
+func (self *DNEtcdRegister) UpdateNamespaceLeader(ns string, partition int, rl RealLeader, oldGen EpochType) (EpochType, error) {
+	value, err := json.Marshal(rl)
+	if err != nil {
+		return oldGen, err
+	}
+	if oldGen == 0 {
+		rsp, err := self.client.Create(self.getNamespaceLeaderPath(ns, partition), string(value), 0)
+		if err != nil {
+			return 0, err
+		}
+		rl.epoch = EpochType(rsp.Node.ModifiedIndex)
+		return rl.epoch, nil
+	}
+	rsp, err := self.client.CompareAndSwap(self.getNamespaceLeaderPath(ns, partition), string(value), 0, "", uint64(oldGen))
+	if err != nil {
+		return 0, err
+	}
+	rl.epoch = EpochType(rsp.Node.ModifiedIndex)
+	return rl.epoch, nil
 }
 
 func (self *DNEtcdRegister) GetNodeInfo(nid string) (NodeInfo, error) {
@@ -1020,9 +1074,13 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 }
 
 func (self *DNEtcdRegister) getDataNodePathFromID(nid string) string {
-	return path.Join("/", ROOT_DIR, self.clusterID, DATA_NODE_DIR, "Node-"+nid)
+	return path.Join(self.getClusterPath(), DATA_NODE_DIR, "Node-"+nid)
 }
 
 func (self *DNEtcdRegister) getDataNodePath(nodeData *NodeInfo) string {
-	return path.Join("/", ROOT_DIR, self.clusterID, DATA_NODE_DIR, "Node-"+nodeData.ID)
+	return path.Join(self.getClusterPath(), DATA_NODE_DIR, "Node-"+nodeData.ID)
+}
+
+func (self *DNEtcdRegister) getNamespaceLeaderPath(ns string, partition int) string {
+	return path.Join(self.getNamespacePartitionPath(ns, partition), NAMESPACE_REAL_LEADER)
 }

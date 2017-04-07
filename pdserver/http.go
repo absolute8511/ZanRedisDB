@@ -181,7 +181,7 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 		pnum = nsInfo.PartitionNum
 		engType = nsInfo.EngType
 		var pn PartitionNodeInfo
-		for i, nid := range nsInfo.RaftNodes {
+		for _, nid := range nsInfo.RaftNodes {
 			n, ok := dns[nid]
 			if !ok {
 				continue
@@ -193,7 +193,7 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 				RedisPort:        n.RedisPort,
 				HTTPPort:         n.HttpPort,
 			}
-			if i == 0 {
+			if nsInfo.GetRealLeader() == nid {
 				pn.Leader = dn
 			}
 			pn.Replicas = append(pn.Replicas, dn)

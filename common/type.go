@@ -18,6 +18,7 @@ var (
 	ErrTimeout         = errors.New("queue request timeout")
 	ErrInvalidArgs     = errors.New("Invalid arguments")
 	ErrInvalidRedisKey = errors.New("invalid redis key")
+	ErrEpochMismatch   = errors.New("epoch mismatch")
 )
 
 // for out use
@@ -199,6 +200,9 @@ type SnapshotSyncInfo struct {
 	RsyncModule string
 }
 
-type IClusterInfoGetter interface {
+type IClusterInfo interface {
 	GetSnapshotSyncInfo(string) ([]SnapshotSyncInfo, error)
+	// return leader node id, leader epoch, for this namespace
+	GetNamespaceLeader(fullNS string) (uint64, int64, error)
+	UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error)
 }

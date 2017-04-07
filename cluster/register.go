@@ -25,11 +25,15 @@ type NodeInfo struct {
 	Tags              map[string]bool
 	DataRoot          string
 	RsyncModule       string
-	Epoch             EpochType
+	epoch             EpochType
 }
 
 func (self *NodeInfo) GetID() string {
 	return self.ID
+}
+
+func (self *NodeInfo) Epoch() EpochType {
+	return self.epoch
 }
 
 func (self *NodeInfo) GetRegisterID() uint64 {
@@ -47,9 +51,13 @@ type NamespaceMetaInfo struct {
 	// to verify the data of the create -> delete -> create with same namespace
 	MagicCode int64
 	MinGID    int64
-	MetaEpoch EpochType
+	metaEpoch EpochType
 	EngType   string
 	Tags      map[string]bool
+}
+
+func (self *NamespaceMetaInfo) MetaEpoch() EpochType {
+	return self.metaEpoch
 }
 
 type RemovingInfo struct {
@@ -62,7 +70,7 @@ type PartitionReplicaInfo struct {
 	RaftIDs   map[string]uint64
 	Removings map[string]RemovingInfo
 	MaxRaftID int64
-	Epoch     EpochType
+	epoch     EpochType
 }
 
 func (self *PartitionReplicaInfo) GetISR() []string {
@@ -79,10 +87,19 @@ func (self *PartitionReplicaInfo) GetISR() []string {
 	return isr
 }
 
+func (self *PartitionReplicaInfo) Epoch() EpochType {
+	return self.epoch
+}
+
+type RealLeader struct {
+	Leader string
+	epoch  EpochType
+}
+
 type PartitionMetaInfo struct {
 	Name          string
 	Partition     int
-	currentLeader string
+	currentLeader RealLeader
 	NamespaceMetaInfo
 	PartitionReplicaInfo
 }
@@ -92,7 +109,7 @@ func (self *PartitionMetaInfo) IsISRQuorum() bool {
 }
 
 func (self *PartitionMetaInfo) GetRealLeader() string {
-	return self.currentLeader
+	return self.currentLeader.Leader
 }
 
 func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
@@ -175,7 +192,7 @@ type DataNodeRegister interface {
 	GetNodeInfo(nid string) (NodeInfo, error)
 	// while losing leader, update to empty nid
 	// while became the new leader, update to my node
-	UpdateNamespaceLeader(ns string, partition int, nid string, oldGen EpochType) (EpochType, error)
+	UpdateNamespaceLeader(ns string, partition int, rl RealLeader, oldGen EpochType) (EpochType, error)
 	GetNamespaceLeader(ns string, partition int) (string, EpochType, error)
 	NewRegisterNodeID() (uint64, error)
 }

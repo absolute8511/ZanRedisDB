@@ -97,6 +97,7 @@ type raftNode struct {
 	description       string
 	readStateC        chan raft.ReadState
 	memberCnt         int32
+	newLeaderChan     chan string
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -105,7 +106,7 @@ type raftNode struct {
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries.
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
-	join bool, ds DataStorage) (<-chan applyInfo, *raftNode) {
+	join bool, ds DataStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode) {
 
 	commitC := make(chan applyInfo, 1000)
 	if rconfig.SnapCount <= 0 {
@@ -116,18 +117,18 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	}
 
 	rc := &raftNode{
-		commitC:     commitC,
-		config:      rconfig,
-		members:     make(map[uint64]*common.MemberInfo),
-		join:        join,
-		raftStorage: raft.NewMemoryStorage(),
-		stopc:       make(chan struct{}),
-		ds:          ds,
-		reqIDGen:    idutil.NewGenerator(uint16(rconfig.ID), time.Now()),
-		msgSnapC:    make(chan raftpb.Message, maxInFlightMsgSnap),
-		transport:   transport,
-		readStateC:  make(chan raft.ReadState, 1),
-		// rest of structure populated after WAL replay
+		commitC:       commitC,
+		config:        rconfig,
+		members:       make(map[uint64]*common.MemberInfo),
+		join:          join,
+		raftStorage:   raft.NewMemoryStorage(),
+		stopc:         make(chan struct{}),
+		ds:            ds,
+		reqIDGen:      idutil.NewGenerator(uint16(rconfig.ID), time.Now()),
+		msgSnapC:      make(chan raftpb.Message, maxInFlightMsgSnap),
+		transport:     transport,
+		readStateC:    make(chan raft.ReadState, 1),
+		newLeaderChan: newLeaderChan,
 	}
 	snapDir := rc.config.SnapDir
 	if !fileutil.Exist(snapDir) {
@@ -508,9 +509,6 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 			rc.Infof("I've been removed from the cluster! Shutting down.")
 			return true, confChanged, nil
 		}
-		// TODO: check if all replicas is deleted on the node
-		// if no any replica we can remove peer from transport
-		// rc.transport.RemovePeer(types.ID(cc.NodeID))
 	case raftpb.ConfChangeUpdateNode:
 		var m common.MemberInfo
 		json.Unmarshal(cc.Context, &m)
@@ -552,12 +550,14 @@ func (rc *raftNode) serveChannels() {
 		// store raft entries to wal, then publish over commit channel
 		case rd := <-rc.node.Ready():
 			if rd.SoftState != nil {
+				isLeader = rd.RaftState == raft.StateLeader
 				if lead := atomic.LoadUint64(&rc.lead); rd.SoftState.Lead != raft.None && lead != rd.SoftState.Lead {
 					rc.Infof("leader changed from %v to %v", lead, rd.SoftState)
-					// TODO: trigger report to lookup service that leader changed
+					if isLeader {
+						rc.triggerNewLeader()
+					}
 				}
 				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
-				isLeader = rd.RaftState == raft.StateLeader
 			}
 			if len(rd.ReadStates) != 0 {
 				select {
@@ -686,6 +686,13 @@ func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
 		return nil
 	}
 	return rc.node.Step(ctx, m)
+}
+
+func (rc *raftNode) triggerNewLeader() {
+	select {
+	case rc.newLeaderChan <- rc.config.GroupName:
+	default:
+	}
 }
 
 func (rc *raftNode) ReportUnreachable(id uint64, group raftpb.Group) {

@@ -134,7 +134,7 @@ func NewServer(conf ServerConfig) *Server {
 			sLog.Fatalf("failed to init register for coordinator: %v", err)
 		}
 		s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
-		s.nsMgr.SetClusterInfoGetter(s.dataCoord)
+		s.nsMgr.SetClusterInfoInterface(s.dataCoord)
 	} else {
 		s.raftTransport.ID = types.ID(myNode.RegID)
 	}
@@ -163,9 +163,9 @@ func (self *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
 	return self.nsMgr.GetNamespaceNode(ns)
 }
 
-func (self *Server) GetStats() common.ServerStats {
+func (self *Server) GetStats(leaderOnly bool) common.ServerStats {
 	var ss common.ServerStats
-	ss.NSStats = self.nsMgr.GetStats()
+	ss.NSStats = self.nsMgr.GetStats(leaderOnly)
 	return ss
 }
 
@@ -223,10 +223,12 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	if err != nil {
 		return nil, cmd, err
 	}
+	// TODO: for multi primary keys such as mset, mget, we need make sure they are all in the same partition
 	h, ok := n.Node.GetHandler(cmdName)
 	if !ok {
 		return nil, cmd, common.ErrInvalidCommand
 	}
+	// TODO: to make consistence, read command should request the raft read index if not leader
 	return h, cmd, nil
 }
 

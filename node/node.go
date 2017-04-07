@@ -70,7 +70,7 @@ type KVNode struct {
 	wg                sync.WaitGroup
 	commitC           <-chan applyInfo
 	committedIndex    uint64
-	clusterInfoGetter common.IClusterInfoGetter
+	clusterInfo       common.IClusterInfo
 }
 
 type KVSnapInfo struct {
@@ -92,7 +92,7 @@ func (self *KVSnapInfo) GetData() ([]byte, error) {
 
 func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConfig,
 	transport *rafthttp.Transport, join bool, deleteCb func(),
-	getter common.IClusterInfoGetter) *KVNode {
+	clusterInfo common.IClusterInfo, newLeaderChan chan string) *KVNode {
 	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
 	config.nodeConfig = machineConfig
@@ -107,10 +107,10 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		ns:            config.GroupName,
 		machineConfig: machineConfig,
 	}
-	s.clusterInfoGetter = getter
+	s.clusterInfo = clusterInfo
 	s.registerHandler()
 	commitC, raftNode := newRaftNode(config, transport,
-		join, s)
+		join, s, newLeaderChan)
 	s.rn = raftNode
 	s.commitC = commitC
 	return s
@@ -162,6 +162,7 @@ func (self *KVNode) GetRaftStatus() raft.Status {
 func (self *KVNode) GetLeadMember() *common.MemberInfo {
 	return self.rn.GetLeadMember()
 }
+
 func (self *KVNode) GetMembers() []*common.MemberInfo {
 	return self.rn.GetMembers()
 }
@@ -938,7 +939,7 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	var err error
 	for retry < 3 {
 		retry++
-		snapSyncInfoList, err = self.clusterInfoGetter.GetSnapshotSyncInfo(self.ns)
+		snapSyncInfoList, err = self.clusterInfo.GetSnapshotSyncInfo(self.ns)
 		if err != nil {
 			self.rn.Infof("get snapshot info failed: %v", err)
 			select {
@@ -985,6 +986,25 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	}
 	self.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
 	return syncAddr, syncDir
+}
+
+func (self *KVNode) ReportMeRaftLeader() {
+	nid, epoch, err := self.clusterInfo.GetNamespaceLeader(self.ns)
+	if err != nil {
+		self.rn.Infof("get raft leader from cluster failed: %v", err)
+		return
+	}
+	if self.rn.IsLead() {
+		if self.rn.config.nodeConfig.NodeID == nid {
+			return
+		}
+		_, err = self.clusterInfo.UpdateMeForNamespaceLeader(self.ns, epoch)
+		if err != nil {
+			self.rn.Infof("update raft leader to me failed: %v", err)
+		} else {
+			self.rn.Infof("update %v raft leader to me : %v", self.ns, self.rn.config.ID)
+		}
+	}
 }
 
 func (self *KVNode) Process(ctx context.Context, m raftpb.Message) error {

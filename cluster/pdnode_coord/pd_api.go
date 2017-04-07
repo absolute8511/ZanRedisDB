@@ -174,7 +174,7 @@ func (self *PDCoordinator) updateNamespaceMeta(currentNodes map[string]NodeInfo,
 		CoordLog().Infof("nodes %v is less than replica  %v", len(currentNodes), meta)
 		return ErrNodeUnavailable.ToErrorType()
 	}
-	return self.register.UpdateNamespaceMetaInfo(namespace, meta, meta.MetaEpoch)
+	return self.register.UpdateNamespaceMetaInfo(namespace, meta, meta.MetaEpoch())
 }
 
 func (self *PDCoordinator) CreateNamespace(namespace string, meta NamespaceMetaInfo) error {
@@ -250,7 +250,7 @@ func (self *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map[st
 			continue
 		}
 		tmpReplicaInfo := partReplicaList[i]
-		commonErr := self.register.UpdateNamespacePartReplicaInfo(namespace, i, &tmpReplicaInfo, tmpReplicaInfo.Epoch)
+		commonErr := self.register.UpdateNamespacePartReplicaInfo(namespace, i, &tmpReplicaInfo, tmpReplicaInfo.Epoch())
 		if commonErr != nil {
 			CoordLog().Infof("failed update info for namespace : %v-%v, %v", namespace, i, commonErr)
 			continue

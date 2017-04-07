@@ -196,15 +196,7 @@ func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprou
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
-	ss := self.GetStats()
-	nss := make([]common.NamespaceStats, 0, len(ss.NSStats))
-	for _, nsStat := range ss.NSStats {
-		if leaderOnly && !nsStat.IsLeader {
-			continue
-		}
-		nss = append(nss, nsStat)
-	}
-	ss.NSStats = nss
+	ss := self.GetStats(leaderOnly)
 
 	startTime := self.startTime
 	uptime := time.Since(startTime)

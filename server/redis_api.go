@@ -43,7 +43,7 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteString("OK")
 		conn.Close()
 	case "info":
-		s := self.GetStats()
+		s := self.GetStats(false)
 		d, _ := json.MarshalIndent(s, "", " ")
 		conn.WriteBulkString(string(d))
 	default:
