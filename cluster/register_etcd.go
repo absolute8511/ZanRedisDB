@@ -311,7 +311,10 @@ func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 	maxEpoch := EpochType(0)
 	for _, node := range nodes {
 		if node.Nodes != nil {
-			maxEpoch = self.processNamespaceNode(node.Nodes, metaMap, replicasMap, leaderMap)
+			newEpoch := self.processNamespaceNode(node.Nodes, metaMap, replicasMap, leaderMap)
+			if newEpoch > maxEpoch {
+				maxEpoch = newEpoch
+			}
 		}
 		if EpochType(node.ModifiedIndex) > maxEpoch {
 			maxEpoch = EpochType(node.ModifiedIndex)
