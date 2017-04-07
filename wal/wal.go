@@ -367,7 +367,7 @@ func (w *WAL) cut() error {
 	if err := w.tail().Truncate(off); err != nil {
 		return err
 	}
-	if err := w.sync(); err != nil {
+	if err := w.sync(true); err != nil {
 		return err
 	}
 
@@ -396,7 +396,7 @@ func (w *WAL) cut() error {
 		return err
 	}
 	// atomically move temp wal file to wal file
-	if err = w.sync(); err != nil {
+	if err = w.sync(true); err != nil {
 		return err
 	}
 
@@ -433,11 +433,14 @@ func (w *WAL) cut() error {
 	return nil
 }
 
-func (w *WAL) sync() error {
+func (w *WAL) sync(fsync bool) error {
 	if w.encoder != nil {
 		if err := w.encoder.flush(); err != nil {
 			return err
 		}
+	}
+	if !fsync {
+		return nil
 	}
 	start := time.Now()
 	err := fileutil.Fdatasync(w.tail().File)
@@ -447,7 +450,6 @@ func (w *WAL) sync() error {
 		plog.Warningf("sync duration of %v, expected less than %v", duration, warnSyncDuration)
 	}
 	syncDurations.Observe(duration.Seconds())
-
 	return err
 }
 
@@ -505,7 +507,7 @@ func (w *WAL) Close() error {
 	}
 
 	if w.tail() != nil {
-		if err := w.sync(); err != nil {
+		if err := w.sync(true); err != nil {
 			return err
 		}
 	}
@@ -569,7 +571,8 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	}
 	if curOff < SegmentSizeBytes {
 		if mustSync {
-			return w.sync()
+			fsync := st.Vote != w.state.Vote || st.Term != w.state.Term
+			return w.sync(fsync)
 		}
 		return nil
 	}
@@ -591,7 +594,7 @@ func (w *WAL) SaveSnapshot(e walpb.Snapshot) error {
 	if w.enti < e.Index {
 		w.enti = e.Index
 	}
-	return w.sync()
+	return w.sync(true)
 }
 
 func (w *WAL) saveCrc(prevCrc uint32) error {

@@ -61,7 +61,7 @@ func benchmarkWriteEntry(b *testing.B, size int, batch int) {
 		}
 		n++
 		if n > batch {
-			w.sync()
+			w.sync(false)
 			n = 0
 		}
 	}
