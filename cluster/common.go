@@ -184,6 +184,9 @@ func GenNodeID(n *NodeInfo, extra string) string {
 
 func ExtractRegIDFromGenID(nid string) uint64 {
 	pos1 := strings.Index(nid, ":")
+	if pos1 == -1 {
+		return 0
+	}
 	v, _ := strconv.ParseInt(nid[:pos1], 10, 64)
 	return uint64(v)
 }
