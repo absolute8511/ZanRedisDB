@@ -844,10 +844,13 @@ func (self *DataCoordinator) GetNamespaceLeader(fullNS string) (uint64, int64, e
 	}
 	nid, epoch, err := self.register.GetNamespaceLeader(namespace, pid)
 	if err != nil {
+		if err == ErrKeyNotFound {
+			return 0, 0, nil
+		}
 		return 0, 0, err
 	}
 	if nid == "" {
-		return 0, int64(epoch), errors.New("no leader for namespace")
+		return 0, int64(epoch), nil
 	}
 	regID := ExtractRegIDFromGenID(nid)
 	return regID, int64(epoch), nil
