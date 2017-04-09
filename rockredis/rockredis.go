@@ -237,6 +237,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	db.eng = eng
 	atomic.StoreInt32(&db.engOpened, 1)
 	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
+	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
 	db.wg.Add(1)
 	go func() {
@@ -271,6 +272,7 @@ func (r *RockDB) reOpenEng() error {
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	if err == nil {
 		atomic.StoreInt32(&r.engOpened, 1)
+		dbLog.Infof("rocksdb opened: %v", r.GetDataDir())
 	}
 	return err
 }
@@ -284,6 +286,7 @@ func (r *RockDB) closeEng() {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
 			r.eng.Close()
+			dbLog.Infof("rocksdb closed: %v", r.GetDataDir())
 		}
 	}
 }

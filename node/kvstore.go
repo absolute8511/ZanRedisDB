@@ -20,13 +20,15 @@ type KVOptions struct {
 	RockOpts rockredis.RockOptions
 }
 
-func NewKVStore(kvopts *KVOptions) *KVStore {
+func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
 	s := &KVStore{
 		opts: kvopts,
 	}
 
-	s.openDB()
-	return s
+	if err := s.openDB(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *KVStore) openDB() error {
@@ -36,6 +38,9 @@ func (s *KVStore) openDB() error {
 		cfg.DataDir = s.opts.DataDir
 		cfg.RockOptions = s.opts.RockOpts
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
+		if err != nil {
+			nodeLog.Warningf("failed to open rocksdb: %v", err)
+		}
 	} else {
 		return errors.New("Not recognized engine type:" + s.opts.EngType)
 	}

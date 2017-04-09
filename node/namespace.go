@@ -268,12 +268,6 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 	d, _ := json.MarshalIndent(&conf, "", " ")
 	nodeLog.Infof("namespace load config: %v", string(d))
 	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, clusterNodes)
-	if _, ok := self.nsMetas[conf.BaseName]; !ok {
-		self.nsMetas[conf.BaseName] = NamespaceMeta{
-			PartitionNum: conf.PartitionNum,
-		}
-	}
-
 	raftConf := &RaftConfig{
 		GroupID:     conf.RaftGroupConf.GroupID,
 		GroupName:   conf.Name,
@@ -285,9 +279,18 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		SnapCatchup: conf.SnapCatchup,
 		Replicator:  conf.Replicator,
 	}
-	kv := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
+	kv, err := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
 		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name),
 		self.clusterInfo, self.newLeaderChan)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := self.nsMetas[conf.BaseName]; !ok {
+		self.nsMetas[conf.BaseName] = NamespaceMeta{
+			PartitionNum: conf.PartitionNum,
+		}
+	}
+
 	n := &NamespaceNode{
 		Node: kv,
 		conf: conf,
