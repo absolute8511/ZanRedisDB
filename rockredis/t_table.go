@@ -73,7 +73,11 @@ func (db *RockDB) GetTables() chan []byte {
 	go func() {
 		s := encodeTableMetaStartKey()
 		e := encodeTableMetaStopKey()
-		it := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+		it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+		if err != nil {
+			close(ch)
+			return
+		}
 		defer it.Close()
 		for ; it.Valid(); it.Next() {
 			rk := it.Key()

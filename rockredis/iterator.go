@@ -35,6 +35,33 @@ type DBIterator struct {
 	*gorocksdb.Iterator
 	snap *gorocksdb.Snapshot
 	ro   *gorocksdb.ReadOptions
+	db   *gorocksdb.DB
+}
+
+func NewDBIterator(db *gorocksdb.DB, withSnap bool) (*DBIterator, error) {
+	db.RLock()
+	dbit := &DBIterator{
+		db: db,
+	}
+	readOpts := gorocksdb.NewDefaultReadOptions()
+	readOpts.SetFillCache(false)
+	readOpts.SetVerifyChecksums(false)
+	dbit.ro = readOpts
+	var err error
+	if withSnap {
+		dbit.snap, err = db.NewSnapshot()
+		if err != nil {
+			dbit.Close()
+			return nil, err
+		}
+		readOpts.SetSnapshot(dbit.snap)
+	}
+	dbit.Iterator, err = db.NewIterator(readOpts)
+	if err != nil {
+		dbit.Close()
+		return nil, err
+	}
+	return dbit, nil
 }
 
 func (it *DBIterator) RefKey() []byte {
@@ -54,90 +81,71 @@ func (it *DBIterator) Value() []byte {
 }
 
 func (it *DBIterator) Close() {
-	it.Iterator.Close()
+	if it.Iterator != nil {
+		it.Iterator.Close()
+	}
 	if it.ro != nil {
 		it.ro.Destroy()
 	}
 	if it.snap != nil {
 		it.snap.Release()
 	}
+	it.db.RUnlock()
 }
 
 func NewDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
-	offset int, count int, reverse bool) *RangeLimitedIterator {
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	readOpts.SetFillCache(false)
-	readOpts.SetVerifyChecksums(false)
-	it := db.NewIterator(readOpts)
-	dbit := &DBIterator{
-		Iterator: it,
-		snap:     nil,
-		ro:       readOpts,
+	offset int, count int, reverse bool) (*RangeLimitedIterator, error) {
+	dbit, err := NewDBIterator(db, false)
+	if err != nil {
+		return nil, err
 	}
 	if !reverse {
 		return NewRangeLimitIterator(dbit, &Range{Min: min, Max: max, Type: rtype},
-			&Limit{Offset: offset, Count: count})
+			&Limit{Offset: offset, Count: count}), nil
 	} else {
 		return NewRevRangeLimitIterator(dbit, &Range{Min: min, Max: max, Type: rtype},
-			&Limit{Offset: offset, Count: count})
+			&Limit{Offset: offset, Count: count}), nil
 	}
 }
 
 func NewSnapshotDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
-	offset int, count int, reverse bool) *RangeLimitedIterator {
-	snap := gorocksdb.NewSnapshot(db)
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	readOpts.SetFillCache(false)
-	readOpts.SetSnapshot(snap)
-	readOpts.SetVerifyChecksums(false)
-	it := db.NewIterator(readOpts)
-	dbit := &DBIterator{
-		Iterator: it,
-		snap:     snap,
-		ro:       readOpts,
+	offset int, count int, reverse bool) (*RangeLimitedIterator, error) {
+	dbit, err := NewDBIterator(db, true)
+	if err != nil {
+		return nil, err
 	}
 	if !reverse {
 		return NewRangeLimitIterator(dbit, &Range{Min: min, Max: max, Type: rtype},
-			&Limit{Offset: offset, Count: count})
+			&Limit{Offset: offset, Count: count}), nil
 	} else {
 		return NewRevRangeLimitIterator(dbit, &Range{Min: min, Max: max, Type: rtype},
-			&Limit{Offset: offset, Count: count})
+			&Limit{Offset: offset, Count: count}), nil
 	}
 }
 
-func NewDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8, reverse bool) *RangeLimitedIterator {
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	readOpts.SetFillCache(false)
-	readOpts.SetVerifyChecksums(false)
-	it := db.NewIterator(readOpts)
-	dbit := &DBIterator{
-		Iterator: it,
-		snap:     nil,
-		ro:       readOpts,
+func NewDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
+	reverse bool) (*RangeLimitedIterator, error) {
+	dbit, err := NewDBIterator(db, false)
+	if err != nil {
+		return nil, err
 	}
 	if !reverse {
-		return NewRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype})
+		return NewRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype}), nil
 	} else {
-		return NewRevRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype})
+		return NewRevRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype}), nil
 	}
 }
 
-func NewSnapshotDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8, reverse bool) *RangeLimitedIterator {
-	snap := gorocksdb.NewSnapshot(db)
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	readOpts.SetFillCache(false)
-	readOpts.SetVerifyChecksums(false)
-	readOpts.SetSnapshot(snap)
-	it := db.NewIterator(readOpts)
-	dbit := &DBIterator{
-		Iterator: it,
-		snap:     snap,
-		ro:       readOpts,
+func NewSnapshotDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
+	reverse bool) (*RangeLimitedIterator, error) {
+	dbit, err := NewDBIterator(db, true)
+	if err != nil {
+		return nil, err
 	}
 	if !reverse {
-		return NewRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype})
+		return NewRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype}), nil
 	} else {
-		return NewRevRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype})
+		return NewRevRangeIterator(dbit, &Range{Min: min, Max: max, Type: rtype}), nil
 	}
 }
 

@@ -126,7 +126,10 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	stop := sEncodeStopKey(key)
 
 	var num int64 = 0
-	it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	if err != nil {
+		return 0
+	}
 	for ; it.Valid(); it.Next() {
 		wb.Delete(it.RefKey())
 		num++
@@ -276,7 +279,10 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 
 	v := make([][]byte, 0, 16)
 
-	it := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	if err != nil {
+		return nil, err
+	}
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		_, m, err := sDecodeSetKey(it.Key())

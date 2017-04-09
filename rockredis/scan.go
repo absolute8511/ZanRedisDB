@@ -51,7 +51,7 @@ func buildMatchRegexp(match string) (glob.Glob, error) {
 	return r, nil
 }
 
-func (db *RockDB) buildScanIterator(minKey []byte, maxKey []byte) *RangeLimitedIterator {
+func (db *RockDB) buildScanIterator(minKey []byte, maxKey []byte) (*RangeLimitedIterator, error) {
 	tp := common.RangeOpen
 	return NewDBRangeIterator(db.eng, minKey, maxKey, tp, false)
 }
@@ -142,7 +142,10 @@ func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
 	}
 	count = checkScanCount(count)
 
-	it := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey)
+	if err != nil {
+		return nil, err
+	}
 
 	v := make([][]byte, 0, count)
 
@@ -215,7 +218,11 @@ func (db *RockDB) buildSpecificDataScanIterator(storeDataType byte,
 		return nil, err
 	}
 
-	it := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey)
+
+	if err != nil {
+		return nil, err
+	}
 	return it, nil
 }
 

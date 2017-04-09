@@ -458,7 +458,10 @@ func (db *RockDB) ZCount(key []byte, min int64, max int64) (int64, error) {
 	}
 	minKey := zEncodeStartScoreKey(key, min)
 	maxKey := zEncodeStopScoreKey(key, max)
-	it := NewDBRangeIterator(db.eng, minKey, maxKey, common.RangeClose, false)
+	it, err := NewDBRangeIterator(db.eng, minKey, maxKey, common.RangeClose, false)
+	if err != nil {
+		return 0, err
+	}
 
 	var n int64 = 0
 	for ; it.Valid(); it.Next() {
@@ -487,10 +490,16 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 			var rit *RangeLimitedIterator
 			if !reverse {
 				minKey := zEncodeStartScoreKey(key, MinScore)
-				rit = NewDBRangeIterator(db.eng, minKey, sk, common.RangeClose, reverse)
+				rit, err = NewDBRangeIterator(db.eng, minKey, sk, common.RangeClose, reverse)
+				if err != nil {
+					return 0, err
+				}
 			} else {
 				maxKey := zEncodeStopScoreKey(key, MaxScore)
-				rit = NewDBRangeIterator(db.eng, sk, maxKey, common.RangeClose, reverse)
+				rit, err = NewDBRangeIterator(db.eng, sk, maxKey, common.RangeClose, reverse)
+				if err != nil {
+					return 0, err
+				}
 			}
 			defer rit.Close()
 
@@ -531,7 +540,10 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 
 	minKey := zEncodeStartScoreKey(key, min)
 	maxKey := zEncodeStopScoreKey(key, max)
-	it := NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
+	it, err := NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
+	if err != nil {
+		return 0, err
+	}
 	num := int64(0)
 	for ; it.Valid(); it.Next() {
 		sk := it.RefKey()
@@ -581,14 +593,18 @@ func (db *RockDB) zRange(key []byte, min int64, max int64, offset int, count int
 	v := make([]common.ScorePair, 0, nv)
 
 	var it *RangeLimitedIterator
+	var err error
 	minKey := zEncodeStartScoreKey(key, min)
 	maxKey := zEncodeStopScoreKey(key, max)
 	//if reverse and offset is 0, count < 0, we may use forward iterator then reverse
 	//because store iterator prev is slower than next
 	if !reverse || (offset == 0 && count < 0) {
-		it = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
+		it, err = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
 	} else {
-		it = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, true)
+		it, err = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, true)
+	}
+	if err != nil {
+		return nil, err
 	}
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()
@@ -784,7 +800,10 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 		return nil, errTooMuchBatchSize
 	}
 
-	it := NewDBRangeLimitIterator(db.eng, min, max, rangeType, offset, count, false)
+	it, err := NewDBRangeLimitIterator(db.eng, min, max, rangeType, offset, count, false)
+	if err != nil {
+		return nil, err
+	}
 	defer it.Close()
 
 	ay := make([][]byte, 0, 16)
@@ -819,7 +838,10 @@ func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType u
 
 	wb := db.wb
 	wb.Clear()
-	it := NewDBRangeIterator(db.eng, min, max, rangeType, false)
+	it, err := NewDBRangeIterator(db.eng, min, max, rangeType, false)
+	if err != nil {
+		return 0, err
+	}
 	defer it.Close()
 	var num int64 = 0
 	for ; it.Valid(); it.Next() {
@@ -863,7 +885,10 @@ func (db *RockDB) ZLexCount(key []byte, min []byte, max []byte, rangeType uint8)
 		max = zEncodeSetKey(key, max)
 	}
 
-	it := NewDBRangeIterator(db.eng, min, max, rangeType, false)
+	it, err := NewDBRangeIterator(db.eng, min, max, rangeType, false)
+	if err != nil {
+		return 0, err
+	}
 	var n int64 = 0
 	for ; it.Valid(); it.Next() {
 		n++

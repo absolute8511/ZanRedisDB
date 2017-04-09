@@ -339,21 +339,6 @@ func (r *RockDB) GetInternalPropertyStatus(p string) string {
 	return r.eng.GetProperty(p)
 }
 
-func (r *RockDB) ReadRange(sKey, eKey []byte, maxNum int) chan common.KVRecord {
-	retChan := make(chan common.KVRecord, 32)
-	go func() {
-		it := NewDBRangeLimitIterator(r.eng, sKey, eKey, common.RangeClose, 0, maxNum, false)
-		defer it.Close()
-		for ; it.Valid(); it.Next() {
-			key := it.Key()
-			value := it.Value()
-			retChan <- common.KVRecord{Key: key, Value: value}
-		}
-		close(retChan)
-	}()
-	return retChan
-}
-
 type BackupInfo struct {
 	backupDir string
 	started   chan struct{}

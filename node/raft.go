@@ -86,18 +86,20 @@ type raftNode struct {
 
 	snapshotter *snap.Snapshotter
 
-	transport         *rafthttp.Transport
-	stopc             chan struct{} // signals proposal channel closed
-	reqIDGen          *idutil.Generator
-	wgAsync           sync.WaitGroup
-	wgServe           sync.WaitGroup
-	ds                DataStorage
-	msgSnapC          chan raftpb.Message
-	inflightSnapshots int64
-	description       string
-	readStateC        chan raft.ReadState
-	memberCnt         int32
-	newLeaderChan     chan string
+	transport           *rafthttp.Transport
+	stopc               chan struct{} // signals proposal channel closed
+	reqIDGen            *idutil.Generator
+	wgAsync             sync.WaitGroup
+	wgServe             sync.WaitGroup
+	ds                  DataStorage
+	msgSnapC            chan raftpb.Message
+	inflightSnapshots   int64
+	description         string
+	readStateC          chan raft.ReadState
+	memberCnt           int32
+	newLeaderChan       chan string
+	lastLeaderChangedTs int64
+	stopping            int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -313,6 +315,9 @@ func advanceTicksForElection(n raft.Node, electionTicks int) {
 }
 
 func (rc *raftNode) StopNode() {
+	if !atomic.CompareAndSwapInt32(&rc.stopping, 0, 1) {
+		return
+	}
 	close(rc.stopc)
 	rc.wgServe.Wait()
 	rc.Infof("raft node stopped")
@@ -553,6 +558,7 @@ func (rc *raftNode) serveChannels() {
 				isLeader = rd.RaftState == raft.StateLeader
 				if lead := atomic.LoadUint64(&rc.lead); rd.SoftState.Lead != raft.None && lead != rd.SoftState.Lead {
 					rc.Infof("leader changed from %v to %v", lead, rd.SoftState)
+					atomic.StoreInt64(&rc.lastLeaderChangedTs, time.Now().UnixNano())
 					if isLeader {
 						rc.triggerNewLeader()
 					}
@@ -686,6 +692,10 @@ func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
 		return nil
 	}
 	return rc.node.Step(ctx, m)
+}
+
+func (rc *raftNode) getLastLeaderChangedTime() int64 {
+	return atomic.LoadInt64(&rc.lastLeaderChangedTs)
 }
 
 func (rc *raftNode) triggerNewLeader() {

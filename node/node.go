@@ -135,15 +135,19 @@ func (self *KVNode) Start() error {
 	return nil
 }
 
+func (self *KVNode) StopRaft() {
+	self.rn.StopNode()
+}
+
 func (self *KVNode) Stop() {
 	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
 		return
 	}
 	self.rn.StopNode()
-	self.store.Close()
 	close(self.stopChan)
 	go self.deleteCb()
 	self.wg.Wait()
+	self.store.Close()
 	self.rn.Infof("node %v stopped", self.ns)
 }
 
@@ -986,6 +990,10 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	}
 	self.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
 	return syncAddr, syncDir
+}
+
+func (self *KVNode) GetLastLeaderChangedTime() int64 {
+	return self.rn.getLastLeaderChangedTime()
 }
 
 func (self *KVNode) ReportMeRaftLeader() {

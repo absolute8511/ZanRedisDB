@@ -51,6 +51,10 @@ func (self *NamespaceNode) SetMagicCode(magic int64) error {
 func (self *NamespaceNode) SetDataFixState(needFix bool) {
 }
 
+func (self *NamespaceNode) GetLastLeaderChangedTime() int64 {
+	return self.Node.GetLastLeaderChangedTime()
+}
+
 func (self *NamespaceNode) GetRaftID() uint64 {
 	return self.Node.rn.config.ID
 }
@@ -66,6 +70,10 @@ func (self *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) e
 		return ErrRaftIDMismatch
 	}
 	return nil
+}
+
+func (self *NamespaceNode) StopRaft() {
+	self.Node.StopRaft()
 }
 
 func (self *NamespaceNode) Close() {
@@ -98,7 +106,7 @@ func (self *NamespaceNode) Start() error {
 }
 
 func (self *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 	oldLeader := self.Node.rn.Lead()
 	self.Node.rn.node.TransferLeadership(ctx, oldLeader, toRaftID)

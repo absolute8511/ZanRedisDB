@@ -127,7 +127,7 @@ func (self *DataCoordinator) Start() error {
 }
 
 func (self *DataCoordinator) Stop() {
-	if atomic.LoadInt32(&self.stopping) == 1 {
+	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
 		return
 	}
 	self.prepareLeavingCluster()
@@ -422,6 +422,9 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 	ticker := time.NewTicker(time.Minute * 10)
 	defer self.wg.Done()
 	doWork := func() {
+		if atomic.LoadInt32(&self.stopping) == 1 {
+			return
+		}
 		CoordLog().Debugf("check for namespace sync...")
 		// try load local namespace if any namespace raft group changed
 		self.loadLocalNamespaceData()
@@ -472,15 +475,22 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				continue
 			}
 			isReplicasEnough := len(isrList) >= namespaceMeta.Replica
+			members := self.getNamespaceRaftMembers(namespaceMeta)
+			if len(members) < namespaceMeta.Replica {
+				isReplicasEnough = false
+			}
 
 			if isReplicasEnough && isrList[0] != self.GetMyID() {
 				// the raft leader check if I am the expected sharding leader,
 				// if not, try to transfer the leader to expected node. We need do this
 				// because we should make all the sharding leaders balanced on
 				// all the cluster nodes.
-				self.transferMyNamespaceLeader(namespaceMeta, isrList[0])
+				// avoid transfer while some node is leaving, so wait enough time to
+				// allow node leaving
+				if time.Now().UnixNano()-localNamespace.GetLastLeaderChangedTime() > time.Minute.Nanoseconds() {
+					self.transferMyNamespaceLeader(namespaceMeta, isrList[0])
+				}
 			} else {
-				members := self.getNamespaceRaftMembers(namespaceMeta)
 				// check if any replica is not joined to members
 				anyJoined := false
 				for nid, rid := range namespaceMeta.RaftIDs {
@@ -896,13 +906,14 @@ func (self *DataCoordinator) prepareLeavingCluster() {
 			}
 		}
 	}
-	CoordLog().Infof("prepare leaving finished.")
-	self.localNSMgr.Stop()
 	if self.register != nil {
 		atomic.StoreInt32(&self.stopping, 1)
 		self.register.Unregister(&self.myNode)
 		self.register.Stop()
 	}
+
+	CoordLog().Infof("prepare leaving finished.")
+	self.localNSMgr.Stop()
 }
 
 func (self *DataCoordinator) Stats(namespace string, part int) *CoordStats {
