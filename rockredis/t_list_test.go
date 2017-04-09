@@ -9,6 +9,7 @@ import (
 func TestListCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:key")
 
@@ -32,6 +33,7 @@ func TestListCodec(t *testing.T) {
 func TestListTrim(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:test_list_trim")
 
@@ -121,6 +123,7 @@ func TestListTrim(t *testing.T) {
 func TestDBList(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:testdb_list_a")
 
@@ -175,6 +178,7 @@ func TestDBList(t *testing.T) {
 func TestLKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 	key := []byte("test:lkeyexists_test")
 	if n, err := db.LKeyExists(key); err != nil {
 		t.Fatal(err.Error())
@@ -192,6 +196,7 @@ func TestLKeyExists(t *testing.T) {
 func TestListPop(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:lpop_test")
 

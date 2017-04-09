@@ -23,6 +23,7 @@ func pair(memb string, score int) common.ScorePair {
 func TestZSetCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:key")
 	member := []byte("member")
@@ -59,6 +60,7 @@ func TestZSetCodec(t *testing.T) {
 func TestDBZSet(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := bin("test:testdb_zset_a")
 
@@ -122,6 +124,7 @@ func TestDBZSet(t *testing.T) {
 func TestZSetOrder(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := bin("test:testdb_zset_order")
 
@@ -228,6 +231,7 @@ func TestZRemRange(t *testing.T) {
 func TestZLex(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:myzset")
 	if _, err := db.ZAdd(key, common.ScorePair{Score: 0, Member: []byte("a")},
@@ -282,6 +286,7 @@ func TestZLex(t *testing.T) {
 func TestZKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 	key := []byte("test:zkeyexists_test")
 	if n, err := db.ZKeyExists(key); err != nil {
 		t.Fatal(err.Error())

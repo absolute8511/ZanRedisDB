@@ -30,6 +30,7 @@ func TestHashCodec(t *testing.T) {
 func TestDBHash(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:testdb_hash_a")
 
@@ -116,6 +117,7 @@ func TestDBHash(t *testing.T) {
 func TestHashKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 	key := []byte("test:hkeyexists_test")
 	v, err := db.HKeyExists(key)
 	if err != nil {
@@ -160,6 +162,7 @@ func TestHashKeyExists(t *testing.T) {
 func TestHashKeyIncrBy(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 	key := []byte("test:hkey_incr_test")
 	if _, err := db.HSet(key, []byte("hello"), []byte("0")); err != nil {
 		t.Fatal(err.Error())

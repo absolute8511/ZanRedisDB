@@ -10,6 +10,7 @@ import (
 func TestKVCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	ek := encodeKVKey([]byte("key"))
 
@@ -23,6 +24,7 @@ func TestKVCodec(t *testing.T) {
 func TestDBKV(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key1 := []byte("test:testdb_kv_a")
 
@@ -188,6 +190,7 @@ func TestDBKV(t *testing.T) {
 func TestDBKVWithNoTable(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key1 := []byte("testdb_kv_a")
 

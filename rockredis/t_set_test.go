@@ -8,6 +8,7 @@ import (
 func TestSetCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:key")
 	member := []byte("member")
@@ -32,6 +33,7 @@ func TestSetCodec(t *testing.T) {
 func TestDBSet(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	key := []byte("test:testdb_set_a")
 	member := []byte("member")
@@ -96,6 +98,7 @@ func TestDBSet(t *testing.T) {
 func TestSKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 	key := []byte("test:skeyexists_test")
 	if n, err := db.SKeyExists(key); err != nil {
 		t.Fatal(err.Error())

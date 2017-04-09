@@ -997,6 +997,9 @@ func (self *KVNode) GetLastLeaderChangedTime() int64 {
 }
 
 func (self *KVNode) ReportMeRaftLeader() {
+	if self.clusterInfo == nil {
+		return
+	}
 	nid, epoch, err := self.clusterInfo.GetNamespaceLeader(self.ns)
 	if err != nil {
 		self.rn.Infof("get raft leader from cluster failed: %v", err)

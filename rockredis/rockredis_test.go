@@ -26,11 +26,13 @@ func getTestDB(t *testing.T) *RockDB {
 func TestDB(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 }
 
 func TestRockDB(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 	key := []byte("test:test_kv_key")
 	value := []byte("value")
 	if err := db.KVSet(0, key, value); err != nil {
