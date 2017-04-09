@@ -514,10 +514,10 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 		dbLog.Infof("list checkpoint files failed:  %v\n", err)
 		return err
 	}
-	ckSstNameMap := make(map[string]bool)
+	ckSstNameMap := make(map[string]string)
 	for _, fn := range ckNameList {
 		if strings.HasSuffix(fn, ".sst") {
-			ckSstNameMap[path.Base(fn)] = true
+			ckSstNameMap[path.Base(fn)] = fn
 		}
 	}
 
@@ -527,9 +527,19 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 			continue
 		}
 		if strings.HasSuffix(shortName, ".sst") {
-			if _, ok := ckSstNameMap[shortName]; ok {
-				dbLog.Infof("keeping sst file: %v", fn)
-				continue
+			if fullName, ok := ckSstNameMap[shortName]; ok {
+				stat1, err1 := os.Stat(fullName)
+				stat2, err2 := os.Stat(fn)
+				if err1 == nil && err2 == nil {
+					if stat1.Size() == stat2.Size() {
+						dbLog.Infof("keeping sst file: %v", fn)
+						continue
+					} else {
+						dbLog.Infof("no keeping sst file %v for mismatch size: %v, %v", fn, stat1, stat2)
+					}
+				} else {
+					dbLog.Infof("no keeping sst file %v for err: %v, %v", fn, err1, err2)
+				}
 			}
 		}
 		dbLog.Infof("removing: %v", fn)

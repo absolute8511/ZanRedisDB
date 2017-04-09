@@ -419,7 +419,7 @@ func (self *DataCoordinator) transferMyNamespaceLeader(nsInfo *PartitionMetaInfo
 }
 
 func (self *DataCoordinator) checkForUnsyncedNamespaces() {
-	ticker := time.NewTicker(time.Minute * 10)
+	ticker := time.NewTicker(time.Minute * 5)
 	defer self.wg.Done()
 	doWork := func() {
 		if atomic.LoadInt32(&self.stopping) == 1 {
