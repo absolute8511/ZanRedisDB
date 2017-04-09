@@ -105,7 +105,7 @@ func (p *program) Start() error {
 		for _, v := range nsConf.RaftGroupConf.SeedNodes {
 			clusterNodes[v.ReplicaID] = v
 		}
-		app.InitKVNamespace(id, &nsConf)
+		app.InitKVNamespace(id, &nsConf, false)
 	}
 	app.Start()
 	p.server = app

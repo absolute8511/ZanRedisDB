@@ -272,7 +272,11 @@ func (rc *raftNode) initForTransport() {
 	if len(rc.members) == 0 {
 		for _, v := range rc.config.RaftPeers {
 			if v.NodeID != rc.config.nodeConfig.NodeID {
-				rc.transport.UpdatePeer(types.ID(v.NodeID), []string{v.RaftAddr})
+				if rc.join {
+					rc.transport.AddRemote(types.ID(v.NodeID), []string{v.RaftAddr})
+				} else {
+					rc.transport.UpdatePeer(types.ID(v.NodeID), []string{v.RaftAddr})
+				}
 			}
 		}
 	}

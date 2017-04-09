@@ -164,6 +164,7 @@ var (
 	ErrNamespaceNotCreated            = NewCoordErrWithCode("namespace not created", CoordLocalErr, RpcNoErr)
 	ErrNamespaceConfInvalid           = NewCoordErrWithCode("namespace config is invalid", CoordClusterErr, RpcNoErr)
 	ErrNamespaceWaitingSync           = NewCoordErrWithCode("namespace is still waiting sync", CoordTmpErr, RpcNoErr)
+	ErrRegisterServiceUnstable        = NewCoordErr("the register service is unstable", CoordTmpErr)
 )
 
 func GenNodeID(n *NodeInfo, extra string) string {

@@ -173,8 +173,8 @@ func (self *Server) OptimizeDB() {
 	self.nsMgr.OptimizeDB()
 }
 
-func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig) (*node.NamespaceNode, error) {
-	return self.nsMgr.InitNamespaceNode(conf, id)
+func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig, join bool) (*node.NamespaceNode, error) {
+	return self.nsMgr.InitNamespaceNode(conf, id, join)
 }
 
 func (self *Server) Start() {

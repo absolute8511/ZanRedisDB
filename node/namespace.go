@@ -232,7 +232,7 @@ func (self *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 	return tmp
 }
 
-func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64) (*NamespaceNode, error) {
+func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64, join bool) (*NamespaceNode, error) {
 	if atomic.LoadInt32(&self.stopping) == 1 {
 		return nil, errStopping
 	}
@@ -260,7 +260,6 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		clusterNodes[v.ReplicaID] = v
 	}
 	_, ok := clusterNodes[uint64(raftID)]
-	join := false
 	if !ok {
 		join = true
 	}

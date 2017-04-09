@@ -20,7 +20,6 @@ var (
 	ErrNamespaceRaftEnough       = NewCoordErr("the namespace isr and catchup nodes are enough", CoordTmpErr)
 	ErrClusterNodeRemoving       = NewCoordErr("the node is mark as removed", CoordTmpErr)
 	ErrNamespaceNodeConflict     = NewCoordErr("the namespace node info is conflicted", CoordClusterErr)
-	ErrRegisterServiceUnstable   = NewCoordErr("the register service is unstable", CoordTmpErr)
 	ErrNamespaceRaftIDNotFound   = NewCoordErr("the namespace raft id is not found", CoordClusterErr)
 	ErrNamespaceReplicaNotEnough = NewCoordErr("the replicas in the namespace is not enough", CoordTmpErr)
 )

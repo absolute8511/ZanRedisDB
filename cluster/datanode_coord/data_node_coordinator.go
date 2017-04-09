@@ -793,7 +793,26 @@ func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo) (*n
 		return nil, err
 	}
 
-	localNode, _ := self.localNSMgr.InitNamespaceNode(nsConf, raftID)
+	// TODO: handle if we need join the existing cluster
+	// we should not create new cluster except for the init
+	// if something wrong while disaster, we need re-init cluster but that
+	// should be used by setting manual flag for re-init
+	join := true
+	if len(nsInfo.GetISR()) > 0 && nsInfo.GetISR()[0] == self.GetMyID() {
+		nid, epoch, err := self.register.GetNamespaceLeader(nsInfo.Name, nsInfo.Partition)
+		if err != nil {
+			if err != ErrKeyNotFound {
+				go self.tryCheckNamespaces()
+				return nil, ErrRegisterServiceUnstable
+			}
+		}
+		if nid == "" && epoch == 0 {
+			join = false
+			CoordLog().Infof("my node will create new cluster for namespace: %v since first init: %v",
+				nsInfo.GetDesp(), nsConf)
+		}
+	}
+	localNode, _ := self.localNSMgr.InitNamespaceNode(nsConf, raftID, join)
 	if localNode != nil {
 		if checkErr := localNode.CheckRaftConf(raftID, nsConf); checkErr != nil {
 			CoordLog().Infof("local namespace %v mismatch with the new raft config removing: %v", nsInfo.GetDesp(), checkErr)
