@@ -54,7 +54,7 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
 	kv := NewServer(kvOpts)
-	_, err = kv.InitKVNamespace(1, nsConf)
+	_, err = kv.InitKVNamespace(1, nsConf, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}

@@ -94,15 +94,15 @@ func (db *RockDB) GetTables() chan []byte {
 
 func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) error {
 	tm := encodeTableMetaKey(table)
-	wb.Merge(tm, PutInt64(delta))
+	wb.Merge(tm, PutRocksdbUint64(uint64(delta)))
 	return nil
 }
 
 func (db *RockDB) GetTableKeyCount(table []byte) (int64, error) {
 	tm := encodeTableMetaKey(table)
 	var err error
-	var size int64
-	if size, err = Int64(db.eng.GetBytes(db.defaultReadOpts, tm)); err != nil {
+	var size uint64
+	if size, err = GetRocksdbUint64(db.eng.GetBytes(db.defaultReadOpts, tm)); err != nil {
 	}
-	return size, err
+	return int64(size), err
 }
