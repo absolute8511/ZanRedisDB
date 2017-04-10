@@ -147,10 +147,10 @@ func (self *KVNode) Stop() {
 	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
 		return
 	}
-	self.rn.StopNode()
 	close(self.stopChan)
 	go self.deleteCb()
 	self.wg.Wait()
+	self.rn.StopNode()
 	self.store.Close()
 	self.rn.Infof("node %v stopped", self.ns)
 }
