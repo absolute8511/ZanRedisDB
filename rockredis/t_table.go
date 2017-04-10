@@ -92,25 +92,10 @@ func (db *RockDB) GetTables() chan []byte {
 	return ch
 }
 
-func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) error {
 	tm := encodeTableMetaKey(table)
-	var size int64
-	v, err := db.eng.GetBytes(db.defaultReadOpts, tm)
-	if err != nil {
-		return 0, err
-	}
-	if size, err = Int64(v, err); err != nil {
-		dbLog.Infof("convert table size error: %v, set size to init: %v", err, delta)
-		size = delta
-	} else {
-		size += delta
-	}
-	if size < 0 {
-		size = 0
-	}
-
-	wb.Put(tm, PutInt64(size))
-	return size, nil
+	wb.Merge(tm, PutInt64(delta))
+	return nil
 }
 
 func (db *RockDB) GetTableKeyCount(table []byte) (int64, error) {

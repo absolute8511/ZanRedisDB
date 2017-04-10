@@ -297,10 +297,7 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 	if newNum, err := db.zIncrSize(key, num, wb); err != nil {
 		return 0, err
 	} else if newNum > 0 && newNum == num {
-		_, err = db.IncrTableKeyCount(table, 1, wb)
-		if err != nil {
-			return InvalidScore, err
-		}
+		db.IncrTableKeyCount(table, 1, wb)
 	}
 
 	err := db.eng.Write(db.defaultWriteOpts, wb)
@@ -389,10 +386,7 @@ func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 	if newNum, err := db.zIncrSize(key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
-		_, err = db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return InvalidScore, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	err := db.eng.Write(db.defaultWriteOpts, wb)
@@ -422,10 +416,7 @@ func (db *RockDB) ZIncrBy(key []byte, delta int64, member []byte) (int64, error)
 		if err != nil {
 			return InvalidScore, err
 		} else if newNum == 1 {
-			_, err = db.IncrTableKeyCount(table, 1, wb)
-			if err != nil {
-				return InvalidScore, err
-			}
+			db.IncrTableKeyCount(table, 1, wb)
 		}
 	} else {
 		if oldScore, err = Int64(v, err); err != nil {
@@ -563,10 +554,7 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 	if newNum, err := db.zIncrSize(key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
-		_, err = db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	return num, nil
@@ -860,10 +848,7 @@ func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType u
 	if newNum, err := db.zIncrSize(key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
-		_, err = db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {

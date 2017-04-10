@@ -136,10 +136,7 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	}
 	it.Close()
 	if num > 0 {
-		_, err := db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	wb.Delete(sk)
@@ -181,10 +178,7 @@ func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) 
 		if newNum, err := db.sIncrSize(key, 1, wb); err != nil {
 			return 0, err
 		} else if newNum == 1 {
-			_, err = db.IncrTableKeyCount(table, 1, wb)
-			if err != nil {
-				return 0, err
-			}
+			db.IncrTableKeyCount(table, 1, wb)
 		}
 	}
 
@@ -225,10 +219,7 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 	if newNum, err := db.sIncrSize(key, num, wb); err != nil {
 		return 0, err
 	} else if newNum > 0 && newNum == num {
-		_, err = db.IncrTableKeyCount(table, 1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, 1, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -327,10 +318,7 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 	if newNum, err := db.sIncrSize(key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
-		_, err = db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)

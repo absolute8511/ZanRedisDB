@@ -149,10 +149,7 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		wb.Put(ek, args[i])
 	}
 	if size == 0 && pushCnt > 0 {
-		_, err := db.IncrTableKeyCount(table, 1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, 1, wb)
 	}
 	seq += int64(pushCnt-1) * delta
 	//	set meta info
@@ -218,10 +215,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	}
 	if size == 0 {
 		// list is empty after delete
-		_, err := db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return nil, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return value, err
@@ -281,10 +275,7 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 
 	newLen, _ := db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
 	if llen > 0 && newLen == 0 {
-		_, err := db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	return db.eng.Write(db.defaultWriteOpts, wb)
@@ -345,10 +336,7 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	}
 	if size == 0 {
 		// list is empty after trim
-		_, err := db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -396,10 +384,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	}
 	rit.Close()
 	if size > 0 {
-		_, err := db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	wb.Delete(mk)

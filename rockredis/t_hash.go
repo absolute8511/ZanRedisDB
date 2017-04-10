@@ -140,10 +140,7 @@ func (db *RockDB) hSetField(hkey []byte, field []byte, value []byte, wb *gorocks
 		if n, err := db.hIncrSize(hkey, 1, wb); err != nil {
 			return 0, err
 		} else if n == 1 {
-			_, err = db.IncrTableKeyCount(table, 1, wb)
-			if err != nil {
-				return 0, err
-			}
+			db.IncrTableKeyCount(table, 1, wb)
 		}
 	}
 
@@ -227,10 +224,7 @@ func (db *RockDB) HMset(key []byte, args ...common.KVRecord) error {
 	if newNum, err := db.hIncrSize(key, num, db.wb); err != nil {
 		return err
 	} else if newNum > 0 && newNum == num {
-		_, err = db.IncrTableKeyCount(table, 1, db.wb)
-		if err != nil {
-			return err
-		}
+		db.IncrTableKeyCount(table, 1, db.wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
@@ -310,10 +304,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	if newNum, err = db.hIncrSize(key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
-		_, err = db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -368,10 +359,7 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	wb.Clear()
 	db.hDeleteAll(hkey, wb)
 	if hlen > 0 {
-		_, err = db.IncrTableKeyCount(table, -1, wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)

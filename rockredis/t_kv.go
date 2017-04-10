@@ -232,10 +232,7 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		wb.Put(key, value)
 	}
 	for t, num := range tableCnt {
-		_, err = db.IncrTableKeyCount([]byte(t), int64(num), wb)
-		if err != nil {
-			return err
-		}
+		db.IncrTableKeyCount([]byte(t), int64(num), wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -252,10 +249,7 @@ func (db *RockDB) KVSet(ts int64, key []byte, value []byte) error {
 	db.wb.Clear()
 	v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
 	if v == nil {
-		_, err = db.IncrTableKeyCount(table, 1, db.wb)
-		if err != nil {
-			return err
-		}
+		db.IncrTableKeyCount(table, 1, db.wb)
 	}
 	tsBuf := PutInt64(ts)
 	value = append(value, tsBuf...)
@@ -281,10 +275,7 @@ func (db *RockDB) SetNX(ts int64, key []byte, value []byte) (int64, error) {
 		n = 0
 	} else {
 		db.wb.Clear()
-		_, err = db.IncrTableKeyCount(table, 1, db.wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, 1, db.wb)
 		value = append(value, PutInt64(ts)...)
 		db.wb.Put(key, value)
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
@@ -310,10 +301,7 @@ func (db *RockDB) SetRange(ts int64, key []byte, offset int, value []byte) (int6
 	}
 	db.wb.Clear()
 	if oldValue == nil {
-		_, err = db.IncrTableKeyCount(table, 1, db.wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, 1, db.wb)
 	} else if len(oldValue) < tsLen {
 		return 0, errInvalidDBValue
 	} else {
@@ -405,10 +393,7 @@ func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 	}
 	db.wb.Clear()
 	if oldValue == nil {
-		_, err = db.IncrTableKeyCount(table, 1, db.wb)
-		if err != nil {
-			return 0, err
-		}
+		db.IncrTableKeyCount(table, 1, db.wb)
 	} else if len(oldValue) < tsLen {
 		return 0, errInvalidDBValue
 	} else {

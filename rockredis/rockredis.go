@@ -220,6 +220,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetMaxManifestFileSize(cfg.MaxMainifestFileSize)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
+	opts.SetUint64AddMergeOperator()
 
 	db := &RockDB{
 		cfg:              cfg,
