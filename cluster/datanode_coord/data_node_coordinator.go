@@ -318,12 +318,28 @@ func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, loc
 	// are notified to remove this node
 	// Mostly, the remove node proposal will handle the raft node stop, however
 	// there are some situations to be checked here.
-	rm, ok := nsInfo.Removings[self.GetMyID()]
-	if !ok {
-		return false
+	inMeta := false
+	for _, nid := range nsInfo.RaftNodes {
+		if nid == self.GetMyID() {
+			replicaID := nsInfo.RaftIDs[nid]
+			if replicaID == localNamespace.GetRaftID() {
+				inMeta = true
+				break
+			}
+		}
 	}
-	if rm.RemoveReplicaID != nsInfo.RaftIDs[self.GetMyID()] {
-		return false
+	var rmID uint64
+	if inMeta {
+		rm, ok := nsInfo.Removings[self.GetMyID()]
+		if !ok {
+			return false
+		}
+		rmID = rm.RemoveReplicaID
+		if rm.RemoveReplicaID != nsInfo.RaftIDs[self.GetMyID()] {
+			return false
+		}
+	} else {
+		CoordLog().Infof("no any meta info for this namespace: %v", nsInfo.GetDesp(), localNamespace.GetRaftID())
 	}
 
 	inRaft, err := self.isMeInRaftGroup(&nsInfo)
@@ -332,12 +348,12 @@ func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, loc
 	}
 	mems := localNamespace.GetMembers()
 	for _, m := range mems {
-		if m.ID == rm.RemoveReplicaID {
+		if m.ID == rmID {
 			return false
 		}
 	}
-	CoordLog().Infof("removing node %v-%v should stop namespace %v since not in any raft group anymore",
-		self.GetMyID(), rm.RemoveReplicaID, nsInfo.GetDesp())
+	CoordLog().Infof("removing node %v-%v should stop namespace %v (replica %v) since not in any raft group anymore",
+		self.GetMyID(), rmID, nsInfo.GetDesp(), localNamespace.GetRaftID())
 	return true
 }
 
