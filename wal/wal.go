@@ -554,7 +554,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	}
 
 	mustSync := raft.MustSync(st, w.state, len(ents))
-	fsync := st.Vote != w.state.Vote || st.Term != w.state.Term
+	fsync := !raft.IsEmptyHardState(st) && (st.Vote != w.state.Vote || st.Term != w.state.Term)
 	if fsync {
 		plog.Infof("fsync while: %v, %v", st, w.state)
 	}
