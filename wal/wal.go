@@ -554,6 +554,10 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	}
 
 	mustSync := raft.MustSync(st, w.state, len(ents))
+	fsync := st.Vote != w.state.Vote || st.Term != w.state.Term
+	if fsync {
+		plog.Infof("fsync while: %v, %v", st, w.state)
+	}
 
 	// TODO(xiangli): no more reference operator
 	for i := range ents {
@@ -571,7 +575,6 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	}
 	if curOff < SegmentSizeBytes {
 		if mustSync {
-			fsync := st.Vote != w.state.Vote || st.Term != w.state.Term
 			return w.sync(fsync)
 		}
 		return nil

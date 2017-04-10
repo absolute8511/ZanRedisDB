@@ -373,7 +373,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			return err
 		}
 
-		receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(m.Size()))
+		receivedBytes.WithLabelValues(m.FromGroup.Name).Add(float64(m.Size()))
 
 		cr.mu.Lock()
 		paused := cr.paused
@@ -405,7 +405,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 				plog.MergeWarningf("dropped internal raft message from %s since receiving buffer is full (overloaded network)", types.ID(m.From))
 			}
 			plog.Debugf("dropped %s from %s since receiving buffer is full", m.Type, types.ID(m.From))
-			recvFailures.WithLabelValues(m.FromGroup.String()).Inc()
+			recvFailures.WithLabelValues(m.FromGroup.Name).Inc()
 		}
 	}
 }
