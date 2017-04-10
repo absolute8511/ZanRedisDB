@@ -247,9 +247,11 @@ func (db *RockDB) KVSet(ts int64, key []byte, value []byte) error {
 		return err
 	}
 	db.wb.Clear()
-	v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
-	if v == nil {
-		db.IncrTableKeyCount(table, 1, db.wb)
+	if db.cfg.EnableTableCounter {
+		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		if v == nil {
+			db.IncrTableKeyCount(table, 1, db.wb)
+		}
 	}
 	tsBuf := PutInt64(ts)
 	value = append(value, tsBuf...)

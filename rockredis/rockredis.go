@@ -94,9 +94,10 @@ func FillDefaultOptions(opts *RockOptions) {
 }
 
 type RockConfig struct {
-	DataDir          string
-	DefaultReadOpts  *gorocksdb.ReadOptions
-	DefaultWriteOpts *gorocksdb.WriteOptions
+	DataDir            string
+	EnableTableCounter bool
+	DefaultReadOpts    *gorocksdb.ReadOptions
+	DefaultWriteOpts   *gorocksdb.WriteOptions
 	RockOptions
 }
 
