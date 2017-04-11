@@ -215,7 +215,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 
 	namespace, pk, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
-		sLog.Infof("failed to get the namespace of the redis command:%v", rawKey)
+		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
 		return nil, cmd, err
 	}
 	// we need decide the partition id from the primary key

@@ -103,8 +103,9 @@ type RockConfig struct {
 
 func NewRockConfig() *RockConfig {
 	c := &RockConfig{
-		DefaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
-		DefaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
+		DefaultReadOpts:    gorocksdb.NewDefaultReadOptions(),
+		DefaultWriteOpts:   gorocksdb.NewDefaultWriteOptions(),
+		EnableTableCounter: true,
 	}
 	c.DefaultReadOpts.SetVerifyChecksums(false)
 	FillDefaultOptions(&c.RockOptions)
