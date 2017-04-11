@@ -155,7 +155,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 		m.GroupName = rc.config.GroupName
 		m.GroupID = rc.config.GroupID
 		d, _ := json.Marshal(m)
-		w, err := wal.Create(rc.config.WALDir, d)
+		w, err := wal.Create(rc.config.WALDir, d, rc.config.OptimizedFsync)
 		if err != nil {
 			nodeLog.Fatalf("create wal error (%v)", err)
 		}
@@ -166,7 +166,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	if snapshot != nil {
 		walsnap.Index, walsnap.Term = snapshot.Metadata.Index, snapshot.Metadata.Term
 	}
-	w, err := wal.Open(rc.config.WALDir, walsnap)
+	w, err := wal.Open(rc.config.WALDir, walsnap, rc.config.OptimizedFsync)
 	if err != nil {
 		nodeLog.Fatalf("error loading wal (%v)", err)
 	}

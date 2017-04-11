@@ -268,15 +268,16 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 	nodeLog.Infof("namespace load config: %v", string(d))
 	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, clusterNodes)
 	raftConf := &RaftConfig{
-		GroupID:     conf.RaftGroupConf.GroupID,
-		GroupName:   conf.Name,
-		ID:          uint64(raftID),
-		RaftAddr:    self.machineConf.LocalRaftAddr,
-		DataDir:     kvOpts.DataDir,
-		RaftPeers:   clusterNodes,
-		SnapCount:   conf.SnapCount,
-		SnapCatchup: conf.SnapCatchup,
-		Replicator:  conf.Replicator,
+		GroupID:        conf.RaftGroupConf.GroupID,
+		GroupName:      conf.Name,
+		ID:             uint64(raftID),
+		RaftAddr:       self.machineConf.LocalRaftAddr,
+		DataDir:        kvOpts.DataDir,
+		RaftPeers:      clusterNodes,
+		SnapCount:      conf.SnapCount,
+		SnapCatchup:    conf.SnapCatchup,
+		Replicator:     conf.Replicator,
+		OptimizedFsync: conf.OptimizedFsync,
 	}
 	kv, err := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
 		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name),

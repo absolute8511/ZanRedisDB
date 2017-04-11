@@ -48,7 +48,7 @@ func testRepair(t *testing.T, ents [][]raftpb.Entry, corrupt corruptFunc, expect
 	}
 	defer os.RemoveAll(p)
 	// create WAL
-	w, err := Create(p, nil)
+	w, err := Create(p, nil, false)
 	defer func() {
 		if err = w.Close(); err != nil {
 			t.Fatal(err)
@@ -76,7 +76,7 @@ func testRepair(t *testing.T, ents [][]raftpb.Entry, corrupt corruptFunc, expect
 	}
 
 	// verify we broke the wal
-	w, err = Open(p, walpb.Snapshot{})
+	w, err = Open(p, walpb.Snapshot{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func testRepair(t *testing.T, ents [][]raftpb.Entry, corrupt corruptFunc, expect
 	}
 
 	// read it back
-	w, err = Open(p, walpb.Snapshot{})
+	w, err = Open(p, walpb.Snapshot{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func testRepair(t *testing.T, ents [][]raftpb.Entry, corrupt corruptFunc, expect
 	w.Close()
 
 	// read back entries following repair, ensure it's all there
-	w, err = Open(p, walpb.Snapshot{})
+	w, err = Open(p, walpb.Snapshot{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,13 +8,14 @@ type NamespaceConfig struct {
 	// namespace full name with partition
 	Name string `json:"name"`
 	// namespace name without partition
-	BaseName      string          `json:"name"`
-	EngType       string          `json:"eng_type"`
-	PartitionNum  int             `json:"partition_num"`
-	SnapCount     int             `json:"snap_count"`
-	SnapCatchup   int             `json:"snap_catchup"`
-	Replicator    int             `json:"replicator"`
-	RaftGroupConf RaftGroupConfig `json:"raft_group_conf"`
+	BaseName       string          `json:"name"`
+	EngType        string          `json:"eng_type"`
+	PartitionNum   int             `json:"partition_num"`
+	SnapCount      int             `json:"snap_count"`
+	SnapCatchup    int             `json:"snap_catchup"`
+	Replicator     int             `json:"replicator"`
+	OptimizedFsync bool            `json:"optimized_fsync"`
+	RaftGroupConf  RaftGroupConfig `json:"raft_group_conf"`
 }
 
 func NewNSConfig() *NamespaceConfig {
@@ -57,13 +58,14 @@ type RaftConfig struct {
 	ID uint64 `json:"id"`
 	// local server transport address, it
 	// can be used by several raft group
-	RaftAddr    string                 `json:"raft_addr"`
-	DataDir     string                 `json:"data_dir"`
-	WALDir      string                 `json:"wal_dir"`
-	SnapDir     string                 `json:"snap_dir"`
-	RaftPeers   map[uint64]ReplicaInfo `json:"raft_peers"`
-	SnapCount   int                    `json:"snap_count"`
-	SnapCatchup int                    `json:"snap_catchup"`
-	Replicator  int                    `json:"replicator"`
-	nodeConfig  *MachineConfig
+	RaftAddr       string                 `json:"raft_addr"`
+	DataDir        string                 `json:"data_dir"`
+	WALDir         string                 `json:"wal_dir"`
+	SnapDir        string                 `json:"snap_dir"`
+	RaftPeers      map[uint64]ReplicaInfo `json:"raft_peers"`
+	SnapCount      int                    `json:"snap_count"`
+	SnapCatchup    int                    `json:"snap_catchup"`
+	Replicator     int                    `json:"replicator"`
+	OptimizedFsync bool                   `json:"optimized_fsync"`
+	nodeConfig     *MachineConfig
 }

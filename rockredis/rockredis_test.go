@@ -11,6 +11,7 @@ import (
 
 func getTestDB(t *testing.T) *RockDB {
 	cfg := NewRockConfig()
+	cfg.EnableTableCounter = true
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
 	if err != nil {

@@ -36,7 +36,7 @@ func TestNew(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 
-	w, err := Create(p, []byte("somedata"))
+	w, err := Create(p, []byte("somedata"), true)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -91,7 +91,7 @@ func TestNewForInitedDir(t *testing.T) {
 	defer os.RemoveAll(p)
 
 	os.Create(filepath.Join(p, walName(0, 0)))
-	if _, err = Create(p, nil); err == nil || err != os.ErrExist {
+	if _, err = Create(p, nil, true); err == nil || err != os.ErrExist {
 		t.Errorf("err = %v, want %v", err, os.ErrExist)
 	}
 }
@@ -109,7 +109,7 @@ func TestOpenAtIndex(t *testing.T) {
 	}
 	f.Close()
 
-	w, err := Open(dir, walpb.Snapshot{})
+	w, err := Open(dir, walpb.Snapshot{}, true)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -128,7 +128,7 @@ func TestOpenAtIndex(t *testing.T) {
 	}
 	f.Close()
 
-	w, err = Open(dir, walpb.Snapshot{Index: 5})
+	w, err = Open(dir, walpb.Snapshot{Index: 5}, true)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -145,7 +145,7 @@ func TestOpenAtIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(emptydir)
-	if _, err = Open(emptydir, walpb.Snapshot{}); err != ErrFileNotFound {
+	if _, err = Open(emptydir, walpb.Snapshot{}, true); err != ErrFileNotFound {
 		t.Errorf("err = %v, want %v", err, ErrFileNotFound)
 	}
 }
@@ -158,7 +158,7 @@ func TestCut(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 
-	w, err := Create(p, nil)
+	w, err := Create(p, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestSaveWithCut(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 
-	w, err := Create(p, []byte("metadata"))
+	w, err := Create(p, []byte("metadata"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestSaveWithCut(t *testing.T) {
 
 	w.Close()
 
-	neww, err := Open(p, walpb.Snapshot{})
+	neww, err := Open(p, walpb.Snapshot{}, true)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -283,7 +283,7 @@ func TestRecover(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 
-	w, err := Create(p, []byte("metadata"))
+	w, err := Create(p, []byte("metadata"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestRecover(t *testing.T) {
 	}
 	w.Close()
 
-	if w, err = Open(p, walpb.Snapshot{}); err != nil {
+	if w, err = Open(p, walpb.Snapshot{}, true); err != nil {
 		t.Fatal(err)
 	}
 	metadata, state, entries, err := w.ReadAll()
@@ -398,7 +398,7 @@ func TestRecoverAfterCut(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 
-	md, err := Create(p, []byte("metadata"))
+	md, err := Create(p, []byte("metadata"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestRecoverAfterCut(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		w, err := Open(p, walpb.Snapshot{Index: uint64(i)})
+		w, err := Open(p, walpb.Snapshot{Index: uint64(i)}, true)
 		if err != nil {
 			if i <= 4 {
 				if err != ErrFileNotFound {
@@ -456,7 +456,7 @@ func TestOpenAtUncommittedIndex(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 
-	w, err := Create(p, nil)
+	w, err := Create(p, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestOpenAtUncommittedIndex(t *testing.T) {
 	}
 	w.Close()
 
-	w, err = Open(p, walpb.Snapshot{})
+	w, err = Open(p, walpb.Snapshot{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestOpenForRead(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 	// create WAL
-	w, err := Create(p, nil)
+	w, err := Create(p, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestReleaseLockTo(t *testing.T) {
 	}
 	defer os.RemoveAll(p)
 	// create WAL
-	w, err := Create(p, nil)
+	w, err := Create(p, nil, true)
 	defer func() {
 		if err = w.Close(); err != nil {
 			t.Fatal(err)
@@ -612,7 +612,7 @@ func TestTailWriteNoSlackSpace(t *testing.T) {
 	defer os.RemoveAll(p)
 
 	// create initial WAL
-	w, err := Create(p, []byte("metadata"))
+	w, err := Create(p, []byte("metadata"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,7 @@ func TestTailWriteNoSlackSpace(t *testing.T) {
 	w.Close()
 
 	// open, write more
-	w, err = Open(p, walpb.Snapshot{})
+	w, err = Open(p, walpb.Snapshot{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestTailWriteNoSlackSpace(t *testing.T) {
 	w.Close()
 
 	// confirm all writes
-	w, err = Open(p, walpb.Snapshot{})
+	w, err = Open(p, walpb.Snapshot{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +686,7 @@ func TestRestartCreateWal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w, werr := Create(p, []byte("abc"))
+	w, werr := Create(p, []byte("abc"), true)
 	if werr != nil {
 		t.Fatal(werr)
 	}
@@ -716,7 +716,7 @@ func TestOpenOnTornWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(p)
-	w, err := Create(p, nil)
+	w, err := Create(p, nil, true)
 	defer func() {
 		if err = w.Close(); err != nil && err != os.ErrInvalid {
 			t.Fatal(err)
@@ -759,7 +759,7 @@ func TestOpenOnTornWrite(t *testing.T) {
 	}
 	f.Close()
 
-	w, err = Open(p, walpb.Snapshot{})
+	w, err = Open(p, walpb.Snapshot{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

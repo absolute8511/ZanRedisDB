@@ -49,11 +49,12 @@ type NamespaceMetaInfo struct {
 	PartitionNum int
 	Replica      int
 	// to verify the data of the create -> delete -> create with same namespace
-	MagicCode int64
-	MinGID    int64
-	metaEpoch EpochType
-	EngType   string
-	Tags      map[string]bool
+	MagicCode      int64
+	MinGID         int64
+	metaEpoch      EpochType
+	EngType        string
+	OptimizedFsync bool
+	Tags           map[string]bool
 }
 
 func (self *NamespaceMetaInfo) MetaEpoch() EpochType {
