@@ -558,8 +558,8 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 
 	mustSync := raft.MustSync(st, w.state, len(ents))
 	fsync := !raft.IsEmptyHardState(st) && (st.Vote != w.state.Vote || st.Term != w.state.Term)
-	if fsync {
-		plog.Infof("fsync while: %v, %v", st, w.state)
+	if !w.optimized_fsync {
+		fsync = true
 	}
 
 	// TODO(xiangli): no more reference operator
