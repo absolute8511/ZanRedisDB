@@ -110,11 +110,12 @@ func (db *RockDB) KVDel(key []byte) error {
 	if err != nil {
 		return err
 	}
-	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
-
 	db.wb.Clear()
-	if v != nil {
-		db.IncrTableKeyCount(table, -1, db.wb)
+	if db.cfg.EnableTableCounter {
+		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		if v != nil {
+			db.IncrTableKeyCount(table, -1, db.wb)
+		}
 	}
 	db.wb.Delete(key)
 	return db.eng.Write(db.defaultWriteOpts, db.wb)
@@ -222,11 +223,13 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		}
 		value = value[:0]
 		value = append(value, args[i].Value...)
-		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
-		if v == nil {
-			n := tableCnt[string(table)]
-			n++
-			tableCnt[string(table)] = n
+		if db.cfg.EnableTableCounter {
+			v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+			if v == nil {
+				n := tableCnt[string(table)]
+				n++
+				tableCnt[string(table)] = n
+			}
 		}
 		value = append(value, tsBuf...)
 		wb.Put(key, value)

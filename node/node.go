@@ -698,7 +698,12 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 					self.rn.Infof("request check failed %v, real len:%v",
 						reqList, len(reqList.Reqs))
 				}
-				for _, req := range reqList.Reqs {
+				var batchSet [][]byte
+				if len(reqList.Reqs) > 1 {
+					batchSet = append(batchSet, []byte("mset"))
+				}
+				var batchReqIDList []uint64
+				for reqIndex, req := range reqList.Reqs {
 					reqID := req.Header.ID
 					if req.Header.DataType == 0 {
 						cmd, err := redcon.Parse(req.Data)
@@ -706,6 +711,35 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 							self.w.Trigger(reqID, err)
 						} else {
 							cmdName := strings.ToLower(string(cmd.Args[0]))
+							if batchSet != nil {
+								if cmdName == "set" {
+									batchSet = append(batchSet, cmd.Args[1:]...)
+									batchReqIDList = append(batchReqIDList, reqID)
+								}
+								if cmdName == "set" && reqIndex < len(reqList.Reqs)-1 {
+									continue
+								}
+								if len(batchSet) > 1 {
+									h, _ := self.router.GetInternalCmdHandler(string(batchSet[0]))
+									cmdStart := time.Now()
+									_, err := h(redcon.Command{Raw: nil, Args: batchSet}, req.Header.Timestamp)
+									cmdCost := time.Since(cmdStart)
+									self.dbWriteStats.UpdateWriteStats(int64(len(batchSet[2]))*int64(len(batchReqIDList)), cmdCost.Nanoseconds()/1000)
+									// write the future response or error
+									for _, rid := range batchReqIDList {
+										if err != nil {
+											self.w.Trigger(rid, err)
+										} else {
+											self.w.Trigger(rid, nil)
+										}
+									}
+									batchSet = nil
+									batchReqIDList = nil
+								}
+								if cmdName == "set" {
+									continue
+								}
+							}
 							h, ok := self.router.GetInternalCmdHandler(cmdName)
 							if !ok {
 								self.rn.Infof("unsupported redis command: %v", cmd)

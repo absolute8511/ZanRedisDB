@@ -93,6 +93,9 @@ func (db *RockDB) GetTables() chan []byte {
 }
 
 func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) error {
+	if !db.cfg.EnableTableCounter {
+		return nil
+	}
 	tm := encodeTableMetaKey(table)
 	wb.Merge(tm, PutRocksdbUint64(uint64(delta)))
 	return nil
