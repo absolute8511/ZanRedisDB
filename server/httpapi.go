@@ -59,7 +59,7 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	sLog.Infof("got add node request: %v", string(data))
+	sLog.Infof("got add node request: %v from remote: %v", string(data), req.RemoteAddr)
 
 	var m common.MemberInfo
 	err = json.Unmarshal(data, &m)

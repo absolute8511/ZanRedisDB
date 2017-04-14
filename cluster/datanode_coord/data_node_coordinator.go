@@ -508,7 +508,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				}
 			} else {
 				// check if any replica is not joined to members
-				anyJoined := false
+				anyWaitingJoin := false
 				for nid, rid := range namespaceMeta.RaftIDs {
 					if _, ok := namespaceMeta.Removings[nid]; ok {
 						continue
@@ -524,22 +524,11 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 						}
 					}
 					if !found {
-						anyJoined = true
-						var m common.MemberInfo
-						m.ID = rid
-						m.NodeID = ExtractRegIDFromGenID(nid)
-						m.GroupID = uint64(namespaceMeta.MinGID) + uint64(namespaceMeta.Partition)
-						m.GroupName = namespaceMeta.GetDesp()
-						raddr, err := self.getRaftAddrForNode(nid)
-						if err != nil {
-							CoordLog().Infof("failed to get raft address for node: %v, %v", nid, err)
-						} else {
-							m.RaftURLs = append(m.RaftURLs, raddr)
-							self.addNamespaceRaftMember(namespaceMeta, &m)
-						}
+						anyWaitingJoin = true
+						CoordLog().Infof("namespace %v new node still waiting join raft : %v, %v", namespaceMeta.GetDesp(), rid, nid)
 					}
 				}
-				if anyJoined || len(members) < len(isrList) {
+				if anyWaitingJoin || len(members) < len(isrList) {
 					go self.tryCheckNamespaces()
 					continue
 				}
