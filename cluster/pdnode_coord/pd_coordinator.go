@@ -645,7 +645,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 }
 
 func (self *PDCoordinator) addNamespaceToNode(origNSInfo *PartitionMetaInfo, nid string) *CoordErr {
-	if len(nsInfo.Removings) > 0 {
+	if len(origNSInfo.Removings) > 0 {
 		// we do not add new node until the removing node is actually removed
 		// because we need avoid too much failed node in the cluster,
 		// if the new added node failed to join cluster, we got 2 nodes failed in 4 cluster

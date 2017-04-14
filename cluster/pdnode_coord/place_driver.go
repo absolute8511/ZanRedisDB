@@ -76,7 +76,7 @@ func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid strin
 		}
 		nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
 		var rsp []*common.MemberInfo
-		err := common.APIRequest("GET",
+		_, err := common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
 			nil, time.Second*3, &rsp)
 		if err != nil {

@@ -39,27 +39,27 @@ func newDeadlineTransport(timeout time.Duration) *http.Transport {
 }
 
 // stores the result in the value pointed to by ret(must be a pointer)
-func APIRequest(method string, endpoint string, body io.Reader, timeout time.Duration, ret interface{}) error {
+func APIRequest(method string, endpoint string, body io.Reader, timeout time.Duration, ret interface{}) (int, error) {
 	httpclient := &http.Client{Transport: newDeadlineTransport(timeout)}
 	req, err := http.NewRequest(method, endpoint, body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Add("Accept", "application/zanredisdb; version=1.0")
 
 	resp, err := httpclient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	respBody, err := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		return err
+		return resp.StatusCode, err
 	}
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("got error response %s %q", resp.Status, respBody)
+		return resp.StatusCode, fmt.Errorf("got error response %s %q", resp.Status, respBody)
 	}
 
 	if len(respBody) == 0 {
@@ -67,7 +67,7 @@ func APIRequest(method string, endpoint string, body io.Reader, timeout time.Dur
 	}
 
 	if ret == nil {
-		return nil
+		return resp.StatusCode, nil
 	}
-	return json.Unmarshal(respBody, ret)
+	return resp.StatusCode, json.Unmarshal(respBody, ret)
 }

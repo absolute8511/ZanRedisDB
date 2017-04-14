@@ -20,6 +20,7 @@ var (
 	MaxRetryWait         = time.Second * 3
 	ErrNamespaceNotReady = NewCoordErr("namespace node is not ready", CoordLocalErr)
 	ErrNamespaceInvalid  = errors.New("namespace name is invalid")
+	errNamespaceNotFound = errors.New("namespace is not found")
 )
 
 const (
@@ -269,18 +270,22 @@ func (self *DataCoordinator) isMeInRaftGroup(nsInfo *PartitionMetaInfo) (bool, e
 		}
 		nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
 		var rsp []*common.MemberInfo
-		err := common.APIRequest("GET",
+		code, err := common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
 			nil, time.Second*3, &rsp)
 		if err != nil {
 			CoordLog().Infof("failed to get members from %v for namespace: %v, %v", nip, nsInfo.GetDesp(), err)
-			lastErr = err
+			if code == 404 {
+				lastErr = errNamespaceNotFound
+			} else {
+				lastErr = err
+			}
 			continue
 		}
 
 		for _, m := range rsp {
 			if m.NodeID == self.GetMyRegID() && m.ID == nsInfo.RaftIDs[self.GetMyID()] {
-				return true, lastErr
+				return true, nil
 			}
 		}
 	}
@@ -305,12 +310,13 @@ func (self *DataCoordinator) isNamespaceShouldStart(nsInfo PartitionMetaInfo) bo
 		return true
 	}
 
-	inRaft, _ := self.isMeInRaftGroup(&nsInfo)
-	if inRaft {
+	inRaft, err := self.isMeInRaftGroup(&nsInfo)
+	if inRaft || err == errNamespaceNotFound {
 		CoordLog().Infof("removing node %v-%v should join namespace %v since still in raft",
 			self.GetMyID(), rm.RemoveReplicaID, nsInfo.GetDesp())
+		return true
 	}
-	return inRaft
+	return false
 }
 
 func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, localNamespace *node.NamespaceNode) bool {
@@ -672,7 +678,7 @@ func (self *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *Pa
 	}
 	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
 	d, _ := json.Marshal(m)
-	err := common.APIRequest("POST",
+	_, err := common.APIRequest("POST",
 		"http://"+net.JoinHostPort(nip, httpPort)+common.APIAddNode,
 		bytes.NewReader(d), time.Second*3, nil)
 	if err != nil {
