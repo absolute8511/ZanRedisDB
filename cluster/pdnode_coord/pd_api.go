@@ -249,7 +249,12 @@ func (self *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map[st
 		if _, ok := existPart[i]; ok {
 			continue
 		}
+
 		tmpReplicaInfo := partReplicaList[i]
+		if len(tmpReplicaInfo.GetISR()) <= meta.Replica/2 {
+			CoordLog().Infof("failed update info for namespace : %v-%v since not quorum", namespace, i, tmpReplicaInfo)
+			continue
+		}
 		commonErr := self.register.UpdateNamespacePartReplicaInfo(namespace, i, &tmpReplicaInfo, tmpReplicaInfo.Epoch())
 		if commonErr != nil {
 			CoordLog().Infof("failed update info for namespace : %v-%v, %v", namespace, i, commonErr)

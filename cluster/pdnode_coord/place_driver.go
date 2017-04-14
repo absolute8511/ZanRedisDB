@@ -328,6 +328,9 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 		if movedNamespace != "" && movedNamespace != namespaceInfo.Name {
 			continue
 		}
+		if len(namespaceInfo.Removings) > 0 {
+			continue
+		}
 		currentNodes := self.pdCoord.getCurrentNodes(namespaceInfo.Tags)
 		nodeNameList = nodeNameList[0:0]
 		for _, n := range currentNodes {

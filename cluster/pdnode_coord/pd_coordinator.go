@@ -616,15 +616,17 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 		}
 	}
 
-	for i := aliveReplicas; i < nsInfo.Replica; i++ {
-		n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
-		if err != nil {
-			CoordLog().Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
-		} else {
-			nsInfo.MaxRaftID++
-			nsInfo.RaftIDs[n.GetID()] = uint64(nsInfo.MaxRaftID)
-			nsInfo.RaftNodes = append(nsInfo.RaftNodes, n.GetID())
-			isrChanged = true
+	if len(nsInfo.Removings) > 0 {
+		for i := aliveReplicas; i < nsInfo.Replica; i++ {
+			n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
+			if err != nil {
+				CoordLog().Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
+			} else {
+				nsInfo.MaxRaftID++
+				nsInfo.RaftIDs[n.GetID()] = uint64(nsInfo.MaxRaftID)
+				nsInfo.RaftNodes = append(nsInfo.RaftNodes, n.GetID())
+				isrChanged = true
+			}
 		}
 	}
 
@@ -643,6 +645,14 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 }
 
 func (self *PDCoordinator) addNamespaceToNode(origNSInfo *PartitionMetaInfo, nid string) *CoordErr {
+	if len(nsInfo.Removings) > 0 {
+		// we do not add new node until the removing node is actually removed
+		// because we need avoid too much failed node in the cluster,
+		// if the new added node failed to join cluster, we got 2 nodes failed in 4 cluster
+		// which maybe cause the cluster is hard to became 4 nodes cluster since the removing
+		// node maybe can not restart in short time
+		return ErrNamespaceWaitingSync
+	}
 	nsInfo := origNSInfo.GetCopy()
 	nsInfo.RaftNodes = append(nsInfo.RaftNodes, nid)
 	if !self.dpm.checkNamespaceNodeConflict(nsInfo) {
@@ -728,7 +738,7 @@ func (self *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *PartitionMet
 		changed = true
 		CoordLog().Infof("namespace %v replica removed from removing node:%v, %v", nsInfo.GetDesp(), nid, rinfo)
 	}
-	if changed {
+	if changed && nsInfo.IsISRQuorum() {
 		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 		if err != nil {
