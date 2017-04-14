@@ -113,8 +113,11 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	}
 	s.clusterInfo = clusterInfo
 	s.registerHandler()
-	commitC, raftNode := newRaftNode(config, transport,
+	commitC, raftNode, err := newRaftNode(config, transport,
 		join, s, newLeaderChan)
+	if err != nil {
+		return nil, err
+	}
 	s.rn = raftNode
 	s.commitC = commitC
 	return s, nil

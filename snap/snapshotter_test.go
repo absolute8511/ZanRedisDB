@@ -50,7 +50,7 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g, err := ss.Load()
+	g, _, err := ss.Load()
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)
 	}
@@ -102,7 +102,7 @@ func TestFailback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g, err := ss.Load()
+	g, _, err := ss.Load()
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)
 	}
@@ -165,7 +165,7 @@ func TestLoadNewestSnap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g, err := ss.Load()
+	g, _, err := ss.Load()
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)
 	}
@@ -182,7 +182,7 @@ func TestNoSnapshot(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 	ss := New(dir)
-	_, err = ss.Load()
+	_, _, err = ss.Load()
 	if err != ErrNoSnapshot {
 		t.Errorf("err = %v, want %v", err, ErrNoSnapshot)
 	}
@@ -223,7 +223,7 @@ func TestAllSnapshotBroken(t *testing.T) {
 	}
 
 	ss := New(dir)
-	_, err = ss.Load()
+	_, _, err = ss.Load()
 	if err != ErrNoSnapshot {
 		t.Errorf("err = %v, want %v", err, ErrNoSnapshot)
 	}

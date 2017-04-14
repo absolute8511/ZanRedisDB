@@ -95,21 +95,28 @@ func (s *Snapshotter) save(snapshot *raftpb.Snapshot) error {
 	return err
 }
 
-func (s *Snapshotter) Load() (*raftpb.Snapshot, error) {
+func (s *Snapshotter) RemoveSnap(snapName string) {
+	fpath := filepath.Join(s.dir, snapName)
+	renameBroken(fpath)
+}
+
+func (s *Snapshotter) Load() (*raftpb.Snapshot, string, error) {
 	names, err := s.snapNames()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var snap *raftpb.Snapshot
+	var snapName string
 	for _, name := range names {
 		if snap, err = loadSnap(s.dir, name); err == nil {
+			snapName = name
 			break
 		}
 	}
 	if err != nil {
-		return nil, ErrNoSnapshot
+		return nil, "", ErrNoSnapshot
 	}
-	return snap, nil
+	return snap, snapName, nil
 }
 
 func loadSnap(dir, name string) (*raftpb.Snapshot, error) {

@@ -60,6 +60,7 @@ type DataStorage interface {
 	CleanData() error
 	RestoreFromSnapshot(bool, raftpb.Snapshot) error
 	GetSnapshot(term uint64, index uint64) (Snapshot, error)
+	Stop()
 }
 
 type applyInfo struct {
@@ -108,7 +109,7 @@ type raftNode struct {
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries.
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
-	join bool, ds DataStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode) {
+	join bool, ds DataStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
 
 	commitC := make(chan applyInfo, 1000)
 	if rconfig.SnapCount <= 0 {
@@ -135,19 +136,21 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	snapDir := rc.config.SnapDir
 	if !fileutil.Exist(snapDir) {
 		if err := os.MkdirAll(snapDir, common.DIR_PERM); err != nil {
-			nodeLog.Fatalf("cannot create dir for snapshot (%v)", err)
+			nodeLog.Errorf("cannot create dir for snapshot (%v)", err)
+			return nil, nil, err
 		}
 	}
 	rc.snapshotter = snap.New(snapDir)
 	rc.description = rc.config.GroupName + "-" + strconv.Itoa(int(rc.config.ID))
-	return commitC, rc
+	return commitC, rc, nil
 }
 
 // openWAL returns a WAL ready for reading.
-func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
+func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) (*wal.WAL, error) {
 	if !wal.Exist(rc.config.WALDir) {
 		if err := os.MkdirAll(rc.config.WALDir, common.DIR_PERM); err != nil {
-			nodeLog.Fatalf("cannot create dir for wal (%v)", err)
+			nodeLog.Errorf("cannot create dir for wal (%v)", err)
+			return nil, err
 		}
 
 		var m common.MemberInfo
@@ -157,9 +160,9 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 		d, _ := json.Marshal(m)
 		w, err := wal.Create(rc.config.WALDir, d, rc.config.OptimizedFsync)
 		if err != nil {
-			nodeLog.Fatalf("create wal error (%v)", err)
+			nodeLog.Errorf("create wal error (%v)", err)
 		}
-		return w
+		return w, err
 	}
 
 	var walsnap walpb.Snapshot
@@ -168,31 +171,37 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	}
 	w, err := wal.Open(rc.config.WALDir, walsnap, rc.config.OptimizedFsync)
 	if err != nil {
-		nodeLog.Fatalf("error loading wal (%v)", err)
+		nodeLog.Errorf("error loading wal (%v)", err)
 	}
 
-	return w
+	return w, err
 }
 
 // replayWAL replays WAL entries into the raft instance.
-func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) *wal.WAL {
-	w := rc.openWAL(snapshot)
+func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) (*wal.WAL, error) {
+	w, err := rc.openWAL(snapshot)
+	if err != nil {
+		return nil, err
+	}
 	meta, st, ents, err := w.ReadAll()
 	if err != nil {
 		w.Close()
-		nodeLog.Fatalf("failed to read WAL (%v)", err)
+		nodeLog.Errorf("failed to read WAL (%v)", err)
+		return nil, err
 	}
 	rc.Infof("wal meta: %v, restart with: %v", string(meta), st.String())
 	var m common.MemberInfo
 	err = json.Unmarshal(meta, &m)
 	if err != nil {
 		w.Close()
-		nodeLog.Fatalf("meta is wrong: %v", err)
+		nodeLog.Errorf("meta is wrong: %v", err)
+		return nil, err
 	}
 	if m.ID != uint64(rc.config.ID) ||
 		m.GroupID != rc.config.GroupID {
 		w.Close()
-		nodeLog.Fatalf("meta starting mismatch config: %v, %v", m, rc.config)
+		nodeLog.Errorf("meta starting mismatch config: %v, %v", m, rc.config)
+		return nil, err
 	}
 
 	if snapshot != nil {
@@ -206,7 +215,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	}
 	rc.Infof("replaying WAL (%v) at lastIndex : %v", len(ents), rc.lastIndex)
 	rc.raftStorage.SetHardState(st)
-	return w
+	return w, nil
 }
 
 func (rc *raftNode) startRaft(ds DataStorage) error {
@@ -232,14 +241,18 @@ func (rc *raftNode) startRaft(ds DataStorage) error {
 			RaftReplicaId: uint64(rc.config.ID)},
 	}
 
+	var err error
 	if oldwal {
-		err := rc.restartNode(c, ds)
+		err = rc.restartNode(c, ds)
 		if err != nil {
 			return err
 		}
 	} else {
 		rc.ds.CleanData()
-		rc.wal = rc.openWAL(nil)
+		rc.wal, err = rc.openWAL(nil)
+		if err != nil {
+			return err
+		}
 		rpeers := make([]raft.Peer, 0, len(rc.config.RaftPeers))
 		for _, v := range rc.config.RaftPeers {
 			var m common.MemberInfo
@@ -288,7 +301,8 @@ func (rc *raftNode) initForTransport() {
 }
 
 func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) error {
-	snapshot, err := rc.snapshotter.Load()
+restartloop:
+	snapshot, snapName, err := rc.snapshotter.Load()
 	if err != nil && err != snap.ErrNoSnapshot {
 		nodeLog.Warning(err)
 		return err
@@ -302,11 +316,16 @@ func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) error {
 			snapshot.Metadata.Index, snapshot.Metadata.ConfState)
 		if err := rc.ds.RestoreFromSnapshot(true, *snapshot); err != nil {
 			nodeLog.Error(err)
-			return err
+			// remove last snapshot and try again
+			rc.snapshotter.RemoveSnap(snapName)
+			goto restartloop
 		}
 	}
 
-	rc.wal = rc.replayWAL(snapshot)
+	rc.wal, err = rc.replayWAL(snapshot)
+	if err != nil {
+		return err
+	}
 	rc.node = raft.RestartNode(c)
 	advanceTicksForElection(rc.node, c.ElectionTick)
 	return nil
@@ -339,7 +358,7 @@ func newSnapshotReaderCloser() io.ReadCloser {
 func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 	select {
 	case m := <-rc.msgSnapC:
-		snapData, err := rc.snapshotter.Load()
+		snapData, _, err := rc.snapshotter.Load()
 		if err != nil {
 			rc.Infof("load snapshot error : %v", err)
 			rc.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
@@ -480,11 +499,14 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 			var m common.MemberInfo
 			err := json.Unmarshal(cc.Context, &m)
 			if err != nil {
-				nodeLog.Fatalf("error conf context: %v", err)
+				nodeLog.Errorf("error conf context: %v", err)
+				go rc.ds.Stop()
+				return false, false, err
 			} else {
 				m.ID = cc.ReplicaID
 				if m.NodeID == 0 {
-					nodeLog.Fatalf("invalid member info: %v", m)
+					nodeLog.Errorf("invalid member info: %v", m)
+					go rc.ds.Stop()
 					return false, confChanged, errors.New("add member should include node id ")
 				}
 				rc.memMutex.Lock()
@@ -584,11 +606,17 @@ func (rc *raftNode) serveChannels() {
 				rc.sendMessages(rd.Messages)
 			}
 			if err := rc.wal.Save(rd.HardState, rd.Entries); err != nil {
-				nodeLog.Fatalf("raft save wal error: %v", err)
+				nodeLog.Errorf("raft save wal error: %v", err)
+				go rc.ds.Stop()
+				<-rc.stopc
+				return
 			}
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				if err := rc.saveSnap(rd.Snapshot); err != nil {
-					nodeLog.Fatalf("raft save snap error: %v", err)
+					nodeLog.Errorf("raft save snap error: %v", err)
+					go rc.ds.Stop()
+					<-rc.stopc
+					return
 				}
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
 				rc.Infof("raft applied incoming snapshot at index: %v", rd.Snapshot.String())
