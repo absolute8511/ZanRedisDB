@@ -868,7 +868,7 @@ func (self *DataCoordinator) RestartAsStandalone(fullNamespace string) error {
 		return ErrNamespaceNotFound
 	}
 	CoordLog().Warningf("namespace %v restart as standalone cluster", fullNamespace)
-	self.forceRemoveLocalNamespace(localNs)
+	localNs.Close()
 	_, coordErr := self.updateLocalNamespace(nsInfo, true)
 	if coordErr != nil {
 		return coordErr.ToErrorType()
