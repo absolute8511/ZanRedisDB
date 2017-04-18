@@ -1,0 +1,15 @@
+#!/bin/bash
+
+set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+rm -rf   $DIR/dist/docker
+mkdir -p $DIR/dist/docker
+rm -rf   $DIR/.godeps
+mkdir -p $DIR/.godeps
+export GOPATH=$DIR/.godeps:$GOPATH
+GOPATH=$DIR/.godeps gpm install
+
+arch=$(go env GOARCH)
+
+go test -tags=embed -race ./...
