@@ -8,7 +8,7 @@ import (
 
 func PutRocksdbUint64(v uint64) []byte {
 	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
+	binary.LittleEndian.PutUint64(b, v)
 	return b
 }
 
@@ -21,5 +21,5 @@ func GetRocksdbUint64(v []byte, err error) (uint64, error) {
 		return 0, errIntNumber
 	}
 
-	return binary.BigEndian.Uint64(v), nil
+	return binary.LittleEndian.Uint64(v), nil
 }
