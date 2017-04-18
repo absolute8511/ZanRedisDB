@@ -245,6 +245,7 @@ func (self *NamespaceNameInfo) String() string {
 }
 
 type Options struct {
-	BalanceStart int
-	BalanceEnd   int
+	AutoBalanceAndMigrate bool
+	BalanceStart          int
+	BalanceEnd            int
 }

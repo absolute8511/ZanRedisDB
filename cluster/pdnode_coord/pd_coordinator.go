@@ -47,6 +47,7 @@ type PDCoordinator struct {
 	isUpgrading            int32
 	dpm                    *DataPlacement
 	doChecking             int32
+	autoBalance            bool
 }
 
 func NewPDCoordinator(cluster string, n *NodeInfo, opts *Options) *PDCoordinator {
@@ -59,6 +60,7 @@ func NewPDCoordinator(cluster string, n *NodeInfo, opts *Options) *PDCoordinator
 		checkNamespaceFailChan: make(chan NamespaceNameInfo, 3),
 		stopChan:               make(chan struct{}),
 		monitorChan:            make(chan struct{}),
+		autoBalance:            opts.AutoBalanceAndMigrate,
 	}
 	coord.dpm = NewDataPlacement(coord)
 	if opts != nil {
@@ -522,7 +524,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			partitions = make(map[int]time.Time)
 			waitingMigrateNamespace[nsInfo.Name] = partitions
 		}
-		if needMigrate {
+		if needMigrate && self.autoBalance {
 			if _, ok := partitions[nsInfo.Partition]; !ok {
 				partitions[nsInfo.Partition] = time.Now()
 				// migrate next time

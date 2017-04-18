@@ -146,11 +146,12 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 }
 
 // openWAL returns a WAL ready for reading.
-func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) (*wal.WAL, error) {
+func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot, readOld bool) (*wal.WAL, []byte, raftpb.HardState, []raftpb.Entry, error) {
+	var hardState raftpb.HardState
 	if !wal.Exist(rc.config.WALDir) {
 		if err := os.MkdirAll(rc.config.WALDir, common.DIR_PERM); err != nil {
 			nodeLog.Errorf("cannot create dir for wal (%v)", err)
-			return nil, err
+			return nil, nil, hardState, nil, err
 		}
 
 		var m common.MemberInfo
@@ -162,31 +163,51 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) (*wal.WAL, error) {
 		if err != nil {
 			nodeLog.Errorf("create wal error (%v)", err)
 		}
-		return w, err
+		return w, d, hardState, nil, err
 	}
 
 	var walsnap walpb.Snapshot
 	if snapshot != nil {
 		walsnap.Index, walsnap.Term = snapshot.Metadata.Index, snapshot.Metadata.Term
 	}
-	w, err := wal.Open(rc.config.WALDir, walsnap, rc.config.OptimizedFsync)
-	if err != nil {
-		nodeLog.Errorf("error loading wal (%v)", err)
+	repaired := false
+	var err error
+	var w *wal.WAL
+	for {
+		w, err = wal.Open(rc.config.WALDir, walsnap, rc.config.OptimizedFsync)
+		if err != nil {
+			nodeLog.Errorf("error loading wal (%v)", err)
+			return w, nil, hardState, nil, err
+		}
+		if readOld {
+			meta, st, ents, err := w.ReadAll()
+			if err != nil {
+				w.Close()
+				nodeLog.Errorf("failed to read WAL (%v)", err)
+				if repaired || err != io.ErrUnexpectedEOF {
+					nodeLog.Errorf("read wal error and cannot be repaire")
+				} else {
+					if !wal.Repair(rc.config.WALDir) {
+						nodeLog.Errorf("read wal error and cannot be repaire")
+					} else {
+						nodeLog.Infof("wal repaired")
+						repaired = true
+						continue
+					}
+				}
+			}
+			return w, meta, st, ents, err
+		} else {
+			break
+		}
 	}
-
-	return w, err
+	return w, nil, hardState, nil, err
 }
 
 // replayWAL replays WAL entries into the raft instance.
-func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) (*wal.WAL, error) {
-	w, err := rc.openWAL(snapshot)
+func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) (*wal.WAL, error) {
+	w, meta, st, ents, err := rc.openWAL(snapshot, true)
 	if err != nil {
-		return nil, err
-	}
-	meta, st, ents, err := w.ReadAll()
-	if err != nil {
-		w.Close()
-		nodeLog.Errorf("failed to read WAL (%v)", err)
 		return nil, err
 	}
 	rc.Infof("wal meta: %v, restart with: %v", string(meta), st.String())
@@ -204,9 +225,36 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) (*wal.WAL, error) {
 		return nil, err
 	}
 
+	if forceStandalone {
+		// discard the previously uncommitted entries
+		for i, ent := range ents {
+			if ent.Index > st.Commit {
+				nodeLog.Infof("discarding %d uncommitted WAL entries ", len(ents)-i)
+				ents = ents[:i]
+				break
+			}
+		}
+
+		ids, grps := getIDsAndGroups(snapshot, ents)
+		// force append the configuration change entries
+		toAppEnts := rc.createConfigChangeEnts(ids, grps, rc.config.ID, st.Term, st.Commit)
+		ents = append(ents, toAppEnts...)
+
+		// force commit newly appended entries
+		err := w.Save(raftpb.HardState{}, toAppEnts)
+		if err != nil {
+			nodeLog.Errorf("force commit error: %v", err)
+			return nil, err
+		}
+		if len(ents) != 0 {
+			st.Commit = ents[len(ents)-1].Index
+		}
+	}
+
 	if snapshot != nil {
 		rc.raftStorage.ApplySnapshot(*snapshot)
 	}
+	rc.raftStorage.SetHardState(st)
 	// append to storage so raft starts at the right place in log
 	rc.raftStorage.Append(ents)
 	// send nil once lastIndex is published so client knows commit channel is current
@@ -214,11 +262,10 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot) (*wal.WAL, error) {
 		rc.lastIndex = ents[len(ents)-1].Index
 	}
 	rc.Infof("replaying WAL (%v) at lastIndex : %v", len(ents), rc.lastIndex)
-	rc.raftStorage.SetHardState(st)
 	return w, nil
 }
 
-func (rc *raftNode) startRaft(ds DataStorage) error {
+func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 	walDir := rc.config.WALDir
 	oldwal := wal.Exist(walDir)
 
@@ -243,13 +290,38 @@ func (rc *raftNode) startRaft(ds DataStorage) error {
 
 	var err error
 	if oldwal {
-		err = rc.restartNode(c, ds)
+	restartloop:
+		snapshot, snapName, err := rc.snapshotter.Load()
+		if err != nil && err != snap.ErrNoSnapshot {
+			nodeLog.Warning(err)
+			return err
+		}
+		if err == snap.ErrNoSnapshot || raft.IsEmptySnap(*snapshot) {
+			rc.Infof("loading no snapshot \n")
+			rc.ds.CleanData()
+		} else {
+			rc.Infof("loading snapshot at term %d and index %d, snap: %v",
+				snapshot.Metadata.Term,
+				snapshot.Metadata.Index, snapshot.Metadata.ConfState)
+			if err := rc.ds.RestoreFromSnapshot(true, *snapshot); err != nil {
+				nodeLog.Error(err)
+				// remove last snapshot and try again
+				rc.snapshotter.RemoveSnap(snapName)
+				goto restartloop
+			}
+		}
+
+		if standalone {
+			err = rc.restartAsStandaloneNode(c, snapshot)
+		} else {
+			err = rc.restartNode(c, snapshot)
+		}
 		if err != nil {
 			return err
 		}
 	} else {
 		rc.ds.CleanData()
-		rc.wal, err = rc.openWAL(nil)
+		rc.wal, _, _, _, err = rc.openWAL(nil, false)
 		if err != nil {
 			return err
 		}
@@ -300,35 +372,125 @@ func (rc *raftNode) initForTransport() {
 	}
 }
 
-func (rc *raftNode) restartNode(c *raft.Config, ds DataStorage) error {
-restartloop:
-	snapshot, snapName, err := rc.snapshotter.Load()
-	if err != nil && err != snap.ErrNoSnapshot {
-		nodeLog.Warning(err)
-		return err
-	}
-	if err == snap.ErrNoSnapshot || raft.IsEmptySnap(*snapshot) {
-		rc.Infof("loading no snapshot \n")
-		rc.ds.CleanData()
-	} else {
-		rc.Infof("loading snapshot at term %d and index %d, snap: %v",
-			snapshot.Metadata.Term,
-			snapshot.Metadata.Index, snapshot.Metadata.ConfState)
-		if err := rc.ds.RestoreFromSnapshot(true, *snapshot); err != nil {
-			nodeLog.Error(err)
-			// remove last snapshot and try again
-			rc.snapshotter.RemoveSnap(snapName)
-			goto restartloop
-		}
-	}
-
-	rc.wal, err = rc.replayWAL(snapshot)
+func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error {
+	var err error
+	rc.wal, err = rc.replayWAL(snapshot, false)
 	if err != nil {
 		return err
 	}
 	rc.node = raft.RestartNode(c)
 	advanceTicksForElection(rc.node, c.ElectionTick)
 	return nil
+}
+
+func (rc *raftNode) restartAsStandaloneNode(cfg *raft.Config, snapshot *raftpb.Snapshot) error {
+	var err error
+	rc.wal, err = rc.replayWAL(snapshot, true)
+	if err != nil {
+		return err
+	}
+	rc.node = raft.RestartNode(cfg)
+	return nil
+}
+
+// returns an ordered set of IDs included in the given snapshot and
+// the entries. The given snapshot/entries can contain two kinds of
+// ID-related entry:
+// - ConfChangeAddNode, in which case the contained ID will be added into the set.
+// - ConfChangeRemoveNode, in which case the contained ID will be removed from the set.
+func getIDsAndGroups(snap *raftpb.Snapshot, ents []raftpb.Entry) ([]uint64, map[uint64]raftpb.Group) {
+	ids := make(map[uint64]bool)
+	grps := make(map[uint64]raftpb.Group)
+	if snap != nil {
+		for _, id := range snap.Metadata.ConfState.Nodes {
+			ids[id] = true
+		}
+		for _, grp := range snap.Metadata.ConfState.Groups {
+			grps[grp.RaftReplicaId] = *grp
+		}
+	}
+	for _, e := range ents {
+		if e.Type != raftpb.EntryConfChange {
+			continue
+		}
+		var cc raftpb.ConfChange
+		cc.Unmarshal(e.Data)
+		switch cc.Type {
+		case raftpb.ConfChangeAddNode:
+			ids[cc.ReplicaID] = true
+			grps[cc.NodeGroup.RaftReplicaId] = cc.NodeGroup
+		case raftpb.ConfChangeRemoveNode:
+			delete(ids, cc.ReplicaID)
+			delete(grps, cc.ReplicaID)
+		case raftpb.ConfChangeUpdateNode:
+			// do nothing
+		default:
+			nodeLog.Errorf("ConfChange Type should be either ConfChangeAddNode or ConfChangeRemoveNode!")
+		}
+	}
+	sids := make(types.Uint64Slice, 0, len(ids))
+	for id := range ids {
+		sids = append(sids, id)
+	}
+	sort.Sort(sids)
+	return []uint64(sids), grps
+}
+
+// createConfigChangeEnts creates a series of Raft entries (i.e.
+// EntryConfChange) to remove the set of given IDs from the cluster. The ID
+// `self` is _not_ removed, even if present in the set.
+// If `self` is not inside the given ids, it creates a Raft entry to add a
+// default member with the given `self`.
+func (rc *raftNode) createConfigChangeEnts(ids []uint64, grps map[uint64]raftpb.Group,
+	self uint64, term, index uint64) []raftpb.Entry {
+	ents := make([]raftpb.Entry, 0)
+	next := index + 1
+	found := false
+	for _, id := range ids {
+		if id == self {
+			found = true
+			continue
+		}
+		cc := &raftpb.ConfChange{
+			Type:      raftpb.ConfChangeRemoveNode,
+			ReplicaID: id,
+			NodeGroup: grps[id],
+		}
+		d, _ := cc.Marshal()
+		e := raftpb.Entry{
+			Type:  raftpb.EntryConfChange,
+			Data:  d,
+			Term:  term,
+			Index: next,
+		}
+		ents = append(ents, e)
+		next++
+	}
+	if !found {
+		m := common.MemberInfo{
+			ID:        self,
+			NodeID:    rc.config.nodeConfig.NodeID,
+			GroupName: rc.config.GroupName,
+			GroupID:   rc.config.GroupID,
+		}
+		m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
+		ctx, _ := json.Marshal(m)
+		cc := &raftpb.ConfChange{
+			Type:      raftpb.ConfChangeAddNode,
+			ReplicaID: self,
+			NodeGroup: grps[self],
+			Context:   ctx,
+		}
+		d, _ := cc.Marshal()
+		e := raftpb.Entry{
+			Type:  raftpb.EntryConfChange,
+			Data:  d,
+			Term:  term,
+			Index: next,
+		}
+		ents = append(ents, e)
+	}
+	return ents
 }
 
 func advanceTicksForElection(n raft.Node, electionTicks int) {

@@ -19,7 +19,6 @@ import (
 	"golang.org/x/net/context"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"path"
 	"strings"
@@ -29,6 +28,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/pkg/httputil"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/go-semver/semver"
@@ -319,7 +319,7 @@ func (cr *streamReader) run() {
 			// all data is read out
 			case err == io.EOF:
 			// connection is closed by the remote
-			case isClosedConnectionError(err):
+			case transport.IsClosedConnError(err):
 			default:
 				cr.status.deactivate(failureType{source: t.String(), action: "read"}, err.Error())
 			}
@@ -522,11 +522,6 @@ func (cr *streamReader) resume() {
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
 	cr.paused = false
-}
-
-func isClosedConnectionError(err error) bool {
-	operr, ok := err.(*net.OpError)
-	return ok && operr.Err.Error() == "use of closed network connection"
 }
 
 // checkStreamSupport checks whether the stream type is supported in the

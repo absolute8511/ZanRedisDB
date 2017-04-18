@@ -123,8 +123,8 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	return s, nil
 }
 
-func (self *KVNode) Start() error {
-	err := self.rn.startRaft(self)
+func (self *KVNode) Start(standalone bool) error {
+	err := self.rn.startRaft(self, standalone)
 	if err != nil {
 		return err
 	}

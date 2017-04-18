@@ -54,6 +54,37 @@ func (self *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps http
 	return nil, nil
 }
 
+func (self *Server) doForceNewCluster(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	v := self.GetNamespaceFromFullName(ns)
+	if v == nil || !v.IsReady() {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
+	}
+	if v.Node.GetLeadMember() != nil {
+		return nil, common.HttpErr{Code: http.StatusForbidden, Text: "can not force new cluster while leader is ok"}
+	}
+
+	err := self.RestartAsStandalone(ns)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
+}
+
+func (self *Server) doForceCleanRaftNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	v := self.GetNamespaceFromFullName(ns)
+	if v == nil || !v.IsReady() {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
+	}
+
+	if v.Node.IsLead() {
+		return nil, common.HttpErr{Code: http.StatusForbidden, Text: "leader of raft can not be force clean"}
+	}
+	v.Destroy()
+	return nil, nil
+}
+
 func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
@@ -217,6 +248,8 @@ func (self *Server) initHttpHandler() {
 	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(self.checkNodeBackup, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(self.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(self.doOptimize, log, common.V1))
+	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(self.doForceNewCluster, log, common.V1))
+	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(self.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(self.doAddNode, log, common.V1))
 
 	router.Handle("GET", "/ping", common.Decorate(self.pingHandler, common.PlainText))
