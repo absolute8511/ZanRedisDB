@@ -22,6 +22,7 @@ var (
 	ErrNamespaceNodeConflict     = NewCoordErr("the namespace node info is conflicted", CoordClusterErr)
 	ErrNamespaceRaftIDNotFound   = NewCoordErr("the namespace raft id is not found", CoordClusterErr)
 	ErrNamespaceReplicaNotEnough = NewCoordErr("the replicas in the namespace is not enough", CoordTmpErr)
+	ErrNamespaceMigrateWaiting   = NewCoordErr("the migrate is waiting", CoordTmpErr)
 )
 
 const (
@@ -642,6 +643,8 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 			CoordLog().Infof("namespace %v migrate to replicas : %v", nsInfo.GetDesp(), nsInfo.RaftNodes)
 			*origNSInfo = *nsInfo
 		}
+	} else {
+		return ErrNamespaceMigrateWaiting
 	}
 	return nil
 }
