@@ -6,6 +6,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rm -rf   $DIR/dist/docker
 rm -rf   $DIR/.godeps
 mkdir -p $DIR/.godeps
+mkdir -p $DIR/dist
 export GOPATH=$DIR/.godeps:$GOPATH
 GOPATH=$DIR/.godeps gpm install
 

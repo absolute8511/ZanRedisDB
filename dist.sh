@@ -26,7 +26,7 @@ GOOS=$os GOARCH=$arch \
     make DESTDIR=$BUILD PREFIX=/$TARGET install
 pushd $BUILD
 tar czvf $TARGET.tar.gz $TARGET
-mv $TARGET.tar.gz $DIR/dist
+mv $TARGET.tar.gz $DIR/dist/
 popd
 make clean
 rm -r $BUILD
