@@ -525,6 +525,13 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			partitions = make(map[int]time.Time)
 			waitingMigrateNamespace[nsInfo.Name] = partitions
 		}
+
+		// handle removing should before migrate since the migrate may be blocked by the
+		// removing node.
+		if atomic.LoadInt32(&self.balanceWaiting) == 0 && len(nsInfo.Removings) > 0 {
+			self.removeNamespaceFromRemovings(&nsInfo)
+		}
+
 		if needMigrate && self.autoBalance {
 			if _, ok := partitions[nsInfo.Partition]; !ok {
 				partitions[nsInfo.Partition] = time.Now()
@@ -547,18 +554,20 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 				}
 				CoordLog().Infof("begin migrate the namespace :%v", nsInfo.GetDesp())
 				if coordErr := self.handleNamespaceMigrate(&nsInfo, aliveNodes, aliveEpoch); coordErr != nil {
-					go self.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second)
+					if emergency {
+						go self.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second*3)
+					}
 					continue
-				}
-				delete(partitions, nsInfo.Partition)
-				// migrate only one at once to reduce the migrate traffic
-				atomic.StoreInt32(&self.isClusterUnstable, 1)
-				for _, parts := range waitingMigrateNamespace {
-					for pid, _ := range parts {
-						parts[pid].Add(time.Second * 10)
+				} else {
+					delete(partitions, nsInfo.Partition)
+					// migrate only one at once to reduce the migrate traffic
+					atomic.StoreInt32(&self.isClusterUnstable, 1)
+					for _, parts := range waitingMigrateNamespace {
+						for pid, _ := range parts {
+							parts[pid].Add(time.Second * 10)
+						}
 					}
 				}
-				return
 			} else {
 				CoordLog().Infof("waiting migrate the namespace :%v since time: %v", nsInfo.GetDesp(), partitions[nsInfo.Partition])
 			}
@@ -567,9 +576,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		}
 
 		if atomic.LoadInt32(&self.balanceWaiting) == 0 {
-			if len(nsInfo.Removings) > 0 {
-				self.removeNamespaceFromRemovings(&nsInfo)
-			} else if aliveCount > nsInfo.Replica && !needMigrate {
+			if aliveCount > nsInfo.Replica && !needMigrate {
 				//remove the unwanted node in isr
 				CoordLog().Infof("namespace %v isr %v is more than replicator: %v, %v", nsInfo.GetDesp(),
 					nsInfo.RaftNodes, aliveCount, nsInfo.Replica)
