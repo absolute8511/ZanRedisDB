@@ -17,7 +17,7 @@ $(BLDDIR)/zankv:  $(wildcard apps/zankv/*.go wal/*.go transport/*/*.go stats/*.g
 
 $(BLDDIR)/%:
 	@mkdir -p $(dir $@)
-	go build -i -tags=embed ${GOFLAGS} -o $@ ./apps/$*
+	go build -tags=embed ${GOFLAGS} -o $@ ./apps/$*
 
 $(APPS): %: $(BLDDIR)/%
 

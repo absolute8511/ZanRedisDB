@@ -22,7 +22,7 @@ for os in linux darwin ; do
     echo "... building v$version for $os/$arch"
     BUILD=$(mktemp -d -t zankvXXXXXX)
     TARGET="zankv-$version.$os-$arch.$goversion"
-    GOOS=$os GOARCH=$arch CGO_ENABLED=0 \
+    GOOS=$os GOARCH=$arch \
         make DESTDIR=$BUILD PREFIX=/$TARGET install
     pushd $BUILD
     tar czvf $TARGET.tar.gz $TARGET

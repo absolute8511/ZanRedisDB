@@ -15,12 +15,6 @@
 // Package stats defines a standard interface for cluster statistics.
 package stats
 
-import "github.com/coreos/pkg/capnslog"
-
-var (
-	plog = capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "stats")
-)
-
 type Stats interface {
 	// SelfStats returns the struct representing statistics of this server
 	SelfStats() []byte
