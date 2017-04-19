@@ -626,7 +626,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 		}
 	}
 
-	if len(nsInfo.Removings) > 0 {
+	if len(nsInfo.Removings) == 0 {
 		for i := aliveReplicas; i < nsInfo.Replica; i++ {
 			n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
 			if err != nil {
