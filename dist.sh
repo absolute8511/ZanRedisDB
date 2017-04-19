@@ -15,19 +15,18 @@ export GOPATH=$DIR/.godeps:$GOPATH
 echo $GOPATH
 
 arch=$(go env GOARCH)
+os=$(go env GOOS)
 version=$(awk '/const VerBinary/ {print $NF}' < $DIR/common/binary.go | sed 's/"//g')
 goversion=$(go version | awk '{print $3}')
 
-for os in linux darwin ; do
-    echo "... building v$version for $os/$arch"
-    BUILD=$(mktemp -d -t zankvXXXXXX)
-    TARGET="zankv-$version.$os-$arch.$goversion"
-    GOOS=$os GOARCH=$arch \
-        make DESTDIR=$BUILD PREFIX=/$TARGET install
-    pushd $BUILD
-    tar czvf $TARGET.tar.gz $TARGET
-    mv $TARGET.tar.gz $DIR/dist
-    popd
-    make clean
-    rm -r $BUILD
-done
+echo "... building v$version for $os/$arch"
+BUILD=$(mktemp -d -t zankvXXXXXX)
+TARGET="zankv-$version.$os-$arch.$goversion"
+GOOS=$os GOARCH=$arch \
+    make DESTDIR=$BUILD PREFIX=/$TARGET install
+pushd $BUILD
+tar czvf $TARGET.tar.gz $TARGET
+mv $TARGET.tar.gz $DIR/dist
+popd
+make clean
+rm -r $BUILD
