@@ -7,24 +7,17 @@ go get github.com/absolute8511/c-rocksdb
 go get github.com/absolute8511/gorocksdb
 </pre>
 
-Build ZanRedisDB from the source (only support go version 1.7.4+):
+Build zankv and placedriver from the source (only support go version 1.7.4+):
 <pre>
-go build -tags=embed
+make
 </pre>
-
-Build placedriver:
-<pre>
-cd app/placedriver
-go build .
-</pre>
-
 
 ## Deploy
 
  * Deploy the rsync daemon which is needed on all server node to transfer the snapshot data for raft
  * Deploy etcd cluster which is needed for the meta data for the namespaces
  * Deploy the placedriver which is used for data placement: `placedriver -config=/path/to/config`
- * Deploy the ZanRedisDB for data storage server `ZanRedisDB -config=/path/to/config`
+ * Deploy the zankv for data storage server `zankv -config=/path/to/config`
 
 ## API
 placedriver has several HTTP APIs to manager the namespace
