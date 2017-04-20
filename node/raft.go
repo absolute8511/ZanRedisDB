@@ -323,8 +323,7 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 	}
 
 	if oldwal {
-	restartloop:
-		snapshot, snapName, err := rc.persistStorage.Load()
+		snapshot, _, err := rc.persistStorage.Load()
 		if err != nil && err != snap.ErrNoSnapshot {
 			nodeLog.Warning(err)
 			return err
@@ -338,13 +337,7 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 				snapshot.Metadata.Index, snapshot.Metadata.ConfState)
 			if err := rc.ds.RestoreFromSnapshot(true, *snapshot); err != nil {
 				nodeLog.Error(err)
-				if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
-					// remove last snapshot and try again
-					rs.Snapshotter.RemoveSnap(snapName)
-					goto restartloop
-				} else {
-					return err
-				}
+				return err
 			}
 		}
 
