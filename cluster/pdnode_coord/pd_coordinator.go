@@ -604,6 +604,9 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 	if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
 		return ErrClusterChanged
 	}
+	if len(origNSInfo.Removings) > 0 {
+		return ErrNamespaceMigrateWaiting
+	}
 	isrChanged := false
 	aliveReplicas := 0
 	nsInfo := origNSInfo.GetCopy()
@@ -615,7 +618,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 				nsInfo.Removings = make(map[string]RemovingInfo)
 			}
 			if _, ok := nsInfo.Removings[replica]; !ok {
-				if len(nsInfo.GetISR())-1 > nsInfo.Replica/2 {
+				if len(nsInfo.Removings) == 0 && len(nsInfo.GetISR())-1 > nsInfo.Replica/2 {
 					CoordLog().Infof("mark removing for failed raft node %v for namespace: %v, isr: %v",
 						replica, nsInfo.GetDesp(), nsInfo.GetISR())
 					nsInfo.Removings[replica] = RemovingInfo{RemoveTime: time.Now().UnixNano(),
@@ -641,6 +644,10 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 	}
 
 	if isrChanged && nsInfo.IsISRQuorum() {
+		if len(nsInfo.Removings) > 1 {
+			CoordLog().Infof("namespace should not have two removing nodes: %v", nsInfo)
+			return ErrNamespaceConfInvalid
+		}
 		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 		if err != nil {
@@ -700,11 +707,15 @@ func (self *PDCoordinator) removeNamespaceFromNode(origNSInfo *PartitionMetaInfo
 	if origNSInfo.Removings == nil {
 		origNSInfo.Removings = make(map[string]RemovingInfo)
 	}
+	// at most one node removing, wait removing node removed from removings
+	if len(origNSInfo.Removings) > 0 {
+		return ErrNamespaceMigrateWaiting
+	}
 	nsInfo := origNSInfo.GetCopy()
 	CoordLog().Infof("namespace %v: mark replica removing , current isr: %v", nsInfo.GetDesp(),
 		nsInfo.GetISR())
 	nsInfo.Removings[nid] = RemovingInfo{RemoveTime: time.Now().UnixNano(), RemoveReplicaID: nsInfo.RaftIDs[nid]}
-	if !nsInfo.IsISRQuorum() {
+	if !nsInfo.IsISRQuorum() || len(nsInfo.Removings) > 1 {
 		return ErrNamespaceReplicaNotEnough
 	}
 	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
