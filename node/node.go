@@ -829,6 +829,9 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 			<-ent.raftDone
 			self.maybeTriggerSnapshot(&np, confChanged)
 			self.rn.handleSendSnapshot(&np)
+			if ent.applyWaitDone != nil {
+				close(ent.applyWaitDone)
+			}
 		case <-self.stopChan:
 			return
 		}
@@ -1072,5 +1075,5 @@ func (self *KVNode) ReportSnapshot(id uint64, gp raftpb.Group, status raft.Snaps
 }
 
 func (self *KVNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
-	return self.rn.snapshotter.SaveDBFrom(r, msg)
+	return self.rn.SaveDBFrom(r, msg)
 }

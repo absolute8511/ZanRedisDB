@@ -1,5 +1,5 @@
 github.com/absolute8511/glog
-github.com/coreos/etcd
+github.com/coreos/etcd         dd0d5902177b6336b8cf344e6cbf1962b5981dde
 github.com/coreos/go-etcd/etcd
 github.com/coreos/go-semver/semver
 github.com/coreos/pkg

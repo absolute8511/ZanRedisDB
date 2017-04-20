@@ -56,6 +56,17 @@ type Snapshot interface {
 	GetData() ([]byte, error)
 }
 
+type IRaftPersistStorage interface {
+	// Save function saves ents and state to the underlying stable storage.
+	// Save MUST block until st and ents are on stable storage.
+	Save(st raftpb.HardState, ents []raftpb.Entry) error
+	// SaveSnap function saves snapshot to the underlying stable storage.
+	SaveSnap(snap raftpb.Snapshot) error
+	Load() (*raftpb.Snapshot, string, error)
+	// Close closes the Storage and performs finalization.
+	Close() error
+}
+
 type DataStorage interface {
 	CleanData() error
 	RestoreFromSnapshot(bool, raftpb.Snapshot) error
@@ -64,9 +75,10 @@ type DataStorage interface {
 }
 
 type applyInfo struct {
-	ents     []raftpb.Entry
-	snapshot raftpb.Snapshot
-	raftDone chan struct{}
+	ents          []raftpb.Entry
+	snapshot      raftpb.Snapshot
+	raftDone      chan struct{}
+	applyWaitDone chan struct{}
 }
 
 // A key-value stream backed by raft
@@ -85,9 +97,9 @@ type raftNode struct {
 	raftStorage *raft.MemoryStorage
 	wal         *wal.WAL
 
-	snapshotter *snap.Snapshotter
+	persistStorage IRaftPersistStorage
 
-	transport           *rafthttp.Transport
+	transport           rafthttp.Transporter
 	stopc               chan struct{} // signals proposal channel closed
 	reqIDGen            *idutil.Generator
 	wgAsync             sync.WaitGroup
@@ -111,7 +123,7 @@ type raftNode struct {
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	join bool, ds DataStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
 
-	commitC := make(chan applyInfo, 1000)
+	commitC := make(chan applyInfo, 5000)
 	if rconfig.SnapCount <= 0 {
 		rconfig.SnapCount = DefaultSnapCount
 	}
@@ -140,7 +152,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 			return nil, nil, err
 		}
 	}
-	rc.snapshotter = snap.New(snapDir)
+	rc.persistStorage = NewRaftPersistStorage(nil, snap.New(snapDir))
 	rc.description = rc.config.GroupName + "-" + strconv.Itoa(int(rc.config.ID))
 	return commitC, rc, nil
 }
@@ -205,24 +217,28 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot, readOld bool) (*wal.WAL, 
 }
 
 // replayWAL replays WAL entries into the raft instance.
-func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) (*wal.WAL, error) {
+func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) error {
 	w, meta, st, ents, err := rc.openWAL(snapshot, true)
 	if err != nil {
-		return nil, err
+		return err
 	}
+
 	rc.Infof("wal meta: %v, restart with: %v", string(meta), st.String())
 	var m common.MemberInfo
 	err = json.Unmarshal(meta, &m)
 	if err != nil {
 		w.Close()
 		nodeLog.Errorf("meta is wrong: %v", err)
-		return nil, err
+		return err
 	}
 	if m.ID != uint64(rc.config.ID) ||
 		m.GroupID != rc.config.GroupID {
 		w.Close()
 		nodeLog.Errorf("meta starting mismatch config: %v, %v", m, rc.config)
-		return nil, err
+		return err
+	}
+	if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
+		rs.WAL = w
 	}
 
 	if forceStandalone {
@@ -236,15 +252,33 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) (
 		}
 
 		ids, grps := getIDsAndGroups(snapshot, ents)
+
+		m := common.MemberInfo{
+			ID:        rc.config.ID,
+			NodeID:    rc.config.nodeConfig.NodeID,
+			GroupName: rc.config.GroupName,
+			GroupID:   rc.config.GroupID,
+		}
+		m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
+		ctx, _ := json.Marshal(m)
+		// force add self node groups
+		if _, ok := grps[rc.config.ID]; !ok {
+			grps[rc.config.ID] = raftpb.Group{
+				NodeId:        rc.config.nodeConfig.NodeID,
+				Name:          rc.config.GroupName,
+				GroupId:       rc.config.GroupID,
+				RaftReplicaId: rc.config.ID,
+			}
+		}
 		// force append the configuration change entries
-		toAppEnts := rc.createConfigChangeEnts(ids, grps, rc.config.ID, st.Term, st.Commit)
+		toAppEnts := createConfigChangeEnts(ctx, ids, grps, rc.config.ID, st.Term, st.Commit)
 		ents = append(ents, toAppEnts...)
 
 		// force commit newly appended entries
 		err := w.Save(raftpb.HardState{}, toAppEnts)
 		if err != nil {
 			nodeLog.Errorf("force commit error: %v", err)
-			return nil, err
+			return err
 		}
 		if len(ents) != 0 {
 			st.Commit = ents[len(ents)-1].Index
@@ -262,7 +296,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) (
 		rc.lastIndex = ents[len(ents)-1].Index
 	}
 	rc.Infof("replaying WAL (%v) at lastIndex : %v", len(ents), rc.lastIndex)
-	return w, nil
+	return nil
 }
 
 func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
@@ -288,10 +322,9 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			RaftReplicaId: uint64(rc.config.ID)},
 	}
 
-	var err error
 	if oldwal {
 	restartloop:
-		snapshot, snapName, err := rc.snapshotter.Load()
+		snapshot, snapName, err := rc.persistStorage.Load()
 		if err != nil && err != snap.ErrNoSnapshot {
 			nodeLog.Warning(err)
 			return err
@@ -305,9 +338,13 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 				snapshot.Metadata.Index, snapshot.Metadata.ConfState)
 			if err := rc.ds.RestoreFromSnapshot(true, *snapshot); err != nil {
 				nodeLog.Error(err)
-				// remove last snapshot and try again
-				rc.snapshotter.RemoveSnap(snapName)
-				goto restartloop
+				if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
+					// remove last snapshot and try again
+					rs.Snapshotter.RemoveSnap(snapName)
+					goto restartloop
+				} else {
+					return err
+				}
 			}
 		}
 
@@ -321,9 +358,12 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 		}
 	} else {
 		rc.ds.CleanData()
-		rc.wal, _, _, _, err = rc.openWAL(nil, false)
+		w, _, _, _, err := rc.openWAL(nil, false)
 		if err != nil {
 			return err
+		}
+		if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
+			rs.WAL = w
 		}
 		rpeers := make([]raft.Peer, 0, len(rc.config.RaftPeers))
 		for _, v := range rc.config.RaftPeers {
@@ -374,7 +414,7 @@ func (rc *raftNode) initForTransport() {
 
 func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error {
 	var err error
-	rc.wal, err = rc.replayWAL(snapshot, false)
+	err = rc.replayWAL(snapshot, false)
 	if err != nil {
 		return err
 	}
@@ -385,7 +425,7 @@ func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error
 
 func (rc *raftNode) restartAsStandaloneNode(cfg *raft.Config, snapshot *raftpb.Snapshot) error {
 	var err error
-	rc.wal, err = rc.replayWAL(snapshot, true)
+	err = rc.replayWAL(snapshot, true)
 	if err != nil {
 		return err
 	}
@@ -441,7 +481,7 @@ func getIDsAndGroups(snap *raftpb.Snapshot, ents []raftpb.Entry) ([]uint64, map[
 // `self` is _not_ removed, even if present in the set.
 // If `self` is not inside the given ids, it creates a Raft entry to add a
 // default member with the given `self`.
-func (rc *raftNode) createConfigChangeEnts(ids []uint64, grps map[uint64]raftpb.Group,
+func createConfigChangeEnts(ctx []byte, ids []uint64, grps map[uint64]raftpb.Group,
 	self uint64, term, index uint64) []raftpb.Entry {
 	ents := make([]raftpb.Entry, 0)
 	next := index + 1
@@ -467,14 +507,6 @@ func (rc *raftNode) createConfigChangeEnts(ids []uint64, grps map[uint64]raftpb.
 		next++
 	}
 	if !found {
-		m := common.MemberInfo{
-			ID:        self,
-			NodeID:    rc.config.nodeConfig.NodeID,
-			GroupName: rc.config.GroupName,
-			GroupID:   rc.config.GroupID,
-		}
-		m.RaftURLs = append(m.RaftURLs, rc.config.RaftAddr)
-		ctx, _ := json.Marshal(m)
 		cc := &raftpb.ConfChange{
 			Type:      raftpb.ConfChangeAddNode,
 			ReplicaID: self,
@@ -520,7 +552,7 @@ func newSnapshotReaderCloser() io.ReadCloser {
 func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 	select {
 	case m := <-rc.msgSnapC:
-		snapData, _, err := rc.snapshotter.Load()
+		snapData, _, err := rc.persistStorage.Load()
 		if err != nil {
 			rc.Infof("load snapshot error : %v", err)
 			rc.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
@@ -591,7 +623,7 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 			}
 			panic(err)
 		}
-		if err := rc.saveSnap(snap); err != nil {
+		if err := rc.persistStorage.SaveSnap(snap); err != nil {
 			panic(err)
 		}
 		rc.Infof("saved snapshot at index %d", snap.Metadata.Index)
@@ -611,25 +643,13 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 	return nil
 }
 
-func (rc *raftNode) saveSnap(snap raftpb.Snapshot) error {
-	walSnap := walpb.Snapshot{
-		Index: snap.Metadata.Index,
-		Term:  snap.Metadata.Term,
-	}
-	if err := rc.wal.SaveSnapshot(walSnap); err != nil {
-		return err
-	}
-	if err := rc.snapshotter.SaveSnap(snap); err != nil {
-		return err
-	}
-	return rc.wal.ReleaseLockTo(snap.Metadata.Index)
-}
-
 // publishEntries writes committed log entries to commit channel and returns
 // whether all entries could be published.
-func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot, raftDone chan struct{}) {
+func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot,
+	raftDone chan struct{}, applyWaitDone chan struct{}) {
 	select {
-	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot, raftDone: raftDone}:
+	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot,
+		raftDone: raftDone, applyWaitDone: applyWaitDone}:
 	case <-rc.stopc:
 		return
 	}
@@ -733,7 +753,7 @@ func (rc *raftNode) serveChannels() {
 		// wait all async operation done
 		rc.wgAsync.Wait()
 		rc.node.Stop()
-		rc.wal.Close()
+		rc.persistStorage.Close()
 	}()
 
 	// event loop on raft state machine updates
@@ -762,19 +782,41 @@ func (rc *raftNode) serveChannels() {
 					return
 				}
 			}
+
 			raftDone := make(chan struct{}, 1)
-			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, raftDone)
-			if isLeader {
-				rc.sendMessages(rd.Messages)
+			var applyWaitDone chan struct{}
+			waitApply := false
+			if !isLeader {
+				// Candidate or follower needs to wait for all pending configuration
+				// changes to be applied before sending messages.
+				// Otherwise we might incorrectly count votes (e.g. votes from removed members).
+				// Also slow machine's follower raft-layer could proceed to become the leader
+				// on its own single-node cluster, before apply-layer applies the config change.
+				// We simply wait for ALL pending entries to be applied for now.
+				// We might improve this later on if it causes unnecessary long blocking issues.
+				for _, ent := range rd.CommittedEntries {
+					if ent.Type == raftpb.EntryConfChange {
+						waitApply = true
+						break
+					}
+				}
+				if waitApply {
+					applyWaitDone = make(chan struct{})
+				}
 			}
-			if err := rc.wal.Save(rd.HardState, rd.Entries); err != nil {
+
+			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, raftDone, applyWaitDone)
+			if isLeader {
+				rc.transport.Send(rc.processMessages(rd.Messages))
+			}
+			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
 				nodeLog.Errorf("raft save wal error: %v", err)
 				go rc.ds.Stop()
 				<-rc.stopc
 				return
 			}
 			if !raft.IsEmptySnap(rd.Snapshot) {
-				if err := rc.saveSnap(rd.Snapshot); err != nil {
+				if err := rc.persistStorage.SaveSnap(rd.Snapshot); err != nil {
 					nodeLog.Errorf("raft save snap error: %v", err)
 					go rc.ds.Stop()
 					<-rc.stopc
@@ -785,9 +827,19 @@ func (rc *raftNode) serveChannels() {
 			}
 			rc.raftStorage.Append(rd.Entries)
 			if !isLeader {
-				rc.sendMessages(rd.Messages)
+				msgs := rc.processMessages(rd.Messages)
+				raftDone <- struct{}{}
+				if waitApply {
+					select {
+					case <-applyWaitDone:
+					case <-rc.stopc:
+						return
+					}
+				}
+				rc.transport.Send(msgs)
+			} else {
+				raftDone <- struct{}{}
 			}
-			raftDone <- struct{}{}
 			rc.node.Advance()
 		case <-rc.stopc:
 			return
@@ -795,7 +847,7 @@ func (rc *raftNode) serveChannels() {
 	}
 }
 
-func (rc *raftNode) sendMessages(msgs []raftpb.Message) {
+func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 	sentAppResp := false
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Type == raftpb.MsgAppResp {
@@ -819,7 +871,7 @@ func (rc *raftNode) sendMessages(msgs []raftpb.Message) {
 			rc.Infof("send vote resp : %v", msgs[i].String())
 		}
 	}
-	rc.transport.Send(msgs)
+	return msgs
 }
 
 func (rc *raftNode) Lead() uint64 { return atomic.LoadUint64(&rc.lead) }
@@ -906,6 +958,13 @@ func (rc *raftNode) ReportUnreachable(id uint64, group raftpb.Group) {
 func (rc *raftNode) ReportSnapshot(id uint64, gp raftpb.Group, status raft.SnapshotStatus) {
 	rc.Infof("node %v in group %v snapshot status: %v", id, gp, status)
 	rc.node.ReportSnapshot(id, gp, status)
+}
+
+func (rc *raftNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
+	if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
+		return rs.Snapshotter.SaveDBFrom(r, msg)
+	}
+	return 0, nil
 }
 
 func (rc *raftNode) purgeFile(done chan struct{}) {
