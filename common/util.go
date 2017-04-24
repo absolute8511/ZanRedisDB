@@ -2,6 +2,7 @@ package common
 
 import (
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -32,8 +33,36 @@ func GetIPv4ForInterfaceName(ifname string) string {
 	return ""
 }
 
+var validNamespaceTableNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+const (
+	InternalPrefix = "##"
+)
+
 func IsValidNamespaceName(ns string) bool {
-	return true
+	return isValidNameString(ns)
+}
+
+func IsValidTableName(tb []byte) bool {
+	return isValidName(tb)
+}
+
+func IsInternalTableName(tb string) bool {
+	return strings.HasPrefix(tb, InternalPrefix)
+}
+
+func isValidNameString(name string) bool {
+	if len(name) > 255 || len(name) < 1 {
+		return false
+	}
+	return validNamespaceTableNameRegex.MatchString(name)
+}
+
+func isValidName(name []byte) bool {
+	if len(name) > 255 || len(name) < 1 {
+		return false
+	}
+	return validNamespaceTableNameRegex.Match(name)
 }
 
 func GetNsDesp(ns string, part int) string {

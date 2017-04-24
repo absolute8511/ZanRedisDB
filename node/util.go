@@ -51,6 +51,10 @@ func rebuildFirstKeyAndPropose(kvn *KVNode, conn redcon.Conn, cmd redcon.Command
 		conn.WriteError(err.Error())
 		return cmd, nil, false
 	}
+	if common.IsValidTableName(key) {
+		conn.WriteError(common.ErrInvalidTableName.Error())
+		return cmd, nil, false
+	}
 	cmd.Args[1] = key
 	ncmd := buildCommand(cmd.Args)
 	copy(cmd.Raw[0:], ncmd.Raw[:])
@@ -176,6 +180,11 @@ func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc
 				conn.WriteError(err.Error())
 				return
 			}
+			if common.IsValidTableName(key) {
+				conn.WriteError(common.ErrInvalidTableName.Error())
+				return
+			}
+
 			args[i] = key
 		}
 		ncmd := buildCommand(cmd.Args)
@@ -278,6 +287,11 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.CommandFu
 				conn.WriteError(err.Error())
 				return
 			}
+			if common.IsValidTableName(key) {
+				conn.WriteError(common.ErrInvalidTableName.Error())
+				return
+			}
+
 			args[i] = key
 		}
 		ncmd := buildCommand(cmd.Args)

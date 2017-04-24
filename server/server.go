@@ -229,6 +229,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 		return nil, cmd, err
 	}
 	// we need decide the partition id from the primary key
+	// if the command need cross multi partitions, we need handle separate
 	n, err := self.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
 	if err != nil {
 		return nil, cmd, err

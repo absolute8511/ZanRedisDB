@@ -13,12 +13,13 @@ const (
 )
 
 var (
-	ErrInvalidCommand  = errors.New("invalid command")
-	ErrStopped         = errors.New("the node stopped")
-	ErrTimeout         = errors.New("queue request timeout")
-	ErrInvalidArgs     = errors.New("Invalid arguments")
-	ErrInvalidRedisKey = errors.New("invalid redis key")
-	ErrEpochMismatch   = errors.New("epoch mismatch")
+	ErrInvalidCommand   = errors.New("invalid command")
+	ErrStopped          = errors.New("the node stopped")
+	ErrTimeout          = errors.New("queue request timeout")
+	ErrInvalidArgs      = errors.New("Invalid arguments")
+	ErrInvalidRedisKey  = errors.New("invalid redis key")
+	ErrEpochMismatch    = errors.New("epoch mismatch")
+	ErrInvalidTableName = errors.New("table name is invalid")
 )
 
 // for out use

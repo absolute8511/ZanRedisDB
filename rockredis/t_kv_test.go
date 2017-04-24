@@ -188,7 +188,7 @@ func TestDBKV(t *testing.T) {
 }
 
 func TestDBKVWithNoTable(t *testing.T) {
-	db := getTestDB(t)
+	db := getTestDBNoTableCounter(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
