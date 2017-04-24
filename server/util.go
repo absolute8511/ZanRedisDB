@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"github.com/tidwall/redcon"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/tidwall/redcon"
 )
 
 var (
@@ -235,4 +236,16 @@ func qcmdlower(n []byte) string {
 		}
 	}
 	return strings.ToLower(string(n))
+}
+
+func isScanCommand(cmd string) bool {
+	n := len(cmd)
+	if n < 4 {
+		return false
+	}
+	if cmd[n-1] == 'n' && cmd[n-2] == 'a' &&
+		cmd[n-3] == 'c' && cmd[n-4] == 's' {
+		return true
+	}
+	return false
 }

@@ -1,9 +1,10 @@
 package node
 
 import (
+	"strconv"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
-	"strconv"
 )
 
 var nodeLog = common.NewLevelLogger(common.LOG_DEBUG, common.NewDefaultLogger("node"))
@@ -51,6 +52,7 @@ func rebuildFirstKeyAndPropose(kvn *KVNode, conn redcon.Conn, cmd redcon.Command
 		conn.WriteError(err.Error())
 		return cmd, nil, false
 	}
+
 	cmd.Args[1] = key
 	ncmd := buildCommand(cmd.Args)
 	copy(cmd.Raw[0:], ncmd.Raw[:])
@@ -322,5 +324,18 @@ func wrapWriteCommandKSubkeyVSubkeyV(kvn *KVNode, f common.CommandRspFunc) commo
 			return
 		}
 		f(conn, cmd, rsp)
+	}
+}
+
+func wrapScanCommand(f common.ScanCommandFunc) common.ScanCommandFunc {
+	return func(ch chan common.ScanResult, cmd redcon.Command) {
+		_, key, err := common.ExtractNamesapce(cmd.Args[1])
+		if err != nil {
+			ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
+			return
+		}
+		cmd.Args[1] = key
+
+		f(ch, cmd)
 	}
 }

@@ -3,8 +3,9 @@ package common
 import (
 	"bytes"
 	"errors"
-	"github.com/tidwall/redcon"
 	"strings"
+
+	"github.com/tidwall/redcon"
 )
 
 const (
@@ -18,6 +19,7 @@ var (
 	ErrTimeout         = errors.New("queue request timeout")
 	ErrInvalidArgs     = errors.New("Invalid arguments")
 	ErrInvalidRedisKey = errors.New("invalid redis key")
+	ErrInvalidKeyType  = errors.New("Invalid key type")
 	ErrEpochMismatch   = errors.New("epoch mismatch")
 )
 
@@ -79,6 +81,7 @@ const (
 	MinScore      int64 = -1<<63 + 1
 	MaxScore      int64 = 1<<63 - 1
 	InvalidScore  int64 = -1 << 63
+	MAX_SCAN_JOB        = 10
 )
 
 const (
@@ -106,16 +109,19 @@ type ScorePair struct {
 type CommandFunc func(redcon.Conn, redcon.Command)
 type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
 type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
+type ScanCommandFunc func(chan ScanResult, redcon.Command)
 
 type CmdRouter struct {
 	cmds         map[string]CommandFunc
 	internalCmds map[string]InternalCommandFunc
+	scanCmds     map[string]ScanCommandFunc
 }
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
 		cmds:         make(map[string]CommandFunc),
 		internalCmds: make(map[string]InternalCommandFunc),
+		scanCmds:     make(map[string]ScanCommandFunc),
 	}
 }
 
@@ -142,6 +148,19 @@ func (r *CmdRouter) RegisterInternal(name string, f InternalCommandFunc) bool {
 
 func (r *CmdRouter) GetInternalCmdHandler(name string) (InternalCommandFunc, bool) {
 	v, ok := r.internalCmds[strings.ToLower(name)]
+	return v, ok
+}
+
+func (r *CmdRouter) RegisterScan(name string, f ScanCommandFunc) bool {
+	if _, ok := r.scanCmds[strings.ToLower(name)]; ok {
+		return false
+	}
+	r.scanCmds[name] = f
+	return true
+}
+
+func (r *CmdRouter) GetScanCmdHandler(name string) (ScanCommandFunc, bool) {
+	v, ok := r.scanCmds[strings.ToLower(name)]
 	return v, ok
 }
 
@@ -205,4 +224,13 @@ type IClusterInfo interface {
 	// return leader node id, leader epoch, for this namespace
 	GetNamespaceLeader(fullNS string) (uint64, int64, error)
 	UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error)
+}
+
+type ScanResult struct {
+	NormalResult [][]byte
+	HScanResult  []KVRecord
+	ZScanResult  []ScorePair
+	List         interface{}
+	NextCursor   []byte
+	Error        error
 }

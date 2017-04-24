@@ -247,6 +247,7 @@ func (self *EtcdRegister) watchNamespaces() {
 func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
 	coordLog.Infof("refreshing namespaces")
 	atomic.StoreInt32(&self.ifNamespaceChanged, 0)
+	coordLog.Infof(self.namespaceRoot)
 	rsp, err := self.client.Get(self.namespaceRoot, true, true)
 	if err != nil {
 		atomic.StoreInt32(&self.ifNamespaceChanged, 1)

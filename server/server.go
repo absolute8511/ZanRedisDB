@@ -2,6 +2,15 @@ package server
 
 import (
 	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/cluster/datanode_coord"
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -13,14 +22,6 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/tidwall/redcon"
 	"golang.org/x/net/context"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 var (
@@ -49,6 +50,8 @@ type Server struct {
 	dataCoord     *datanode_coord.DataCoordinator
 	nsMgr         *node.NamespaceMgr
 	startTime     time.Time
+	maxScanJob    int
+	scanStats     common.ScanStats
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -61,6 +64,9 @@ func NewServer(conf ServerConfig) *Server {
 	}
 	if conf.ElectionTick < 5 {
 		conf.ElectionTick = 5
+	}
+	if conf.MaxScanJob <= 0 {
+		conf.MaxScanJob = common.MAX_SCAN_JOB
 	}
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
@@ -102,6 +108,7 @@ func NewServer(conf ServerConfig) *Server {
 		stopC:         make(chan struct{}),
 		raftHttpDoneC: make(chan struct{}),
 		startTime:     time.Now(),
+		maxScanJob:    conf.MaxScanJob,
 	}
 
 	ts := &stats.TransportStats{}
@@ -166,6 +173,7 @@ func (self *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
 func (self *Server) GetStats(leaderOnly bool) common.ServerStats {
 	var ss common.ServerStats
 	ss.NSStats = self.nsMgr.GetStats(leaderOnly)
+	ss.ScanStats = self.scanStats.Copy()
 	return ss
 }
 
@@ -230,6 +238,63 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	}
 	// TODO: to make consistence, read command should request the raft read index if not leader
 	return h, cmd, nil
+}
+
+func (self *Server) GetScanHandler(cmdName string, cmd redcon.Command) (common.ScanCommandFunc, redcon.Command, error) {
+	if len(cmd.Args) < 2 {
+		return nil, cmd, common.ErrInvalidArgs
+	}
+	rawKey := cmd.Args[1]
+
+	namespace, pk, err := common.ExtractNamesapce(rawKey)
+	if err != nil {
+		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
+		return nil, cmd, err
+	}
+	// we need decide the partition id from the primary key
+	n, err := self.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
+	if err != nil {
+		return nil, cmd, err
+	}
+	// TODO: for multi primary keys such as mset, mget, we need make sure they are all in the same partition
+	h, ok := n.Node.GetScanHandler(cmdName)
+	if !ok {
+		return nil, cmd, common.ErrInvalidCommand
+	}
+	// TODO: to make consistence, read command should request the raft read index if not leader
+	return h, cmd, nil
+}
+
+func (self *Server) GetScanHandlers(cmdName string, cmd redcon.Command) ([]common.ScanCommandFunc, redcon.Command, error) {
+	if len(cmd.Args) < 2 {
+		return nil, cmd, common.ErrInvalidArgs
+	}
+	rawKey := cmd.Args[1]
+
+	namespace, _, err := common.ExtractNamesapce(rawKey)
+	if err != nil {
+		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
+		return nil, cmd, err
+	}
+
+	nodes, err := self.nsMgr.GetNamespaceNodesWithBaseName(namespace)
+	if err != nil {
+		return nil, cmd, err
+	}
+
+	var handlers []common.ScanCommandFunc
+	for _, v := range nodes {
+		h, ok := v.Node.GetScanHandler(cmdName)
+		if ok {
+			handlers = append(handlers, h)
+		}
+	}
+
+	if len(handlers) <= 0 {
+		return nil, cmd, common.ErrInvalidCommand
+	}
+
+	return handlers, cmd, nil
 }
 
 func (self *Server) serveRaft() {

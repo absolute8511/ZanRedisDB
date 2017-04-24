@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/net/context"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/net/context"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/raft"
@@ -228,6 +229,10 @@ func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool) {
 	return self.router.GetCmdHandler(cmd)
 }
 
+func (self *KVNode) GetScanHandler(cmd string) (common.ScanCommandFunc, bool) {
+	return self.router.GetScanCmdHandler(cmd)
+}
+
 func (self *KVNode) registerHandler() {
 	// for kv
 	self.router.Register("get", wrapReadCommandK(self.getCommand))
@@ -292,11 +297,18 @@ func (self *KVNode) registerHandler() {
 	self.router.Register("smclear", wrapWriteCommandKK(self, self.smclearCommand))
 
 	// for scan
-	self.router.Register("scan", wrapReadCommandKAnySubkey(self.scanCommand))
-	self.router.Register("hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
-	self.router.Register("sscan", wrapReadCommandKAnySubkey(self.sscanCommand))
-	self.router.Register("zscan", wrapReadCommandKAnySubkey(self.zscanCommand))
-	self.router.Register("advscan", self.advanceScanCommand)
+	/*
+		self.router.Register("scan", wrapReadCommandKAnySubkey(self.scanCommand))
+		self.router.Register("hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
+		self.router.Register("sscan", wrapReadCommandKAnySubkey(self.sscanCommand))
+		self.router.Register("zscan", wrapReadCommandKAnySubkey(self.zscanCommand))
+		self.router.Register("advscan", self.advanceScanCommand)
+	*/
+	self.router.RegisterScan("scan", wrapScanCommand(self.scanCommandSingle))
+	self.router.RegisterScan("hscan", wrapScanCommand(self.hscanCommandSingle))
+	self.router.RegisterScan("sscan", wrapScanCommand(self.sscanCommandSingle))
+	self.router.RegisterScan("zscan", wrapScanCommand(self.zscanCommandSingle))
+	self.router.RegisterScan("advscan", self.advanceScanCommandSingle)
 
 	// only write command need to be registered as internal
 	// kv

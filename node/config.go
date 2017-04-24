@@ -8,7 +8,7 @@ type NamespaceConfig struct {
 	// namespace full name with partition
 	Name string `json:"name"`
 	// namespace name without partition
-	BaseName       string          `json:"name"`
+	BaseName       string          `json:"base_name"`
 	EngType        string          `json:"eng_type"`
 	PartitionNum   int             `json:"partition_num"`
 	SnapCount      int             `json:"snap_count"`

@@ -1,9 +1,13 @@
 package common
 
 import (
+	"bytes"
+	"encoding/gob"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/tidwall/redcon"
 )
 
 const (
@@ -52,4 +56,25 @@ func GetNamespaceAndPartition(fullNamespace string) (string, int) {
 	}
 
 	return namespace, pid
+}
+
+func DeepCopyCmd(cmd redcon.Command) redcon.Command {
+	var newCmd redcon.Command
+	newCmd.Raw = append(newCmd.Raw, cmd.Raw...)
+	for i := 0; i < len(cmd.Args); i++ {
+		var tmp []byte
+		tmp = append(tmp, cmd.Args[i]...)
+		newCmd.Args = append(newCmd.Args, tmp)
+	}
+	return newCmd
+}
+
+func DeepCopy(src interface{}) (dst interface{}, err error) {
+	var buf bytes.Buffer
+	if err = gob.NewEncoder(&buf).Encode(src); err != nil {
+		return
+	}
+
+	err = gob.NewDecoder(bytes.NewBuffer(buf.Bytes())).Decode(dst)
+	return
 }

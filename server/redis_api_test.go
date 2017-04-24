@@ -2,10 +2,6 @@ package server
 
 import (
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
-	"github.com/siddontang/goredis"
 	"io/ioutil"
 	"path"
 	"reflect"
@@ -13,12 +9,19 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/siddontang/goredis"
 )
 
 var testOnce sync.Once
 var kvs *Server
 var redisport int
 var OK = "OK"
+
+var Separator = "@|@"
 
 func startTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
@@ -1867,6 +1870,296 @@ func TestSetScan(t *testing.T) {
 
 func TestZSetScan(t *testing.T) {
 	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:scan_zset"
+	c.Do("ZADD", key, 1, "a", 2, "b")
+
+	if ay, err := goredis.Values(c.Do("ZSCAN", key, "")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "a", 1, "b", 2)
+	}
+}
+
+func startDistTestServer(t *testing.T) (*Server, int, string) {
+	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("dir:%v\n", tmpDir)
+	ioutil.WriteFile(
+		path.Join(tmpDir, "myid"),
+		[]byte(strconv.FormatInt(int64(1), 10)),
+		common.FILE_PERM)
+	raftAddr := "http://127.0.0.1:12345"
+	redisport := 22345
+	var replica node.ReplicaInfo
+	replica.NodeID = 1
+	replica.ReplicaID = 1
+	replica.RaftAddr = raftAddr
+	kvOpts := ServerConfig{
+		ClusterID:     "test",
+		DataDir:       tmpDir,
+		RedisAPIPort:  redisport,
+		LocalRaftAddr: raftAddr,
+		BroadcastAddr: "127.0.0.1",
+		TickMs:        100,
+		ElectionTick:  5,
+	}
+	nsConf := node.NewNSConfig()
+	nsConf.Name = "default-0"
+	nsConf.BaseName = "default"
+	nsConf.EngType = rockredis.EngType
+	nsConf.PartitionNum = 2
+	nsConf.Replicator = 1
+	nsConf.RaftGroupConf.GroupID = 1000
+	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	kv := NewServer(kvOpts)
+	_, err = kv.InitKVNamespace(1, nsConf, false)
+	if err != nil {
+		t.Fatalf("failed to init namespace: %v", err)
+	}
+
+	nsConf.Name = "default-1"
+	_, err = kv.InitKVNamespace(1, nsConf, false)
+	if err != nil {
+		t.Fatalf("failed to init namespace: %v", err)
+	}
+
+	kv.Start()
+	time.Sleep(time.Second)
+	return kv, redisport, tmpDir
+}
+
+func getDistTestConn(t *testing.T) *goredis.PoolConn {
+	testOnce.Do(func() {
+		kvs, redisport, _ = startDistTestServer(t)
+	},
+	)
+	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisport), "")
+	c.SetMaxIdleConns(4)
+	conn, err := c.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+func checkDistScanValues(t *testing.T, ay interface{}, values ...interface{}) {
+	a, err := goredis.Strings(ay, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(a) != len(values) {
+		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
+	}
+	equalCount := 0
+
+	for _, v := range a {
+		for j, _ := range values {
+			if string(v) == fmt.Sprintf("%v", values[j]) {
+				equalCount++
+			}
+		}
+	}
+
+	if equalCount != len(a) {
+		t.Fatal("not all equal")
+	}
+}
+
+func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"", tp, "count", 5)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "testscan:1"+Separator+"testscan:12"+Separator && string(n) != "testscan:12"+Separator+"testscan:1"+Separator {
+		t.Fatal(string(n))
+	} else {
+		checkDistScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:11", "testscan:12")
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:1"+Separator+"default:testscan:12"+Separator, tp, "count", 6)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "testscan:14"+Separator+"testscan:19"+Separator && string(n) != "testscan:19"+Separator+"testscan:14"+Separator {
+		t.Fatal(string(n))
+	} else {
+		checkDistScanValues(t, ay[1], "testscan:10", "testscan:13", "testscan:14", "testscan:16", "testscan:18", "testscan:19")
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:14"+Separator+"default:testscan:19"+Separator, tp, "count", 8)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "testscan:4"+Separator {
+		t.Fatal(string(n))
+	} else {
+		if len(ay[1].([]interface{})) != 0 {
+			checkDistScanValues(t, ay[1], "testscan:15", "testscan:17", "testscan:2", "testscan:4", "testscan:3", "testscan:8", "testscan:9")
+		}
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:4"+Separator, tp, "count", 5)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "" {
+		t.Fatal(string(n))
+	} else {
+		if len(ay[1].([]interface{})) != 0 {
+			checkDistScanValues(t, ay[1], "testscan:5", "testscan:7", "testscan:6")
+		}
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:9"+Separator, tp, "count", 0)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "" {
+		t.Fatal(string(n))
+	} else {
+		if len(ay[1].([]interface{})) != 0 {
+			t.Fatal(ay[1])
+		}
+	}
+}
+
+func TestDistScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	testDistKVScan(t, c)
+	testDistHashKeyScan(t, c)
+	testDistListKeyScan(t, c)
+	testDistZSetKeyScan(t, c)
+	testDistSetKeyScan(t, c)
+}
+
+func TestDistKVScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	testDistKVScan(t, c)
+	fmt.Println(kvs.GetStats())
+}
+
+func testDistKVScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("set", "default:testscan:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkDistAdvanceScan(t, c, "KV")
+}
+
+func TestDistHashKeyScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	testDistHashKeyScan(t, c)
+}
+
+func testDistHashKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("hset", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkDistAdvanceScan(t, c, "HASH")
+}
+
+func TestDistListKeyScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	testDistListKeyScan(t, c)
+}
+
+func testDistListKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("lpush", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkDistAdvanceScan(t, c, "LIST")
+}
+
+func TestDistZSetKeyScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	testDistZSetKeyScan(t, c)
+}
+
+func testDistZSetKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("zadd", "default:testscan:"+fmt.Sprintf("%d", i), i, []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkDistAdvanceScan(t, c, "ZSET")
+}
+
+func TestDistSetKeyScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	testDistSetKeyScan(t, c)
+}
+
+func testDistSetKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("sadd", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkDistAdvanceScan(t, c, "SET")
+}
+
+func TestDistHashScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	key := "default:testscan:scan_hash"
+	c.Do("HMSET", key, "a", 1, "b", 2)
+
+	if ay, err := goredis.Values(c.Do("HSCAN", key, "")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "a", 1, "b", 2)
+	}
+}
+
+func TestDistSetScan(t *testing.T) {
+	c := getDistTestConn(t)
+	defer c.Close()
+
+	key := "default:test:scan_set"
+	c.Do("SADD", key, "a", "b")
+
+	if ay, err := goredis.Values(c.Do("SSCAN", key, "")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "a", "b")
+	}
+}
+
+func TestDistZSetScan(t *testing.T) {
+	c := getDistTestConn(t)
 	defer c.Close()
 
 	key := "default:test:scan_zset"

@@ -69,8 +69,47 @@ type NamespaceStats struct {
 	IsLeader          bool                   `json:"is_leader"`
 }
 
+type ScanStats struct {
+	ScanCount uint64
+	// <1024us, 2ms, 4ms, 8ms, 16ms, 32ms, 64ms, 128ms, 256ms, 512ms, 1024ms, 2048ms, 4s, 8s
+	ScanLatencyStats [16]int64 `json:"scan_latency_stats"`
+}
+
+func (self *ScanStats) IncScanCount() {
+	atomic.AddUint64(&self.ScanCount, 1)
+}
+
+func (self *ScanStats) UpdateLatencyStats(latencyUs int64) {
+	bucket := 0
+	if latencyUs < 1024 {
+	} else {
+		bucket = int(math.Log2(float64(latencyUs/1000))) + 1
+	}
+	if bucket >= len(self.ScanLatencyStats) {
+		bucket = len(self.ScanLatencyStats) - 1
+	}
+	atomic.AddInt64(&self.ScanLatencyStats[bucket], 1)
+}
+
+func (self *ScanStats) UpdateScanStats(latencyUs int64) {
+	self.IncScanCount()
+	self.UpdateLatencyStats(latencyUs)
+}
+
+func (self *ScanStats) Copy() *ScanStats {
+	var s ScanStats
+	s.ScanCount = atomic.LoadUint64(&self.ScanCount)
+	for i := 0; i < len(self.ScanLatencyStats); i++ {
+		s.ScanLatencyStats[i] = atomic.LoadInt64(&self.ScanLatencyStats[i])
+	}
+	return &s
+}
+
 type ServerStats struct {
 	// database stats
 	NSStats []NamespaceStats `json:"ns_stats"`
+	//scan统计
+	ScanStats *ScanStats `json:"scan_stats"`
+
 	// other server related stats
 }
