@@ -712,7 +712,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		atomic.StoreInt32(&rc.memberCnt, int32(len(rc.members)))
 		rc.memMutex.Unlock()
 		if cc.ReplicaID == uint64(rc.config.ID) {
-			rc.Infof("I've been removed from the cluster! Shutting down.")
+			rc.Infof("I've been removed from the cluster! Shutting down. %v", cc.String())
 			return true, confChanged, nil
 		}
 	case raftpb.ConfChangeUpdateNode:
@@ -758,7 +758,7 @@ func (rc *raftNode) serveChannels() {
 		// store raft entries to wal, then publish over commit channel
 		case rd, ok := <-rc.node.Ready():
 			if !ok {
-				rc.Infof("raft loop stopped")
+				rc.Errorf("raft loop stopped")
 				return
 			}
 			if rd.SoftState != nil {
@@ -987,6 +987,11 @@ func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 func (rc *raftNode) Infof(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
 	nodeLog.InfoDepth(1, fmt.Sprintf("%v: %s", rc.Descrp(), msg))
+}
+
+func (rc *raftNode) Errorf(f string, args ...interface{}) {
+	msg := fmt.Sprintf(f, args...)
+	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", rc.Descrp(), msg))
 }
 
 func (rc *raftNode) Descrp() string {

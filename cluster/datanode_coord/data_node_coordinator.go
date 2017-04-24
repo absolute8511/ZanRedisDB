@@ -285,7 +285,7 @@ func (self *DataCoordinator) isMeInRaftGroup(nsInfo *PartitionMetaInfo) (bool, e
 
 		for _, m := range rsp {
 			if m.NodeID == self.GetMyRegID() && m.ID == nsInfo.RaftIDs[self.GetMyID()] {
-				CoordLog().Infof("from %v for namespace: %v, node is still in raft: %v", nip, nsInfo.GetDesp(), rsp)
+				CoordLog().Infof("from %v for namespace: %v, node is still in raft: %v", nip, nsInfo.GetDesp(), m)
 				return true, nil
 			}
 		}

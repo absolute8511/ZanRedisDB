@@ -344,7 +344,7 @@ func (self *KVNode) handleProposeReq() {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			self.rn.Infof("handle propose loop panic: %s:%v", buf, e)
+			self.rn.Errorf("handle propose loop panic: %s:%v", buf, e)
 		}
 		for _, r := range reqList.Reqs {
 			self.w.Trigger(r.Header.ID, common.ErrStopped)

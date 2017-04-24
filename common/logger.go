@@ -115,6 +115,12 @@ func (self *LevelLogger) Errorf(f string, args ...interface{}) {
 	}
 }
 
+func (self *LevelLogger) ErrorDepth(d int, l string) {
+	if self.Logger != nil {
+		self.Logger.OutputErr(2+d, l)
+	}
+}
+
 func (self *LevelLogger) Warningf(f string, args ...interface{}) {
 	if self.Logger != nil && self.Level() >= LOG_WARN {
 		self.Logger.OutputWarning(2, fmt.Sprintf(f, args...))
