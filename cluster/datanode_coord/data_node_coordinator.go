@@ -553,7 +553,11 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					}
 					if !found {
 						CoordLog().Infof("raft member %v not found in meta: %v", m, namespaceMeta.RaftNodes)
-						self.removeNamespaceRaftMember(namespaceMeta, m)
+						// here we do not remove other member from raft
+						// it may happen while the namespace info in the register is not updated due to network lag
+						// so the new added node (add by api) may not in the meta info
+						// self.removeNamespaceRaftMember(namespaceMeta, m)
+						go self.tryCheckNamespaces()
 					} else {
 						for nid, removing := range namespaceMeta.Removings {
 							if m.ID == removing.RemoveReplicaID && m.NodeID == ExtractRegIDFromGenID(nid) {
@@ -596,7 +600,7 @@ func (self *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.N
 			return ErrNamespaceNotReady
 		}
 		m := localNamespace.Node.GetLocalMemberInfo()
-		CoordLog().Infof("removing %v from namespace : %v", m.ID, m.GroupName)
+		CoordLog().Infof("propose remove %v from namespace : %v", m.ID, m.GroupName)
 
 		localErr := localNamespace.Node.ProposeRemoveMember(*m)
 		if localErr != nil {
