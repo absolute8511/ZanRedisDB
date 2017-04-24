@@ -795,9 +795,10 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 			select {
 			case <-self.stopChan:
 			default:
-				self.destroy()
+				self.Stop()
 			}
 		}()
+		return false
 	}
 	return confChanged
 }
@@ -820,6 +821,13 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 		select {
 		case ent, ok := <-commitC:
 			if !ok {
+				go func() {
+					select {
+					case <-self.stopChan:
+					default:
+						self.Stop()
+					}
+				}()
 				return
 			}
 			if ent.raftDone == nil {
