@@ -70,7 +70,7 @@ type NamespaceStats struct {
 }
 
 type ScanStats struct {
-	ScanCount uint64
+	ScanCount uint64 `json:"scan_count"`
 	// <1024us, 2ms, 4ms, 8ms, 16ms, 32ms, 64ms, 128ms, 256ms, 512ms, 1024ms, 2048ms, 4s, 8s
 	ScanLatencyStats [16]int64 `json:"scan_latency_stats"`
 }

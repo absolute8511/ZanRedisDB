@@ -2046,7 +2046,6 @@ func TestDistKVScan(t *testing.T) {
 	defer c.Close()
 
 	testDistKVScan(t, c)
-	fmt.Println(kvs.GetStats())
 }
 
 func testDistKVScan(t *testing.T, c *goredis.PoolConn) {
