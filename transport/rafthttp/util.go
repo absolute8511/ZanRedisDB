@@ -15,8 +15,6 @@
 package rafthttp
 
 import (
-	"crypto/tls"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -25,7 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/version"
@@ -39,7 +36,7 @@ var (
 
 // NewListener returns a listener for raft message transfer between peers.
 // It uses timeout listener to identify broken streams promptly.
-func NewListener(u url.URL, tlscfg *tls.Config) (net.Listener, error) {
+func NewListener(u url.URL, tlscfg *transport.TLSInfo) (net.Listener, error) {
 	return transport.NewTimeoutListener(u.Host, u.Scheme, tlscfg, ConnReadTimeout, ConnWriteTimeout)
 }
 
@@ -59,31 +56,6 @@ func NewRoundTripper(tlsInfo transport.TLSInfo, dialTimeout time.Duration) (http
 // sent on broken connection.
 func newStreamRoundTripper(tlsInfo transport.TLSInfo, dialTimeout time.Duration) (http.RoundTripper, error) {
 	return transport.NewTimeoutTransport(tlsInfo, dialTimeout, ConnReadTimeout, ConnWriteTimeout)
-}
-
-func writeEntryTo(w io.Writer, ent *raftpb.Entry) error {
-	size := ent.Size()
-	if err := binary.Write(w, binary.BigEndian, uint64(size)); err != nil {
-		return err
-	}
-	b, err := ent.Marshal()
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(b)
-	return err
-}
-
-func readEntryFrom(r io.Reader, ent *raftpb.Entry) error {
-	var l uint64
-	if err := binary.Read(r, binary.BigEndian, &l); err != nil {
-		return err
-	}
-	buf := make([]byte, int(l))
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return err
-	}
-	return ent.Unmarshal(buf)
 }
 
 // createPostRequest creates a HTTP POST request that sends raft message.

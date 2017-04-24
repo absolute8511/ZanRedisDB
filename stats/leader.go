@@ -45,7 +45,6 @@ func (ls *PeersStats) JSON() []byte {
 	b, err := json.Marshal(stats)
 	// TODO(jonboulle): appropriate error handling?
 	if err != nil {
-		plog.Errorf("error marshalling leader stats (%v)", err)
 	}
 	return b
 }

@@ -14,6 +14,7 @@ type ServerConfig struct {
 
 	ClusterID                  string   `flag:"cluster-id"`
 	ClusterLeadershipAddresses string   `flag:"cluster-leadership-addresses" cfg:"cluster_leadership_addresses"`
+	AutoBalanceAndMigrate      bool     `flag:"auto-balance-and-migrate"`
 	BalanceInterval            []string `flag:"balance-interval"`
 
 	LogLevel int32  `flag:"log-level" cfg:"log_level"`

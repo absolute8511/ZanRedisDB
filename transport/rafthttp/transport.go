@@ -50,6 +50,7 @@ type Transporter interface {
 	// Start starts the given Transporter.
 	// Start MUST be called before calling other functions in the interface.
 	Start() error
+	IsStarted() bool
 	// Handler returns the HTTP handler of the transporter.
 	// A transporter HTTP handler handles the HTTP requests
 	// from remote peers.
@@ -400,6 +401,7 @@ func NewNopTransporter() Transporter {
 }
 
 func (s *nopTransporter) Start() error                        { return nil }
+func (s *nopTransporter) IsStarted() bool                     { return true }
 func (s *nopTransporter) Handler() http.Handler               { return nil }
 func (s *nopTransporter) Send(m []raftpb.Message)             {}
 func (s *nopTransporter) SendSnapshot(m snap.Message)         {}

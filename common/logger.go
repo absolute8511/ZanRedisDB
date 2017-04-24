@@ -26,7 +26,7 @@ func header(lvl, msg string) string {
 
 func NewDefaultLogger(module string) *defaultLogger {
 	return &defaultLogger{
-		logger: log.New(os.Stderr, module, log.LstdFlags|log.Lmicroseconds|log.Lshortfile),
+		logger: log.New(os.Stdout, module, log.LstdFlags|log.Lmicroseconds|log.Lshortfile),
 	}
 }
 

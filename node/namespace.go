@@ -98,8 +98,8 @@ func (self *NamespaceNode) GetMembers() []*common.MemberInfo {
 	return self.Node.GetMembers()
 }
 
-func (self *NamespaceNode) Start() error {
-	if err := self.Node.Start(); err != nil {
+func (self *NamespaceNode) Start(forceStandaloneCluster bool) error {
+	if err := self.Node.Start(forceStandaloneCluster); err != nil {
 		return err
 	}
 	atomic.StoreInt32(&self.ready, 1)
@@ -188,7 +188,7 @@ func (self *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 func (self *NamespaceMgr) Start() {
 	self.mutex.Lock()
 	for _, kv := range self.kvNodes {
-		kv.Start()
+		kv.Start(false)
 	}
 	self.mutex.Unlock()
 	self.wg.Add(1)

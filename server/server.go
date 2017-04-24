@@ -185,6 +185,13 @@ func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig, join 
 	return self.nsMgr.InitNamespaceNode(conf, id, join)
 }
 
+func (self *Server) RestartAsStandalone(fullNamespace string) error {
+	if self.dataCoord != nil {
+		return self.dataCoord.RestartAsStandalone(fullNamespace)
+	}
+	return nil
+}
+
 func (self *Server) Start() {
 	self.raftTransport.Start()
 	self.wg.Add(1)

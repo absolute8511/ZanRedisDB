@@ -29,7 +29,8 @@ var (
 	reverseProxyPort   = flagSet.String("reverse-proxy-port", "", "<port> for reverse proxy")
 
 	clusterLeadershipAddresses = flagSet.String("cluster-leadership-addresses", "", " the cluster leadership server list")
-	clusterID                  = flagSet.String("cluster-id", "test-cluster", "the cluster id used for separating different nsq cluster.")
+	clusterID                  = flagSet.String("cluster-id", "test-cluster", "the cluster id used for separating different cluster.")
+	autoBalance                = flagSet.Bool("auto-balance-and-migrate", false, "auto balance and migrate the data while unstable")
 
 	logLevel        = flagSet.Int("log-level", 1, "log verbose level")
 	logDir          = flagSet.String("log-dir", "", "directory for log file")

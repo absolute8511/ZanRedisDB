@@ -124,8 +124,8 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	return s, nil
 }
 
-func (self *KVNode) Start() error {
-	err := self.rn.startRaft(self)
+func (self *KVNode) Start(standalone bool) error {
+	err := self.rn.startRaft(self, standalone)
 	if err != nil {
 		return err
 	}
@@ -841,6 +841,9 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 			<-ent.raftDone
 			self.maybeTriggerSnapshot(&np, confChanged)
 			self.rn.handleSendSnapshot(&np)
+			if ent.applyWaitDone != nil {
+				close(ent.applyWaitDone)
+			}
 		case <-self.stopChan:
 			return
 		}
@@ -1084,5 +1087,5 @@ func (self *KVNode) ReportSnapshot(id uint64, gp raftpb.Group, status raft.Snaps
 }
 
 func (self *KVNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
-	return self.rn.snapshotter.SaveDBFrom(r, msg)
+	return self.rn.SaveDBFrom(r, msg)
 }

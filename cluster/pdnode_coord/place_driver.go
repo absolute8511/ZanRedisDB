@@ -126,6 +126,9 @@ func (self *DataPlacement) DoBalance(monitorChan chan struct{}) {
 				CoordLog().Infof("no balance since cluster is not stable while checking balance")
 				continue
 			}
+			if !self.pdCoord.autoBalance {
+				continue
+			}
 			CoordLog().Infof("begin checking balance of namespace data...")
 			currentNodes := self.pdCoord.getCurrentNodes(nil)
 			validNum := len(currentNodes)
