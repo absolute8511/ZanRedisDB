@@ -62,6 +62,9 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.ElectionTick < 5 {
 		conf.ElectionTick = 5
 	}
+	if conf.ProfilePort == 0 {
+		conf.ProfilePort = 6666
+	}
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
 		Hostname:    hname,

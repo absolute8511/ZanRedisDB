@@ -425,7 +425,9 @@ func (self *Server) DelTombstonePDNode(nid string) bool {
 }
 
 func (self *Server) serveHttpAPI(addr string, stopC <-chan struct{}) {
-	go http.ListenAndServe(":6667", nil)
+	if self.conf.ProfilePort != "" {
+		go http.ListenAndServe(":"+self.conf.ProfilePort, nil)
+	}
 	self.initHttpHandler()
 	srv := http.Server{
 		Addr:    addr,

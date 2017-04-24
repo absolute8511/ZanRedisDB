@@ -7,6 +7,8 @@ broadcast_interface = "eth0"
 ## local reverse proxy port, basically used for collecting the stats 
 reverse_proxy_port = "18003"
 
+profile_port = "6667"
+
 cluster_id = "test-cluster-dev-1"
 ## the etcd cluster ip list
 cluster_leadership_addresses = "127.0.0.1:2379"

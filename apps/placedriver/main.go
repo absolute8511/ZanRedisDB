@@ -27,6 +27,7 @@ var (
 	broadcastAddress   = flagSet.String("broadcast-address", "", "address of this lookupd node, (default to the OS hostname)")
 	broadcastInterface = flagSet.String("broadcast-interface", "", "address of this lookupd node, (default to the OS hostname)")
 	reverseProxyPort   = flagSet.String("reverse-proxy-port", "", "<port> for reverse proxy")
+	profilePort        = flagSet.String("profile-port", "6667", "<port> for golang profile")
 
 	clusterLeadershipAddresses = flagSet.String("cluster-leadership-addresses", "", " the cluster leadership server list")
 	clusterID                  = flagSet.String("cluster-id", "test-cluster", "the cluster id used for separating different cluster.")

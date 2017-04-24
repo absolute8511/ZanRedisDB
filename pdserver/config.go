@@ -11,6 +11,7 @@ type ServerConfig struct {
 	BroadcastInterface string `flag:"broadcast-interface"`
 
 	ReverseProxyPort string `flag:"reverse-proxy-port"`
+	ProfilePort      string `flag:"profile-port"`
 
 	ClusterID                  string   `flag:"cluster-id"`
 	ClusterLeadershipAddresses string   `flag:"cluster-leadership-addresses" cfg:"cluster_leadership_addresses"`
@@ -31,6 +32,7 @@ func NewServerConfig() *ServerConfig {
 		HTTPAddress:        "0.0.0.0:18001",
 		BroadcastAddr:      hostname,
 		BroadcastInterface: "eth0",
+		ProfilePort:        "6667",
 
 		ClusterLeadershipAddresses: "",
 		ClusterID:                  "",
