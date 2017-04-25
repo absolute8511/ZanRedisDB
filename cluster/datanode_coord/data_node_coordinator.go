@@ -444,6 +444,11 @@ func (self *DataCoordinator) transferMyNamespaceLeader(nsInfo *PartitionMetaInfo
 func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 	ticker := time.NewTicker(time.Minute * 5)
 	defer self.wg.Done()
+	type pendingRemoveInfo struct {
+		ts time.Time
+		m  common.MemberInfo
+	}
+	pendingRemovings := make(map[string]map[uint64]pendingRemoveInfo)
 	doWork := func() {
 		if atomic.LoadInt32(&self.stopping) == 1 {
 			return
@@ -540,9 +545,23 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					continue
 				}
 				// the members is more than replica, we need to remove the member that is not necessary anymore
+				pendings, ok := pendingRemovings[namespaceMeta.GetDesp()]
+				if !ok {
+					pendings = make(map[uint64]pendingRemoveInfo)
+					pendingRemovings[namespaceMeta.GetDesp()] = pendings
+				}
+				newestReplicaInfo, err := self.register.GetRemoteNamespaceReplicaInfo(namespaceMeta.Name, namespaceMeta.Partition)
+				if err != nil {
+					if err != ErrKeyNotFound {
+						go self.tryCheckNamespaces()
+					}
+					delete(pendingRemovings, namespaceMeta.GetDesp())
+					continue
+				}
+				namespaceMeta.PartitionReplicaInfo = *newestReplicaInfo
 				for _, m := range members {
 					found := false
-					for nid, rid := range namespaceMeta.RaftIDs {
+					for nid, rid := range newestReplicaInfo.RaftIDs {
 						if m.ID == rid {
 							found = true
 							if m.NodeID != ExtractRegIDFromGenID(nid) {
@@ -552,16 +571,32 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 						}
 					}
 					if !found {
-						CoordLog().Infof("raft member %v not found in meta: %v", m, namespaceMeta.RaftNodes)
-						// here we do not remove other member from raft
+						CoordLog().Infof("raft member %v not found in meta: %v", m, newestReplicaInfo.RaftNodes)
+						// here we do not remove other member immediately from raft
 						// it may happen while the namespace info in the register is not updated due to network lag
 						// so the new added node (add by api) may not in the meta info
-						// self.removeNamespaceRaftMember(namespaceMeta, m)
+						if pendRemove, ok := pendings[m.ID]; ok {
+							if !pendRemove.m.IsEqual(m) {
+								pendings[m.ID] = pendingRemoveInfo{
+									ts: time.Now(),
+									m:  *m,
+								}
+							} else if time.Since(pendRemove.ts) > time.Minute {
+								CoordLog().Infof("pending removing member %v finally removed since not in meta", pendRemove)
+								self.removeNamespaceRaftMember(namespaceMeta, m)
+							}
+						} else {
+							pendings[m.ID] = pendingRemoveInfo{
+								ts: time.Now(),
+								m:  *m,
+							}
+						}
 						go self.tryCheckNamespaces()
 					} else {
-						for nid, removing := range namespaceMeta.Removings {
+						delete(pendings, m.ID)
+						for nid, removing := range newestReplicaInfo.Removings {
 							if m.ID == removing.RemoveReplicaID && m.NodeID == ExtractRegIDFromGenID(nid) {
-								CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, namespaceMeta.Removings)
+								CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
 								self.removeNamespaceRaftMember(namespaceMeta, m)
 							}
 						}
