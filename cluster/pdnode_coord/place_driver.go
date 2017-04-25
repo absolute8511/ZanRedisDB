@@ -98,7 +98,6 @@ func (self *DataPlacement) IsRaftNodeFullJoined(nsInfo *PartitionMetaInfo, nid s
 	if len(nsInfo.RaftNodes) == 0 {
 		return false, nil
 	}
-	var lastErr error
 	for _, remoteNode := range nsInfo.GetISR() {
 		if remoteNode == nid {
 			continue
@@ -110,7 +109,6 @@ func (self *DataPlacement) IsRaftNodeFullJoined(nsInfo *PartitionMetaInfo, nid s
 			nil, time.Second*3, &rsp)
 		if err != nil {
 			CoordLog().Infof("failed (%v) to get members for namespace %v: %v", nip, nsInfo.GetDesp(), err)
-			lastErr = err
 			return false, err
 		}
 
@@ -126,7 +124,7 @@ func (self *DataPlacement) IsRaftNodeFullJoined(nsInfo *PartitionMetaInfo, nid s
 			return false, nil
 		}
 	}
-	return false, lastErr
+	return true, nil
 }
 
 func (self *DataPlacement) SetBalanceInterval(start int, end int) {
