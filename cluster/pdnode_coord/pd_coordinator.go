@@ -564,7 +564,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 					atomic.StoreInt32(&self.isClusterUnstable, 1)
 					for _, parts := range waitingMigrateNamespace {
 						for pid, _ := range parts {
-							parts[pid].Add(time.Second * 10)
+							parts[pid].Add(time.Second)
 						}
 					}
 				}

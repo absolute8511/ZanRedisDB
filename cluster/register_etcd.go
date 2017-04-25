@@ -400,6 +400,23 @@ func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*Parti
 	return p.GetCopy(), nil
 }
 
+func (self *EtcdRegister) GetRemoteNamespaceReplicaInfo(ns string, partition int) (*PartitionReplicaInfo, error) {
+	rsp, err := self.client.Get(self.getNamespaceReplicaInfoPath(ns, partition), false, false)
+	if err != nil {
+		if client.IsKeyNotFound(err) {
+			atomic.StoreInt32(&self.ifNamespaceChanged, 1)
+			return nil, ErrKeyNotFound
+		}
+		return nil, err
+	}
+	var rInfo PartitionReplicaInfo
+	if err = json.Unmarshal([]byte(rsp.Node.Value), &rInfo); err != nil {
+		return nil, err
+	}
+	rInfo.epoch = EpochType(rsp.Node.ModifiedIndex)
+	return &rInfo, nil
+}
+
 func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error) {
 	self.nsMutex.Lock()
 	defer self.nsMutex.Unlock()

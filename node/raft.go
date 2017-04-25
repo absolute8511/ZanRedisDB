@@ -707,6 +707,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		}
 	case raftpb.ConfChangeRemoveNode:
 		rc.memMutex.Lock()
+		rc.Infof("raft replica %v removed from the cluster!", cc.String())
 		delete(rc.members, cc.ReplicaID)
 		confChanged = true
 		atomic.StoreInt32(&rc.memberCnt, int32(len(rc.members)))
