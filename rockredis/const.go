@@ -20,7 +20,8 @@ const (
 	// 0~10 reserved for system usage
 
 	// table count, stats, index, schema, and etc.
-	TableMetaType byte = 10
+	TableMetaType      byte = 10
+	TableIndexMetaType byte = 11
 
 	// for data
 	KVType    byte = 21
@@ -35,13 +36,22 @@ const (
 	SetType    byte = 29
 	SSizeType  byte = 30
 
-	JSONType byte = 31
+	JSONType    byte = 31
+	HLLType     byte = 32 // hyperloglog
+	GeoHashType byte = 33
 
+	ColumnType byte = 38 // used for column store for OLAP
+
+	NonUniqueIndex byte = 40
+	UniqueIndex    byte = 41
+
+	FullTextInvertedIndex   byte = 50
+	FullTextRoaringmapIndex byte = 51
 	// this type has a custom partition key length
 	// to allow all the data store in the same partition
 	// this type allow the transaction in the same tx group,
 	// which will be stored in the same partition
-	FixPartType byte = 50
+	FixPartType byte = 80
 	maxDataType byte = 100
 
 	// use the exp table to store all the expire time for the key
