@@ -97,6 +97,16 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
+	if self.dataCoord != nil {
+		removing, err := self.dataCoord.IsRemovingMember(m)
+		if err != nil {
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+		}
+		if removing {
+			sLog.Infof("refuse to add removing node: %v from remote: %v", m, req.RemoteAddr)
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "removing node should not add to cluster"}
+		}
+	}
 	nsNode := self.GetNamespaceFromFullName(m.GroupName)
 	if nsNode == nil || !nsNode.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: node.ErrNamespacePartitionNotFound.Error()}

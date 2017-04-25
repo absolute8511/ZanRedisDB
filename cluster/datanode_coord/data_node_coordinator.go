@@ -704,6 +704,18 @@ func (self *DataCoordinator) tryCheckNamespaces() {
 func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 	localNamespace *node.NamespaceNode, firstLoad bool) *CoordErr {
 
+	rm, ok := nsInfo.Removings[self.GetMyID()]
+	if ok {
+		// for removing node, we just restart local raft node and
+		// wait sync from raft leader.
+		// For the node not in the raft we will remove this node later so
+		// no need request join again.
+		if rm.RemoveReplicaID == nsInfo.RaftIDs[self.GetMyID()] {
+			CoordLog().Infof("no need request join for removing node: %v, %v", nsInfo.GetDesp(), nsInfo.Removings)
+			return nil
+		}
+	}
+
 	// check if in local raft group
 	myRunning := atomic.AddInt32(&self.catchupRunning, 1)
 	defer atomic.AddInt32(&self.catchupRunning, -1)
@@ -907,6 +919,28 @@ func (self *DataCoordinator) GetSnapshotSyncInfo(fullNamespace string) ([]common
 		ssiList = append(ssiList, ssi)
 	}
 	return ssiList, nil
+}
+
+func (self *DataCoordinator) IsRemovingMember(m common.MemberInfo) (bool, error) {
+	namespace, pid := common.GetNamespaceAndPartition(m.GroupName)
+	if namespace == "" {
+		CoordLog().Warningf("namespace invalid: %v", m.GroupName)
+		return false, ErrNamespaceInvalid
+	}
+	nsInfo, err := self.register.GetNamespacePartInfo(namespace, pid)
+	if err != nil {
+		if err == ErrKeyNotFound {
+			return true, nil
+		}
+		return false, err
+	}
+
+	for nid, rm := range nsInfo.Removings {
+		if rm.RemoveReplicaID == m.ID && ExtractRegIDFromGenID(nid) == m.NodeID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (self *DataCoordinator) GetNamespaceLeader(fullNS string) (uint64, int64, error) {
