@@ -94,6 +94,41 @@ func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid strin
 	return false, lastErr
 }
 
+func (self *DataPlacement) IsRaftNodeFullJoined(nsInfo *PartitionMetaInfo, nid string) (bool, error) {
+	if len(nsInfo.RaftNodes) == 0 {
+		return false, nil
+	}
+	var lastErr error
+	for _, remoteNode := range nsInfo.GetISR() {
+		if remoteNode == nid {
+			continue
+		}
+		nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+		var rsp []*common.MemberInfo
+		_, err := common.APIRequest("GET",
+			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
+			nil, time.Second*3, &rsp)
+		if err != nil {
+			CoordLog().Infof("failed (%v) to get members for namespace %v: %v", nip, nsInfo.GetDesp(), err)
+			lastErr = err
+			return false, err
+		}
+
+		found := false
+		for _, m := range rsp {
+			if m.NodeID == ExtractRegIDFromGenID(nid) && m.ID == nsInfo.RaftIDs[nid] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			CoordLog().Infof("raft %v not found in the node (%v) members for namespace %v", nid, nip, nsInfo.GetDesp())
+			return false, nil
+		}
+	}
+	return false, lastErr
+}
+
 func (self *DataPlacement) SetBalanceInterval(start int, end int) {
 	if start == end && start == 0 {
 		return
@@ -176,7 +211,7 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 		if err != nil {
 			CoordLog().Infof("failed to get namespace %v info: %v", fullName, err)
 		} else {
-			if inRaft, _ := self.IsRaftNodeJoined(nInfo, nid); inRaft {
+			if inRaft, _ := self.IsRaftNodeFullJoined(nInfo, nid); inRaft {
 				break
 			} else if FindSlice(nInfo.RaftNodes, nid) != -1 {
 				// wait ready
