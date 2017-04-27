@@ -68,6 +68,9 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.MaxScanJob <= 0 {
 		conf.MaxScanJob = common.MAX_SCAN_JOB
 	}
+	if conf.ProfilePort == 0 {
+		conf.ProfilePort = 6666
+	}
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
 		Hostname:    hname,
@@ -234,6 +237,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 		return nil, cmd, err
 	}
 	// we need decide the partition id from the primary key
+	// if the command need cross multi partitions, we need handle separate
 	n, err := self.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
 	if err != nil {
 		return nil, cmd, err

@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"runtime"
 
 	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
@@ -287,6 +288,17 @@ func (n *node) run(r *raft) {
 	lead := None
 	prevSoftSt := r.softState()
 	prevHardSt := emptyState
+	defer func() {
+		if e := recover(); e != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			r.logger.Infof("handle raft loop panic: %s:%v", buf, e)
+		}
+
+		close(n.done)
+		close(n.readyc)
+	}()
 
 	for {
 		if advancec != nil {
@@ -427,7 +439,6 @@ func (n *node) run(r *raft) {
 		case c := <-n.status:
 			c <- getStatus(r)
 		case <-n.stop:
-			close(n.done)
 			return
 		}
 	}

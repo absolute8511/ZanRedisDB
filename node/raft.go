@@ -737,9 +737,11 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 
 func (rc *raftNode) serveChannels() {
 	purgeDone := make(chan struct{})
-	go rc.purgeFile(purgeDone)
+	raftReadyLoopC := make(chan struct{})
+	go rc.purgeFile(purgeDone, raftReadyLoopC)
 	defer func() {
 		// wait purge stopped to avoid purge the files after wal closed
+		close(raftReadyLoopC)
 		<-purgeDone
 		close(rc.commitC)
 		rc.Infof("raft node stopping")
@@ -754,7 +756,11 @@ func (rc *raftNode) serveChannels() {
 	for {
 		select {
 		// store raft entries to wal, then publish over commit channel
-		case rd := <-rc.node.Ready():
+		case rd, ok := <-rc.node.Ready():
+			if !ok {
+				rc.Infof("raft loop stopped")
+				return
+			}
 			if rd.SoftState != nil {
 				isLeader = rd.RaftState == raft.StateLeader
 				if lead := atomic.LoadUint64(&rc.lead); rd.SoftState.Lead != raft.None && lead != rd.SoftState.Lead {
@@ -960,7 +966,7 @@ func (rc *raftNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 	return 0, nil
 }
 
-func (rc *raftNode) purgeFile(done chan struct{}) {
+func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 	defer func() {
 		rc.Infof("purge exit")
 		close(done)
@@ -973,7 +979,7 @@ func (rc *raftNode) purgeFile(done chan struct{}) {
 		rc.Infof("failed to purge wal file %v", e)
 	case e := <-serrc:
 		rc.Infof("failed to purge snap file %v", e)
-	case <-rc.stopc:
+	case <-stopC:
 		return
 	}
 }

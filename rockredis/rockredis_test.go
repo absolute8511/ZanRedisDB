@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+func getTestDBNoTableCounter(t *testing.T) *RockDB {
+	cfg := NewRockConfig()
+	cfg.EnableTableCounter = false
+	var err error
+	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testDB, err := OpenRockDB(cfg)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	return testDB
+}
+
 func getTestDB(t *testing.T) *RockDB {
 	cfg := NewRockConfig()
 	cfg.EnableTableCounter = true
