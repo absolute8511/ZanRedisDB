@@ -174,6 +174,7 @@ type RockDB struct {
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
 	engOpened        int32
+	indexMgr         *IndexMgr
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -238,6 +239,12 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, err
 	}
 	db.eng = eng
+	db.indexMgr = NewIndexMgr()
+	err = db.indexMgr.LoadIndexes(eng)
+	if err != nil {
+		dbLog.Infof("rocksdb %v load index failed: %v", db.GetDataDir(), err)
+		return nil, err
+	}
 	atomic.StoreInt32(&db.engOpened, 1)
 	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
 	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
@@ -274,6 +281,13 @@ func (r *RockDB) reOpenEng() error {
 	var err error
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	if err == nil {
+		r.indexMgr = NewIndexMgr()
+		err = r.indexMgr.LoadIndexes(r.eng)
+		if err != nil {
+			dbLog.Infof("rocksdb %v load index failed: %v", r.GetDataDir(), err)
+			return err
+		}
+
 		atomic.StoreInt32(&r.engOpened, 1)
 		dbLog.Infof("rocksdb opened: %v", r.GetDataDir())
 	}
@@ -288,6 +302,7 @@ func (r *RockDB) CompactRange() {
 func (r *RockDB) closeEng() {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
+			r.indexMgr.Close()
 			r.eng.Close()
 			dbLog.Infof("rocksdb closed: %v", r.GetDataDir())
 		}

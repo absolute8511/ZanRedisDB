@@ -42,16 +42,18 @@ const (
 
 	ColumnType byte = 38 // used for column store for OLAP
 
-	NonUniqueIndex byte = 40
-	UniqueIndex    byte = 41
+	// for secondary index data
+	IndexDataType byte = 40
 
-	FullTextInvertedIndex   byte = 50
-	FullTextRoaringmapIndex byte = 51
+	FullTextIndexDataType byte = 50
 	// this type has a custom partition key length
 	// to allow all the data store in the same partition
 	// this type allow the transaction in the same tx group,
 	// which will be stored in the same partition
 	FixPartType byte = 80
+	// in case there are more than 100 kinds of data types,
+	// we use the extanded data for more types
+	ExtandType  byte = 90
 	maxDataType byte = 100
 
 	// use the exp table to store all the expire time for the key

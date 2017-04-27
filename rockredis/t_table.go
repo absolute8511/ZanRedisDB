@@ -12,16 +12,26 @@ import (
 // we need scan all data types to get all the data in the same table
 
 var (
-	errTableNameLen = errors.New("invalid table name length")
-	errTableName    = errors.New("invalid table name")
-	errTableMetaKey = errors.New("invalid table meta key")
+	errTableNameLen      = errors.New("invalid table name length")
+	errTableName         = errors.New("invalid table name")
+	errTableMetaKey      = errors.New("invalid table meta key")
+	errTableIndexMetaKey = errors.New("invalid table index meta key")
 )
 
 const (
-	tableStartSep byte = ':'
-	tableStopSep  byte = tableStartSep + 1
-	colStartSep   byte = ':'
-	colStopSep    byte = colStartSep + 1
+	tableStartSep          byte = ':'
+	tableStopSep           byte = tableStartSep + 1
+	colStartSep            byte = ':'
+	colStopSep             byte = colStartSep + 1
+	tableIndexMetaStartSep byte = ':'
+	tableIndexMetaStopSep  byte = tableIndexMetaStartSep + 1
+)
+
+const (
+	hsetIndexMeta     byte = 1
+	jsonIndexMeta     byte = 2
+	hsetIndexDataType byte = 1
+	jsonIndexDataType byte = 2
 )
 
 // only KV data type need a table name as prefix to allow scan by table
@@ -108,4 +118,47 @@ func (db *RockDB) GetTableKeyCount(table []byte) (int64, error) {
 	if size, err = GetRocksdbUint64(db.eng.GetBytes(db.defaultReadOpts, tm)); err != nil {
 	}
 	return int64(size), err
+}
+
+func encodeTableIndexMetaKey(table []byte, itype byte) []byte {
+	tmkey := make([]byte, 2+len(table))
+	pos := 0
+	tmkey[pos] = TableIndexMetaType
+	pos++
+	tmkey[pos] = itype
+	copy(tmkey[pos:], table)
+	return tmkey
+}
+
+func decodeTableIndexMetaKey(tk []byte) (byte, []byte, error) {
+	pos := 0
+	if len(tk) < pos+2 || tk[pos] != TableIndexMetaType {
+		return 0, nil, errTableIndexMetaKey
+	}
+	pos++
+	itype := tk[pos]
+	pos++
+	return itype, tk[pos:], nil
+}
+
+func encodeTableIndexMetaStartKey(itype byte) []byte {
+	return encodeTableIndexMetaKey(nil, itype)
+}
+
+func encodeTableIndexMetaStopKey(itype byte) []byte {
+	t := encodeTableIndexMetaKey(nil, itype)
+	t[len(t)-1] = TableIndexMetaType + 1
+	return t
+}
+
+func (db *RockDB) GetTableHsetIndexValue(table []byte) ([]byte, error) {
+	key := encodeTableIndexMetaKey(table, hsetIndexMeta)
+	return db.eng.GetBytes(db.defaultReadOpts, key)
+}
+
+func (db *RockDB) SetTableHsetIndexValue(table []byte, value []byte) error {
+	key := encodeTableIndexMetaKey(table, hsetIndexMeta)
+	db.wb.Clear()
+	db.wb.Put(key, value)
+	return db.eng.Write(db.defaultWriteOpts, db.wb)
 }
