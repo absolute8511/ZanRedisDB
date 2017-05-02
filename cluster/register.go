@@ -145,6 +145,8 @@ type Register interface {
 	// should return both the meta info for namespace and the replica info for partition
 	// epoch should be updated while return
 	GetNamespacePartInfo(ns string, partition int) (*PartitionMetaInfo, error)
+	// get directly from register without cache
+	GetRemoteNamespaceReplicaInfo(ns string, partition int) (*PartitionReplicaInfo, error)
 	// get  meta info only
 	GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, error)
 	GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error)

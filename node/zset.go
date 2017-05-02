@@ -503,10 +503,6 @@ func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
 }
 
 func (self *KVNode) localZaddCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	if len(cmd.Args) < 4 || len(cmd.Args)%2 != 0 {
-		return nil, common.ErrInvalidArgs
-	}
-
 	mlist, err := getScorePairs(cmd.Args[2:])
 	if err != nil {
 		return nil, err
@@ -519,10 +515,6 @@ func (self *KVNode) localZaddCommand(cmd redcon.Command, ts int64) (interface{},
 }
 
 func (self *KVNode) localZincrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	if len(cmd.Args) != 4 {
-		return nil, common.ErrInvalidArgs
-	}
-
 	delta, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
@@ -539,9 +531,6 @@ func (self *KVNode) localZremCommand(cmd redcon.Command, ts int64) (interface{},
 }
 
 func (self *KVNode) localZremrangebyrankCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	if len(cmd.Args) != 4 {
-		return nil, common.ErrInvalidArgs
-	}
 	start, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
@@ -555,10 +544,6 @@ func (self *KVNode) localZremrangebyrankCommand(cmd redcon.Command, ts int64) (i
 }
 
 func (self *KVNode) localZremrangebyscoreCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	if len(cmd.Args) != 4 {
-		return nil, common.ErrInvalidArgs
-	}
-
 	min, max, err := getScoreRange(cmd.Args[2], cmd.Args[3])
 	if err != nil {
 		return nil, err
@@ -567,10 +552,6 @@ func (self *KVNode) localZremrangebyscoreCommand(cmd redcon.Command, ts int64) (
 }
 
 func (self *KVNode) localZremrangebylexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	if len(cmd.Args) != 4 {
-		return nil, common.ErrInvalidArgs
-	}
-
 	min, max, rt, err := getLexRange(cmd.Args[2], cmd.Args[3])
 	if err != nil {
 		return nil, err
