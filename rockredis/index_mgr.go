@@ -1,7 +1,6 @@
 package rockredis
 
 import (
-	"github.com/absolute8511/gorocksdb"
 	"sync"
 )
 
@@ -22,6 +21,31 @@ func NewIndexContainer() *TableIndexContainer {
 	}
 }
 
+func (self *TableIndexContainer) marshalHsetIndexes() ([]byte, error) {
+	var indexList HsetIndexList
+	for _, v := range self.hsetIndexes {
+		indexList.HsetIndexes = append(indexList.HsetIndexes, v.HsetIndexInfo)
+	}
+	return indexList.Marshal()
+}
+
+func (self *TableIndexContainer) unmarshalHsetIndexes(table []byte, data []byte) error {
+	var indexList HsetIndexList
+	err := indexList.Unmarshal(data)
+	if err != nil {
+		return err
+	}
+	self.hsetIndexes = make(map[string]*HsetIndex)
+	for _, v := range indexList.HsetIndexes {
+		var hi HsetIndex
+		hi.HsetIndexInfo = v
+		hi.Table = table
+		self.hsetIndexes[string(v.IndexField)] = &hi
+	}
+	dbLog.Infof("load hash index: %v", indexList.String())
+	return nil
+}
+
 type IndexMgr struct {
 	sync.RWMutex
 	tableIndexes map[string]*TableIndexContainer
@@ -33,9 +57,29 @@ func NewIndexMgr() *IndexMgr {
 	}
 }
 
-func (self *IndexMgr) LoadIndexes(db *gorocksdb.DB) error {
+func (self *IndexMgr) LoadIndexes(db *RockDB) error {
 	dbLog.Infof("begin loading indexes...")
 	defer dbLog.Infof("finish load indexes.")
+	tables := db.GetHsetIndexTables()
+	for t := range tables {
+		d, err := db.GetTableHsetIndexValue(t)
+		if err != nil {
+			dbLog.Infof("get table %v hset index failed: %v", string(t), err)
+			continue
+		}
+		if d == nil {
+			dbLog.Infof("get table %v hset index empty", string(t))
+			continue
+		}
+		indexes := NewIndexContainer()
+		err = indexes.unmarshalHsetIndexes(t, d)
+		if err != nil {
+			dbLog.Infof("unmarshal table %v hset indexes failed: %v", string(t), err)
+			return err
+		}
+		dbLog.Infof("table %v load %v hash indexes", string(t), len(indexes.hsetIndexes))
+		self.tableIndexes[string(t)] = indexes
+	}
 	return nil
 }
 
@@ -45,7 +89,7 @@ func (self *IndexMgr) Close() {
 	self.Unlock()
 }
 
-func (self *IndexMgr) AddHsetIndex(hindex *HsetIndex) error {
+func (self *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
 	self.Lock()
 	defer self.Unlock()
 	indexes, ok := self.tableIndexes[string(hindex.Table)]
@@ -61,10 +105,20 @@ func (self *IndexMgr) AddHsetIndex(hindex *HsetIndex) error {
 	}
 	hindex.State = InitIndex
 	indexes.hsetIndexes[string(hindex.IndexField)] = hindex
-	return nil
+	d, err := indexes.marshalHsetIndexes()
+	if err != nil {
+		delete(indexes.hsetIndexes, string(hindex.IndexField))
+		return err
+	}
+	err = db.SetTableHsetIndexValue(hindex.Table, d)
+	if err != nil {
+		delete(indexes.hsetIndexes, string(hindex.IndexField))
+		return err
+	}
+	return err
 }
 
-func (self *IndexMgr) UpdateHsetIndexState(table string, field string, state TableIndexState) error {
+func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field string, state IndexState) error {
 	self.RLock()
 	defer self.RUnlock()
 	indexes, ok := self.tableIndexes[table]
@@ -78,11 +132,23 @@ func (self *IndexMgr) UpdateHsetIndexState(table string, field string, state Tab
 	if !ok {
 		return ErrIndexNotExist
 	}
+	oldState := index.State
 	index.State = state
+	d, err := indexes.marshalHsetIndexes()
+	if err != nil {
+		index.State = oldState
+		return err
+	}
+	err = db.SetTableHsetIndexValue([]byte(table), d)
+	if err != nil {
+		index.State = oldState
+		return err
+	}
+
 	return nil
 }
 
-func (self *IndexMgr) DeleteHsetIndex(table string, field string) error {
+func (self *IndexMgr) DeleteHsetIndex(db *RockDB, table string, field string) error {
 	self.Lock()
 	defer self.Unlock()
 	indexes, ok := self.tableIndexes[table]
@@ -97,6 +163,14 @@ func (self *IndexMgr) DeleteHsetIndex(table string, field string) error {
 		return ErrIndexNotExist
 	}
 	delete(indexes.hsetIndexes, field)
+	d, err := indexes.marshalHsetIndexes()
+	if err != nil {
+		return err
+	}
+	err = db.SetTableHsetIndexValue([]byte(table), d)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

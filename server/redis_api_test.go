@@ -1726,26 +1726,26 @@ func TestZSetLex(t *testing.T) {
 func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 	a, err := goredis.Strings(ay, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 
 	if len(a) != len(values) {
-		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
+		t.Error(fmt.Sprintf("len %d != %d", len(a), len(values)))
 	}
 	for i, v := range a {
 		if string(v) != fmt.Sprintf("%v", values[i]) {
-			t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+			t.Error(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
 		}
 	}
 }
 
 func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"", tp, "count", 5)); err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	} else if len(ay) != 2 {
-		t.Fatal(len(ay))
+		t.Error(len(ay))
 	} else if n := ay[0].([]byte); string(n) != "testscan:4" {
-		t.Fatal(string(n))
+		t.Error(n)
 	} else {
 		checkScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:2", "testscan:3", "testscan:4")
 	}

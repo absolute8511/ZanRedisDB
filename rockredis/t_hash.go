@@ -404,38 +404,44 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 		return 0, nil, err
 	}
 
-	v := make(chan common.KVRecordRet, 16)
-	len, err := db.HLen(key)
+	start := hEncodeStartKey(key)
+	stop := hEncodeStopKey(key)
+	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
-	if len >= MAX_BATCH_NUM {
-		return len, nil, errTooMuchBatchSize
+
+	v := make(chan common.KVRecordRet, 16)
+	length, err := db.HLen(key)
+	if err != nil {
+		return 0, nil, err
+	}
+	if length >= MAX_BATCH_NUM {
+		return length, nil, errTooMuchBatchSize
 	}
 
-	go func() {
-		start := hEncodeStartKey(key)
-		stop := hEncodeStopKey(key)
-		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
-		if err != nil {
-			v <- common.KVRecordRet{
-				Err: err,
-			}
-			close(v)
-			return
-		}
+	doScan := func() {
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {
 			_, f, err := hDecodeHashKey(it.Key())
-			v <- common.KVRecordRet{
+			select {
+			case v <- common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: it.Value()},
 				Err: err,
+			}:
+			case <-db.quit:
+				break
 			}
 		}
-	}()
+	}
+	if length < int64(len(v)) {
+		doScan()
+	} else {
+		go doScan()
+	}
 
-	return len, v, nil
+	return length, v, nil
 }
 
 func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {

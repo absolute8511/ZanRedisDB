@@ -240,7 +240,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	}
 	db.eng = eng
 	db.indexMgr = NewIndexMgr()
-	err = db.indexMgr.LoadIndexes(eng)
+	err = db.indexMgr.LoadIndexes(db)
 	if err != nil {
 		dbLog.Infof("rocksdb %v load index failed: %v", db.GetDataDir(), err)
 		return nil, err
@@ -282,7 +282,7 @@ func (r *RockDB) reOpenEng() error {
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	if err == nil {
 		r.indexMgr = NewIndexMgr()
-		err = r.indexMgr.LoadIndexes(r.eng)
+		err = r.indexMgr.LoadIndexes(r)
 		if err != nil {
 			dbLog.Infof("rocksdb %v load index failed: %v", r.GetDataDir(), err)
 			return err
