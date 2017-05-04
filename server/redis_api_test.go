@@ -1977,7 +1977,7 @@ func checkDistScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 }
 
 func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"", tp, "count", 5)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:", tp, "count", 5)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2033,7 +2033,7 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 	}
 
 	if _, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:dGVzdHNjYW46NA==", tp, "count", 0)); err == nil {
-		t.Fatal(err)
+		t.Fatal("want err, get nil")
 	}
 }
 
