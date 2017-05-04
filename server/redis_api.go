@@ -5,19 +5,12 @@ import (
 	"errors"
 	"runtime"
 	"strconv"
-	"sync/atomic"
-	"time"
 
 	"github.com/tidwall/redcon"
 )
 
 var (
 	errInvalidCommand = errors.New("invalid command")
-	errMaxScanJob     = errors.New("too much scan job")
-)
-
-var (
-	scanJobCount int32 = 0
 )
 
 func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
@@ -56,21 +49,7 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteBulkString(string(d))
 	default:
 		if isMergeCommand(cmdName) {
-			if scanJobCount >= self.maxScanJob {
-				conn.WriteError(errMaxScanJob.Error() + " : Err handle command " + string(cmd.Args[0]))
-				return
-			}
-			atomic.AddInt32(&scanJobCount, 1)
-			defer func() {
-				atomic.AddInt32(&scanJobCount, -1)
-			}()
-			scanStart := time.Now()
 			self.dealMergeCommand(conn, cmd)
-			scanCost := time.Since(scanStart)
-			if scanCost >= 5*time.Second {
-				sLog.Infof("slow write command: %v, cost: %v", string(cmd.Raw), scanCost)
-			}
-			self.scanStats.UpdateScanStats(scanCost.Nanoseconds() / 1000)
 		} else {
 			h, cmd, err := self.GetHandler(cmdName, cmd)
 			if err == nil {

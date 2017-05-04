@@ -138,14 +138,14 @@ type MergeCommandFunc func(redcon.Command) (interface{}, error)
 type CmdRouter struct {
 	cmds         map[string]CommandFunc
 	internalCmds map[string]InternalCommandFunc
-	scanCmds     map[string]MergeCommandFunc
+	mergeCmds    map[string]MergeCommandFunc
 }
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
 		cmds:         make(map[string]CommandFunc),
 		internalCmds: make(map[string]InternalCommandFunc),
-		scanCmds:     make(map[string]MergeCommandFunc),
+		mergeCmds:    make(map[string]MergeCommandFunc),
 	}
 }
 
@@ -176,15 +176,15 @@ func (r *CmdRouter) GetInternalCmdHandler(name string) (InternalCommandFunc, boo
 }
 
 func (r *CmdRouter) RegisterMerge(name string, f MergeCommandFunc) bool {
-	if _, ok := r.scanCmds[strings.ToLower(name)]; ok {
+	if _, ok := r.mergeCmds[strings.ToLower(name)]; ok {
 		return false
 	}
-	r.scanCmds[name] = f
+	r.mergeCmds[name] = f
 	return true
 }
 
 func (r *CmdRouter) GetMergeCmdHandler(name string) (MergeCommandFunc, bool) {
-	v, ok := r.scanCmds[strings.ToLower(name)]
+	v, ok := r.mergeCmds[strings.ToLower(name)]
 	return v, ok
 }
 

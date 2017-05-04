@@ -2,18 +2,48 @@ package server
 
 import (
 	"encoding/base64"
+	"errors"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 )
 
+var (
+	errMaxScanJob = errors.New("too much scan job")
+)
+
+var (
+	scanJobCount int32 = 0
+)
+
 // handle range, scan command which need across multi partitions
 
 func (self *Server) dealMergeCommand(conn redcon.Conn, cmd redcon.Command) {
+	cmdName := qcmdlower(cmd.Args[0])
+	if isScanCommand(cmdName) {
+		if scanJobCount >= self.maxScanJob {
+			conn.WriteError(errMaxScanJob.Error() + " : Err handle command " + string(cmd.Args[0]))
+			return
+		}
+		atomic.AddInt32(&scanJobCount, 1)
+		scanStart := time.Now()
+		defer func(start time.Time) {
+			scanCost := time.Since(scanStart)
+			if scanCost >= 5*time.Second {
+				sLog.Infof("slow write command: %v, cost: %v", string(cmd.Raw), scanCost)
+			}
+			self.scanStats.UpdateScanStats(scanCost.Nanoseconds() / 1000)
+			atomic.AddInt32(&scanJobCount, -1)
+		}(scanStart)
+
+	}
+
 	if len(cmd.Args) >= 2 {
 		var err error
 		var count int
