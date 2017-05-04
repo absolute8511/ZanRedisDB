@@ -16,7 +16,6 @@ var (
 
 const (
 	hashStartSep byte = ':'
-	hashStopSep  byte = hashStartSep + 1
 )
 
 func convertRedisKeyToDBHKey(key []byte, field []byte) ([]byte, []byte, error) {
@@ -42,12 +41,14 @@ func checkHashKFSize(key []byte, field []byte) error {
 }
 
 func hEncodeSizeKey(key []byte) []byte {
-	buf := make([]byte, len(key)+1)
+	buf := make([]byte, len(key)+1+len(metaPrefix))
 
 	pos := 0
 	buf[pos] = HSizeType
 
 	pos++
+	copy(buf[pos:], metaPrefix)
+	pos += len(metaPrefix)
 	copy(buf[pos:], key)
 	return buf
 }
@@ -55,10 +56,11 @@ func hEncodeSizeKey(key []byte) []byte {
 func hDecodeSizeKey(ek []byte) ([]byte, error) {
 	pos := 0
 
-	if pos+1 > len(ek) || ek[pos] != HSizeType {
+	if pos+1+len(metaPrefix) > len(ek) || ek[pos] != HSizeType {
 		return nil, errHSizeKey
 	}
 	pos++
+	pos += len(metaPrefix)
 
 	return ek[pos:], nil
 }
@@ -119,7 +121,7 @@ func hEncodeStartKey(key []byte) []byte {
 
 func hEncodeStopKey(key []byte) []byte {
 	k := hEncodeHashKey(key, nil)
-	k[len(k)-1] = hashStopSep
+	k[len(k)-1] = k[len(k)-1] + 1
 	return k
 }
 
@@ -404,38 +406,44 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 		return 0, nil, err
 	}
 
-	v := make(chan common.KVRecordRet, 16)
-	len, err := db.HLen(key)
+	start := hEncodeStartKey(key)
+	stop := hEncodeStopKey(key)
+	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
-	if len >= MAX_BATCH_NUM {
-		return len, nil, errTooMuchBatchSize
+
+	v := make(chan common.KVRecordRet, 16)
+	length, err := db.HLen(key)
+	if err != nil {
+		return 0, nil, err
+	}
+	if length >= MAX_BATCH_NUM {
+		return length, nil, errTooMuchBatchSize
 	}
 
-	go func() {
-		start := hEncodeStartKey(key)
-		stop := hEncodeStopKey(key)
-		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
-		if err != nil {
-			v <- common.KVRecordRet{
-				Err: err,
-			}
-			close(v)
-			return
-		}
+	doScan := func() {
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {
 			_, f, err := hDecodeHashKey(it.Key())
-			v <- common.KVRecordRet{
+			select {
+			case v <- common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: it.Value()},
 				Err: err,
+			}:
+			case <-db.quit:
+				break
 			}
 		}
-	}()
+	}
+	if length < int64(len(v)) {
+		doScan()
+	} else {
+		go doScan()
+	}
 
-	return len, v, nil
+	return length, v, nil
 }
 
 func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {

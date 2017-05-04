@@ -12,16 +12,26 @@ import (
 // we need scan all data types to get all the data in the same table
 
 var (
-	errTableNameLen = errors.New("invalid table name length")
-	errTableName    = errors.New("invalid table name")
-	errTableMetaKey = errors.New("invalid table meta key")
+	errTableNameLen      = errors.New("invalid table name length")
+	errTableName         = errors.New("invalid table name")
+	errTableMetaKey      = errors.New("invalid table meta key")
+	errTableIndexMetaKey = errors.New("invalid table index meta key")
 )
 
 const (
-	tableStartSep byte = ':'
-	tableStopSep  byte = tableStartSep + 1
-	colStartSep   byte = ':'
-	colStopSep    byte = colStartSep + 1
+	tableStartSep          byte = ':'
+	colStartSep            byte = ':'
+	tableIndexMetaStartSep byte = ':'
+	metaSep                byte = ':'
+)
+
+var metaPrefix = []byte("meta" + string(metaSep))
+
+const (
+	hsetIndexMeta     byte = 1
+	jsonIndexMeta     byte = 2
+	hsetIndexDataType byte = 1
+	jsonIndexDataType byte = 2
 )
 
 // only KV data type need a table name as prefix to allow scan by table
@@ -41,20 +51,23 @@ func extractTableFromRedisKey(key []byte) []byte {
 }
 
 func encodeTableMetaKey(table []byte) []byte {
-	tmkey := make([]byte, 1+len(table))
+	tmkey := make([]byte, 1+len(metaPrefix)+len(table))
 	pos := 0
 	tmkey[pos] = TableMetaType
 	pos++
+	copy(tmkey[pos:], metaPrefix)
+	pos += len(metaPrefix)
 	copy(tmkey[pos:], table)
 	return tmkey
 }
 
 func decodeTableMetaKey(tk []byte) ([]byte, error) {
 	pos := 0
-	if len(tk) < pos+1 || tk[pos] != TableMetaType {
+	if len(tk) < pos+1+len(metaPrefix) || tk[pos] != TableMetaType {
 		return nil, errTableMetaKey
 	}
 	pos++
+	pos += len(metaPrefix)
 	return tk[pos:], nil
 }
 
@@ -64,7 +77,7 @@ func encodeTableMetaStartKey() []byte {
 
 func encodeTableMetaStopKey() []byte {
 	t := encodeTableMetaKey(nil)
-	t[len(t)-1] = TableMetaType + 1
+	t[len(t)-1] = t[len(t)-1] + 1
 	return t
 }
 
