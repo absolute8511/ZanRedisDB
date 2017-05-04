@@ -29,12 +29,13 @@ func checkSetKMSize(key []byte, member []byte) error {
 }
 
 func sEncodeSizeKey(key []byte) []byte {
-	buf := make([]byte, len(key)+1)
+	buf := make([]byte, len(key)+1+len(metaPrefix))
 
 	pos := 0
 	buf[pos] = SSizeType
-
 	pos++
+	copy(buf[pos:], metaPrefix)
+	pos += len(metaPrefix)
 
 	copy(buf[pos:], key)
 	return buf
@@ -42,10 +43,11 @@ func sEncodeSizeKey(key []byte) []byte {
 
 func sDecodeSizeKey(ek []byte) ([]byte, error) {
 	pos := 0
-	if pos+1 > len(ek) || ek[pos] != SSizeType {
+	if pos+1+len(metaPrefix) > len(ek) || ek[pos] != SSizeType {
 		return nil, errSSizeKey
 	}
 	pos++
+	pos += len(metaPrefix)
 
 	return ek[pos:], nil
 }

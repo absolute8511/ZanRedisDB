@@ -33,7 +33,6 @@ const (
 	zsetStopScoreSep byte = zsetPScoreSep + 1
 
 	zsetStartMemSep byte = ':'
-	zsetStopMemSep  byte = zsetStartMemSep + 1
 )
 
 func checkZSetKMSize(key []byte, member []byte) error {
@@ -46,20 +45,23 @@ func checkZSetKMSize(key []byte, member []byte) error {
 }
 
 func zEncodeSizeKey(key []byte) []byte {
-	buf := make([]byte, len(key)+1)
+	buf := make([]byte, len(key)+1+len(metaPrefix))
 	pos := 0
 	buf[pos] = ZSizeType
 	pos++
+	copy(buf[pos:], metaPrefix)
+	pos += len(metaPrefix)
 	copy(buf[pos:], key)
 	return buf
 }
 
 func zDecodeSizeKey(ek []byte) ([]byte, error) {
 	pos := 0
-	if pos+1 > len(ek) || ek[pos] != ZSizeType {
+	if pos+1+len(metaPrefix) > len(ek) || ek[pos] != ZSizeType {
 		return nil, errZSizeKey
 	}
 	pos++
+	pos += len(metaPrefix)
 	return ek[pos:], nil
 }
 
@@ -117,7 +119,7 @@ func zEncodeStartSetKey(key []byte) []byte {
 
 func zEncodeStopSetKey(key []byte) []byte {
 	k := zEncodeSetKey(key, nil)
-	k[len(k)-1] = zsetStartMemSep + 1
+	k[len(k)-1] = k[len(k)-1] + 1
 	return k
 }
 
@@ -157,7 +159,7 @@ func zEncodeStartScoreKey(key []byte, score int64) []byte {
 
 func zEncodeStopScoreKey(key []byte, score int64) []byte {
 	k := zEncodeScoreKey(key, nil, score)
-	k[len(k)-1] = zsetStopMemSep
+	k[len(k)-1] = k[len(k)-1] + 1
 	return k
 }
 

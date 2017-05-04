@@ -79,7 +79,7 @@ func encodeScanMaxKey(storeDataType byte, key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	k[len(k)-1] = storeDataType + 1
+	k[len(k)-1] = k[len(k)-1] + 1
 	return k, nil
 }
 

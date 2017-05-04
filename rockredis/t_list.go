@@ -27,10 +27,12 @@ var errListSeq = errors.New("invalid list sequence, overflow")
 var errListIndex = errors.New("invalid list index")
 
 func lEncodeMetaKey(key []byte) []byte {
-	buf := make([]byte, len(key)+1)
+	buf := make([]byte, len(key)+1+len(metaPrefix))
 	pos := 0
 	buf[pos] = LMetaType
 	pos++
+	copy(buf[pos:], metaPrefix)
+	pos += len(metaPrefix)
 
 	copy(buf[pos:], key)
 	return buf
@@ -38,11 +40,12 @@ func lEncodeMetaKey(key []byte) []byte {
 
 func lDecodeMetaKey(ek []byte) ([]byte, error) {
 	pos := 0
-	if pos+1 > len(ek) || ek[pos] != LMetaType {
+	if pos+1+len(metaPrefix) > len(ek) || ek[pos] != LMetaType {
 		return nil, errLMetaKey
 	}
 
 	pos++
+	pos += len(metaPrefix)
 	return ek[pos:], nil
 }
 
@@ -52,7 +55,7 @@ func lEncodeMinKey() []byte {
 
 func lEncodeMaxKey() []byte {
 	ek := lEncodeMetaKey(nil)
-	ek[len(ek)-1] = LMetaType + 1
+	ek[len(ek)-1] = ek[len(ek)-1] + 1
 	return ek
 }
 
