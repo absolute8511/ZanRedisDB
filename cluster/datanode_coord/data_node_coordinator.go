@@ -216,7 +216,7 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 			shouldLoad := self.isNamespaceShouldStart(nsInfo)
 			if !shouldLoad {
 				if len(nsInfo.GetISR()) >= nsInfo.Replica && localNamespace != nil {
-					self.removeLocalNamespaceFromRaft(localNamespace, true)
+					self.removeLocalNamespaceFromRaft(localNamespace, false)
 				}
 				continue
 			}
@@ -490,8 +490,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 			isrList := namespaceMeta.GetISR()
 			localRID := localNamespace.GetRaftID()
 
-			if FindSlice(isrList, self.myNode.GetID()) == -1 ||
-				localRID != namespaceMeta.RaftIDs[self.myNode.GetID()] {
+			if localRID != namespaceMeta.RaftIDs[self.myNode.GetID()] {
 				if len(isrList) > 0 {
 					CoordLog().Infof("the namespace should be clean : %v", namespaceMeta)
 					self.removeLocalNamespaceFromRaft(localNamespace, true)
@@ -499,7 +498,8 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				continue
 			}
 			// only leader check the follower status
-			if leader != self.GetMyRegID() || len(isrList) == 0 {
+			if FindSlice(isrList, self.GetMyID()) == -1 ||
+				leader != self.GetMyRegID() || len(isrList) == 0 {
 				continue
 			}
 			isReplicasEnough := len(isrList) >= namespaceMeta.Replica
@@ -629,8 +629,8 @@ func (self *DataCoordinator) forceRemoveLocalNamespace(localNamespace *node.Name
 	}
 }
 
-func (self *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.NamespaceNode, removeData bool) *CoordErr {
-	if removeData {
+func (self *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.NamespaceNode, removeFromRaft bool) *CoordErr {
+	if removeFromRaft {
 		if !localNamespace.IsReady() {
 			return ErrNamespaceNotReady
 		}
