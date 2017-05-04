@@ -50,7 +50,7 @@ type Server struct {
 	dataCoord     *datanode_coord.DataCoordinator
 	nsMgr         *node.NamespaceMgr
 	startTime     time.Time
-	maxScanJob    int
+	maxScanJob    int32
 	scanStats     common.ScanStats
 }
 
@@ -251,61 +251,39 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	return h, cmd, nil
 }
 
-func (self *Server) GetScanHandler(cmdName string, cmd redcon.Command) (common.ScanCommandFunc, redcon.Command, error) {
+func (self *Server) GetMergeHandlersAndCommands(cmdName string, cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, error) {
 	if len(cmd.Args) < 2 {
-		return nil, cmd, common.ErrInvalidArgs
+		return nil, nil, common.ErrInvalidArgs
 	}
 	rawKey := cmd.Args[1]
 
-	namespace, pk, err := common.ExtractNamesapce(rawKey)
+	namespace, table, realKey, err := common.ExtractRawKey(rawKey)
 	if err != nil {
 		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return nil, cmd, err
+		return nil, nil, err
 	}
-	// we need decide the partition id from the primary key
-	n, err := self.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
+
+	nodes, cmds, err := self.nsMgr.GetNamespaceNodesWithKey(cmd, namespace, table, realKey)
 	if err != nil {
-		return nil, cmd, err
-	}
-	// TODO: for multi primary keys such as mset, mget, we need make sure they are all in the same partition
-	h, ok := n.Node.GetScanHandler(cmdName)
-	if !ok {
-		return nil, cmd, common.ErrInvalidCommand
-	}
-	// TODO: to make consistence, read command should request the raft read index if not leader
-	return h, cmd, nil
-}
-
-func (self *Server) GetScanHandlers(cmdName string, cmd redcon.Command) ([]common.ScanCommandFunc, redcon.Command, error) {
-	if len(cmd.Args) < 2 {
-		return nil, cmd, common.ErrInvalidArgs
-	}
-	rawKey := cmd.Args[1]
-
-	namespace, _, err := common.ExtractNamesapce(rawKey)
-	if err != nil {
-		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return nil, cmd, err
+		return nil, nil, err
 	}
 
-	nodes, err := self.nsMgr.GetNamespaceNodesWithBaseName(namespace)
-	if err != nil {
-		return nil, cmd, err
-	}
-
-	var handlers []common.ScanCommandFunc
-	for _, v := range nodes {
-		h, ok := v.Node.GetScanHandler(cmdName)
+	var handlers []common.MergeCommandFunc
+	var commands []redcon.Command
+	for k, v := range nodes {
+		newCmd := cmds[k]
+		h, ok := v.Node.GetMergeHandler(cmdName)
 		if ok {
 			handlers = append(handlers, h)
+			commands = append(commands, newCmd)
 		}
 	}
 
 	if len(handlers) <= 0 {
-		return nil, cmd, common.ErrInvalidCommand
+		return nil, nil, common.ErrInvalidCommand
 	}
 
-	return handlers, cmd, nil
+	return handlers, commands, nil
 }
 
 func (self *Server) serveRaft() {

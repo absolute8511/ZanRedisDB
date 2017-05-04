@@ -24,7 +24,7 @@ type ServerConfig struct {
 	// default rocksdb options, can be override by namespace config
 	RocksDBOpts rockredis.RockOptions `json:"rocksdb_opts"`
 	Namespaces  []NamespaceNodeConfig `json:"namespaces"`
-	MaxScanJob  int                   `json:"max_scan_job"`
+	MaxScanJob  int32                 `json:"max_scan_job"`
 }
 
 type NamespaceNodeConfig struct {

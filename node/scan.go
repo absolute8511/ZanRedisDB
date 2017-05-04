@@ -52,52 +52,17 @@ func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err e
 // scan only kv type, cursor is table:key
 
 // TODO: for scan we act like the prefix scan, if the prefix changed , we should stop scan
-func (self *KVNode) scanCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
+func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	args := cmd.Args[1:]
 	cursor, match, count, err := parseScanArgs(args)
 
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
-	var ay [][]byte
-	ay, err = self.store.Scan(common.KV, cursor, count, match)
-	if err != nil {
-		conn.WriteError(err.Error())
-		return
-	}
-	var nextCursor []byte
-	if len(ay) < count || (count == 0 && len(ay) == 0) {
-		nextCursor = []byte("")
-	} else {
-		nextCursor = ay[len(ay)-1]
-	}
-
-	conn.WriteArray(2)
-	conn.WriteBulk(nextCursor)
-	conn.WriteArray(len(ay))
-	for _, v := range ay {
-		conn.WriteBulk(v)
-	}
-}
-
-func (self *KVNode) scanCommandSingle(ch chan common.ScanResult, cmd redcon.Command) {
-	args := cmd.Args[1:]
-	cursor, match, count, err := parseScanArgs(args)
-
-	if err != nil {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
 	}
 
 	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
 	}
 
 	var nextCursor []byte
@@ -106,17 +71,16 @@ func (self *KVNode) scanCommandSingle(ch chan common.ScanResult, cmd redcon.Comm
 	} else {
 		nextCursor = ay[len(ay)-1]
 	}
-	ch <- common.ScanResult{List: ay, NextCursor: nextCursor, Error: nil}
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, NodeInfo: self.ns, Error: nil}, nil
 }
 
 // ADVSCAN cursor type [MATCH match] [COUNT count]
 // here cursor is the scan key for start, (table:key)
 // and the response will return the next start key for next scan,
 // (note: it is not the "0" as the redis scan to indicate the end of scan)
-func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
+func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
 	}
 
 	var dataType common.DataType
@@ -132,13 +96,11 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 	case "ZSET":
 		dataType = common.ZSET
 	default:
-		conn.WriteError("invalid key type " + string(cmd.Args[2]))
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, Error: common.ErrInvalidScanType}, common.ErrInvalidScanType
 	}
 	_, key, err := common.ExtractNamesapce(cmd.Args[1])
 	if err != nil {
-		conn.WriteError(err.Error() + ", " + string(cmd.Args[1]))
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
 	}
 	cmd.Args[1] = key
 	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
@@ -146,8 +108,7 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
 
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
 	}
 
 	var ay [][]byte
@@ -155,8 +116,7 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 	ay, err = self.store.Scan(dataType, cursor, count, match)
 
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
 	}
 
 	var nextCursor []byte
@@ -166,77 +126,7 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 		nextCursor = ay[len(ay)-1]
 	}
 
-	conn.WriteArray(2)
-	conn.WriteBulk(nextCursor)
-	conn.WriteArray(len(ay))
-	for _, v := range ay {
-		conn.WriteBulk(v)
-	}
-	return
-}
-
-func (self *KVNode) advanceScanCommandSingle(ch chan common.ScanResult, cmd redcon.Command) {
-	if len(cmd.Args) < 3 {
-		//		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: common.ErrInvalidArgs}
-		return
-	}
-
-	var dataType common.DataType
-	switch strings.ToUpper(string(cmd.Args[2])) {
-	case "KV":
-		dataType = common.KV
-	case "HASH":
-		dataType = common.HASH
-	case "LIST":
-		dataType = common.LIST
-	case "SET":
-		dataType = common.SET
-	case "ZSET":
-		dataType = common.ZSET
-	default:
-		fmt.Println("cmd:", string(cmd.Args[1]), "; KeyType:", string(cmd.Args[2]))
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: common.ErrInvalidKeyType}
-		return
-	}
-	_, key, err := common.ExtractNamesapce(cmd.Args[1])
-	if err != nil {
-		//		conn.WriteError(err.Error() + ", " + string(cmd.Args[1]))
-
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-	cmd.Args[1] = key
-	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
-
-	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
-
-	if err != nil {
-		//		conn.WriteError(err.Error())
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-
-	var ay [][]byte
-
-	ay, err = self.store.Scan(dataType, cursor, count, match)
-
-	if err != nil {
-		//		conn.WriteError(err.Error())
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-
-	var nextCursor []byte
-	if len(ay) < count || (count == 0 && len(ay) == 0) {
-		nextCursor = []byte("")
-	} else {
-		nextCursor = ay[len(ay)-1]
-	}
-
-	ch <- common.ScanResult{List: ay, NextCursor: nextCursor, Error: nil}
-
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, NodeInfo: self.ns, Error: nil}, nil
 }
 
 // HSCAN key cursor [MATCH match] [COUNT count]
@@ -281,41 +171,6 @@ func (self *KVNode) hscanCommand(conn redcon.Conn, cmd redcon.Command) {
 	return
 }
 
-func (self *KVNode) hscanCommandSingle(ch chan common.ScanResult, cmd redcon.Command) {
-	// the cursor can be nil means scan from start of the hash
-	if len(cmd.Args) < 2 {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: common.ErrInvalidArgs}
-		return
-	}
-	args := cmd.Args[1:]
-	key := args[0]
-	cursor, match, count, err := parseScanArgs(args[1:])
-
-	if err != nil {
-		//		conn.WriteError(err.Error())
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-
-	var ay []common.KVRecord
-
-	ay, err = self.store.HScan(key, cursor, count, match)
-	if err != nil {
-		//		conn.WriteError(err.Error())
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-
-	var nextCursor []byte
-	if len(ay) < count || (count == 0 && len(ay) == 0) {
-		nextCursor = []byte("")
-	} else {
-		nextCursor = ay[len(ay)-1].Key
-	}
-
-	ch <- common.ScanResult{List: ay, NextCursor: nextCursor, Error: nil}
-}
-
 //SSCAN key cursor [MATCH match] [COUNT count]
 // key is (table:key)
 func (self *KVNode) sscanCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -352,36 +207,6 @@ func (self *KVNode) sscanCommand(conn redcon.Conn, cmd redcon.Command) {
 	for _, v := range ay {
 		conn.WriteBulk(v)
 	}
-}
-
-func (self *KVNode) sscanCommandSingle(ch chan common.ScanResult, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: common.ErrInvalidArgs}
-		return
-	}
-	args := cmd.Args[1:]
-	key := args[0]
-
-	cursor, match, count, err := parseScanArgs(args[1:])
-
-	if err != nil {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-
-	var ay [][]byte
-	ay, err = self.store.SScan(key, cursor, count, match)
-	if err != nil {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-	var nextCursor []byte
-	if len(ay) < count || (count == 0 && len(ay) == 0) {
-		nextCursor = []byte("")
-	} else {
-		nextCursor = ay[len(ay)-1]
-	}
-	ch <- common.ScanResult{List: ay, NextCursor: nextCursor, Error: nil}
 }
 
 // ZSCAN key cursor [MATCH match] [COUNT count]
@@ -431,43 +256,4 @@ func (self *KVNode) zscanCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteBulk([]byte(strconv.FormatInt(v.Score, 10)))
 	}
 	return
-}
-
-func (self *KVNode) zscanCommandSingle(ch chan common.ScanResult, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: common.ErrInvalidArgs}
-		return
-	}
-	args := cmd.Args[1:]
-	key := args[0]
-
-	cursor, match, count, err := parseScanArgs(args[1:])
-
-	if err != nil {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-
-	var ay []common.ScorePair
-
-	ay, err = self.store.ZScan(key, cursor, count, match)
-
-	if err != nil {
-		ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-		return
-	}
-
-	vv := make([][]byte, 0, len(ay)*2)
-
-	for _, v := range ay {
-		vv = append(vv, v.Member)
-	}
-
-	var nextCursor []byte
-	if len(ay) < count || (count == 0 && len(ay) == 0) {
-		nextCursor = []byte("")
-	} else {
-		nextCursor = ay[len(ay)-1].Member
-	}
-	ch <- common.ScanResult{List: ay, NextCursor: nextCursor, Error: nil}
 }

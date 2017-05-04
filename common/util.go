@@ -1,8 +1,6 @@
 package common
 
 import (
-	"bytes"
-	"encoding/gob"
 	"net"
 	"regexp"
 	"strconv"
@@ -96,14 +94,4 @@ func DeepCopyCmd(cmd redcon.Command) redcon.Command {
 		newCmd.Args = append(newCmd.Args, tmp)
 	}
 	return newCmd
-}
-
-func DeepCopy(src interface{}) (dst interface{}, err error) {
-	var buf bytes.Buffer
-	if err = gob.NewEncoder(&buf).Encode(src); err != nil {
-		return
-	}
-
-	err = gob.NewDecoder(bytes.NewBuffer(buf.Bytes())).Decode(dst)
-	return
 }

@@ -229,8 +229,8 @@ func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool) {
 	return self.router.GetCmdHandler(cmd)
 }
 
-func (self *KVNode) GetScanHandler(cmd string) (common.ScanCommandFunc, bool) {
-	return self.router.GetScanCmdHandler(cmd)
+func (self *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool) {
+	return self.router.GetMergeCmdHandler(cmd)
 }
 
 func (self *KVNode) registerHandler() {
@@ -297,18 +297,13 @@ func (self *KVNode) registerHandler() {
 	self.router.Register("smclear", wrapWriteCommandKK(self, self.smclearCommand))
 
 	// for scan
-	/*
-		self.router.Register("scan", wrapReadCommandKAnySubkey(self.scanCommand))
-		self.router.Register("hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
-		self.router.Register("sscan", wrapReadCommandKAnySubkey(self.sscanCommand))
-		self.router.Register("zscan", wrapReadCommandKAnySubkey(self.zscanCommand))
-		self.router.Register("advscan", self.advanceScanCommand)
-	*/
-	self.router.RegisterScan("scan", wrapScanCommand(self.scanCommandSingle))
-	self.router.RegisterScan("hscan", wrapScanCommand(self.hscanCommandSingle))
-	self.router.RegisterScan("sscan", wrapScanCommand(self.sscanCommandSingle))
-	self.router.RegisterScan("zscan", wrapScanCommand(self.zscanCommandSingle))
-	self.router.RegisterScan("advscan", self.advanceScanCommandSingle)
+	self.router.Register("hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
+	self.router.Register("sscan", wrapReadCommandKAnySubkey(self.sscanCommand))
+	self.router.Register("zscan", wrapReadCommandKAnySubkey(self.zscanCommand))
+
+	//for cross mutil partion
+	self.router.RegisterMerge("scan", wrapMergeCommand(self.scanCommand))
+	self.router.RegisterMerge("advscan", self.advanceScanCommand)
 
 	// only write command need to be registered as internal
 	// kv

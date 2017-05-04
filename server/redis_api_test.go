@@ -21,8 +21,6 @@ var kvs *Server
 var redisport int
 var OK = "OK"
 
-var Separator = "@|@"
-
 func startTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	if err != nil {
@@ -1913,7 +1911,7 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.Name = "default-0"
 	nsConf.BaseName = "default"
 	nsConf.EngType = rockredis.EngType
-	nsConf.PartitionNum = 2
+	nsConf.PartitionNum = 3
 	nsConf.Replicator = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
@@ -1924,6 +1922,12 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 	}
 
 	nsConf.Name = "default-1"
+	_, err = kv.InitKVNamespace(1, nsConf, false)
+	if err != nil {
+		t.Fatalf("failed to init namespace: %v", err)
+	}
+
+	nsConf.Name = "default-2"
 	_, err = kv.InitKVNamespace(1, nsConf, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
@@ -1977,35 +1981,46 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "testscan:1"+Separator+"testscan:12"+Separator && string(n) != "testscan:12"+Separator+"testscan:1"+Separator {
+	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07" &&
+		string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07" &&
+		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07" &&
+		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07" &&
+		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07" &&
+		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07" {
 		t.Fatal(string(n))
 	} else {
-		checkDistScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:11", "testscan:12")
+		checkDistScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:11")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:1"+Separator+"default:testscan:12"+Separator, tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07", tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "testscan:14"+Separator+"testscan:19"+Separator && string(n) != "testscan:19"+Separator+"testscan:14"+Separator {
+	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07" &&
+		string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07" &&
+		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07" &&
+		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07" &&
+		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07" &&
+		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07" {
 		t.Fatal(string(n))
 	} else {
-		checkDistScanValues(t, ay[1], "testscan:10", "testscan:13", "testscan:14", "testscan:16", "testscan:18", "testscan:19")
+		checkDistScanValues(t, ay[1], "testscan:12", "testscan:14", "testscan:10", "testscan:15", "testscan:13", "testscan:18")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:14"+Separator+"default:testscan:19"+Separator, tp, "count", 8)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07", tp, "count", 8)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "testscan:4"+Separator {
+	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk5RPT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1Uaz07" &&
+		string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1Uaz07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk5RPT07" {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkDistScanValues(t, ay[1], "testscan:15", "testscan:17", "testscan:2", "testscan:4", "testscan:3", "testscan:8", "testscan:9")
+			checkDistScanValues(t, ay[1], "testscan:16", "testscan:19", "testscan:17", "testscan:2", "testscan:5")
 		}
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:4"+Separator, tp, "count", 5)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk5BPT07", tp, "count", 5)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2013,20 +2028,12 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkDistScanValues(t, ay[1], "testscan:5", "testscan:7", "testscan:6")
+			checkDistScanValues(t, ay[1], "testscan:7", "testscan:6")
 		}
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:9"+Separator, tp, "count", 0)); err != nil {
+	if _, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:dGVzdHNjYW46NA==", tp, "count", 0)); err == nil {
 		t.Fatal(err)
-	} else if len(ay) != 2 {
-		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "" {
-		t.Fatal(string(n))
-	} else {
-		if len(ay[1].([]interface{})) != 0 {
-			t.Fatal(ay[1])
-		}
 	}
 }
 
@@ -2123,52 +2130,4 @@ func testDistSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	}
 
 	checkDistAdvanceScan(t, c, "SET")
-}
-
-func TestDistHashScan(t *testing.T) {
-	c := getDistTestConn(t)
-	defer c.Close()
-
-	key := "default:testscan:scan_hash"
-	c.Do("HMSET", key, "a", 1, "b", 2)
-
-	if ay, err := goredis.Values(c.Do("HSCAN", key, "")); err != nil {
-		t.Fatal(err)
-	} else if len(ay) != 2 {
-		t.Fatal(len(ay))
-	} else {
-		checkScanValues(t, ay[1], "a", 1, "b", 2)
-	}
-}
-
-func TestDistSetScan(t *testing.T) {
-	c := getDistTestConn(t)
-	defer c.Close()
-
-	key := "default:test:scan_set"
-	c.Do("SADD", key, "a", "b")
-
-	if ay, err := goredis.Values(c.Do("SSCAN", key, "")); err != nil {
-		t.Fatal(err)
-	} else if len(ay) != 2 {
-		t.Fatal(len(ay))
-	} else {
-		checkScanValues(t, ay[1], "a", "b")
-	}
-}
-
-func TestDistZSetScan(t *testing.T) {
-	c := getDistTestConn(t)
-	defer c.Close()
-
-	key := "default:test:scan_zset"
-	c.Do("ZADD", key, 1, "a", 2, "b")
-
-	if ay, err := goredis.Values(c.Do("ZSCAN", key, "")); err != nil {
-		t.Fatal(err)
-	} else if len(ay) != 2 {
-		t.Fatal(len(ay))
-	} else {
-		checkScanValues(t, ay[1], "a", 1, "b", 2)
-	}
 }

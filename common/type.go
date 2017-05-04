@@ -14,14 +14,20 @@ const (
 )
 
 var (
-	ErrInvalidCommand   = errors.New("invalid command")
-	ErrStopped          = errors.New("the node stopped")
-	ErrTimeout          = errors.New("queue request timeout")
-	ErrInvalidArgs      = errors.New("Invalid arguments")
-	ErrInvalidRedisKey  = errors.New("invalid redis key")
-	ErrInvalidKeyType   = errors.New("Invalid key type")
-	ErrEpochMismatch    = errors.New("epoch mismatch")
-	ErrInvalidTableName = errors.New("table name is invalid")
+	SCAN_CURSOR_SEP = []byte(";")
+	SCAN_NODE_SEP   = []byte(":")
+)
+
+var (
+	ErrInvalidCommand    = errors.New("invalid command")
+	ErrStopped           = errors.New("the node stopped")
+	ErrTimeout           = errors.New("queue request timeout")
+	ErrInvalidArgs       = errors.New("invalid arguments")
+	ErrInvalidRedisKey   = errors.New("invalid redis key")
+	ErrInvalidScanType   = errors.New("invalid scan type")
+	ErrEpochMismatch     = errors.New("epoch mismatch")
+	ErrInvalidTableName  = errors.New("table name is invalid")
+	ErrInvalidScanCursor = errors.New("invalid scan cursor")
 )
 
 // for out use
@@ -102,6 +108,23 @@ func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
 	return namespace, realKey, nil
 }
 
+func ExtractRawKey(rawKey []byte) (ns, table string, realKey []byte, err error) {
+	ns, newKey, err := ExtractNamesapce(rawKey)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	index := bytes.IndexByte(newKey, ':')
+	if index <= 0 {
+		return ns, "", newKey, nil
+	}
+
+	table = string(newKey[:index])
+
+	realKey = newKey[index+1:]
+	return
+}
+
 type ScorePair struct {
 	Score  int64
 	Member []byte
@@ -110,19 +133,19 @@ type ScorePair struct {
 type CommandFunc func(redcon.Conn, redcon.Command)
 type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
 type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
-type ScanCommandFunc func(chan ScanResult, redcon.Command)
+type MergeCommandFunc func(redcon.Command) (interface{}, error)
 
 type CmdRouter struct {
 	cmds         map[string]CommandFunc
 	internalCmds map[string]InternalCommandFunc
-	scanCmds     map[string]ScanCommandFunc
+	scanCmds     map[string]MergeCommandFunc
 }
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
 		cmds:         make(map[string]CommandFunc),
 		internalCmds: make(map[string]InternalCommandFunc),
-		scanCmds:     make(map[string]ScanCommandFunc),
+		scanCmds:     make(map[string]MergeCommandFunc),
 	}
 }
 
@@ -152,7 +175,7 @@ func (r *CmdRouter) GetInternalCmdHandler(name string) (InternalCommandFunc, boo
 	return v, ok
 }
 
-func (r *CmdRouter) RegisterScan(name string, f ScanCommandFunc) bool {
+func (r *CmdRouter) RegisterMerge(name string, f MergeCommandFunc) bool {
 	if _, ok := r.scanCmds[strings.ToLower(name)]; ok {
 		return false
 	}
@@ -160,7 +183,7 @@ func (r *CmdRouter) RegisterScan(name string, f ScanCommandFunc) bool {
 	return true
 }
 
-func (r *CmdRouter) GetScanCmdHandler(name string) (ScanCommandFunc, bool) {
+func (r *CmdRouter) GetMergeCmdHandler(name string) (MergeCommandFunc, bool) {
 	v, ok := r.scanCmds[strings.ToLower(name)]
 	return v, ok
 }
@@ -228,10 +251,8 @@ type IClusterInfo interface {
 }
 
 type ScanResult struct {
-	NormalResult [][]byte
-	HScanResult  []KVRecord
-	ZScanResult  []ScorePair
-	List         interface{}
-	NextCursor   []byte
-	Error        error
+	Result     interface{}
+	NextCursor []byte
+	NodeInfo   string
+	Error      error
 }

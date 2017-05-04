@@ -52,12 +52,12 @@ func rebuildFirstKeyAndPropose(kvn *KVNode, conn redcon.Conn, cmd redcon.Command
 		conn.WriteError(err.Error())
 		return cmd, nil, false
 	}
-	
+
 	if common.IsValidTableName(key) {
 		conn.WriteError(common.ErrInvalidTableName.Error())
 		return cmd, nil, false
 	}
-	
+
 	cmd.Args[1] = key
 	ncmd := buildCommand(cmd.Args)
 	copy(cmd.Raw[0:], ncmd.Raw[:])
@@ -342,15 +342,14 @@ func wrapWriteCommandKSubkeyVSubkeyV(kvn *KVNode, f common.CommandRspFunc) commo
 	}
 }
 
-func wrapScanCommand(f common.ScanCommandFunc) common.ScanCommandFunc {
-	return func(ch chan common.ScanResult, cmd redcon.Command) {
+func wrapMergeCommand(f common.MergeCommandFunc) common.MergeCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		_, key, err := common.ExtractNamesapce(cmd.Args[1])
 		if err != nil {
-			ch <- common.ScanResult{List: nil, NextCursor: nil, Error: err}
-			return
+			return nil, err
 		}
 		cmd.Args[1] = key
 
-		f(ch, cmd)
+		return f(cmd)
 	}
 }
