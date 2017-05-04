@@ -59,17 +59,6 @@ func decodeKVKey(ek []byte) ([]byte, error) {
 	return ek[pos:], nil
 }
 
-func encodeKVMinKey() []byte {
-	ek := encodeKVKey(nil)
-	return ek
-}
-
-func encodeKVMaxKey() []byte {
-	ek := encodeKVKey(nil)
-	ek[len(ek)-1] = KVType + 1
-	return ek
-}
-
 func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
