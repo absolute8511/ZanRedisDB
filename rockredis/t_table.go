@@ -20,12 +20,12 @@ var (
 
 const (
 	tableStartSep          byte = ':'
-	tableStopSep           byte = tableStartSep + 1
 	colStartSep            byte = ':'
-	colStopSep             byte = colStartSep + 1
 	tableIndexMetaStartSep byte = ':'
-	tableIndexMetaStopSep  byte = tableIndexMetaStartSep + 1
+	metaSep                byte = ':'
 )
+
+var metaPrefix = []byte("meta" + string(metaSep))
 
 const (
 	hsetIndexMeta     byte = 1
@@ -51,20 +51,23 @@ func extractTableFromRedisKey(key []byte) []byte {
 }
 
 func encodeTableMetaKey(table []byte) []byte {
-	tmkey := make([]byte, 1+len(table))
+	tmkey := make([]byte, 1+len(metaPrefix)+len(table))
 	pos := 0
 	tmkey[pos] = TableMetaType
 	pos++
+	copy(tmkey[pos:], metaPrefix)
+	pos += len(metaPrefix)
 	copy(tmkey[pos:], table)
 	return tmkey
 }
 
 func decodeTableMetaKey(tk []byte) ([]byte, error) {
 	pos := 0
-	if len(tk) < pos+1 || tk[pos] != TableMetaType {
+	if len(tk) < pos+1+len(metaPrefix) || tk[pos] != TableMetaType {
 		return nil, errTableMetaKey
 	}
 	pos++
+	pos += len(metaPrefix)
 	return tk[pos:], nil
 }
 
@@ -74,7 +77,7 @@ func encodeTableMetaStartKey() []byte {
 
 func encodeTableMetaStopKey() []byte {
 	t := encodeTableMetaKey(nil)
-	t[len(t)-1] = TableMetaType + 1
+	t[len(t)-1] = t[len(t)-1] + 1
 	return t
 }
 
@@ -121,21 +124,25 @@ func (db *RockDB) GetTableKeyCount(table []byte) (int64, error) {
 }
 
 func encodeTableIndexMetaKey(table []byte, itype byte) []byte {
-	tmkey := make([]byte, 2+len(table))
+	tmkey := make([]byte, 2+len(metaPrefix)+len(table))
 	pos := 0
 	tmkey[pos] = TableIndexMetaType
 	pos++
+	copy(tmkey[pos:], metaPrefix)
+	pos += len(metaPrefix)
 	tmkey[pos] = itype
+	pos++
 	copy(tmkey[pos:], table)
 	return tmkey
 }
 
 func decodeTableIndexMetaKey(tk []byte) (byte, []byte, error) {
 	pos := 0
-	if len(tk) < pos+2 || tk[pos] != TableIndexMetaType {
+	if len(tk) < pos+2+len(metaPrefix) || tk[pos] != TableIndexMetaType {
 		return 0, nil, errTableIndexMetaKey
 	}
 	pos++
+	pos += len(metaPrefix)
 	itype := tk[pos]
 	pos++
 	return itype, tk[pos:], nil
@@ -147,8 +154,35 @@ func encodeTableIndexMetaStartKey(itype byte) []byte {
 
 func encodeTableIndexMetaStopKey(itype byte) []byte {
 	t := encodeTableIndexMetaKey(nil, itype)
-	t[len(t)-1] = TableIndexMetaType + 1
+	t[len(t)-1] = t[len(t)-1] + 1
 	return t
+}
+
+func (db *RockDB) GetHsetIndexTables() chan []byte {
+	// TODO: use total_order_seek options for rocksdb to seek with prefix less than prefix extractor
+	ch := make(chan []byte, 10)
+	go func() {
+		s := encodeTableIndexMetaStartKey(hsetIndexMeta)
+		e := encodeTableIndexMetaStopKey(hsetIndexMeta)
+		it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+		if err != nil {
+			close(ch)
+			return
+		}
+		defer it.Close()
+		defer close(ch)
+
+		for ; it.Valid(); it.Next() {
+			rk := it.Key()
+			_, table, err := decodeTableIndexMetaKey(rk)
+			if err != nil {
+				dbLog.Infof("decode index table name %v failed: %v", rk, err)
+				continue
+			}
+			ch <- table
+		}
+	}()
+	return ch
 }
 
 func (db *RockDB) GetTableHsetIndexValue(table []byte) ([]byte, error) {
