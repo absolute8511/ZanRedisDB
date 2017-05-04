@@ -41,7 +41,7 @@ func (self *Server) dealMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 				var results []interface{}
 
 				cmdName := qcmdlower(cmd.Args[0])
-				handlers, cmds, err := self.GetMergeHandlersAndCommands(cmdName, cmd)
+				handlers, cmds, err := self.GetMergeHandlers(cmdName, cmd)
 
 				if err == nil {
 					length := len(handlers)
@@ -106,7 +106,6 @@ func (self *Server) dealScanMergeCommand(conn redcon.Conn, results []interface{}
 			for i := 0; i < cnt; i++ {
 				result = append(result, v.Index(i).Interface())
 			}
-
 		} else {
 			//TODO: log sth
 		}

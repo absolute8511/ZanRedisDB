@@ -251,7 +251,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	return h, cmd, nil
 }
 
-func (self *Server) GetMergeHandlersAndCommands(cmdName string, cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, error) {
+func (self *Server) GetMergeHandlers(cmdName string, cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, error) {
 	if len(cmd.Args) < 2 {
 		return nil, nil, common.ErrInvalidArgs
 	}
