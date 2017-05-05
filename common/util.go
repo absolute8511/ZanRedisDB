@@ -96,18 +96,6 @@ func DeepCopyCmd(cmd redcon.Command) redcon.Command {
 	return newCmd
 }
 
-func IsScanCommand(cmd string) bool {
-	n := len(cmd)
-	if n < 4 {
-		return false
-	}
-	if cmd[n-1] == 'n' && cmd[n-2] == 'a' &&
-		cmd[n-3] == 'c' && cmd[n-4] == 's' {
-		return true
-	}
-	return false
-}
-
 func IsMergeScanCommand(cmd string) bool {
 	switch len(cmd) {
 	case 4:

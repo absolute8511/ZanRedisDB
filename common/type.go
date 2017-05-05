@@ -29,6 +29,7 @@ var (
 	ErrInvalidTableName  = errors.New("table name is invalid")
 	ErrInvalidScanCursor = errors.New("invalid scan cursor")
 	ErrScanCursorNoTable = errors.New("scan cursor must has table")
+	ErrUnexpectError     = errors.New("unexpected error")
 )
 
 // for out use
@@ -237,6 +238,6 @@ type IClusterInfo interface {
 type ScanResult struct {
 	Result     interface{}
 	NextCursor []byte
-	NodeInfo   string
+	PartionId  string
 	Error      error
 }

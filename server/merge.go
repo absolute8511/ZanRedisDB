@@ -29,7 +29,7 @@ var (
 func (s *Server) doMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 	cmdName := qcmdlower(cmd.Args[0])
 
-	if common.IsScanCommand(cmdName) {
+	if common.IsMergeScanCommand(cmdName) {
 		s.doScan(conn, cmd)
 	}
 
@@ -52,22 +52,13 @@ func (s *Server) doScan(conn redcon.Conn, cmd redcon.Command) {
 	}(scanStart)
 
 	if len(cmd.Args) >= 2 {
-		var table []byte
 		var count int
 		var countIndex int
 		var err error
 		rawKey := cmd.Args[1]
 
-		_, realKey, err := common.ExtractNamesapce(rawKey)
+		_, _, err = common.ExtractNamesapce(rawKey)
 		if err != nil {
-			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
-			return
-		}
-
-		originCursor := bytes.Split(realKey, common.SCAN_NODE_SEP)
-		if len(originCursor) == 2 {
-			table = originCursor[0]
-		} else {
 			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
 			return
 		}
@@ -130,10 +121,7 @@ func (s *Server) doScan(conn redcon.Conn, cmd redcon.Command) {
 				}
 
 				if len(realRes.NextCursor) > 0 {
-					nextCursorBytes = append(nextCursorBytes, []byte(realRes.NodeInfo)...)
-					nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
-
-					nextCursorBytes = append(nextCursorBytes, table...)
+					nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
 					nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
 
 					nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
@@ -161,24 +149,29 @@ func (s *Server) doScan(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (s *Server) doScanNodesFilter(key []byte, namespace string, nodes map[string]*node.NamespaceNode, cmds map[string]redcon.Command) error {
-
+func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Command, nodes map[string]*node.NamespaceNode) (map[string]redcon.Command, error) {
+	cmds := make(map[string]redcon.Command)
 	nsMap, err := s.decodeCursor(key, namespace)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(nsMap) == 0 {
-		return nil
+		for k, _ := range nodes {
+			newCmd := common.DeepCopyCmd(cmd)
+			cmds[k] = newCmd
+		}
+		return cmds, nil
 	}
-	for k, _ := range cmds {
-		if cmd, ok := nsMap[k]; !ok {
+	for k, _ := range nodes {
+		if cursor, ok := nsMap[k]; !ok {
 			delete(nodes, k)
-			delete(cmds, k)
 		} else {
-			cmds[k].Args[1] = []byte(cmd)
+			newCmd := common.DeepCopyCmd(cmd)
+			newCmd.Args[1] = []byte(namespace + ":" + cursor)
+			cmds[k] = newCmd
 		}
 	}
-	return nil
+	return cmds, nil
 }
 
 func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string, error) {
@@ -204,20 +197,20 @@ func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string,
 				if len(cursors) > 0 {
 					for _, c := range cursors {
 						cursorinfo := bytes.Split(c, common.SCAN_NODE_SEP)
-						if len(cursorinfo) == 3 {
-							ns := cursorinfo[0]
-							tab := string(cursorinfo[1])
-							if tab != table {
-								return nil, common.ErrInvalidScanCursor
-							}
-
-							cursorEncoded := cursorinfo[2]
+						if len(cursorinfo) == 2 {
+							cursorEncoded := cursorinfo[1]
 							cursorDecoded, err := base64.StdEncoding.DecodeString(string(cursorEncoded))
 							if err == nil {
-								var newCursor []byte
-								newCursor = append(newCursor, []byte(nsBaseName+":")...)
-								newCursor = append(newCursor, cursorDecoded...)
-								nsMap[string(ns)] = string(newCursor)
+								splits := bytes.SplitN(cursorDecoded, []byte(":"), 2)
+								tab := string(splits[0])
+								if table != tab {
+									return nil, common.ErrInvalidScanCursor
+								}
+								ns := []byte(nsBaseName)
+								ns = append(ns, '-')
+								ns = append(ns, cursorinfo[0]...)
+
+								nsMap[string(ns)] = string(cursorDecoded)
 							} else {
 								return nil, common.ErrInvalidScanCursor
 							}

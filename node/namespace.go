@@ -1,8 +1,6 @@
 package node
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
@@ -18,7 +16,6 @@ import (
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/spaolacci/murmur3"
-	"github.com/tidwall/redcon"
 	"golang.org/x/net/context"
 )
 
@@ -329,70 +326,22 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 	return n, nil
 }
 
-func (self *NamespaceMgr) GetNamespaceNodes(cmd redcon.Command, nsBaseName string) (map[string]*NamespaceNode, map[string]redcon.Command, error) {
+func (self *NamespaceMgr) GetNamespaceNodes(nsBaseName string) (map[string]*NamespaceNode, error) {
 	nsNodes := make(map[string]*NamespaceNode)
-	commands := make(map[string]redcon.Command)
 
 	tmp := self.GetNamespaces()
 	for k, v := range tmp {
 		ns, _ := common.GetNamespaceAndPartition(k)
 		if ns == nsBaseName {
 			nsNodes[k] = v
-			newCmd := common.DeepCopyCmd(cmd)
-			commands[k] = newCmd
 		}
 	}
 
 	if len(nsNodes) <= 0 {
-		return nil, nil, ErrNamespaceNotFound
+		return nil, ErrNamespaceNotFound
 	}
 
-	return nsNodes, commands, nil
-}
-
-func (self *NamespaceMgr) GetNamespaceNodesWithScanCursor(cmd redcon.Command, nsBaseName string, cursor []byte) (map[string]*NamespaceNode, map[string]redcon.Command, error) {
-	nsNodes := make(map[string]*NamespaceNode)
-	commands := make(map[string]redcon.Command)
-	if len(cursor) > 0 {
-		cursor, err := base64.StdEncoding.DecodeString(string(cursor))
-		if err == nil {
-			cursors := bytes.Split(cursor, common.SCAN_CURSOR_SEP)
-			if len(cursors) > 0 {
-				for _, c := range cursors {
-					cursorinfo := bytes.Split(c, common.SCAN_NODE_SEP)
-					if len(cursorinfo) > 1 {
-						ns := cursorinfo[0]
-						self.mutex.RLock()
-						defer self.mutex.RUnlock()
-						if node, ok := self.kvNodes[string(ns)]; ok {
-							cursorEncoded := cursorinfo[1]
-							newCmd := common.DeepCopyCmd(cmd)
-							cursorDecoded, err := base64.StdEncoding.DecodeString(string(cursorEncoded))
-							if err == nil {
-								var newCursor []byte
-								newCursor = append(newCursor, []byte(nsBaseName+":")...)
-								newCursor = append(newCursor, cursorDecoded...)
-								newCmd.Args[1] = newCursor
-								nsNodes[string(ns)] = node
-								commands[string(ns)] = newCmd
-							}
-						}
-					}
-				}
-			} else {
-				return nil, nil, common.ErrInvalidScanCursor
-			}
-		} else {
-			return nil, nil, common.ErrInvalidScanCursor
-		}
-
-		if len(nsNodes) <= 0 {
-			return nil, nil, ErrNamespaceNotFound
-		}
-		return nsNodes, commands, nil
-	} else {
-		return self.GetNamespaceNodes(cmd, nsBaseName)
-	}
+	return nsNodes, nil
 }
 
 func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {

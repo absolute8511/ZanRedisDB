@@ -57,12 +57,12 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	cursor, match, count, err := parseScanArgs(args)
 
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	var nextCursor []byte
@@ -71,7 +71,11 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	} else {
 		nextCursor = ay[len(ay)-1]
 	}
-	return common.ScanResult{Result: ay, NextCursor: nextCursor, NodeInfo: self.ns, Error: nil}, nil
+	splits := strings.SplitN(self.ns, "-", 2)
+	if len(splits) != 2 {
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrUnexpectError}, common.ErrUnexpectError
+	}
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: splits[1], Error: nil}, nil
 }
 
 // ADVSCAN cursor type [MATCH match] [COUNT count]
@@ -80,7 +84,7 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 // (note: it is not the "0" as the redis scan to indicate the end of scan)
 func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 3 {
-		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
 	}
 
 	var dataType common.DataType
@@ -100,7 +104,7 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	}
 	_, key, err := common.ExtractNamesapce(cmd.Args[1])
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 	cmd.Args[1] = key
 	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
@@ -108,7 +112,7 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
 
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	var ay [][]byte
@@ -116,7 +120,7 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	ay, err = self.store.Scan(dataType, cursor, count, match)
 
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, NodeInfo: "", Error: err}, err
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	var nextCursor []byte
@@ -125,8 +129,11 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	} else {
 		nextCursor = ay[len(ay)-1]
 	}
-
-	return common.ScanResult{Result: ay, NextCursor: nextCursor, NodeInfo: self.ns, Error: nil}, nil
+	splits := strings.SplitN(self.ns, "-", 2)
+	if len(splits) != 2 {
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrUnexpectError}, common.ErrUnexpectError
+	}
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: splits[1], Error: nil}, nil
 }
 
 // HSCAN key cursor [MATCH match] [COUNT count]
