@@ -329,11 +329,32 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 	return n, nil
 }
 
-func (self *NamespaceMgr) GetNamespaceNodesWithKey(cmd redcon.Command, nsBaseName, table string, key []byte) (map[string]*NamespaceNode, map[string]redcon.Command, error) {
+func (self *NamespaceMgr) GetNamespaceNodes(cmd redcon.Command, nsBaseName string) (map[string]*NamespaceNode, map[string]redcon.Command, error) {
 	nsNodes := make(map[string]*NamespaceNode)
 	commands := make(map[string]redcon.Command)
-	if len(key) > 0 {
-		cursor, err := base64.StdEncoding.DecodeString(string(key))
+
+	tmp := self.GetNamespaces()
+	for k, v := range tmp {
+		ns, _ := common.GetNamespaceAndPartition(k)
+		if ns == nsBaseName {
+			nsNodes[k] = v
+			newCmd := common.DeepCopyCmd(cmd)
+			commands[k] = newCmd
+		}
+	}
+
+	if len(nsNodes) <= 0 {
+		return nil, nil, ErrNamespaceNotFound
+	}
+
+	return nsNodes, commands, nil
+}
+
+func (self *NamespaceMgr) GetNamespaceNodesWithScanCursor(cmd redcon.Command, nsBaseName string, cursor []byte) (map[string]*NamespaceNode, map[string]redcon.Command, error) {
+	nsNodes := make(map[string]*NamespaceNode)
+	commands := make(map[string]redcon.Command)
+	if len(cursor) > 0 {
+		cursor, err := base64.StdEncoding.DecodeString(string(cursor))
 		if err == nil {
 			cursors := bytes.Split(cursor, common.SCAN_CURSOR_SEP)
 			if len(cursors) > 0 {
@@ -364,23 +385,14 @@ func (self *NamespaceMgr) GetNamespaceNodesWithKey(cmd redcon.Command, nsBaseNam
 		} else {
 			return nil, nil, common.ErrInvalidScanCursor
 		}
-	} else {
-		tmp := self.GetNamespaces()
-		for k, v := range tmp {
-			ns, _ := common.GetNamespaceAndPartition(k)
-			if ns == nsBaseName {
-				nsNodes[k] = v
-				newCmd := common.DeepCopyCmd(cmd)
-				commands[k] = newCmd
-			}
-		}
 
 		if len(nsNodes) <= 0 {
 			return nil, nil, ErrNamespaceNotFound
 		}
+		return nsNodes, commands, nil
+	} else {
+		return self.GetNamespaceNodes(cmd, nsBaseName)
 	}
-
-	return nsNodes, commands, nil
 }
 
 func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {

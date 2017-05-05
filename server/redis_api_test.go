@@ -1920,15 +1920,28 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
-
-	nsConf.Name = "default-1"
-	_, err = kv.InitKVNamespace(1, nsConf, false)
+	nsConf1 := node.NewNSConfig()
+	nsConf1.Name = "default-1"
+	nsConf1.BaseName = "default"
+	nsConf1.EngType = rockredis.EngType
+	nsConf1.PartitionNum = 3
+	nsConf1.Replicator = 1
+	nsConf1.RaftGroupConf.GroupID = 1000
+	nsConf1.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	_, err = kv.InitKVNamespace(1, nsConf1, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
 
-	nsConf.Name = "default-2"
-	_, err = kv.InitKVNamespace(1, nsConf, false)
+	nsConf2 := node.NewNSConfig()
+	nsConf2.Name = "default-2"
+	nsConf2.BaseName = "default"
+	nsConf2.EngType = rockredis.EngType
+	nsConf2.PartitionNum = 3
+	nsConf2.Replicator = 1
+	nsConf2.RaftGroupConf.GroupID = 1000
+	nsConf2.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	_, err = kv.InitKVNamespace(1, nsConf2, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
