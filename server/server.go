@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"net/http"
@@ -263,22 +262,19 @@ func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandF
 		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
 		return nil, nil, err
 	}
-	var nodes map[string]*node.NamespaceNode
-	var cmds map[string]redcon.Command
-	cmdName := strings.ToLower(string(cmd.Args[0]))
-	if common.IsScanCommand(cmdName) {
-		cursor := bytes.Split(realKey, common.SCAN_NODE_SEP)
-		if len(cursor) > 1 {
-			nodes, cmds, err = self.nsMgr.GetNamespaceNodesWithScanCursor(cmd, namespace, cursor[1])
-		} else {
-
-			nodes, cmds, err = self.nsMgr.GetNamespaceNodesWithScanCursor(cmd, namespace, realKey)
-		}
-	} else {
-		nodes, cmds, err = self.nsMgr.GetNamespaceNodes(cmd, namespace)
-	}
+	nodes, cmds, err := self.nsMgr.GetNamespaceNodes(cmd, namespace)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	cmdName := strings.ToLower(string(cmd.Args[0]))
+
+	//do nodes filter
+	if common.IsScanCommand(cmdName) {
+		err = self.doScanNodesFilter(realKey, namespace, nodes, cmds)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	var handlers []common.MergeCommandFunc

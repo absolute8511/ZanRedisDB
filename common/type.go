@@ -28,6 +28,7 @@ var (
 	ErrEpochMismatch     = errors.New("epoch mismatch")
 	ErrInvalidTableName  = errors.New("table name is invalid")
 	ErrInvalidScanCursor = errors.New("invalid scan cursor")
+	ErrScanCursorNoTable = errors.New("scan cursor must has table")
 )
 
 // for out use
@@ -106,23 +107,6 @@ func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
 	namespace := string(rawKey[:index])
 	realKey := rawKey[index+1:]
 	return namespace, realKey, nil
-}
-
-func ExtractRawKey(rawKey []byte) (ns, table string, realKey []byte, err error) {
-	ns, newKey, err := ExtractNamesapce(rawKey)
-	if err != nil {
-		return "", "", nil, err
-	}
-
-	index := bytes.IndexByte(newKey, ':')
-	if index <= 0 {
-		return ns, "", newKey, nil
-	}
-
-	table = string(newKey[:index])
-
-	realKey = newKey[index+1:]
-	return
 }
 
 type ScorePair struct {

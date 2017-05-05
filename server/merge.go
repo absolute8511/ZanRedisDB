@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/tidwall/redcon"
 )
 
@@ -24,8 +26,9 @@ var (
 
 // handle range, scan command which need across multi partitions
 
-func (s *Server) dealMergeCommand(conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) doMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 	cmdName := qcmdlower(cmd.Args[0])
+
 	if common.IsScanCommand(cmdName) {
 		s.doScan(conn, cmd)
 	}
@@ -49,9 +52,26 @@ func (s *Server) doScan(conn redcon.Conn, cmd redcon.Command) {
 	}(scanStart)
 
 	if len(cmd.Args) >= 2 {
+		var table []byte
 		var count int
 		var countIndex int
 		var err error
+		rawKey := cmd.Args[1]
+
+		_, realKey, err := common.ExtractNamesapce(rawKey)
+		if err != nil {
+			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
+			return
+		}
+
+		originCursor := bytes.Split(realKey, common.SCAN_NODE_SEP)
+		if len(originCursor) == 2 {
+			table = originCursor[0]
+		} else {
+			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
+			return
+		}
+
 		for i := 0; i < len(cmd.Args); i++ {
 			if strings.ToLower(string(cmd.Args[i])) == "count" {
 				if i+1 >= len(cmd.Args) {
@@ -112,6 +132,10 @@ func (s *Server) doScan(conn redcon.Conn, cmd redcon.Command) {
 				if len(realRes.NextCursor) > 0 {
 					nextCursorBytes = append(nextCursorBytes, []byte(realRes.NodeInfo)...)
 					nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
+
+					nextCursorBytes = append(nextCursorBytes, table...)
+					nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
+
 					nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
 					nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
 				}
@@ -135,4 +159,84 @@ func (s *Server) doScan(conn redcon.Conn, cmd redcon.Command) {
 	} else {
 		conn.WriteError(common.ErrInvalidArgs.Error() + " : Err handle command " + string(cmd.Args[0]))
 	}
+}
+
+func (s *Server) doScanNodesFilter(key []byte, namespace string, nodes map[string]*node.NamespaceNode, cmds map[string]redcon.Command) error {
+
+	nsMap, err := s.decodeCursor(key, namespace)
+	if err != nil {
+		return err
+	}
+	if len(nsMap) == 0 {
+		return nil
+	}
+	for k, _ := range cmds {
+		if cmd, ok := nsMap[k]; !ok {
+			delete(nodes, k)
+			delete(cmds, k)
+		} else {
+			cmds[k].Args[1] = []byte(cmd)
+		}
+	}
+	return nil
+}
+
+func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string, error) {
+
+	//key = table:cursor
+	originCursor := bytes.Split(key, common.SCAN_NODE_SEP)
+
+	//key:namespace val:new cursor
+	nsMap := make(map[string]string)
+
+	if len(originCursor) == 2 {
+		table := string(originCursor[0])
+		encodedCursors := originCursor[1]
+		if len(table) > 0 {
+			if len(encodedCursors) == 0 {
+				return nsMap, nil
+			}
+
+			decodedCursors, err := base64.StdEncoding.DecodeString(string(encodedCursors))
+			if err == nil {
+				decodedCursors = bytes.TrimRight(decodedCursors, string(common.SCAN_CURSOR_SEP))
+				cursors := bytes.Split(decodedCursors, common.SCAN_CURSOR_SEP)
+				if len(cursors) > 0 {
+					for _, c := range cursors {
+						cursorinfo := bytes.Split(c, common.SCAN_NODE_SEP)
+						if len(cursorinfo) == 3 {
+							ns := cursorinfo[0]
+							tab := string(cursorinfo[1])
+							if tab != table {
+								return nil, common.ErrInvalidScanCursor
+							}
+
+							cursorEncoded := cursorinfo[2]
+							cursorDecoded, err := base64.StdEncoding.DecodeString(string(cursorEncoded))
+							if err == nil {
+								var newCursor []byte
+								newCursor = append(newCursor, []byte(nsBaseName+":")...)
+								newCursor = append(newCursor, cursorDecoded...)
+								nsMap[string(ns)] = string(newCursor)
+							} else {
+								return nil, common.ErrInvalidScanCursor
+							}
+
+						} else {
+							return nil, common.ErrInvalidScanCursor
+						}
+					}
+				} else {
+					return nil, common.ErrInvalidScanCursor
+				}
+			} else {
+				return nil, common.ErrInvalidScanCursor
+			}
+		} else {
+			return nil, common.ErrScanCursorNoTable
+		}
+	} else {
+		return nil, common.ErrInvalidScanCursor
+	}
+	return nsMap, nil
 }

@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 )
 
@@ -48,8 +49,8 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		d, _ := json.MarshalIndent(s, "", " ")
 		conn.WriteBulkString(string(d))
 	default:
-		if isMergeCommand(cmdName) {
-			self.dealMergeCommand(conn, cmd)
+		if common.IsMergeCommand(cmdName) {
+			self.doMergeCommand(conn, cmd)
 		} else {
 			h, cmd, err := self.GetHandler(cmdName, cmd)
 			if err == nil {

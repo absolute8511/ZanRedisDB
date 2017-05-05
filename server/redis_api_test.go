@@ -1994,38 +1994,38 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07" &&
-		string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07" &&
-		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07" &&
-		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07" &&
-		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07" &&
-		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07" {
+	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1URT07" &&
+		string(n) != "ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1BPT07" &&
+		string(n) != "ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1URT07" &&
+		string(n) != "ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1RPT07" &&
+		string(n) != "ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1BPT07" &&
+		string(n) != "ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1URT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1RPT07" {
 		t.Fatal(string(n))
 	} else {
 		checkDistScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:11")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1URT07", tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1RPT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1BPT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1URT07", tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07" &&
-		string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07" &&
-		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07" &&
-		string(n) != "ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07" &&
-		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07" &&
-		string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07" {
+	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UZz07" &&
+		string(n) != "ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UVT07" &&
+		string(n) != "ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UZz07" &&
+		string(n) != "ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UUT07" &&
+		string(n) != "ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UVT07" &&
+		string(n) != "ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UZz07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UUT07" {
 		t.Fatal(string(n))
 	} else {
 		checkDistScanValues(t, ay[1], "testscan:12", "testscan:14", "testscan:10", "testscan:15", "testscan:13", "testscan:18")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk1UZz07", tp, "count", 8)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UUT07ZGVmYXVsdC0xOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UVT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1UZz07", tp, "count", 8)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk5RPT07ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1Uaz07" &&
-		string(n) != "ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk1Uaz07ZGVmYXVsdC0yOmRHVnpkSE5qWVc0Nk5RPT07" {
+	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1Uaz07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk5RPT07" &&
+		string(n) != "ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk5RPT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1Uaz07" {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
@@ -2033,16 +2033,38 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		}
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOmRHVnpkSE5qWVc0Nk5BPT07", tp, "count", 5)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk1Uaz07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk5RPT07", tp, "count", 5)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "" {
+	} else if n := ay[0].([]byte); string(n) != "ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk9RPT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk5BPT07" &&
+		string(n) != "ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk5BPT07ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk9RPT07" {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkDistScanValues(t, ay[1], "testscan:7", "testscan:6")
+			checkDistScanValues(t, ay[1], "testscan:9", "testscan:8", "testscan:3", "testscan:4")
 		}
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk9RPT07ZGVmYXVsdC0wOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk5BPT07", tp, "count", 8)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "" &&
+		string(n) != "" {
+		t.Fatal(string(n))
+	} else {
+		if len(ay[1].([]interface{})) != 0 {
+			checkDistScanValues(t, ay[1], "testscan:6", "testscan:7")
+		}
+	}
+
+	if _, err := goredis.Values(c.Do("ADVSCAN", "default::ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk9RPT07ZGVmYXVsdC0wOnRlc3RzY2FuMTpkR1Z6ZEhOallXNDZOQT09Ow==", tp, "count", 8)); err == nil {
+		t.Fatal("want err, get nil ")
+	}
+
+	if _, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:ZGVmYXVsdC0yOnRlc3RzY2FuOmRHVnpkSE5qWVc0Nk9RPT07ZGVmYXVsdC0wOnRlc3RzY2FuMTpkR1Z6ZEhOallXNDZOQT09Ow==", tp, "count", 8)); err == nil {
+		t.Fatal("want err, get nil ")
 	}
 
 	if _, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:dGVzdHNjYW46NA==", tp, "count", 0)); err == nil {
