@@ -15,6 +15,7 @@ const (
 var (
 	ErrIndexExist          = errors.New("index already exist")
 	ErrIndexNotExist       = errors.New("index not exist")
+	ErrIndexDeleted        = errors.New("index is deleted")
 	ErrIndexValueNotNumber = errors.New("invalid value for number")
 	errHsetIndexKey        = errors.New("invalid hset index key")
 	emptyValue             = []byte("")
@@ -247,7 +248,69 @@ func hsetIndexRemoveStringRec(table []byte, indexName []byte, indexValue []byte,
 	wb.Delete(dbkey)
 }
 
+func (db *RockDB) hsetIndexAddFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb *gorocksdb.WriteBatch) error {
+	table := extractTableFromRedisKey(pk)
+	if len(table) == 0 {
+		return errTableName
+	}
+	if len(fieldList) != len(valueList) {
+		return errors.New("invalid args")
+	}
+	for i, field := range fieldList {
+		hindex, err := db.indexMgr.GetHsetIndex(string(table), string(field))
+		if err != nil {
+			continue
+		}
+
+		err = hindex.UpdateRec(nil, valueList[i], pk, wb)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *RockDB) hsetIndexUpdateFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb *gorocksdb.WriteBatch) error {
+	table := extractTableFromRedisKey(pk)
+	if len(table) == 0 {
+		return errTableName
+	}
+	if len(fieldList) != len(valueList) {
+		return errors.New("invalid args")
+	}
+	oldvalues, err := db.HMget(pk, fieldList...)
+	if err != nil {
+		return err
+	}
+
+	for i, field := range fieldList {
+		hindex, err := db.indexMgr.GetHsetIndex(string(table), string(field))
+		if err != nil {
+			continue
+		}
+		err = hindex.UpdateRec(oldvalues[i], valueList[i], pk, wb)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (db *RockDB) hsetIndexAddRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
+	table := extractTableFromRedisKey(pk)
+	if len(table) == 0 {
+		return errTableName
+	}
+
+	hindex, err := db.indexMgr.GetHsetIndex(string(table), string(field))
+	if err != nil {
+		return err
+	}
+
+	return hindex.UpdateRec(nil, value, pk, wb)
+}
+
+func (db *RockDB) hsetIndexUpdateRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
 	table := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
@@ -306,6 +369,10 @@ type HsetIndex struct {
 }
 
 func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly bool) (int64, [][]byte, error) {
+	if self.State == DeletedIndex {
+		return 0, nil, ErrIndexDeleted
+	}
+
 	var n int64 = 0
 	pkList := make([][]byte, 0, 32)
 	var min []byte
@@ -394,6 +461,9 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 }
 
 func (self *HsetIndex) UpdateRec(oldvalue []byte, value []byte, pk []byte, wb *gorocksdb.WriteBatch) error {
+	if self.State == DeletedIndex {
+		return nil
+	}
 	pkkey := pk
 	pkvalue := emptyValue
 	if self.Unique == 1 {
@@ -439,4 +509,45 @@ func (self *HsetIndex) RemoveRec(value []byte, pk []byte, wb *gorocksdb.WriteBat
 
 		hsetIndexRemoveStringRec(self.Table, self.Name, value, pk, wb)
 	}
+}
+
+func (self *HsetIndex) cleanAll(db *RockDB, stopChan chan struct{}) error {
+	rt := common.RangeClose
+	min := encodeHsetIndexStartKey(self.Table, self.Name)
+	max := encodeHsetIndexStopKey(self.Table, self.Name)
+	var r gorocksdb.Range
+	r.Start = min
+	r.Limit = max
+
+	n := 0
+	dbLog.Infof("begin clean index: %v-%v-%v", string(self.Table), string(self.Name), string(self.IndexField))
+	defer dbLog.Infof("clean index: %v-%v-%v done, scan number: %v", string(self.Table),
+		string(self.Name), string(self.IndexField), n)
+
+	db.eng.DeleteFilesInRange(r)
+	db.eng.CompactRange(r)
+
+	it, err := NewDBRangeIterator(db.eng, min, max, rt, false)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	wb := gorocksdb.NewWriteBatch()
+	defer wb.Destroy()
+	for ; it.Valid(); it.Next() {
+		n++
+		if n%1000 == 0 {
+			select {
+			case <-stopChan:
+				return errDBClosed
+			default:
+			}
+		}
+		wb.Delete(it.RefKey())
+	}
+	err = db.eng.Write(db.defaultWriteOpts, wb)
+	if err != nil {
+		dbLog.Infof("clean index %v, %v error: %v", string(self.Table), string(self.Name), err)
+	}
+	return nil
 }

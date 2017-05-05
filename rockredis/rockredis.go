@@ -325,6 +325,9 @@ func (r *RockDB) Close() {
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
 	}
+	if r.wb != nil {
+		r.wb.Destroy()
+	}
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
 

@@ -18,7 +18,8 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			sLog.Infof("handle redis command panic: %s:%v", buf, e)
+			sLog.Infof("handle redis command %v panic: %s:%v", string(cmd.Args[0]), buf, e)
+			conn.Close()
 		}
 	}()
 

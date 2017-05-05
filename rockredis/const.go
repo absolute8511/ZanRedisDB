@@ -88,6 +88,7 @@ var (
 	errValueSize        = errors.New("invalid value size")
 	errZSetMemberSize   = errors.New("invalid zset member size")
 	errTooMuchBatchSize = errors.New("the batch size exceed the limit")
+	errDBClosed         = errors.New("the db is closed")
 )
 
 const (

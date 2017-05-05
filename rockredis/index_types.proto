@@ -18,7 +18,9 @@ enum IndexPropertyDType {
 enum IndexState {
     InitIndex = 0;
     BuildingIndex = 1;
-    ReadyIndex = 2;
+    BuildDoneIndex = 2;
+    ReadyIndex = 3;
+    DeletedIndex = 4;
 }
 
 message HsetIndexInfo {

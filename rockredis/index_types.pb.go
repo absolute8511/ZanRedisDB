@@ -69,17 +69,20 @@ const (
 	InitIndex     IndexState = 0
 	BuildingIndex IndexState = 1
 	ReadyIndex    IndexState = 2
+	DeletedIndex  IndexState = 3
 )
 
 var IndexState_name = map[int32]string{
 	0: "InitIndex",
 	1: "BuildingIndex",
 	2: "ReadyIndex",
+	3: "DeletedIndex",
 }
 var IndexState_value = map[string]int32{
 	"InitIndex":     0,
 	"BuildingIndex": 1,
 	"ReadyIndex":    2,
+	"DeletedIndex":  3,
 }
 
 func (x IndexState) Enum() *IndexState {

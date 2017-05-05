@@ -1,7 +1,21 @@
 package rockredis
 
 import (
+	"bytes"
+	"errors"
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/gorocksdb"
 	"sync"
+)
+
+var (
+	ErrIndexStateInvalidChange = errors.New("index state change state is not invalid")
+	ErrIndexDeleteNotInDeleted = errors.New("delete index in wrong state")
+	ErrIndexClosed             = errors.New("index is closed")
+)
+
+var (
+	buildIndexBlock = 1000
 )
 
 type JsonIndex struct {
@@ -48,12 +62,16 @@ func (self *TableIndexContainer) unmarshalHsetIndexes(table []byte, data []byte)
 
 type IndexMgr struct {
 	sync.RWMutex
-	tableIndexes map[string]*TableIndexContainer
+	tableIndexes   map[string]*TableIndexContainer
+	closeChan      chan struct{}
+	indexBuildChan chan int
+	wg             sync.WaitGroup
 }
 
 func NewIndexMgr() *IndexMgr {
 	return &IndexMgr{
-		tableIndexes: make(map[string]*TableIndexContainer),
+		tableIndexes:   make(map[string]*TableIndexContainer),
+		indexBuildChan: make(chan int, 10),
 	}
 }
 
@@ -78,25 +96,57 @@ func (self *IndexMgr) LoadIndexes(db *RockDB) error {
 			return err
 		}
 		dbLog.Infof("table %v load %v hash indexes", string(t), len(indexes.hsetIndexes))
+		self.Lock()
 		self.tableIndexes[string(t)] = indexes
+		self.Unlock()
+	}
+
+	self.Lock()
+	if self.closeChan != nil {
+		select {
+		case <-self.closeChan:
+		default:
+			close(self.closeChan)
+		}
+	}
+	self.closeChan = make(chan struct{})
+	self.wg.Add(1)
+	go func(stopC chan struct{}) {
+		defer self.wg.Done()
+		self.buildIndexes(db, stopC)
+	}(self.closeChan)
+	self.Unlock()
+	select {
+	case self.indexBuildChan <- 1:
+	default:
 	}
 	return nil
 }
 
 func (self *IndexMgr) Close() {
+	dbLog.Infof("closing index manager")
 	self.Lock()
 	self.tableIndexes = make(map[string]*TableIndexContainer)
+	if self.closeChan != nil {
+		select {
+		case <-self.closeChan:
+		default:
+			close(self.closeChan)
+		}
+	}
 	self.Unlock()
+	self.wg.Wait()
+	dbLog.Infof("index manager closed")
 }
 
 func (self *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
 	self.Lock()
-	defer self.Unlock()
 	indexes, ok := self.tableIndexes[string(hindex.Table)]
 	if !ok {
 		indexes = NewIndexContainer()
 		self.tableIndexes[string(hindex.Table)] = indexes
 	}
+	self.Unlock()
 	indexes.Lock()
 	defer indexes.Unlock()
 	_, ok = indexes.hsetIndexes[string(hindex.IndexField)]
@@ -120,10 +170,14 @@ func (self *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
 
 func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field string, state IndexState) error {
 	self.RLock()
-	defer self.RUnlock()
+	isClosed := self.closeChan == nil
 	indexes, ok := self.tableIndexes[table]
+	self.RUnlock()
 	if !ok {
 		return ErrIndexNotExist
+	}
+	if isClosed {
+		return ErrIndexClosed
 	}
 
 	indexes.Lock()
@@ -131,6 +185,9 @@ func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field strin
 	index, ok := indexes.hsetIndexes[field]
 	if !ok {
 		return ErrIndexNotExist
+	}
+	if index.State == state {
+		return nil
 	}
 	oldState := index.State
 	index.State = state
@@ -144,23 +201,44 @@ func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field strin
 		index.State = oldState
 		return err
 	}
+	if index.State == DeletedIndex {
+		self.wg.Add(1)
+		go func() {
+			defer self.wg.Done()
+			err := index.cleanAll(db, self.closeChan)
+			if err != nil {
+				dbLog.Infof("failed to clean index: %v", err)
+			} else {
+				self.deleteHsetIndex(db, string(index.Table), string(index.IndexField))
+			}
+		}()
+	} else if index.State == BuildingIndex {
+		select {
+		case self.indexBuildChan <- 1:
+		default:
+		}
+	}
 
 	return nil
 }
 
-func (self *IndexMgr) DeleteHsetIndex(db *RockDB, table string, field string) error {
+// ensure mark index as deleted, and clean in background before delete the index
+func (self *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) error {
 	self.Lock()
-	defer self.Unlock()
 	indexes, ok := self.tableIndexes[table]
+	self.Unlock()
 	if !ok {
 		return ErrIndexNotExist
 	}
 
 	indexes.Lock()
 	defer indexes.Unlock()
-	_, ok = indexes.hsetIndexes[field]
+	hindex, ok := indexes.hsetIndexes[field]
 	if !ok {
 		return ErrIndexNotExist
+	}
+	if hindex.State != DeletedIndex {
+		return ErrIndexDeleteNotInDeleted
 	}
 	delete(indexes.hsetIndexes, field)
 	d, err := indexes.marshalHsetIndexes()
@@ -176,8 +254,8 @@ func (self *IndexMgr) DeleteHsetIndex(db *RockDB, table string, field string) er
 
 func (self *IndexMgr) GetHsetIndex(table string, field string) (*HsetIndex, error) {
 	self.RLock()
-	defer self.RUnlock()
 	indexes, ok := self.tableIndexes[table]
+	self.RUnlock()
 	if !ok {
 		return nil, ErrIndexNotExist
 	}
@@ -190,4 +268,98 @@ func (self *IndexMgr) GetHsetIndex(table string, field string) (*HsetIndex, erro
 	}
 
 	return index, nil
+}
+
+func (self *IndexMgr) buildIndexes(db *RockDB, stopChan chan struct{}) {
+	for {
+		select {
+		case <-self.indexBuildChan:
+			self.dobuildIndexes(db, stopChan)
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
+	tmpHsetIndexes := make([]*HsetIndex, 0)
+	var buildWg sync.WaitGroup
+	self.Lock()
+	for table, v := range self.tableIndexes {
+		for _, hindex := range v.hsetIndexes {
+			if hindex.State == BuildingIndex {
+				tmpHsetIndexes = append(tmpHsetIndexes, hindex)
+			}
+		}
+		fields := make([][]byte, 0)
+		for _, hindex := range tmpHsetIndexes {
+			fields = append(fields, hindex.IndexField)
+		}
+
+		buildWg.Add(1)
+		go func(buildTable string, t *TableIndexContainer) {
+			defer buildWg.Done()
+			dbLog.Infof("begin rebuild index for table %v", buildTable)
+			for _, f := range fields {
+				dbLog.Infof("begin rebuild index for field: %s", string(f))
+			}
+			cursor := []byte(buildTable + ":")
+			for {
+				done, err := func() (bool, error) {
+					t.Lock()
+					defer t.Unlock()
+					select {
+					case <-stopChan:
+						dbLog.Infof("rebuild index for table %v stopped", buildTable)
+						return true, ErrIndexClosed
+					default:
+					}
+
+					pkList, err := db.Scan(common.HASH, cursor, buildIndexBlock, "")
+					if err != nil {
+						dbLog.Infof("rebuild index for table %v error %v", buildTable, err)
+						return true, err
+					}
+					wb := gorocksdb.NewWriteBatch()
+					for _, pk := range pkList {
+						if !bytes.HasPrefix(pk, []byte(buildTable)) {
+							dbLog.Infof("rebuild index for table %v end at: %v", buildTable, string(cursor))
+							cursor = nil
+							break
+						}
+						values, err := db.HMget(pk, fields...)
+						if err != nil {
+							dbLog.Infof("rebuild index for table %v error %v ", buildTable, err)
+							return true, err
+						}
+						err = db.hsetIndexAddFieldRecs(pk, fields, values, wb)
+						if err != nil {
+							dbLog.Infof("rebuild index for table %v error %v ", buildTable, err)
+							return true, err
+						}
+						cursor = pk
+					}
+					db.eng.Write(db.defaultWriteOpts, wb)
+					wb.Destroy()
+					if len(cursor) == 0 {
+						return true, nil
+					} else {
+						dbLog.Infof("rebuild index for table %v cursor: %s", buildTable, string(cursor))
+					}
+					return false, nil
+				}()
+				if done {
+					if err != nil {
+					} else {
+						dbLog.Infof("finish rebuild index for table %v", buildTable)
+						// TODO: change index state to build done
+					}
+					break
+				}
+			}
+		}(table, v)
+	}
+	self.Unlock()
+
+	buildWg.Wait()
 }

@@ -83,7 +83,9 @@ func encodeTableMetaStopKey() []byte {
 
 func (db *RockDB) GetTables() chan []byte {
 	ch := make(chan []byte, 10)
+	db.wg.Add(1)
 	go func() {
+		defer db.wg.Done()
 		s := encodeTableMetaStartKey()
 		e := encodeTableMetaStopKey()
 		it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
@@ -161,7 +163,9 @@ func encodeTableIndexMetaStopKey(itype byte) []byte {
 func (db *RockDB) GetHsetIndexTables() chan []byte {
 	// TODO: use total_order_seek options for rocksdb to seek with prefix less than prefix extractor
 	ch := make(chan []byte, 10)
+	db.wg.Add(1)
 	go func() {
+		defer db.wg.Done()
 		s := encodeTableIndexMetaStartKey(hsetIndexMeta)
 		e := encodeTableIndexMetaStopKey(hsetIndexMeta)
 		it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
