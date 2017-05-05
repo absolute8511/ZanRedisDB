@@ -71,11 +71,8 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	} else {
 		nextCursor = ay[len(ay)-1]
 	}
-	splits := strings.SplitN(self.ns, "-", 2)
-	if len(splits) != 2 {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrUnexpectError}, common.ErrUnexpectError
-	}
-	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: splits[1], Error: nil}, nil
+	_, pid := common.GetNamespaceAndPartition(self.ns)
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
 }
 
 // ADVSCAN cursor type [MATCH match] [COUNT count]
@@ -129,11 +126,8 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	} else {
 		nextCursor = ay[len(ay)-1]
 	}
-	splits := strings.SplitN(self.ns, "-", 2)
-	if len(splits) != 2 {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrUnexpectError}, common.ErrUnexpectError
-	}
-	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: splits[1], Error: nil}, nil
+	_, pid := common.GetNamespaceAndPartition(self.ns)
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
 }
 
 // HSCAN key cursor [MATCH match] [COUNT count]

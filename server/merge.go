@@ -206,11 +206,12 @@ func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string,
 								if table != tab {
 									return nil, common.ErrInvalidScanCursor
 								}
-								ns := []byte(nsBaseName)
-								ns = append(ns, '-')
-								ns = append(ns, cursorinfo[0]...)
-
-								nsMap[string(ns)] = string(cursorDecoded)
+								pid, err := strconv.Atoi(string(cursorinfo[0]))
+								if err != nil {
+									return nil, common.ErrInvalidScanCursor
+								}
+								ns := common.GetNsDesp(nsBaseName, pid)
+								nsMap[ns] = string(cursorDecoded)
 							} else {
 								return nil, common.ErrInvalidScanCursor
 							}
