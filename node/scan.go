@@ -2,10 +2,11 @@ package node
 
 import (
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/tidwall/redcon"
 	"strconv"
 	"strings"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/tidwall/redcon"
 )
 
 func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err error) {
@@ -51,47 +52,36 @@ func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err e
 // scan only kv type, cursor is table:key
 
 // TODO: for scan we act like the prefix scan, if the prefix changed , we should stop scan
-func (self *KVNode) scanCommand(conn redcon.Conn, cmd redcon.Command) {
-	if len(cmd.Args) < 2 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
-	}
+func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	args := cmd.Args[1:]
 	cursor, match, count, err := parseScanArgs(args)
 
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
-	var ay [][]byte
-	ay, err = self.store.Scan(common.KV, cursor, count, match)
+
+	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
+
 	var nextCursor []byte
 	if len(ay) < count || (count == 0 && len(ay) == 0) {
 		nextCursor = []byte("")
 	} else {
 		nextCursor = ay[len(ay)-1]
 	}
-
-	conn.WriteArray(2)
-	conn.WriteBulk(nextCursor)
-	conn.WriteArray(len(ay))
-	for _, v := range ay {
-		conn.WriteBulk(v)
-	}
+	_, pid := common.GetNamespaceAndPartition(self.ns)
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
 }
 
 // ADVSCAN cursor type [MATCH match] [COUNT count]
 // here cursor is the scan key for start, (table:key)
 // and the response will return the next start key for next scan,
 // (note: it is not the "0" as the redis scan to indicate the end of scan)
-func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
+func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
 	}
 
 	var dataType common.DataType
@@ -107,13 +97,11 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 	case "ZSET":
 		dataType = common.ZSET
 	default:
-		conn.WriteError("invalid key type " + string(cmd.Args[2]))
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, Error: common.ErrInvalidScanType}, common.ErrInvalidScanType
 	}
 	_, key, err := common.ExtractNamesapce(cmd.Args[1])
 	if err != nil {
-		conn.WriteError(err.Error() + ", " + string(cmd.Args[1]))
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 	cmd.Args[1] = key
 	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
@@ -121,8 +109,7 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
 
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	var ay [][]byte
@@ -130,8 +117,7 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 	ay, err = self.store.Scan(dataType, cursor, count, match)
 
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	var nextCursor []byte
@@ -140,14 +126,8 @@ func (self *KVNode) advanceScanCommand(conn redcon.Conn, cmd redcon.Command) {
 	} else {
 		nextCursor = ay[len(ay)-1]
 	}
-
-	conn.WriteArray(2)
-	conn.WriteBulk(nextCursor)
-	conn.WriteArray(len(ay))
-	for _, v := range ay {
-		conn.WriteBulk(v)
-	}
-	return
+	_, pid := common.GetNamespaceAndPartition(self.ns)
+	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
 }
 
 // HSCAN key cursor [MATCH match] [COUNT count]

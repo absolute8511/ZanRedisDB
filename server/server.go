@@ -2,6 +2,15 @@ package server
 
 import (
 	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/cluster/datanode_coord"
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -13,14 +22,6 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/tidwall/redcon"
 	"golang.org/x/net/context"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 var (
@@ -49,6 +50,8 @@ type Server struct {
 	dataCoord     *datanode_coord.DataCoordinator
 	nsMgr         *node.NamespaceMgr
 	startTime     time.Time
+	maxScanJob    int32
+	scanStats     common.ScanStats
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -61,6 +64,9 @@ func NewServer(conf ServerConfig) *Server {
 	}
 	if conf.ElectionTick < 5 {
 		conf.ElectionTick = 5
+	}
+	if conf.MaxScanJob <= 0 {
+		conf.MaxScanJob = common.MAX_SCAN_JOB
 	}
 	if conf.ProfilePort == 0 {
 		conf.ProfilePort = 6666
@@ -105,6 +111,7 @@ func NewServer(conf ServerConfig) *Server {
 		stopC:         make(chan struct{}),
 		raftHttpDoneC: make(chan struct{}),
 		startTime:     time.Now(),
+		maxScanJob:    conf.MaxScanJob,
 	}
 
 	ts := &stats.TransportStats{}
@@ -169,6 +176,7 @@ func (self *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
 func (self *Server) GetStats(leaderOnly bool) common.ServerStats {
 	var ss common.ServerStats
 	ss.NSStats = self.nsMgr.GetStats(leaderOnly)
+	ss.ScanStats = self.scanStats.Copy()
 	return ss
 }
 
@@ -241,6 +249,57 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	}
 	// TODO: to make consistence, read command should request the raft read index if not leader
 	return h, cmd, nil
+}
+
+func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, error) {
+	if len(cmd.Args) < 2 {
+		return nil, nil, common.ErrInvalidArgs
+	}
+	rawKey := cmd.Args[1]
+
+	namespace, realKey, err := common.ExtractNamesapce(rawKey)
+	if err != nil {
+		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
+		return nil, nil, err
+	}
+
+	nodes, err := self.nsMgr.GetNamespaceNodes(namespace)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmdName := strings.ToLower(string(cmd.Args[0]))
+	var cmds map[string]redcon.Command
+	//do nodes filter
+	if common.IsMergeScanCommand(cmdName) {
+		cmds, err = self.doScanNodesFilter(realKey, namespace, cmd, nodes)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		cmds = make(map[string]redcon.Command)
+		for k, _ := range nodes {
+			newCmd := common.DeepCopyCmd(cmd)
+			cmds[k] = newCmd
+		}
+	}
+
+	var handlers []common.MergeCommandFunc
+	var commands []redcon.Command
+	for k, v := range nodes {
+		newCmd := cmds[k]
+		h, ok := v.Node.GetMergeHandler(cmdName)
+		if ok {
+			handlers = append(handlers, h)
+			commands = append(commands, newCmd)
+		}
+	}
+
+	if len(handlers) <= 0 {
+		return nil, nil, common.ErrInvalidCommand
+	}
+
+	return handlers, commands, nil
 }
 
 func (self *Server) serveRaft() {

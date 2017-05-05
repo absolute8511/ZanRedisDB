@@ -4,10 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/server"
-	"github.com/judwhite/go-svc/svc"
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,6 +11,11 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/server"
+	"github.com/judwhite/go-svc/svc"
 )
 
 var (

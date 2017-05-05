@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"github.com/tidwall/redcon"
 	"runtime"
 	"strconv"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/tidwall/redcon"
 )
 
 var (
@@ -47,11 +49,15 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		d, _ := json.MarshalIndent(s, "", " ")
 		conn.WriteBulkString(string(d))
 	default:
-		h, cmd, err := self.GetHandler(cmdName, cmd)
-		if err == nil {
-			h(conn, cmd)
+		if common.IsMergeCommand(cmdName) {
+			self.doMergeCommand(conn, cmd)
 		} else {
-			conn.WriteError(err.Error() + " : ERR handle command " + string(cmd.Args[0]))
+			h, cmd, err := self.GetHandler(cmdName, cmd)
+			if err == nil {
+				h(conn, cmd)
+			} else {
+				conn.WriteError(err.Error() + " : ERR handle command " + string(cmd.Args[0]))
+			}
 		}
 	}
 }
