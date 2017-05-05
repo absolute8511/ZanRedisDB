@@ -174,6 +174,11 @@ func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Comm
 	return cmds, nil
 }
 
+//首次传入 namespace:table:,
+//返回 1:table:xxx1;2:table:xxx2;3:table:xxx3,
+//下次传入 namespace:table:1:table:xxx;2:table:xxx;3:table:xxx,
+//解析出分区 1, 2, 3 及其对应的cursor,
+//1的namespace:table:xxx1和2的namespace:table:xxx2, 和3的namespace:table:xxx3,
 func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string, error) {
 
 	//key = table:cursor
