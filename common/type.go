@@ -3,8 +3,9 @@ package common
 import (
 	"bytes"
 	"errors"
-	"github.com/tidwall/redcon"
 	"strings"
+
+	"github.com/tidwall/redcon"
 )
 
 const (
@@ -13,13 +14,22 @@ const (
 )
 
 var (
-	ErrInvalidCommand   = errors.New("invalid command")
-	ErrStopped          = errors.New("the node stopped")
-	ErrTimeout          = errors.New("queue request timeout")
-	ErrInvalidArgs      = errors.New("Invalid arguments")
-	ErrInvalidRedisKey  = errors.New("invalid redis key")
-	ErrEpochMismatch    = errors.New("epoch mismatch")
-	ErrInvalidTableName = errors.New("table name is invalid")
+	SCAN_CURSOR_SEP = []byte(";")
+	SCAN_NODE_SEP   = []byte(":")
+)
+
+var (
+	ErrInvalidCommand    = errors.New("invalid command")
+	ErrStopped           = errors.New("the node stopped")
+	ErrTimeout           = errors.New("queue request timeout")
+	ErrInvalidArgs       = errors.New("invalid arguments")
+	ErrInvalidRedisKey   = errors.New("invalid redis key")
+	ErrInvalidScanType   = errors.New("invalid scan type")
+	ErrEpochMismatch     = errors.New("epoch mismatch")
+	ErrInvalidTableName  = errors.New("table name is invalid")
+	ErrInvalidScanCursor = errors.New("invalid scan cursor")
+	ErrScanCursorNoTable = errors.New("scan cursor must has table")
+	ErrUnexpectError     = errors.New("unexpected error")
 )
 
 // for out use
@@ -80,6 +90,7 @@ const (
 	MinScore      int64 = -1<<63 + 1
 	MaxScore      int64 = 1<<63 - 1
 	InvalidScore  int64 = -1 << 63
+	MAX_SCAN_JOB        = 10
 )
 
 const (
@@ -107,16 +118,19 @@ type ScorePair struct {
 type CommandFunc func(redcon.Conn, redcon.Command)
 type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
 type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
+type MergeCommandFunc func(redcon.Command) (interface{}, error)
 
 type CmdRouter struct {
 	cmds         map[string]CommandFunc
 	internalCmds map[string]InternalCommandFunc
+	mergeCmds    map[string]MergeCommandFunc
 }
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
 		cmds:         make(map[string]CommandFunc),
 		internalCmds: make(map[string]InternalCommandFunc),
+		mergeCmds:    make(map[string]MergeCommandFunc),
 	}
 }
 
@@ -143,6 +157,19 @@ func (r *CmdRouter) RegisterInternal(name string, f InternalCommandFunc) bool {
 
 func (r *CmdRouter) GetInternalCmdHandler(name string) (InternalCommandFunc, bool) {
 	v, ok := r.internalCmds[strings.ToLower(name)]
+	return v, ok
+}
+
+func (r *CmdRouter) RegisterMerge(name string, f MergeCommandFunc) bool {
+	if _, ok := r.mergeCmds[strings.ToLower(name)]; ok {
+		return false
+	}
+	r.mergeCmds[name] = f
+	return true
+}
+
+func (r *CmdRouter) GetMergeCmdHandler(name string) (MergeCommandFunc, bool) {
+	v, ok := r.mergeCmds[strings.ToLower(name)]
 	return v, ok
 }
 
@@ -206,4 +233,11 @@ type IClusterInfo interface {
 	// return leader node id, leader epoch, for this namespace
 	GetNamespaceLeader(fullNS string) (uint64, int64, error)
 	UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error)
+}
+
+type ScanResult struct {
+	Result     interface{}
+	NextCursor []byte
+	PartionId  string
+	Error      error
 }

@@ -3,11 +3,6 @@ package node
 import (
 	"encoding/json"
 	"errors"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
-	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
-	"github.com/spaolacci/murmur3"
-	"golang.org/x/net/context"
 	"io/ioutil"
 	"os"
 	"path"
@@ -16,6 +11,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/spaolacci/murmur3"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -295,6 +296,7 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		Node: kv,
 		conf: conf,
 	}
+
 	self.kvNodes[conf.Name] = n
 	self.groups[raftConf.GroupID] = conf.Name
 	return n, nil
@@ -312,6 +314,7 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 		nodeLog.Infof("namespace %v meta not found", nsBaseName)
 		return nil, ErrNamespaceNotFound
 	}
+
 	fullName := common.GetNsDesp(nsBaseName, GetHashedPartitionID(pk, v.PartitionNum))
 	n, ok := self.kvNodes[fullName]
 	if !ok {
@@ -321,6 +324,24 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 		return nil, ErrRaftGroupNotReady
 	}
 	return n, nil
+}
+
+func (self *NamespaceMgr) GetNamespaceNodes(nsBaseName string) (map[string]*NamespaceNode, error) {
+	nsNodes := make(map[string]*NamespaceNode)
+
+	tmp := self.GetNamespaces()
+	for k, v := range tmp {
+		ns, _ := common.GetNamespaceAndPartition(k)
+		if ns == nsBaseName {
+			nsNodes[k] = v
+		}
+	}
+
+	if len(nsNodes) <= 0 {
+		return nil, ErrNamespaceNotFound
+	}
+
+	return nsNodes, nil
 }
 
 func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {

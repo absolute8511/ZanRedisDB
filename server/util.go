@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"github.com/tidwall/redcon"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/tidwall/redcon"
 )
 
 var (
