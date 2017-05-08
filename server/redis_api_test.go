@@ -1871,7 +1871,7 @@ func TestZSetScan(t *testing.T) {
 	}
 }
 
-func startDistTestServer(t *testing.T) (*Server, int, string) {
+func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatal(err)
@@ -1897,8 +1897,8 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 		ElectionTick:  5,
 	}
 	nsConf := node.NewNSConfig()
-	nsConf.Name = "defaultmutil-0"
-	nsConf.BaseName = "defaultmutil"
+	nsConf.Name = "default-0"
+	nsConf.BaseName = "default"
 	nsConf.EngType = rockredis.EngType
 	nsConf.PartitionNum = 3
 	nsConf.Replicator = 1
@@ -1910,8 +1910,8 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
 	nsConf1 := node.NewNSConfig()
-	nsConf1.Name = "defaultmutil-1"
-	nsConf1.BaseName = "defaultmutil"
+	nsConf1.Name = "default-1"
+	nsConf1.BaseName = "default"
 	nsConf1.EngType = rockredis.EngType
 	nsConf1.PartitionNum = 3
 	nsConf1.Replicator = 1
@@ -1923,8 +1923,8 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 	}
 
 	nsConf2 := node.NewNSConfig()
-	nsConf2.Name = "defaultmutil-2"
-	nsConf2.BaseName = "defaultmutil"
+	nsConf2.Name = "default-2"
+	nsConf2.BaseName = "default"
 	nsConf2.EngType = rockredis.EngType
 	nsConf2.PartitionNum = 3
 	nsConf2.Replicator = 1
@@ -1940,9 +1940,9 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 	return kv, redisport, tmpDir
 }
 
-func getDistTestConn(t *testing.T) *goredis.PoolConn {
+func getMergeTestConn(t *testing.T) *goredis.PoolConn {
 	testOnce.Do(func() {
-		kvsmutil, redisport, _ = startDistTestServer(t)
+		kvsmutil, redisport, _ = startMergeTestServer(t)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisport), "")
@@ -1954,7 +1954,7 @@ func getDistTestConn(t *testing.T) *goredis.PoolConn {
 	return conn
 }
 
-func checkDistScanValues(t *testing.T, ay interface{}, values ...interface{}) {
+func checkMergeScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 	a, err := goredis.Strings(ay, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1978,8 +1978,8 @@ func checkDistScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 	}
 }
 
-func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "defaultmutil:testscan:", tp, "count", 5)); err != nil {
+func checkMergeAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:", tp, "count", 5)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -1991,10 +1991,10 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		string(n) != "MjpkR1Z6ZEhOallXNDZNVEU9OzE6ZEdWemRITmpZVzQ2TUE9PTswOmRHVnpkSE5qWVc0Nk1RPT07" {
 		t.Fatal(string(n))
 	} else {
-		checkDistScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:11")
+		checkMergeScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:11")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "defaultmutil:testscan:MDpkR1Z6ZEhOallXNDZNUT09OzE6ZEdWemRITmpZVzQ2TUE9PTsyOmRHVnpkSE5qWVc0Nk1URT07", tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZNUT09OzE6ZEdWemRITmpZVzQ2TUE9PTsyOmRHVnpkSE5qWVc0Nk1URT07", tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2006,10 +2006,10 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		string(n) != "MjpkR1Z6ZEhOallXNDZNVGc9OzE6ZEdWemRITmpZVzQ2TVRVPTswOmRHVnpkSE5qWVc0Nk1UUT07" {
 		t.Fatal(string(n))
 	} else {
-		checkDistScanValues(t, ay[1], "testscan:12", "testscan:14", "testscan:10", "testscan:15", "testscan:13", "testscan:18")
+		checkMergeScanValues(t, ay[1], "testscan:12", "testscan:14", "testscan:10", "testscan:15", "testscan:13", "testscan:18")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "defaultmutil:testscan:MDpkR1Z6ZEhOallXNDZNVFE9OzE6ZEdWemRITmpZVzQ2TVRVPTsyOmRHVnpkSE5qWVc0Nk1UZz07", tp, "count", 8)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZNVFE9OzE6ZEdWemRITmpZVzQ2TVRVPTsyOmRHVnpkSE5qWVc0Nk1UZz07", tp, "count", 8)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2018,11 +2018,11 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkDistScanValues(t, ay[1], "testscan:16", "testscan:19", "testscan:17", "testscan:2", "testscan:5")
+			checkMergeScanValues(t, ay[1], "testscan:16", "testscan:19", "testscan:17", "testscan:2", "testscan:5")
 		}
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "defaultmutil:testscan:MDpkR1Z6ZEhOallXNDZNVGs9OzI6ZEdWemRITmpZVzQ2TlE9PTs=", tp, "count", 5)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZNVGs9OzI6ZEdWemRITmpZVzQ2TlE9PTs=", tp, "count", 5)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2031,11 +2031,11 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkDistScanValues(t, ay[1], "testscan:9", "testscan:8", "testscan:3", "testscan:4")
+			checkMergeScanValues(t, ay[1], "testscan:9", "testscan:8", "testscan:3", "testscan:4")
 		}
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "defaultmutil:testscan:MDpkR1Z6ZEhOallXNDZOQT09OzI6ZEdWemRITmpZVzQ2T1E9PTs=", tp, "count", 8)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZOQT09OzI6ZEdWemRITmpZVzQ2T1E9PTs=", tp, "count", 8)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2044,7 +2044,7 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkDistScanValues(t, ay[1], "testscan:6", "testscan:7")
+			checkMergeScanValues(t, ay[1], "testscan:6", "testscan:7")
 		}
 	}
 
@@ -2061,62 +2061,62 @@ func checkDistAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 	}
 }
 
-func TestDistScan(t *testing.T) {
-	c := getDistTestConn(t)
+func TestMergeScan(t *testing.T) {
+	c := getMergeTestConn(t)
 	defer c.Close()
 
-	testDistKVScan(t, c)
-	testDistHashKeyScan(t, c)
-	testDistListKeyScan(t, c)
-	testDistZSetKeyScan(t, c)
-	testDistSetKeyScan(t, c)
+	testMergeKVScan(t, c)
+	testMergeHashKeyScan(t, c)
+	testMergeListKeyScan(t, c)
+	testMergeZSetKeyScan(t, c)
+	testMergeSetKeyScan(t, c)
 }
 
-func testDistKVScan(t *testing.T, c *goredis.PoolConn) {
+func testMergeKVScan(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("set", "defaultmutil:testscan:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+		if _, err := c.Do("set", "default:testscan:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	checkDistAdvanceScan(t, c, "KV")
+	checkMergeAdvanceScan(t, c, "KV")
 }
 
-func testDistHashKeyScan(t *testing.T, c *goredis.PoolConn) {
+func testMergeHashKeyScan(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("hset", "defaultmutil:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i), []byte("value")); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	checkDistAdvanceScan(t, c, "HASH")
-}
-
-func testDistListKeyScan(t *testing.T, c *goredis.PoolConn) {
-	for i := 0; i < 20; i++ {
-		if _, err := c.Do("lpush", "defaultmutil:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+		if _, err := c.Do("hset", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i), []byte("value")); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	checkDistAdvanceScan(t, c, "LIST")
+	checkMergeAdvanceScan(t, c, "HASH")
 }
 
-func testDistZSetKeyScan(t *testing.T, c *goredis.PoolConn) {
+func testMergeListKeyScan(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("zadd", "defaultmutil:testscan:"+fmt.Sprintf("%d", i), i, []byte("value")); err != nil {
+		if _, err := c.Do("lpush", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	checkDistAdvanceScan(t, c, "ZSET")
+	checkMergeAdvanceScan(t, c, "LIST")
 }
 
-func testDistSetKeyScan(t *testing.T, c *goredis.PoolConn) {
+func testMergeZSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("sadd", "defaultmutil:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+		if _, err := c.Do("zadd", "default:testscan:"+fmt.Sprintf("%d", i), i, []byte("value")); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	checkDistAdvanceScan(t, c, "SET")
+	checkMergeAdvanceScan(t, c, "ZSET")
+}
+
+func testMergeSetKeyScan(t *testing.T, c *goredis.PoolConn) {
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("sadd", "default:testscan:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checkMergeAdvanceScan(t, c, "SET")
 }
