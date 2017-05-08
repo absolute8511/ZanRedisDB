@@ -282,28 +282,32 @@ func (self *IndexMgr) buildIndexes(db *RockDB, stopChan chan struct{}) {
 }
 
 func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
-	tmpHsetIndexes := make([]*HsetIndex, 0)
 	var buildWg sync.WaitGroup
 	self.Lock()
 	for table, v := range self.tableIndexes {
+		tmpHsetIndexes := make([]*HsetIndex, 0)
 		for _, hindex := range v.hsetIndexes {
 			if hindex.State == BuildingIndex {
 				tmpHsetIndexes = append(tmpHsetIndexes, hindex)
 			}
 		}
+		if len(tmpHsetIndexes) == 0 {
+			continue
+		}
+		dbLog.Infof("begin rebuild index for table %v", table)
 		fields := make([][]byte, 0)
 		for _, hindex := range tmpHsetIndexes {
 			fields = append(fields, hindex.IndexField)
+			dbLog.Infof("begin rebuild index for field: %s", string(hindex.IndexField))
 		}
 
 		buildWg.Add(1)
 		go func(buildTable string, t *TableIndexContainer) {
 			defer buildWg.Done()
-			dbLog.Infof("begin rebuild index for table %v", buildTable)
-			for _, f := range fields {
-				dbLog.Infof("begin rebuild index for field: %s", string(f))
-			}
-			cursor := []byte(buildTable + ":")
+			cursor := []byte(buildTable)
+			cursor = append(cursor, common.NamespaceTableSeperator)
+			origPrefix := cursor
+			indexPKCnt := 0
 			for {
 				done, err := func() (bool, error) {
 					t.Lock()
@@ -322,8 +326,9 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 					}
 					wb := gorocksdb.NewWriteBatch()
 					for _, pk := range pkList {
-						if !bytes.HasPrefix(pk, []byte(buildTable)) {
-							dbLog.Infof("rebuild index for table %v end at: %v", buildTable, string(cursor))
+						if !bytes.HasPrefix(pk, origPrefix) {
+							dbLog.Infof("rebuild index for table %v end at: %v, next is: %v",
+								buildTable, string(cursor), string(pk))
 							cursor = nil
 							break
 						}
@@ -332,27 +337,43 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 							dbLog.Infof("rebuild index for table %v error %v ", buildTable, err)
 							return true, err
 						}
-						err = db.hsetIndexAddFieldRecs(pk, fields, values, wb)
-						if err != nil {
-							dbLog.Infof("rebuild index for table %v error %v ", buildTable, err)
-							return true, err
+						for i, _ := range fields {
+							err = tmpHsetIndexes[i].UpdateRec(nil, values[i], pk, wb)
+							if err != nil {
+								dbLog.Infof("rebuild index for table %v error %v ", buildTable, err)
+								return true, err
+							}
 						}
 						cursor = pk
+						indexPKCnt++
+					}
+					if len(pkList) < buildIndexBlock {
+						cursor = nil
 					}
 					db.eng.Write(db.defaultWriteOpts, wb)
 					wb.Destroy()
 					if len(cursor) == 0 {
 						return true, nil
 					} else {
-						dbLog.Infof("rebuild index for table %v cursor: %s", buildTable, string(cursor))
+						dbLog.Infof("rebuilding index for table %v current cursor: %s, cnt: %v",
+							buildTable, string(cursor), indexPKCnt)
 					}
 					return false, nil
 				}()
 				if done {
 					if err != nil {
 					} else {
-						dbLog.Infof("finish rebuild index for table %v", buildTable)
+						dbLog.Infof("finish rebuild index for table %v, total: %v", string(buildTable), indexPKCnt)
 						// TODO: change index state to build done
+						t.Lock()
+						for _, f := range fields {
+							hindex, ok := t.hsetIndexes[string(f)]
+							if ok {
+								hindex.State = BuildDoneIndex
+							}
+						}
+						t.Unlock()
+
 					}
 					break
 				}

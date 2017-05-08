@@ -349,6 +349,10 @@ func (db *RockDB) HsetIndexSearch(table []byte, field []byte, cond *IndexConditi
 	if err != nil {
 		return 0, nil, err
 	}
+	if hindex.State == DeletedIndex {
+		return 0, nil, ErrIndexDeleted
+	}
+
 	return hindex.SearchRec(db, cond, countOnly)
 }
 
@@ -369,10 +373,6 @@ type HsetIndex struct {
 }
 
 func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly bool) (int64, [][]byte, error) {
-	if self.State == DeletedIndex {
-		return 0, nil, ErrIndexDeleted
-	}
-
 	var n int64 = 0
 	pkList := make([][]byte, 0, 32)
 	var min []byte
@@ -521,8 +521,6 @@ func (self *HsetIndex) cleanAll(db *RockDB, stopChan chan struct{}) error {
 
 	n := 0
 	dbLog.Infof("begin clean index: %v-%v-%v", string(self.Table), string(self.Name), string(self.IndexField))
-	defer dbLog.Infof("clean index: %v-%v-%v done, scan number: %v", string(self.Table),
-		string(self.Name), string(self.IndexField), n)
 
 	db.eng.DeleteFilesInRange(r)
 	db.eng.CompactRange(r)
@@ -548,6 +546,9 @@ func (self *HsetIndex) cleanAll(db *RockDB, stopChan chan struct{}) error {
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	if err != nil {
 		dbLog.Infof("clean index %v, %v error: %v", string(self.Table), string(self.Name), err)
+	} else {
+		dbLog.Infof("clean index: %v-%v-%v done, scan number: %v", string(self.Table),
+			string(self.Name), string(self.IndexField), n)
 	}
 	return nil
 }

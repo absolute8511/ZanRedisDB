@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestHashCodec(t *testing.T) {
@@ -230,6 +231,157 @@ func TestHashIndexLoad(t *testing.T) {
 	tindexes, err = db.indexMgr.GetHsetIndex(string(hindex3.Table), string(hindex3.IndexField))
 	assert.Nil(t, err)
 	assert.Equal(t, hindex3.Name, tindexes.Name)
+}
+
+func TestHashIndexBuildAndClean(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	assert.Equal(t, 0, len(db.indexMgr.tableIndexes))
+	var hindex HsetIndex
+	hindex.Table = []byte("test_index_table")
+	hindex.Name = []byte("index1")
+	hindex.IndexField = []byte("index_test_field")
+	hindex.Unique = 0
+	hindex.ValueType = StringV
+
+	key := []byte(string(hindex.Table) + ":testdb_hash_a")
+	db.HSet(key, hindex.IndexField, []byte("1"))
+	key = []byte(string(hindex.Table) + ":testdb_hash_b")
+	db.HSet(key, hindex.IndexField, []byte("2"))
+	key = []byte(string(hindex.Table) + ":testdb_hash_c")
+	db.HSet(key, hindex.IndexField, []byte("2"))
+
+	err := db.indexMgr.AddHsetIndex(db, &hindex)
+	assert.Nil(t, err)
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex.Table), string(hindex.IndexField), BuildingIndex)
+	assert.Nil(t, err)
+	// wait until building done
+	buildStart := time.Now()
+	for {
+		time.Sleep(time.Millisecond * 10)
+		hindex, err := db.indexMgr.GetHsetIndex(string(hindex.Table), string(hindex.IndexField))
+		assert.Nil(t, err)
+		if hindex.State == BuildDoneIndex {
+			break
+		} else if time.Since(buildStart) > time.Second*10 {
+			t.Errorf("building index timeout")
+			break
+		}
+	}
+	condAll := &IndexCondition{
+		StartKey:     nil,
+		IncludeStart: true,
+		EndKey:       nil,
+		IncludeEnd:   true,
+		Offset:       0,
+		Limit:        -1,
+	}
+	cnt, _, err := db.HsetIndexSearch(hindex.Table, hindex.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 3, int(cnt))
+
+	var hindex2 HsetIndex
+	hindex2.Table = []byte("test_index_table")
+	hindex2.Name = []byte("index2")
+	hindex2.IndexField = []byte("index_test_field2")
+	hindex2.Unique = 0
+	hindex2.ValueType = Int64V
+
+	err = db.indexMgr.AddHsetIndex(db, &hindex2)
+	assert.Nil(t, err)
+
+	var hindex3 HsetIndex
+	hindex3.Table = []byte("test_index_table3")
+	hindex3.Name = []byte("index3")
+	hindex3.IndexField = []byte("index_test_field3")
+	hindex3.Unique = 0
+	hindex3.ValueType = Int64V
+
+	err = db.indexMgr.AddHsetIndex(db, &hindex3)
+	assert.Nil(t, err)
+
+	key = []byte(string(hindex2.Table) + ":testdb_hash_a")
+	db.HSet(key, hindex2.IndexField, []byte("1"))
+	key = []byte(string(hindex2.Table) + ":testdb_hash_b")
+	db.HSet(key, hindex2.IndexField, []byte("2"))
+	key = []byte(string(hindex2.Table) + ":testdb_hash_c")
+	db.HSet(key, hindex2.IndexField, []byte("2"))
+
+	key = []byte(string(hindex3.Table) + ":testdb_hash_a")
+	db.HSet(key, hindex3.IndexField, []byte("1"))
+	key = []byte(string(hindex3.Table) + ":testdb_hash_b")
+	db.HSet(key, hindex3.IndexField, []byte("2"))
+	key = []byte(string(hindex3.Table) + ":testdb_hash_c")
+	db.HSet(key, hindex3.IndexField, []byte("2"))
+	key = []byte(string(hindex3.Table) + ":testdb_hash_d")
+	db.HSet(key, hindex3.IndexField, []byte("3"))
+
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex2.Table), string(hindex2.IndexField), BuildingIndex)
+	assert.Nil(t, err)
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex3.Table), string(hindex3.IndexField), BuildingIndex)
+	assert.Nil(t, err)
+	// wait until building done
+	buildStart = time.Now()
+	for {
+		time.Sleep(time.Millisecond * 10)
+		hindex2, err := db.indexMgr.GetHsetIndex(string(hindex.Table), string(hindex.IndexField))
+		assert.Nil(t, err)
+		hindex3, err := db.indexMgr.GetHsetIndex(string(hindex.Table), string(hindex.IndexField))
+		assert.Nil(t, err)
+		if hindex2.State == BuildDoneIndex && hindex3.State == BuildDoneIndex {
+			break
+		} else if time.Since(buildStart) > time.Second*10 {
+			t.Errorf("building index timeout")
+			break
+		}
+	}
+
+	cnt, _, err = db.HsetIndexSearch(hindex2.Table, hindex2.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 3, int(cnt))
+
+	cnt, _, err = db.HsetIndexSearch(hindex3.Table, hindex3.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 4, int(cnt))
+
+	// clean index
+	deletedIndex1, err := db.indexMgr.GetHsetIndex(string(hindex.Table), string(hindex.IndexField))
+	assert.Nil(t, err)
+	deletedIndex2, err := db.indexMgr.GetHsetIndex(string(hindex2.Table), string(hindex2.IndexField))
+	assert.Nil(t, err)
+	deletedIndex3, err := db.indexMgr.GetHsetIndex(string(hindex3.Table), string(hindex3.IndexField))
+	assert.Nil(t, err)
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex.Table), string(hindex.IndexField), DeletedIndex)
+	assert.Nil(t, err)
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex2.Table), string(hindex2.IndexField), DeletedIndex)
+	assert.Nil(t, err)
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex3.Table), string(hindex3.IndexField), DeletedIndex)
+	assert.Nil(t, err)
+
+	buildStart = time.Now()
+	for {
+		time.Sleep(time.Millisecond * 10)
+		_, err1 := db.indexMgr.GetHsetIndex(string(hindex.Table), string(hindex.IndexField))
+		_, err2 := db.indexMgr.GetHsetIndex(string(hindex2.Table), string(hindex2.IndexField))
+		_, err3 := db.indexMgr.GetHsetIndex(string(hindex3.Table), string(hindex3.IndexField))
+		if err1 == ErrIndexNotExist && err2 == ErrIndexNotExist && err3 == ErrIndexNotExist {
+			break
+		} else if time.Since(buildStart) > time.Second*10 {
+			t.Errorf("clean index timeout")
+			break
+		}
+	}
+
+	cnt, _, err = deletedIndex1.SearchRec(db, condAll, false)
+	assert.Equal(t, 0, int(cnt))
+
+	cnt, _, err = deletedIndex2.SearchRec(db, condAll, false)
+	assert.Equal(t, 0, int(cnt))
+
+	cnt, _, err = deletedIndex3.SearchRec(db, condAll, false)
+	assert.Equal(t, 0, int(cnt))
 }
 
 func TestHashIndexStringV(t *testing.T) {

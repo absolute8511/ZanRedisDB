@@ -1,7 +1,6 @@
 package common
 
 import (
-	"bytes"
 	"errors"
 	"strings"
 
@@ -99,16 +98,6 @@ const (
 	RangeROpen uint8 = 0x10
 	RangeOpen  uint8 = 0x11
 )
-
-func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
-	index := bytes.IndexByte(rawKey, ':')
-	if index <= 0 {
-		return "", nil, ErrInvalidRedisKey
-	}
-	namespace := string(rawKey[:index])
-	realKey := rawKey[index+1:]
-	return namespace, realKey, nil
-}
 
 type ScorePair struct {
 	Score  int64

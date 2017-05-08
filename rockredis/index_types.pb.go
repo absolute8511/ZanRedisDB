@@ -66,23 +66,26 @@ func (x *IndexPropertyDType) UnmarshalJSON(data []byte) error {
 type IndexState int32
 
 const (
-	InitIndex     IndexState = 0
-	BuildingIndex IndexState = 1
-	ReadyIndex    IndexState = 2
-	DeletedIndex  IndexState = 3
+	InitIndex      IndexState = 0
+	BuildingIndex  IndexState = 1
+	BuildDoneIndex IndexState = 2
+	ReadyIndex     IndexState = 3
+	DeletedIndex   IndexState = 4
 )
 
 var IndexState_name = map[int32]string{
 	0: "InitIndex",
 	1: "BuildingIndex",
-	2: "ReadyIndex",
-	3: "DeletedIndex",
+	2: "BuildDoneIndex",
+	3: "ReadyIndex",
+	4: "DeletedIndex",
 }
 var IndexState_value = map[string]int32{
-	"InitIndex":     0,
-	"BuildingIndex": 1,
-	"ReadyIndex":    2,
-	"DeletedIndex":  3,
+	"InitIndex":      0,
+	"BuildingIndex":  1,
+	"BuildDoneIndex": 2,
+	"ReadyIndex":     3,
+	"DeletedIndex":   4,
 }
 
 func (x IndexState) Enum() *IndexState {

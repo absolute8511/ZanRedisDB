@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"net"
 	"regexp"
 	"strconv"
@@ -14,6 +15,10 @@ const (
 	APIGetMembers  = "/cluster/members"
 	APIGetLeader   = "/cluster/leader"
 	APICheckBackup = "/cluster/checkbackup"
+)
+
+const (
+	NamespaceTableSeperator = byte(':')
 )
 
 func GetIPv4ForInterfaceName(ifname string) string {
@@ -65,6 +70,16 @@ func isValidName(name []byte) bool {
 		return false
 	}
 	return validNamespaceTableNameRegex.Match(name)
+}
+
+func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
+	index := bytes.IndexByte(rawKey, NamespaceTableSeperator)
+	if index <= 0 {
+		return "", nil, ErrInvalidRedisKey
+	}
+	namespace := string(rawKey[:index])
+	realKey := rawKey[index+1:]
+	return namespace, realKey, nil
 }
 
 func GetNsDesp(ns string, part int) string {
