@@ -155,6 +155,13 @@ func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 		self.nodesMutex.Lock()
 		self.removingNodes = make(map[string]string)
 		self.nodesMutex.Unlock()
+
+		self.wg.Add(1)
+		go func() {
+			defer self.wg.Done()
+			self.handleDataNodes(monitorChan, false)
+		}()
+
 		return
 	}
 	CoordLog().Infof("I am master now.")
@@ -171,7 +178,7 @@ func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	self.wg.Add(1)
 	go func() {
 		defer self.wg.Done()
-		self.handleDataNodes(monitorChan)
+		self.handleDataNodes(monitorChan, true)
 	}()
 	self.wg.Add(1)
 	go func() {
@@ -252,7 +259,7 @@ func (self *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]bool) (map[s
 	return currentNodes, currentNodesEpoch
 }
 
-func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
+func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster bool) {
 	nodesChan := make(chan []NodeInfo)
 	if self.register != nil {
 		go self.register.WatchDataNodes(nodesChan, monitorChan)
@@ -300,7 +307,7 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}) {
 					check = true
 				}
 			}
-			if check {
+			if check && isMaster {
 				atomic.AddInt64(&self.nodesEpoch, 1)
 				atomic.StoreInt32(&self.isClusterUnstable, 1)
 				self.triggerCheckNamespaces("", 0, time.Millisecond*10)
