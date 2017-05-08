@@ -30,12 +30,12 @@ func (s *Server) doMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 	cmdName := qcmdlower(cmd.Args[0])
 
 	if common.IsMergeScanCommand(cmdName) {
-		s.doScan(conn, cmd)
+		s.doMergeScan(conn, cmd)
 	}
 
 }
 
-func (s *Server) doScan(conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
 	if scanJobCount >= s.maxScanJob {
 		conn.WriteError(errMaxScanJob.Error() + " : Err handle command " + string(cmd.Args[0]))
 		return

@@ -20,6 +20,7 @@ var testOnce sync.Once
 var kvs *Server
 var redisport int
 var OK = "OK"
+var kvsmutil *Server
 
 func startTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
@@ -1941,7 +1942,7 @@ func startDistTestServer(t *testing.T) (*Server, int, string) {
 
 func getDistTestConn(t *testing.T) *goredis.PoolConn {
 	testOnce.Do(func() {
-		kvs, redisport, _ = startDistTestServer(t)
+		kvsmutil, redisport, _ = startDistTestServer(t)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisport), "")
