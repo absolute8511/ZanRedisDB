@@ -308,6 +308,7 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 			cursor = append(cursor, common.NamespaceTableSeperator)
 			origPrefix := cursor
 			indexPKCnt := 0
+			pkList := make([][]byte, 0, buildIndexBlock)
 			for {
 				done, err := func() (bool, error) {
 					t.Lock()
@@ -319,7 +320,12 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 					default:
 					}
 
-					pkList, err := db.Scan(common.HASH, cursor, buildIndexBlock, "")
+					if cap(pkList) < buildIndexBlock {
+						pkList = make([][]byte, 0, buildIndexBlock)
+					}
+					pkList = pkList[:0]
+					var err error
+					pkList, err = db.ScanWithBuffer(common.HASH, cursor, buildIndexBlock, "", pkList)
 					if err != nil {
 						dbLog.Infof("rebuild index for table %v error %v", buildTable, err)
 						return true, err
