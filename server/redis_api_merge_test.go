@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
-	"github.com/bluefoxah/ZanRedisDB/common"
 	"github.com/siddontang/goredis"
 )
 

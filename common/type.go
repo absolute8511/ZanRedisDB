@@ -121,30 +121,40 @@ type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
 type MergeCommandFunc func(redcon.Command) (interface{}, error)
 
 type CmdRouter struct {
-	cmds         map[string]CommandFunc
+	wcmds        map[string]CommandFunc
+	rcmds        map[string]CommandFunc
 	internalCmds map[string]InternalCommandFunc
 	mergeCmds    map[string]MergeCommandFunc
 }
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
-		cmds:         make(map[string]CommandFunc),
+		wcmds:        make(map[string]CommandFunc),
+		rcmds:        make(map[string]CommandFunc),
 		internalCmds: make(map[string]InternalCommandFunc),
 		mergeCmds:    make(map[string]MergeCommandFunc),
 	}
 }
 
-func (r *CmdRouter) Register(name string, f CommandFunc) bool {
-	if _, ok := r.cmds[strings.ToLower(name)]; ok {
+func (r *CmdRouter) Register(isWrite bool, name string, f CommandFunc) bool {
+	cmds := r.wcmds
+	if !isWrite {
+		cmds = r.rcmds
+	}
+	if _, ok := cmds[strings.ToLower(name)]; ok {
 		return false
 	}
-	r.cmds[name] = f
+	cmds[name] = f
 	return true
 }
 
-func (r *CmdRouter) GetCmdHandler(name string) (CommandFunc, bool) {
-	v, ok := r.cmds[strings.ToLower(name)]
-	return v, ok
+func (r *CmdRouter) GetCmdHandler(name string) (CommandFunc, bool, bool) {
+	v, ok := r.rcmds[strings.ToLower(name)]
+	if ok {
+		return v, false, ok
+	}
+	v, ok = r.wcmds[strings.ToLower(name)]
+	return v, true, ok
 }
 
 func (r *CmdRouter) RegisterInternal(name string, f InternalCommandFunc) bool {

@@ -17,6 +17,14 @@ func (db *RockDB) Scan(dataType common.DataType, cursor []byte, count int, match
 	return db.scanGeneric(storeDataType, cursor, count, match)
 }
 
+func (db *RockDB) ScanWithBuffer(dataType common.DataType, cursor []byte, count int, match string, buffer [][]byte) ([][]byte, error) {
+	storeDataType, err := getDataStoreType(dataType)
+	if err != nil {
+		return nil, err
+	}
+	return db.scanGenericUseBuffer(storeDataType, cursor, count, match, buffer)
+}
+
 func getDataStoreType(dataType common.DataType) (byte, error) {
 	var storeDataType byte
 	// for list, hash, set, zset, we can scan all keys from meta ,
@@ -128,9 +136,8 @@ func checkScanCount(count int) int {
 	return count
 }
 
-func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
-	match string) ([][]byte, error) {
-
+func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int,
+	match string, inputBuffer [][]byte) ([][]byte, error) {
 	r, err := buildMatchRegexp(match)
 	if err != nil {
 		return nil, err
@@ -147,7 +154,12 @@ func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
 		return nil, err
 	}
 
-	v := make([][]byte, 0, count)
+	var v [][]byte
+	if inputBuffer != nil {
+		v = inputBuffer
+	} else {
+		v = make([][]byte, 0, count)
+	}
 
 	for i := 0; it.Valid() && i < count; it.Next() {
 		if k, err := decodeScanKey(storeDataType, it.Key()); err != nil {
@@ -161,6 +173,13 @@ func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
 	}
 	it.Close()
 	return v, nil
+
+}
+
+func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
+	match string) ([][]byte, error) {
+
+	return db.scanGenericUseBuffer(storeDataType, key, count, match, nil)
 }
 
 // for specail data scan
