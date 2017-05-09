@@ -5,7 +5,7 @@ go:
 env:
   - GOARCH=amd64
   - GOARCH=386
-sudo: false
+sudo: required
 addons:
   apt:
     sources:
