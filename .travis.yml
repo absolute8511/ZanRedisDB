@@ -20,9 +20,9 @@ script:
   - curl -s https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm > gpm
   - chmod +x gpm
   - go get github.com/absolute8511/c-rocksdb
-  - go get github.com/absolute8511/gorocksdb
+  - go get github.com/absolute8511/gorocksdb || true
   - go get github.com/cockroachdb/c-lz4
-  - ./gpm install
+  - ./gpm install || true
   - ./test.sh
 notifications:
   email: false
