@@ -40,3 +40,41 @@ storage server also support the redis apis for read/write :
  * List:
  * Sorted Set:
  * ZSet:
+
+## Roadmap
+* Redis data structures
+  - [x] KV
+  - [x] Hash
+  - [x] List
+  - [x] Set
+  - [x] Sorted Set
+  - [ ] Geo
+  - [ ] Expires
+  - [ ] HyperLogLog
+  - [ ] Json
+* Distributed system
+  - [x] Raft based replication
+  - [x] Partitions
+  - [x] Auto balance and migrate
+  - [x] Support namespace
+  - [x] High available
+  - [ ] Distributed scan on table
+* Searchable and Indexing
+  - [ ] Secondary index support on Hash fields
+  - [ ] Secondary index support for json kv
+  - [ ] Full text search support
+* Operation
+  - [ ] Backup and restore for cluster
+  - [ ] More stats for read/write performance and errors.
+* Client 
+  - [ ] High available for redis commands (Retry on fail)
+  - [ ] Extand redis commands to support index and search
+  - [ ] Extand redis commands for advance scan
+* Others (maybe)
+   - [ ] Support configure for Column storage friendly for OLAP
+   - [ ] BoltDB as storage engine (read/range optimize)
+   - [ ] Lua scripts support
+   - [ ] Support export data to other systems
+
+
+
