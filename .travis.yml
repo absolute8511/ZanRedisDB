@@ -1,0 +1,15 @@
+language: go
+go:
+  - 1.7.x
+  - 1.8.x
+env:
+  - GOARCH=amd64
+  - GOARCH=386
+sudo: false
+script:
+  - curl -s https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm > gpm
+  - chmod +x gpm
+  - ./gpm install
+  - ./test.sh
+notifications:
+  email: false
