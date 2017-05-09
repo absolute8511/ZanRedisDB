@@ -243,11 +243,15 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 		return nil, cmd, err
 	}
 	// TODO: for multi primary keys such as mset, mget, we need make sure they are all in the same partition
-	h, ok := n.Node.GetHandler(cmdName)
+	h, isWrite, ok := n.Node.GetHandler(cmdName)
 	if !ok {
 		return nil, cmd, common.ErrInvalidCommand
 	}
-	// TODO: to make consistence, read command should request the raft read index if not leader
+	if !isWrite && !n.Node.IsLead() {
+		// read only to leader to avoid stale read
+		// TODO: also read command can request the raft read index if not leader
+		return nil, cmd, node.ErrNamespaceNoLeader
+	}
 	return h, cmd, nil
 }
 
@@ -263,7 +267,7 @@ func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandF
 		return nil, nil, err
 	}
 
-	nodes, err := self.nsMgr.GetNamespaceNodes(namespace)
+	nodes, err := self.nsMgr.GetNamespaceNodes(namespace, true)
 	if err != nil {
 		return nil, nil, err
 	}

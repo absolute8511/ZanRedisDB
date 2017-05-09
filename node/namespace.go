@@ -28,6 +28,7 @@ var (
 	ErrNamespaceNotFound          = errors.New("ERR_CLUSTER_CHANGED: namespace is not found")
 	ErrNamespacePartitionNotFound = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not found")
 	ErrNamespaceNotLeader         = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not leader on the node")
+	ErrNamespaceNoLeader          = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace has no leader")
 	ErrRaftGroupNotReady          = errors.New("raft group not ready")
 	errNamespaceConfInvalid       = errors.New("namespace config is invalid")
 )
@@ -326,13 +327,19 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 	return n, nil
 }
 
-func (self *NamespaceMgr) GetNamespaceNodes(nsBaseName string) (map[string]*NamespaceNode, error) {
+func (self *NamespaceMgr) GetNamespaceNodes(nsBaseName string, leaderOnly bool) (map[string]*NamespaceNode, error) {
 	nsNodes := make(map[string]*NamespaceNode)
 
 	tmp := self.GetNamespaces()
 	for k, v := range tmp {
 		ns, _ := common.GetNamespaceAndPartition(k)
-		if ns == nsBaseName {
+		if ns == nsBaseName && v.IsReady() {
+			if leaderOnly && !v.Node.IsLead() {
+				if v.Node.GetLeadMember() == nil {
+					return nil, ErrNamespaceNoLeader
+				}
+				continue
+			}
 			nsNodes[k] = v
 		}
 	}
