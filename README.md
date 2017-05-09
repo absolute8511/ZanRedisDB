@@ -1,5 +1,7 @@
 # ZanRedisDB
 
+[![Build Status](https://travis-ci.org/absolute8511/ZanRedisDB.svg?branch=master)](https://travis-ci.org/absolute8511/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/absolute8511/ZanRedisDB.svg)](https://github.com/absolute8511/ZanRedisDB/releases/latest)
+
 ## Build
 Install the dependency:
 <pre>

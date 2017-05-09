@@ -8,7 +8,7 @@ GOMAXPROCS=4 go test -tags=embed -timeout 900s -race `go list ./...`
 for dir in $(find apps tools -maxdepth 1 -type d) ; do
     if grep -q '^package main$' $dir/*.go 2>/dev/null; then
         echo "building $dir"
-        go build -o $dir/$(basename $dir) ./$dir
+        go build -tags=embed -o $dir/$(basename $dir) ./$dir
     else
         echo "(skipped $dir)"
     fi
