@@ -250,7 +250,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	if !isWrite && !n.Node.IsLead() {
 		// read only to leader to avoid stale read
 		// TODO: also read command can request the raft read index if not leader
-		return nil, cmd, node.ErrNamespaceNoLeader
+		return nil, cmd, node.ErrNamespaceNotLeader
 	}
 	return h, cmd, nil
 }

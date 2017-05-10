@@ -315,10 +315,11 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 		nodeLog.Infof("namespace %v meta not found", nsBaseName)
 		return nil, ErrNamespaceNotFound
 	}
-
-	fullName := common.GetNsDesp(nsBaseName, GetHashedPartitionID(pk, v.PartitionNum))
+	pid := GetHashedPartitionID(pk, v.PartitionNum)
+	fullName := common.GetNsDesp(nsBaseName, pid)
 	n, ok := self.kvNodes[fullName]
 	if !ok {
+		nodeLog.Debugf("namespace %v partition %v not found for pk: %v", nsBaseName, pid, string(pk))
 		return nil, ErrNamespacePartitionNotFound
 	}
 	if !n.IsReady() {
