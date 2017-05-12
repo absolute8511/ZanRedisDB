@@ -180,6 +180,10 @@ func (self *Server) GetStats(leaderOnly bool) common.ServerStats {
 	return ss
 }
 
+func (self *Server) GetDBStats(leaderOnly bool) map[string]string {
+	return self.nsMgr.GetDBStats(leaderOnly)
+}
+
 func (self *Server) OptimizeDB() {
 	self.nsMgr.OptimizeDB()
 }

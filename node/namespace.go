@@ -384,6 +384,23 @@ func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 	return kv
 }
 
+func (self *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
+	self.mutex.RLock()
+	nsStats := make(map[string]string, len(self.kvNodes))
+	for k, n := range self.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
+		dbStats := n.Node.GetDBInternalStats()
+		nsStats[k] = dbStats
+	}
+	self.mutex.RUnlock()
+	return nsStats
+}
+
 func (self *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
 	self.mutex.RLock()
 	nsStats := make([]common.NamespaceStats, 0, len(self.kvNodes))
