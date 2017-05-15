@@ -129,8 +129,7 @@ func (self *PDCoordinator) handleLeadership() {
 				CoordLog().Warningf("leader is lost.")
 				continue
 			}
-			if l.GetID() != self.leaderNode.GetID() ||
-				l.Epoch() != self.leaderNode.Epoch() {
+			if l.GetID() != self.leaderNode.GetID() {
 				CoordLog().Infof("leader changed from %v to %v", self.leaderNode, *l)
 				self.leaderNode = *l
 				if self.leaderNode.GetID() != self.myNode.GetID() {

@@ -1046,6 +1046,7 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 			cancel()
 		}
 	}()
+	isMissing := true
 	for {
 		rsp, err = watcher.Next(ctx)
 		if err != nil {
@@ -1057,11 +1058,13 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 				coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
 				//rewatch
 				if etcdlock.IsEtcdWatchExpired(err) {
+					isMissing = true
 					rsp, err = self.client.Get(key, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
 						continue
 					}
+					coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
 					watcher = self.client.Watch(key, rsp.Index+1, true)
 				} else {
 					time.Sleep(5 * time.Second)
@@ -1075,13 +1078,28 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 		var node NodeInfo
 		if rsp.Action == "expire" || rsp.Action == "delete" {
 			coordLog.Infof("key[%s] action[%s]", key, rsp.Action)
+			isMissing = true
 		} else if rsp.Action == "create" || rsp.Action == "update" || rsp.Action == "set" {
 			err := json.Unmarshal([]byte(rsp.Node.Value), &node)
 			if err != nil {
 				continue
 			}
+			if node.ID != "" {
+				isMissing = false
+			}
 		} else {
-			continue
+			if isMissing {
+				coordLog.Errorf("key[%s] new data : %s", key, rsp.Node.String())
+				err := json.Unmarshal([]byte(rsp.Node.Value), &node)
+				if err != nil {
+					continue
+				}
+				if node.ID != "" {
+					isMissing = false
+				}
+			} else {
+				continue
+			}
 		}
 		select {
 		case leader <- &node:
