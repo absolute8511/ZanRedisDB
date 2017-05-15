@@ -183,15 +183,19 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 		var pn PartitionNodeInfo
 		for _, nid := range nsInfo.RaftNodes {
 			n, ok := dns[nid]
-			if !ok {
-				continue
+			ip, _, redisPort, httpPort := cluster.ExtractNodeInfoFromID(nid)
+			hostname := ""
+			version := ""
+			if ok {
+				hostname = n.Hostname
+				version = n.Version
 			}
 			dn := node{
-				BroadcastAddress: n.NodeIP,
-				Hostname:         n.Hostname,
-				Version:          n.Version,
-				RedisPort:        n.RedisPort,
-				HTTPPort:         n.HttpPort,
+				BroadcastAddress: ip,
+				Hostname:         hostname,
+				Version:          version,
+				RedisPort:        redisPort,
+				HTTPPort:         httpPort,
 			}
 			if nsInfo.GetRealLeader() == nid {
 				pn.Leader = dn
