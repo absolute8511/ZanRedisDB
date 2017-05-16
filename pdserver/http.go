@@ -160,10 +160,14 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
 	epoch := reqParams.Get("epoch")
+	disableCache := reqParams.Get("disable_cache")
 
 	namespaces, curEpoch, err := self.pdCoord.GetAllNamespaces()
 	if err != nil {
-		return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		if len(namespaces) == 0 || disableCache == "true" {
+			return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		}
+		sLog.Infof("get namespaces error, using cached data %v", curEpoch)
 	}
 	nsPartsInfo, ok := namespaces[ns]
 	if !ok {

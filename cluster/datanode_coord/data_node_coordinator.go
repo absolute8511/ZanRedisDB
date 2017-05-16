@@ -162,7 +162,7 @@ func (self *DataCoordinator) watchPD() {
 			}
 			self.pdMutex.Lock()
 			if n.GetID() != self.pdLeader.GetID() {
-				CoordLog().Infof("pd leader changed: %v", n)
+				CoordLog().Infof("pd leader changed from %v to %v", self.pdLeader, n)
 				self.pdLeader = *n
 			}
 			self.pdMutex.Unlock()

@@ -254,7 +254,12 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 		if client.IsKeyNotFound(err) {
 			return nil, 0, ErrKeyNotFound
 		}
-		return nil, 0, err
+		self.nsMutex.Lock()
+		nsInfos := self.allNamespaceInfos
+		nsEpoch := self.nsEpoch
+		self.nsMutex.Unlock()
+		coordLog.Infof("refreshing namespaces failed: %v, use old info instead", err)
+		return nsInfos, nsEpoch, err
 	}
 
 	metaMap := make(map[string]NamespaceMetaInfo)

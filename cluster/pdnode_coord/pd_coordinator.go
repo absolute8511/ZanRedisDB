@@ -526,6 +526,15 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			atomic.StoreInt32(&self.isClusterUnstable, 1)
 			return
 		}
+		_, regErr := self.register.GetRemoteNamespaceReplicaInfo(nsInfo.Name, nsInfo.Partition)
+		if regErr != nil {
+			CoordLog().Warningf("get remote namespace %v failed:%v, etcd may be unreachable.",
+				nsInfo.GetDesp(), regErr)
+			atomic.StoreInt32(&self.isClusterUnstable, 1)
+			checkOK = false
+			continue
+		}
+
 		partitions, ok := waitingMigrateNamespace[nsInfo.Name]
 		if !ok {
 			partitions = make(map[int]time.Time)
