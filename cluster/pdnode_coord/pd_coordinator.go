@@ -129,8 +129,7 @@ func (self *PDCoordinator) handleLeadership() {
 				CoordLog().Warningf("leader is lost.")
 				continue
 			}
-			if l.GetID() != self.leaderNode.GetID() ||
-				l.Epoch() != self.leaderNode.Epoch() {
+			if l.GetID() != self.leaderNode.GetID() {
 				CoordLog().Infof("leader changed from %v to %v", self.leaderNode, *l)
 				self.leaderNode = *l
 				if self.leaderNode.GetID() != self.myNode.GetID() {
@@ -527,6 +526,15 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			atomic.StoreInt32(&self.isClusterUnstable, 1)
 			return
 		}
+		_, regErr := self.register.GetRemoteNamespaceReplicaInfo(nsInfo.Name, nsInfo.Partition)
+		if regErr != nil {
+			CoordLog().Warningf("get remote namespace %v failed:%v, etcd may be unreachable.",
+				nsInfo.GetDesp(), regErr)
+			atomic.StoreInt32(&self.isClusterUnstable, 1)
+			checkOK = false
+			continue
+		}
+
 		partitions, ok := waitingMigrateNamespace[nsInfo.Name]
 		if !ok {
 			partitions = make(map[int]time.Time)

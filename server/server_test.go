@@ -10,6 +10,12 @@ func TestRestartFollower(t *testing.T) {
 func TestRestartLeader(t *testing.T) {
 }
 
+func TestMarkLeaderAsRemoving(t *testing.T) {
+}
+
+func TestMarkFollowerAsRemoving(t *testing.T) {
+}
+
 func TestRestartWithCleanData(t *testing.T) {
 }
 

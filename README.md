@@ -1,5 +1,7 @@
 # ZanRedisDB
 
+[![Build Status](https://travis-ci.org/absolute8511/ZanRedisDB.svg?branch=master)](https://travis-ci.org/absolute8511/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/absolute8511/ZanRedisDB.svg)](https://github.com/absolute8511/ZanRedisDB/releases/latest)
+
 ## Build
 Install the dependency:
 <pre>
@@ -40,6 +42,10 @@ storage server also support the redis apis for read/write :
  * List:
  * Sorted Set:
  * ZSet:
+
+## Client
+Golang client SDK : `https://github.com/absolute8511/go-zanredisdb` , a redis proxy can be deployed 
+based on this golang sdk if you want use the redis client in other language.
 
 ## Roadmap
 * Redis data structures

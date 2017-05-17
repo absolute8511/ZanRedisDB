@@ -249,6 +249,18 @@ func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprou
 	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
+func (self *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+	ss := self.GetDBStats(leaderOnly)
+	return ss, nil
+}
+
 func (self *Server) initHttpHandler() {
 	log := common.HttpLog(sLog, common.LOG_INFO)
 	debugLog := common.HttpLog(sLog, common.LOG_DEBUG)
@@ -267,6 +279,7 @@ func (self *Server) initHttpHandler() {
 	router.Handle("GET", "/info", common.Decorate(self.doInfo, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(self.doStats, common.V1))
+	router.Handle("GET", "/db/stats", common.Decorate(self.doDBStats, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(self.doRaftStats, debugLog, common.V1))
 
 	self.router = router

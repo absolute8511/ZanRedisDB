@@ -161,9 +161,8 @@ func (self *DataCoordinator) watchPD() {
 				return
 			}
 			self.pdMutex.Lock()
-			if n.GetID() != self.pdLeader.GetID() ||
-				n.Epoch() != self.pdLeader.Epoch() {
-				CoordLog().Infof("pd leader changed: %v", n)
+			if n.GetID() != self.pdLeader.GetID() {
+				CoordLog().Infof("pd leader changed from %v to %v", self.pdLeader, n)
 				self.pdLeader = *n
 			}
 			self.pdMutex.Unlock()
@@ -498,8 +497,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				continue
 			}
 			// only leader check the follower status
-			if FindSlice(isrList, self.GetMyID()) == -1 ||
-				leader != self.GetMyRegID() || len(isrList) == 0 {
+			if leader != self.GetMyRegID() || len(isrList) == 0 {
 				continue
 			}
 			isReplicasEnough := len(isrList) >= namespaceMeta.Replica
@@ -508,6 +506,13 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				isReplicasEnough = false
 			}
 
+			if FindSlice(isrList, self.GetMyID()) == -1 {
+				CoordLog().Infof("namespace %v leader is not in isr: %v, maybe removing",
+					namespaceMeta.GetDesp(), isrList)
+				if !isReplicasEnough {
+					continue
+				}
+			}
 			if isReplicasEnough && isrList[0] != self.GetMyID() {
 				// the raft leader check if I am the expected sharding leader,
 				// if not, try to transfer the leader to expected node. We need do this

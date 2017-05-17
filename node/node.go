@@ -192,6 +192,10 @@ func (self *KVNode) GetLocalMemberInfo() *common.MemberInfo {
 	return &m
 }
 
+func (self *KVNode) GetDBInternalStats() string {
+	return self.store.GetStatistics()
+}
+
 func (self *KVNode) GetStats() common.NamespaceStats {
 	tbs := self.store.GetTables()
 	var ns common.NamespaceStats
