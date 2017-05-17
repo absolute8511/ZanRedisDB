@@ -644,6 +644,12 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *PartitionMetaInfo,
 		}
 	}
 
+	if len(currentNodes) < nsInfo.Replica && len(nsInfo.Removings) > 0 {
+		CoordLog().Warningf("no enough alive nodes %v for namespace %v replica: %v",
+			len(currentNodes), nsInfo.GetDesp(), nsInfo.Replica)
+		return ErrNodeUnavailable
+	}
+
 	if len(nsInfo.Removings) == 0 {
 		for i := aliveReplicas; i < nsInfo.Replica; i++ {
 			n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
@@ -707,6 +713,7 @@ func (self *PDCoordinator) addNamespaceToNode(origNSInfo *PartitionMetaInfo, nid
 	return nil
 }
 
+// should avoid mark as removing if there are not enough alive nodes for replicator.
 func (self *PDCoordinator) removeNamespaceFromNode(origNSInfo *PartitionMetaInfo, nid string) *CoordErr {
 	_, ok := origNSInfo.Removings[nid]
 	if ok {
