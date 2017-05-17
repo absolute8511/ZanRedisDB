@@ -509,9 +509,10 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 			if FindSlice(isrList, self.GetMyID()) == -1 {
 				CoordLog().Infof("namespace %v leader is not in isr: %v, maybe removing",
 					namespaceMeta.GetDesp(), isrList)
-				if !isReplicasEnough {
-					continue
+				if time.Now().UnixNano()-localNamespace.GetLastLeaderChangedTime() > time.Minute.Nanoseconds() {
+					self.transferMyNamespaceLeader(namespaceMeta, isrList[0])
 				}
+				continue
 			}
 			if isReplicasEnough && isrList[0] != self.GetMyID() {
 				// the raft leader check if I am the expected sharding leader,
