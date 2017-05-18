@@ -220,11 +220,13 @@ func (self *EtcdRegister) watchNamespaces() {
 				coordLog.Infof("watch key[%s] canceled.", self.namespaceRoot)
 				return
 			} else {
+				atomic.StoreInt32(&self.ifNamespaceChanged, 1)
 				coordLog.Errorf("watcher key[%s] error: %s", self.namespaceRoot, err.Error())
 				if etcdlock.IsEtcdWatchExpired(err) {
 					rsp, err := self.client.Get(self.namespaceRoot, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", self.namespaceRoot, err.Error())
+						time.Sleep(time.Second)
 						continue
 					}
 					watcher = self.client.Watch(self.namespaceRoot, rsp.Index+1, true)
@@ -703,6 +705,7 @@ func (self *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop c
 					rsp, err = self.client.Get(key, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
+						time.Sleep(time.Second)
 						continue
 					}
 					watcher = self.client.Watch(key, rsp.Index+1, true)
@@ -1067,6 +1070,7 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 					rsp, err = self.client.Get(key, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
+						time.Sleep(time.Second)
 						continue
 					}
 					coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
