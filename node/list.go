@@ -172,7 +172,7 @@ func (self *KVNode) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}
 	if err != nil {
 		return nil, err
 	}
-	stop, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
+	stop, err := strconv.ParseInt(string(cmd.Args[3]), 10, 64)
 	if err != nil {
 		return nil, err
 	}
