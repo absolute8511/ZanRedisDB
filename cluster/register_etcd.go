@@ -220,11 +220,13 @@ func (self *EtcdRegister) watchNamespaces() {
 				coordLog.Infof("watch key[%s] canceled.", self.namespaceRoot)
 				return
 			} else {
+				atomic.StoreInt32(&self.ifNamespaceChanged, 1)
 				coordLog.Errorf("watcher key[%s] error: %s", self.namespaceRoot, err.Error())
 				if etcdlock.IsEtcdWatchExpired(err) {
 					rsp, err := self.client.Get(self.namespaceRoot, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", self.namespaceRoot, err.Error())
+						time.Sleep(time.Second)
 						continue
 					}
 					watcher = self.client.Watch(self.namespaceRoot, rsp.Index+1, true)
@@ -254,7 +256,12 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 		if client.IsKeyNotFound(err) {
 			return nil, 0, ErrKeyNotFound
 		}
-		return nil, 0, err
+		self.nsMutex.Lock()
+		nsInfos := self.allNamespaceInfos
+		nsEpoch := self.nsEpoch
+		self.nsMutex.Unlock()
+		coordLog.Infof("refreshing namespaces failed: %v, use old info instead", err)
+		return nsInfos, nsEpoch, err
 	}
 
 	metaMap := make(map[string]NamespaceMetaInfo)
@@ -628,7 +635,7 @@ func (self *PDEtcdRegister) processMasterEvents(master etcdlock.Master, leader c
 					leader <- &node
 					continue
 				}
-				coordLog.Infof("master event type[%d] lookupdNode[%v].", e.Type, node)
+				coordLog.Infof("master event type[%d] Node[%v].", e.Type, node)
 				leader <- &node
 			} else if e.Type == etcdlock.MASTER_DELETE {
 				coordLog.Infof("master event delete.")
@@ -662,13 +669,13 @@ func (self *PDEtcdRegister) GetDataNodes() ([]NodeInfo, error) {
 	return self.getDataNodes()
 }
 
-func (self *PDEtcdRegister) WatchDataNodes(nsqds chan []NodeInfo, stop chan struct{}) {
-	nsqdNodes, err := self.getDataNodes()
+func (self *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop chan struct{}) {
+	dataNodes, err := self.getDataNodes()
 	if err == nil {
 		select {
-		case nsqds <- nsqdNodes:
+		case dataNodesChan <- dataNodes:
 		case <-stop:
-			close(nsqds)
+			close(dataNodesChan)
 			return
 		}
 	}
@@ -689,7 +696,7 @@ func (self *PDEtcdRegister) WatchDataNodes(nsqds chan []NodeInfo, stop chan stru
 		if err != nil {
 			if err == context.Canceled {
 				coordLog.Infof("watch key[%s] canceled.", key)
-				close(nsqds)
+				close(dataNodesChan)
 				return
 			} else {
 				coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
@@ -698,6 +705,7 @@ func (self *PDEtcdRegister) WatchDataNodes(nsqds chan []NodeInfo, stop chan stru
 					rsp, err = self.client.Get(key, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
+						time.Sleep(time.Second)
 						continue
 					}
 					watcher = self.client.Watch(key, rsp.Index+1, true)
@@ -708,15 +716,15 @@ func (self *PDEtcdRegister) WatchDataNodes(nsqds chan []NodeInfo, stop chan stru
 				}
 			}
 		}
-		nsqdNodes, err := self.getDataNodes()
+		dataNodes, err := self.getDataNodes()
 		if err != nil {
-			coordLog.Errorf("key[%s] getNsqdNodes error: %s", key, err.Error())
+			coordLog.Errorf("key[%s] getNodes error: %s", key, err.Error())
 			continue
 		}
 		select {
-		case nsqds <- nsqdNodes:
+		case dataNodesChan <- dataNodes:
 		case <-stop:
-			close(nsqds)
+			close(dataNodesChan)
 			return
 		}
 	}
@@ -730,7 +738,7 @@ func (self *PDEtcdRegister) getDataNodes() ([]NodeInfo, error) {
 		}
 		return nil, err
 	}
-	nsqdNodes := make([]NodeInfo, 0)
+	dataNodes := make([]NodeInfo, 0)
 	for _, node := range rsp.Node.Nodes {
 		if node.Dir {
 			continue
@@ -740,9 +748,9 @@ func (self *PDEtcdRegister) getDataNodes() ([]NodeInfo, error) {
 		if err != nil {
 			continue
 		}
-		nsqdNodes = append(nsqdNodes, nodeInfo)
+		dataNodes = append(dataNodes, nodeInfo)
 	}
-	return nsqdNodes, nil
+	return dataNodes, nil
 }
 
 func (self *PDEtcdRegister) CreateNamespacePartition(ns string, partition int) error {
@@ -1046,6 +1054,7 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 			cancel()
 		}
 	}()
+	isMissing := true
 	for {
 		rsp, err = watcher.Next(ctx)
 		if err != nil {
@@ -1057,11 +1066,14 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 				coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
 				//rewatch
 				if etcdlock.IsEtcdWatchExpired(err) {
+					isMissing = true
 					rsp, err = self.client.Get(key, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
+						time.Sleep(time.Second)
 						continue
 					}
+					coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
 					watcher = self.client.Watch(key, rsp.Index+1, true)
 				} else {
 					time.Sleep(5 * time.Second)
@@ -1075,13 +1087,28 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 		var node NodeInfo
 		if rsp.Action == "expire" || rsp.Action == "delete" {
 			coordLog.Infof("key[%s] action[%s]", key, rsp.Action)
+			isMissing = true
 		} else if rsp.Action == "create" || rsp.Action == "update" || rsp.Action == "set" {
 			err := json.Unmarshal([]byte(rsp.Node.Value), &node)
 			if err != nil {
 				continue
 			}
+			if node.ID != "" {
+				isMissing = false
+			}
 		} else {
-			continue
+			if isMissing {
+				coordLog.Errorf("key[%s] new data : %s", key, rsp.Node.String())
+				err := json.Unmarshal([]byte(rsp.Node.Value), &node)
+				if err != nil {
+					continue
+				}
+				if node.ID != "" {
+					isMissing = false
+				}
+			} else {
+				continue
+			}
 		}
 		select {
 		case leader <- &node:

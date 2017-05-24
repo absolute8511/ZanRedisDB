@@ -315,10 +315,11 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 		nodeLog.Infof("namespace %v meta not found", nsBaseName)
 		return nil, ErrNamespaceNotFound
 	}
-
-	fullName := common.GetNsDesp(nsBaseName, GetHashedPartitionID(pk, v.PartitionNum))
+	pid := GetHashedPartitionID(pk, v.PartitionNum)
+	fullName := common.GetNsDesp(nsBaseName, pid)
 	n, ok := self.kvNodes[fullName]
 	if !ok {
+		nodeLog.Debugf("namespace %v partition %v not found for pk: %v", nsBaseName, pid, string(pk))
 		return nil, ErrNamespacePartitionNotFound
 	}
 	if !n.IsReady() {
@@ -381,6 +382,23 @@ func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 		return nil
 	}
 	return kv
+}
+
+func (self *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
+	self.mutex.RLock()
+	nsStats := make(map[string]string, len(self.kvNodes))
+	for k, n := range self.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
+		dbStats := n.Node.GetDBInternalStats()
+		nsStats[k] = dbStats
+	}
+	self.mutex.RUnlock()
+	return nsStats
 }
 
 func (self *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {

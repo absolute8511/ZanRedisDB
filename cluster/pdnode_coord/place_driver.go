@@ -87,6 +87,7 @@ func (self *DataPlacement) IsRaftNodeJoined(nsInfo *PartitionMetaInfo, nid strin
 
 		for _, m := range rsp {
 			if m.NodeID == ExtractRegIDFromGenID(nid) && m.ID == nsInfo.RaftIDs[nid] {
+				CoordLog().Infof("namespace %v node %v is still in raft from %v ", nsInfo.GetDesp(), nid, remoteNode)
 				return true, nil
 			}
 		}

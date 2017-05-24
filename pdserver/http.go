@@ -160,10 +160,14 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
 	epoch := reqParams.Get("epoch")
+	disableCache := reqParams.Get("disable_cache")
 
 	namespaces, curEpoch, err := self.pdCoord.GetAllNamespaces()
 	if err != nil {
-		return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		if len(namespaces) == 0 || disableCache == "true" {
+			return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		}
+		sLog.Infof("get namespaces error, using cached data %v", curEpoch)
 	}
 	nsPartsInfo, ok := namespaces[ns]
 	if !ok {
@@ -183,15 +187,19 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 		var pn PartitionNodeInfo
 		for _, nid := range nsInfo.RaftNodes {
 			n, ok := dns[nid]
-			if !ok {
-				continue
+			ip, _, redisPort, httpPort := cluster.ExtractNodeInfoFromID(nid)
+			hostname := ""
+			version := ""
+			if ok {
+				hostname = n.Hostname
+				version = n.Version
 			}
 			dn := node{
-				BroadcastAddress: n.NodeIP,
-				Hostname:         n.Hostname,
-				Version:          n.Version,
-				RedisPort:        n.RedisPort,
-				HTTPPort:         n.HttpPort,
+				BroadcastAddress: ip,
+				Hostname:         hostname,
+				Version:          version,
+				RedisPort:        redisPort,
+				HTTPPort:         httpPort,
 			}
 			if nsInfo.GetRealLeader() == nid {
 				pn.Leader = dn

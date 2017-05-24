@@ -10,6 +10,16 @@ func TestRestartFollower(t *testing.T) {
 func TestRestartLeader(t *testing.T) {
 }
 
+func TestMarkLeaderAsRemoving(t *testing.T) {
+}
+
+func TestMarkFollowerAsRemoving(t *testing.T) {
+}
+
+func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
+	// should not mark as remove while there is not enough for replica
+}
+
 func TestRestartWithCleanData(t *testing.T) {
 }
 
