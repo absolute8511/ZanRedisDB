@@ -217,6 +217,13 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 	return ns
 }
 
+func (self *KVNode) GetIndexSchema(table string) (interface{}, error) {
+	if len(table) == 0 {
+		return self.store.GetAllIndexSchema()
+	}
+	return self.store.GetIndexSchema(table)
+}
+
 func (self *KVNode) destroy() error {
 	self.Stop()
 	self.store.Destroy()

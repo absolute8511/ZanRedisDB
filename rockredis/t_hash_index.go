@@ -364,6 +364,7 @@ type IndexCondition struct {
 	EndKey       []byte
 	IncludeEnd   bool
 	Offset       int
+	PKOffset     []byte
 	Limit        int
 }
 

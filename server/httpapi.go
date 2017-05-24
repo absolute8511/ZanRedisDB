@@ -141,6 +141,16 @@ func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps http
 	return v.Node.GetMembers(), nil
 }
 
+func (self *Server) getIndexes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	v := self.GetNamespaceFromFullName(ns)
+	if v == nil || !v.IsReady() {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
+	}
+	table := ps.ByName("table")
+	return v.Node.GetIndexSchema(table)
+}
+
 func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := self.GetNamespaceFromFullName(ns)
@@ -267,6 +277,7 @@ func (self *Server) initHttpHandler() {
 	router := httprouter.New()
 	router.Handle("GET", common.APIGetLeader+"/:namespace", common.Decorate(self.getLeader, common.V1))
 	router.Handle("GET", common.APIGetMembers+"/:namespace", common.Decorate(self.getMembers, common.V1))
+	router.Handle("GET", common.APIGetIndexes+"/:namespace/:table", common.Decorate(self.getIndexes, common.V1))
 	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(self.checkNodeBackup, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(self.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(self.doOptimize, log, common.V1))

@@ -594,3 +594,11 @@ func (r *RockDB) ClearBackup(term uint64, index uint64) error {
 	checkpointDir := GetCheckpointDir(term, index)
 	return os.RemoveAll(path.Join(backupDir, checkpointDir))
 }
+
+func (r *RockDB) GetIndexSchema(table string) (*common.IndexSchema, error) {
+	return r.indexMgr.GetIndexSchemaInfo(r, table)
+}
+
+func (r *RockDB) GetAllIndexSchema() (map[string]*common.IndexSchema, error) {
+	return r.indexMgr.GetAllIndexSchemaInfo(r)
+}

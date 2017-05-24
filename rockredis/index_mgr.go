@@ -75,6 +75,67 @@ func NewIndexMgr() *IndexMgr {
 	}
 }
 
+func (self *IndexMgr) GetAllIndexSchemaInfo(db *RockDB) (map[string]*common.IndexSchema, error) {
+	self.RLock()
+	defer self.RUnlock()
+	isClosed := self.closeChan == nil
+	if isClosed {
+		return nil, ErrIndexClosed
+	}
+	schemas := make(map[string]*common.IndexSchema)
+	for name, t := range self.tableIndexes {
+		var schema common.IndexSchema
+		t.RLock()
+		for _, v := range t.hsetIndexes {
+			schema.HsetIndexes = append(schema.HsetIndexes, common.HsetIndexSchema{
+				Name:       string(v.Name),
+				IndexField: string(v.IndexField),
+				PrefixLen:  v.PrefixLen,
+				Unique:     v.Unique,
+				ValueType:  common.IndexPropertyDType(v.ValueType),
+				State:      common.IndexState(v.State),
+			})
+		}
+		//for _, v := range t.jsonIndexes {
+		//	schema.JsonIndexes = append(schema.JsonIndexes, common.JsonIndexSchema{})
+		//}
+		t.RUnlock()
+		schemas[name] = &schema
+	}
+	return schemas, nil
+}
+
+func (self *IndexMgr) GetIndexSchemaInfo(db *RockDB, table string) (*common.IndexSchema, error) {
+	self.RLock()
+	defer self.RUnlock()
+	isClosed := self.closeChan == nil
+	if isClosed {
+		return nil, ErrIndexClosed
+	}
+
+	var schema common.IndexSchema
+	t, ok := self.tableIndexes[table]
+	if !ok {
+		return nil, ErrIndexNotExist
+	}
+	t.RLock()
+	for _, v := range t.hsetIndexes {
+		schema.HsetIndexes = append(schema.HsetIndexes, common.HsetIndexSchema{
+			Name:       string(v.Name),
+			IndexField: string(v.IndexField),
+			PrefixLen:  v.PrefixLen,
+			Unique:     v.Unique,
+			ValueType:  common.IndexPropertyDType(v.ValueType),
+			State:      common.IndexState(v.State),
+		})
+	}
+	//for _, v := range t.jsonIndexes {
+	//	schema.JsonIndexes = append(schema.JsonIndexes, common.JsonIndexSchema{})
+	//}
+	t.RUnlock()
+	return &schema, nil
+}
+
 func (self *IndexMgr) LoadIndexes(db *RockDB) error {
 	dbLog.Infof("begin loading indexes...")
 	defer dbLog.Infof("finish load indexes.")
@@ -370,7 +431,6 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 					if err != nil {
 					} else {
 						dbLog.Infof("finish rebuild index for table %v, total: %v", string(buildTable), indexPKCnt)
-						// TODO: change index state to build done
 						t.Lock()
 						for _, f := range fields {
 							hindex, ok := t.hsetIndexes[string(f)]

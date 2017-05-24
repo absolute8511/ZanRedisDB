@@ -470,7 +470,6 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					CoordLog().Infof("the namespace should be clean since not found in register: %v", name)
 					_, err = self.register.GetNamespaceMetaInfo(namespace)
 					if err == ErrKeyNotFound {
-						self.removeLocalNamespaceFromRaft(localNamespace, true)
 						self.forceRemoveLocalNamespace(localNamespace)
 					}
 				}

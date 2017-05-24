@@ -126,6 +126,7 @@ func (self *PDCoordinator) handleLeadership() {
 				return
 			}
 			if l == nil {
+				atomic.StoreInt32(&self.isClusterUnstable, 1)
 				CoordLog().Warningf("leader is lost.")
 				continue
 			}

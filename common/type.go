@@ -240,3 +240,38 @@ type ScanResult struct {
 	PartionId  string
 	Error      error
 }
+
+type IndexState int32
+
+const (
+	InitIndex      IndexState = 0
+	BuildingIndex  IndexState = 1
+	BuildDoneIndex IndexState = 2
+	ReadyIndex     IndexState = 3
+	DeletedIndex   IndexState = 4
+)
+
+type IndexPropertyDType int32
+
+const (
+	Int64V  IndexPropertyDType = 0
+	Int32V  IndexPropertyDType = 1
+	StringV IndexPropertyDType = 2
+)
+
+type HsetIndexSchema struct {
+	Name       string             `json:"name"`
+	IndexField string             `json:"index_field"`
+	PrefixLen  int32              `json:"prefix_len"`
+	Unique     int32              `json:"unique"`
+	ValueType  IndexPropertyDType `json:"value_type"`
+	State      IndexState         `json:"state"`
+}
+
+type JsonIndexSchema struct {
+}
+
+type IndexSchema struct {
+	HsetIndexes []HsetIndexSchema `json:"hset_indexes"`
+	JsonIndexes []JsonIndexSchema `json:"json_indexes"`
+}

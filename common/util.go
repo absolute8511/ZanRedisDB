@@ -15,6 +15,7 @@ const (
 	APIGetMembers  = "/cluster/members"
 	APIGetLeader   = "/cluster/leader"
 	APICheckBackup = "/cluster/checkbackup"
+	APIGetIndexes  = "/schema/indexes"
 )
 
 const (

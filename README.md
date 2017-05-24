@@ -44,7 +44,7 @@ storage server also support the redis apis for read/write :
  * ZSet:
 
 ## Client
-Golang client SDK : `https://github.com/absolute8511/go-zanredisdb` , a redis proxy can be deployed 
+Golang client SDK : [client-sdk] , a redis proxy can be deployed 
 based on this golang sdk if you want use the redis client in other language.
 
 ## Roadmap
@@ -84,3 +84,4 @@ based on this golang sdk if you want use the redis client in other language.
 
 
 
+[client-sdk]: https://github.com/absolute8511/go-zanredisdb
