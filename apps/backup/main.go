@@ -112,7 +112,7 @@ func backup(namespace, table, t string) {
 	case "hash":
 		go client.HScanChannel(table, ch)
 	case "set":
-		go client.SSCanChannel(table, ch)
+		go client.SScanChannel(table, ch)
 	case "zset":
 		go client.ZScanChannel(table, ch)
 	case "list":
@@ -123,7 +123,7 @@ func backup(namespace, table, t string) {
 	}
 
 	for res := range ch {
-		fmt.Println(res)
+		fmt.Println("###", string(res))
 	}
 }
 
