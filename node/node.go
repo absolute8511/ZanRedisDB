@@ -38,9 +38,10 @@ var (
 )
 
 const (
-	RedisReq       int8 = 0
-	HTTPReq        int8 = 1
-	proposeTimeout      = time.Second * 10
+	RedisReq        int8 = 0
+	HTTPReq         int8 = 1
+	SchemaChangeReq int8 = 2
+	proposeTimeout       = time.Second * 10
 )
 
 type nodeProgress struct {
@@ -217,11 +218,17 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 	return ns
 }
 
-func (self *KVNode) GetIndexSchema(table string) (interface{}, error) {
+func (self *KVNode) GetIndexSchema(table string) (map[string]*common.IndexSchema, error) {
 	if len(table) == 0 {
 		return self.store.GetAllIndexSchema()
 	}
-	return self.store.GetIndexSchema(table)
+	schema, err := self.store.GetIndexSchema(table)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]*common.IndexSchema{
+		table: schema,
+	}, nil
 }
 
 func (self *KVNode) destroy() error {
@@ -509,6 +516,24 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	return self.queueRequest(req)
 }
 
+func (self *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error {
+	h := &RequestHeader{
+		ID:       self.rn.reqIDGen.Next(),
+		DataType: int32(SchemaChangeReq),
+	}
+	buf, _ := sc.Marshal()
+	raftReq := InternalRaftRequest{
+		Header: h,
+		Data:   buf,
+	}
+	req := &internalReq{
+		reqData: raftReq,
+	}
+
+	_, err := self.queueRequest(req)
+	return err
+}
+
 func (self *KVNode) FillMyMemberInfo(m *common.MemberInfo) {
 	m.RaftURLs = append(m.RaftURLs, self.machineConfig.LocalRaftAddr)
 }
@@ -784,15 +809,16 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 					} else if req.Header.DataType == int32(HTTPReq) {
 						//TODO: try other protocol command
 						self.w.Trigger(reqID, errUnknownData)
-					} else {
-						self.w.Trigger(reqID, errUnknownData)
+					} else if req.Header.DataType == int32(SchemaChangeReq) {
+						self.rn.Infof("handle schema change: %v", string(req.Data))
+						// TODO:
+						self.w.Trigger(reqID, nil)
 					}
 				}
 				cost := time.Since(start)
 				if cost >= proposeTimeout/2 {
 					self.rn.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
 				}
-
 			}
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange

@@ -269,9 +269,10 @@ type HsetIndexSchema struct {
 }
 
 type JsonIndexSchema struct {
+	State IndexState `json:"state"`
 }
 
 type IndexSchema struct {
-	HsetIndexes []HsetIndexSchema `json:"hset_indexes"`
-	JsonIndexes []JsonIndexSchema `json:"json_indexes"`
+	HsetIndexes []*HsetIndexSchema `json:"hset_indexes"`
+	JsonIndexes []*JsonIndexSchema `json:"json_indexes"`
 }

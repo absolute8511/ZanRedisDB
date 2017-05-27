@@ -3,15 +3,37 @@
 [![Build Status](https://travis-ci.org/absolute8511/ZanRedisDB.svg?branch=master)](https://travis-ci.org/absolute8511/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/absolute8511/ZanRedisDB.svg)](https://github.com/absolute8511/ZanRedisDB/releases/latest)
 
 ## Build
+
 Install the dependency:
 <pre>
 go get github.com/absolute8511/c-rocksdb
 go get github.com/absolute8511/gorocksdb
+go get github.com/cockroachdb/c-lz4
+go get github.com/cockroachdb/c-snappy
 </pre>
 
-Build zankv and placedriver from the source (only support go version 1.7.4+):
+use the `gpm` to install other dependencies
+<pre>
+wget https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm && sudo mv gpm /usr/local/bin
+gpm get
+</pre>
+
+Install the Snappy library
+<pre>
+yum install snappy-devel (for CentOS)
+apt-get install libsnappy-dev (for Debian/Ubuntu)
+brew install snappy (for Mac)
+</pre>
+
+Build zankv and placedriver from the source (only support go version 1.7.4+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
 make
+</pre>
+
+If you want package the binary release run the scripts
+<pre>
+./pre-dist.sh
+./dist.sh
 </pre>
 
 ## Deploy
@@ -77,11 +99,10 @@ based on this golang sdk if you want use the redis client in other language.
   - [ ] Extand redis commands to support index and search
   - [ ] Extand redis commands for advance scan
 * Others (maybe)
-   - [ ] Support configure for Column storage friendly for OLAP
-   - [ ] BoltDB as storage engine (read/range optimize)
-   - [ ] Lua scripts support
-   - [ ] Support export data to other systems
-
+  - [ ] Support configure for Column storage friendly for OLAP
+  - [ ] BoltDB as storage engine (read/range optimize)
+  - [ ] Lua scripts support
+  - [ ] Support export data to other systems
 
 
 [client-sdk]: https://github.com/absolute8511/go-zanredisdb

@@ -8,7 +8,7 @@ rm -rf   $DIR/.godeps
 mkdir -p $DIR/.godeps
 mkdir -p $DIR/dist
 export GOPATH=$DIR/.godeps:$GOPATH
-GOPATH=$DIR/.godeps gpm install
+GOPATH=$DIR/.godeps gpm get
 
 arch=$(go env GOARCH)
 

@@ -609,6 +609,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 	if checkOK {
 		if fullCheck {
 			atomic.StoreInt32(&self.isClusterUnstable, 0)
+			self.doSchemaCheck()
 		}
 	} else {
 		atomic.StoreInt32(&self.isClusterUnstable, 1)

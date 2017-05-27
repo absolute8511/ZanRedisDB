@@ -87,7 +87,7 @@ func (self *IndexMgr) GetAllIndexSchemaInfo(db *RockDB) (map[string]*common.Inde
 		var schema common.IndexSchema
 		t.RLock()
 		for _, v := range t.hsetIndexes {
-			schema.HsetIndexes = append(schema.HsetIndexes, common.HsetIndexSchema{
+			schema.HsetIndexes = append(schema.HsetIndexes, &common.HsetIndexSchema{
 				Name:       string(v.Name),
 				IndexField: string(v.IndexField),
 				PrefixLen:  v.PrefixLen,
@@ -120,7 +120,7 @@ func (self *IndexMgr) GetIndexSchemaInfo(db *RockDB, table string) (*common.Inde
 	}
 	t.RLock()
 	for _, v := range t.hsetIndexes {
-		schema.HsetIndexes = append(schema.HsetIndexes, common.HsetIndexSchema{
+		schema.HsetIndexes = append(schema.HsetIndexes, &common.HsetIndexSchema{
 			Name:       string(v.Name),
 			IndexField: string(v.IndexField),
 			PrefixLen:  v.PrefixLen,

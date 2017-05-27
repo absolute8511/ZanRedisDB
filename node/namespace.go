@@ -43,6 +43,10 @@ func (self *NamespaceNode) IsReady() bool {
 	return atomic.LoadInt32(&self.ready) == 1
 }
 
+func (self *NamespaceNode) FullName() string {
+	return self.conf.Name
+}
+
 func (self *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 }
 

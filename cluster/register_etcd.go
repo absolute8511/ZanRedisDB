@@ -29,6 +29,7 @@ const (
 	CLUSTER_META_INFO      = "ClusterMeta"
 	NAMESPACE_DIR          = "Namespaces"
 	NAMESPACE_META         = "NamespaceMeta"
+	NAMESPACE_SCHEMA       = "NamespaceSchema"
 	NAMESPACE_REPLICA_INFO = "ReplicaInfo"
 	NAMESPACE_REAL_LEADER  = "RealLeader"
 	DATA_NODE_DIR          = "DataNodes"
@@ -183,6 +184,29 @@ func (self *EtcdRegister) GetAllNamespaces() (map[string]map[int]PartitionMetaIn
 	nsEpoch := self.nsEpoch
 	self.nsMutex.Unlock()
 	return nsInfos, nsEpoch, nil
+}
+
+func (self *EtcdRegister) GetNamespaceSchemas(ns string) (map[string]SchemaInfo, error) {
+	rsp, err := self.client.Get(self.getNamespaceSchemaPath(ns), false, true)
+	if err != nil {
+		if client.IsKeyNotFound(err) {
+			return nil, ErrKeyNotFound
+		}
+		return nil, err
+	}
+	schemas := make(map[string]SchemaInfo)
+	for _, node := range rsp.Node.Nodes {
+		if node.Dir {
+			continue
+		}
+		_, table := path.Split(node.Key)
+		var sInfo SchemaInfo
+		sInfo.Schema = []byte(node.Value)
+		sInfo.Epoch = EpochType(node.ModifiedIndex)
+		schemas[table] = sInfo
+	}
+
+	return schemas, nil
 }
 
 func (self *EtcdRegister) GetNamespacesNotifyChan() chan struct{} {
@@ -483,6 +507,14 @@ func (self *EtcdRegister) getNamespacePath(ns string) string {
 
 func (self *EtcdRegister) getNamespaceMetaPath(ns string) string {
 	return path.Join(self.getNamespacePath(ns), NAMESPACE_META)
+}
+
+func (self *EtcdRegister) getNamespaceSchemaPath(ns string) string {
+	return path.Join(self.getNamespacePath(ns), NAMESPACE_SCHEMA)
+}
+
+func (self *EtcdRegister) getNamespaceTableSchemaPath(ns string, table string) string {
+	return path.Join(self.getNamespaceSchemaPath(ns), table)
 }
 
 func (self *EtcdRegister) getNamespacePartitionPath(ns string, partition int) string {
@@ -875,6 +907,15 @@ func (self *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partition 
 		return err
 	}
 	replicaInfo.epoch = EpochType(rsp.Node.ModifiedIndex)
+	return nil
+}
+
+func (self *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, schema SchemaInfo) error {
+	_, err := self.client.CompareAndSwap(self.getNamespaceTableSchemaPath(ns, table), string(schema.Schema),
+		0, "", uint64(schema.Epoch))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

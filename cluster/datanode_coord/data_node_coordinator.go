@@ -458,6 +458,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 
 		// check local namespaces with cluster to remove the unneed data
 		tmpChecks := self.localNSMgr.GetNamespaces()
+		indexSchemas := make(map[string]*common.IndexSchema)
 		for name, localNamespace := range tmpChecks {
 			namespace, pid := common.GetNamespaceAndPartition(name)
 			if namespace == "" {
@@ -549,11 +550,13 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					go self.tryCheckNamespaces()
 					continue
 				}
+				isFullStable := true
 				// the members is more than replica, we need to remove the member that is not necessary anymore
 				pendings, ok := pendingRemovings[namespaceMeta.GetDesp()]
 				if !ok {
 					pendings = make(map[uint64]pendingRemoveInfo)
 					pendingRemovings[namespaceMeta.GetDesp()] = pendings
+					isFullStable = false
 				}
 				newestReplicaInfo, err := self.register.GetRemoteNamespaceReplicaInfo(namespaceMeta.Name, namespaceMeta.Partition)
 				if err != nil {
@@ -576,6 +579,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 						}
 					}
 					if !found {
+						isFullStable = false
 						CoordLog().Infof("raft member %v not found in meta: %v", m, newestReplicaInfo.RaftNodes)
 						// here we do not remove other member immediately from raft
 						// it may happen while the namespace info in the register is not updated due to network lag
@@ -600,6 +604,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					} else {
 						delete(pendings, m.ID)
 						for nid, removing := range newestReplicaInfo.Removings {
+							isFullStable = false
 							if m.ID == removing.RemoveReplicaID && m.NodeID == ExtractRegIDFromGenID(nid) {
 								CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
 								self.removeNamespaceRaftMember(namespaceMeta, m)
@@ -607,6 +612,10 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 						}
 					}
 				}
+				if isFullStable {
+					self.doSyncSchemaInfo(localNamespace, indexSchemas)
+				}
+
 			}
 		}
 	}

@@ -138,6 +138,11 @@ type ConsistentStore interface {
 	ListKey(key string) ([]string, error)
 }
 
+type SchemaInfo struct {
+	Schema []byte
+	Epoch  EpochType
+}
+
 type Register interface {
 	InitClusterID(id string)
 	// all registered pd nodes.
@@ -152,6 +157,7 @@ type Register interface {
 	GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error)
 	GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error)
 	GetNamespacesNotifyChan() chan struct{}
+	GetNamespaceSchemas(ns string) (map[string]SchemaInfo, error)
 	Stop()
 }
 
@@ -184,6 +190,7 @@ type PDRegister interface {
 	// if no partition, replica info node should create only once.
 	UpdateNamespacePartReplicaInfo(ns string, partition int, replicaInfo *PartitionReplicaInfo, oldGen EpochType) error
 	PrepareNamespaceMinGID() (int64, error)
+	UpdateNamespaceSchema(ns string, table string, schema SchemaInfo) error
 }
 
 type DataNodeRegister interface {
