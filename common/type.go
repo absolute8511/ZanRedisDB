@@ -251,3 +251,16 @@ type ScanResult struct {
 	PartionId  string
 	Error      error
 }
+
+type OnExpiredFunc func([]byte) error
+
+type TTLChecker interface {
+	Start()
+	Stop()
+
+	RegisterKVExpired(OnExpiredFunc)
+	RegisterHashExpired(OnExpiredFunc)
+	RegisterListExpired(OnExpiredFunc)
+	RegisterSetExpired(OnExpiredFunc)
+	RegisterZSetExpired(OnExpiredFunc)
+}
