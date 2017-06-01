@@ -314,23 +314,23 @@ func (self *KVNode) registerHandler() {
 	self.router.Register(true, "smclear", wrapWriteCommandKK(self, self.smclearCommand))
 	// for ttl
 	self.router.Register(false, "ttl", wrapReadCommandK(self.ttlCommand))
-	//self.router.Register(false, "httl", wrapReadCommandK(self.httlCommand))
-	//self.router.Register(false, "lttl", wrapReadCommandK(self.lttlCommand))
-	//self.router.Register(false, "sttl", wrapReadCommandK(self.sttlCommand))
-	//self.router.Register(false, "zttl", wrapReadCommandK(self.zttlCommand))
+	self.router.Register(false, "httl", wrapReadCommandK(self.httlCommand))
+	self.router.Register(false, "lttl", wrapReadCommandK(self.lttlCommand))
+	self.router.Register(false, "sttl", wrapReadCommandK(self.sttlCommand))
+	self.router.Register(false, "zttl", wrapReadCommandK(self.zttlCommand))
 
 	self.router.Register(true, "setex", wrapWriteCommandKVV(self, self.setexCommand))
 	self.router.Register(true, "expire", wrapWriteCommandKV(self, self.expireCommand))
-	//self.router.Register(true, "hexpire", wrapWriteCommandKV(self, self.hashExpireCommand))
-	//self.router.Register(true, "lexpire", wrapWriteCommandKV(self, self.listExpireCommand))
-	//self.router.Register(true, "sexpire", wrapWriteCommandKV(self, self.setExpireCommand))
-	//self.router.Register(true, "zexpire", wrapWriteCommandKV(self, self.zsetExpireCommand))
+	self.router.Register(true, "hexpire", wrapWriteCommandKV(self, self.hashExpireCommand))
+	self.router.Register(true, "lexpire", wrapWriteCommandKV(self, self.listExpireCommand))
+	self.router.Register(true, "sexpire", wrapWriteCommandKV(self, self.setExpireCommand))
+	self.router.Register(true, "zexpire", wrapWriteCommandKV(self, self.zsetExpireCommand))
 
 	self.router.Register(true, "persist", wrapWriteCommandK(self, self.persistCommand))
-	//self.router.Register(true, "hpersist", wrapWriteCommandK(self, self.persistCommand))
-	//self.router.Register(true, "lpersist", wrapWriteCommandK(self, self.persistCommand))
-	//self.router.Register(true, "spersist", wrapWriteCommandK(self, self.persistCommand))
-	//self.router.Register(true, "zpersist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "hpersist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "lpersist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "spersist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "zpersist", wrapWriteCommandK(self, self.persistCommand))
 
 	// for scan
 	self.router.Register(false, "hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
@@ -376,21 +376,18 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterInternal("srem", self.localSrem)
 	self.router.RegisterInternal("sclear", self.localSclear)
 	self.router.RegisterInternal("smclear", self.localSmclear)
-
 	// expire
 	self.router.RegisterInternal("setex", self.localSetexCommand)
 	self.router.RegisterInternal("expire", self.localExpireCommand)
-	//self.router.RegisterInternal("lexpire", self.localListExpireCommand)
-	//self.router.RegisterInternal("hexpire", self.localHashExpireCommand)
-	//self.router.RegisterInternal("sexpire", self.localSetExpireCommand)
-	//self.router.RegisterInternal("zexpire", self.localZSetExpireCommand)
-
+	self.router.RegisterInternal("lexpire", self.localListExpireCommand)
+	self.router.RegisterInternal("hexpire", self.localHashExpireCommand)
+	self.router.RegisterInternal("sexpire", self.localSetExpireCommand)
+	self.router.RegisterInternal("zexpire", self.localZSetExpireCommand)
 	self.router.RegisterInternal("persist", self.localPersistCommand)
-	//self.router.RegisterInternal("hpersist", self.localHashPersistCommand)
-	//self.router.RegisterInternal("lpersist", self.localListPersistCommand)
-	//self.router.RegisterInternal("spersist", self.localSetPersistCommand)
-	//self.router.RegisterInternal("zpersist", self.localZSetPersistCommand)
-
+	self.router.RegisterInternal("hpersist", self.localHashPersistCommand)
+	self.router.RegisterInternal("lpersist", self.localListPersistCommand)
+	self.router.RegisterInternal("spersist", self.localSetPersistCommand)
+	self.router.RegisterInternal("zpersist", self.localZSetPersistCommand)
 }
 
 func (self *KVNode) handleProposeReq() {

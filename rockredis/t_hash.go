@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
@@ -307,6 +308,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(HashType, key, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -362,6 +364,7 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	db.hDeleteAll(hkey, wb)
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(HashType, hkey, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)

@@ -139,6 +139,7 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	it.Close()
 	if num > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(SetType, key, wb)
 	}
 
 	wb.Delete(sk)
@@ -321,6 +322,7 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(SetType, key, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)

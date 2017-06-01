@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
@@ -389,6 +390,7 @@ func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(ZSetType, key, wb)
 	}
 
 	err := db.eng.Write(db.defaultWriteOpts, wb)
@@ -557,6 +559,7 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(ZSetType, key, wb)
 	}
 
 	return num, nil
@@ -851,6 +854,7 @@ func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType u
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(ZSetType, key, wb)
 	}
 
 	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
