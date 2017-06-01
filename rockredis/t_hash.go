@@ -528,3 +528,36 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 
 	return len, v, nil
 }
+
+func (db *RockDB) HExpire(key []byte, duration int64, c common.TTLChecker) (int64, error) {
+	if exists, err := db.HKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	} else {
+		if err2 := db.expire(HashType, key, duration, c); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
+
+func (db *RockDB) HPersist(key []byte) (int64, error) {
+	if exists, err := db.HKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	}
+
+	if ttl, err := db.ttl(HashType, key); err != nil || ttl < 0 {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	if err := db.delExpire(HashType, key, db.wb); err != nil {
+		return 0, err
+	} else {
+		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}

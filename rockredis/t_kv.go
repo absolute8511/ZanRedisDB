@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"errors"
+	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 )
@@ -266,6 +267,32 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	return err
 }
 
+func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte, c common.TTLChecker) error {
+	table, key, err := convertRedisKeyToDBKVKey(rawKey)
+	if err != nil {
+		return err
+	} else if err = checkValueSize(value); err != nil {
+		return err
+	}
+	db.wb.Clear()
+	if db.cfg.EnableTableCounter {
+		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		if v == nil {
+			db.IncrTableKeyCount(table, 1, db.wb)
+		}
+	}
+	tsBuf := PutInt64(ts)
+	value = append(value, tsBuf...)
+	db.wb.Put(key, value)
+
+	db.rawExpireAt(KVType, rawKey, duration+time.Now().Unix(), db.wb, c)
+
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+
+	return err
+
+}
+
 func (db *RockDB) SetNX(ts int64, key []byte, value []byte) (int64, error) {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
@@ -418,4 +445,37 @@ func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 	}
 
 	return int64(len(oldValue) - tsLen), nil
+}
+
+func (db *RockDB) Expire(key []byte, duration int64, c common.TTLChecker) (int64, error) {
+	if exists, err := db.KVExists(key); err != nil || exists != 1 {
+		return 0, err
+	} else {
+		if err2 := db.expire(KVType, key, duration, c); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
+
+func (db *RockDB) Persist(key []byte) (int64, error) {
+	if exists, err := db.KVExists(key); err != nil || exists != 1 {
+		return 0, err
+	}
+
+	if ttl, err := db.ttl(KVType, key); err != nil || ttl < 0 {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	if err := db.delExpire(KVType, key, db.wb); err != nil {
+		return 0, err
+	} else {
+		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
 }

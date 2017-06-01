@@ -87,28 +87,22 @@ func expDecodeTimeKey(tk []byte) (byte, []byte, int64, error) {
 	return tk[pos+9], tk[pos+10:], int64(binary.BigEndian.Uint64(tk[pos+1:])), nil
 }
 
-func (db *RockDB) KVExpire(key []byte, duration int64, c common.TTLChecker) error {
-	return db.expire(KVType, key, duration, c)
-}
-
-func (db *RockDB) HashExpire(key []byte, duration int64, c common.TTLChecker) error {
-	return db.expire(HashType, key, duration, c)
-}
-
-func (db *RockDB) ListExpire(key []byte, duration int64, c common.TTLChecker) error {
-	return db.expire(ListType, key, duration, c)
-}
-
-func (db *RockDB) SetExpire(key []byte, duration int64, c common.TTLChecker) error {
-	return db.expire(SetType, key, duration, c)
-}
-
-func (db *RockDB) ZSetExpire(key []byte, duration int64, c common.TTLChecker) error {
-	return db.expire(ZSetType, key, duration, c)
-}
-
 func (db *RockDB) expire(dataType byte, key []byte, duration int64, c common.TTLChecker) error {
 	return db.expireAt(dataType, key, time.Now().Unix()+duration, c)
+}
+
+func (db *RockDB) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch, c common.TTLChecker) error {
+	mk := expEncodeMetaKey(dataType, key)
+	tk := expEncodeTimeKey(dataType, key, when)
+
+	wb.Put(tk, mk)
+	wb.Put(mk, PutInt64(when))
+
+	//the underline type of c should be rockredis.*TTLChecker as using the RockDB to store the
+	//expire data
+	c.(*TTLChecker).setNextCheckTime(when, false)
+
+	return nil
 }
 
 func (db *RockDB) expireAt(dataType byte, key []byte, when int64, c common.TTLChecker) error {
@@ -149,51 +143,6 @@ func (db *RockDB) SetTtl(key []byte) (t int64, err error) {
 
 func (db *RockDB) ZSetTtl(key []byte) (t int64, err error) {
 	return db.ttl(ZSetType, key)
-}
-
-func (db *RockDB) KVPersist(key []byte) error {
-	db.wb.Clear()
-	if err := db.delExpire(KVType, key, db.wb); err != nil {
-		return err
-	} else {
-		return db.eng.Write(db.defaultWriteOpts, db.wb)
-	}
-}
-
-func (db *RockDB) HashPersist(key []byte) error {
-	db.wb.Clear()
-	if err := db.delExpire(HashType, key, db.wb); err != nil {
-		return err
-	} else {
-		return db.eng.Write(db.defaultWriteOpts, db.wb)
-	}
-}
-
-func (db *RockDB) ListPersist(key []byte) error {
-	db.wb.Clear()
-	if err := db.delExpire(ListType, key, db.wb); err != nil {
-		return err
-	} else {
-		return db.eng.Write(db.defaultWriteOpts, db.wb)
-	}
-}
-
-func (db *RockDB) SetPersist(key []byte) error {
-	db.wb.Clear()
-	if err := db.delExpire(SetType, key, db.wb); err != nil {
-		return err
-	} else {
-		return db.eng.Write(db.defaultWriteOpts, db.wb)
-	}
-}
-
-func (db *RockDB) ZSetPersist(key []byte) error {
-	db.wb.Clear()
-	if err := db.delExpire(ZSetType, key, db.wb); err != nil {
-		return err
-	} else {
-		return db.eng.Write(db.defaultWriteOpts, db.wb)
-	}
 }
 
 func (db *RockDB) ttl(dataType byte, key []byte) (t int64, err error) {
@@ -334,9 +283,12 @@ func (c *TTLChecker) check() {
 	minKey := expEncodeTimeKey(NoneType, nil, 0)
 	maxKey := expEncodeTimeKey(maxDataType, nil, nc)
 
-	stopCheck := false
-	offset := 0
+	var eCount int64 = 0
+	var scanned int64 = 0
+	checkStart := time.Now()
 
+	offset := 0
+	stopCheck := false
 	for ; !stopCheck; offset += expireLimitRange {
 		it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
 			common.RangeClose, offset, expireLimitRange, false)
@@ -356,16 +308,23 @@ func (c *TTLChecker) check() {
 			tk := it.Key()
 			mk := it.Value()
 
-			dt, k, nt, err := expDecodeTimeKey(tk)
+			scanned += 1
 
+			dt, k, nt, err := expDecodeTimeKey(tk)
 			if err != nil {
 				continue
+			}
+
+			if scanned == 1 {
+				//log the first scanned key
+				dbLog.Infof("ttl check start at key:[%s] of type:%d whose expire time is:%d", string(k), dt, nt)
 			}
 
 			if nt > now {
 				//the next ttl check time is nt!
 				nc = nt
 				stopCheck = true
+				dbLog.Infof("ttl check end at key:[%s] of type:%d whose expire time is:%d", string(k), dt, nt)
 				break
 			}
 
@@ -378,11 +337,7 @@ func (c *TTLChecker) check() {
 				// check expire again
 				if exp <= now {
 					cb(k)
-
-					//db.wb.Clear()
-					//db.wb.Delete(tk)
-					//db.wb.Delete(mk)
-					//db.eng.Write(db.defaultWriteOpts, db.wb)
+					eCount += 1
 				}
 			}
 		}
@@ -390,6 +345,10 @@ func (c *TTLChecker) check() {
 	}
 
 	c.setNextCheckTime(nc, true)
+
+	checkCost := time.Since(checkStart).Nanoseconds() / 1000
+	dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us, the next checking will start at Unix Epoch: %d",
+		eCount, scanned, checkCost, nc)
 
 	return
 }

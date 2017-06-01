@@ -11,6 +11,9 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 )
 
+//TODO
+//the commands need to test
+
 func TestTTLCodec(t *testing.T) {
 	ts := time.Now().Unix()
 
@@ -40,13 +43,29 @@ func TestKVTTL(t *testing.T) {
 	ttlChecker := NewTTLChecker(db)
 
 	key1 := []byte("test:testdb_ttl_kv_a")
-	var ttl1 int64 = 1
+	var ttl1 int64 = rand.Int63()
+
+	if v, err := db.Expire(key1, ttl1, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from expire of not exist key != 0")
+	}
+
+	if v, err := db.Persist(key1); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from persist of not exist key != 0")
+	}
 
 	if err := db.KVSet(0, key1, []byte("hello world 1")); err != nil {
 		t.Fatal(err)
 	}
 
-	db.KVExpire(key1, ttl1, ttlChecker)
+	if v, err := db.Expire(key1, ttl1, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from expire != 1")
+	}
 
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
@@ -54,14 +73,33 @@ func TestKVTTL(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if err := db.KVPersist(key1); err != nil {
+	if v, err := db.Persist(key1); err != nil {
 		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from persist != 1")
 	}
 
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
 	} else if v != -1 {
 		t.Fatal("KVPersist do not clear the ttl")
+	}
+
+	testValue := []byte("test value for SetEx command")
+	if err := db.SetEx(0, key1, ttl1, testValue, ttlChecker); err != nil {
+		t.Fatal(err)
+	}
+
+	if v, err := db.KVGet(key1); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(v, testValue) {
+		t.Fatal("SetEx: gotten value != set value")
+	}
+
+	if v, err := db.KVTtl(key1); err != nil {
+		t.Fatal(err)
+	} else if v != ttl1 {
+		t.Fatal("ttl != setex")
 	}
 }
 
@@ -81,6 +119,18 @@ func TestHashTTL(t *testing.T) {
 		t.Fatal("ttl of not exist hash key is not -1")
 	}
 
+	if v, err := db.HExpire(hash_key, hash_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from expire of not exist hash key != 0")
+	}
+
+	if v, err := db.HPersist(hash_key); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from hpersist of not exist hash key != 0")
+	}
+
 	hash_val := []common.KVRecord{
 		common.KVRecord{Key: []byte("field0"), Value: []byte("value0")},
 		common.KVRecord{Key: []byte("field1"), Value: []byte("value1")},
@@ -91,7 +141,11 @@ func TestHashTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db.HashExpire(hash_key, hash_ttl, ttlChecker)
+	if v, err := db.HExpire(hash_key, hash_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from hexpire != 1")
+	}
 
 	if v, err := db.HashTtl(hash_key); err != nil {
 		t.Fatal(err)
@@ -99,8 +153,10 @@ func TestHashTTL(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if err := db.HashPersist(hash_key); err != nil {
+	if v, err := db.HPersist(hash_key); err != nil {
 		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from hpersist is != 1")
 	}
 
 	if v, err := db.HashTtl(hash_key); err != nil {
@@ -126,12 +182,28 @@ func TestListTTL(t *testing.T) {
 		t.Fatal("ttl of not exist list key is not -1")
 	}
 
+	if v, err := db.LExpire(list_key, list_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from expire of not exist list key != 0")
+	}
+
+	if v, err := db.LPersist(list_key); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from lpersist of not exist list key != 0")
+	}
+
 	if _, err := db.LPush(list_key, []byte("this"), []byte("is"), []byte("list"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}
 
-	db.ListExpire(list_key, list_ttl, ttlChecker)
+	if v, err := db.LExpire(list_key, list_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from lexpire != 1")
+	}
 
 	if v, err := db.ListTtl(list_key); err != nil {
 		t.Fatal(err)
@@ -139,8 +211,10 @@ func TestListTTL(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if err := db.ListPersist(list_key); err != nil {
+	if v, err := db.LPersist(list_key); err != nil {
 		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from lpersist != 1")
 	}
 
 	if v, err := db.ListTtl(list_key); err != nil {
@@ -166,12 +240,28 @@ func TestSetTTL(t *testing.T) {
 		t.Fatal("ttl of not exist set key is not -1")
 	}
 
+	if v, err := db.SExpire(set_key, set_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from expire of not exist set key != 0")
+	}
+
+	if v, err := db.SPersist(set_key); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from spersist of not exist set key != 0")
+	}
+
 	if _, err := db.SAdd(set_key, []byte("this"), []byte("is"), []byte("set"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}
 
-	db.SetExpire(set_key, set_ttl, ttlChecker)
+	if v, err := db.SExpire(set_key, set_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from sexpire != 1")
+	}
 
 	if v, err := db.SetTtl(set_key); err != nil {
 		t.Fatal(err)
@@ -179,8 +269,10 @@ func TestSetTTL(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if err := db.SetPersist(set_key); err != nil {
+	if v, err := db.SPersist(set_key); err != nil {
 		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from spersist!= 1")
 	}
 
 	if v, err := db.SetTtl(set_key); err != nil {
@@ -206,6 +298,18 @@ func TestZSetTTL(t *testing.T) {
 		t.Fatal("ttl of not exist zset key is not -1")
 	}
 
+	if v, err := db.ZExpire(zset_key, zset_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from expire of not exist zset key != 0")
+	}
+
+	if v, err := db.ZPersist(zset_key); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from zpersist of not exist zset key != 0")
+	}
+
 	members := []common.ScorePair{
 		common.ScorePair{Member: []byte("member1"), Score: 10},
 		common.ScorePair{Member: []byte("member2"), Score: 20},
@@ -217,7 +321,11 @@ func TestZSetTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db.ZSetExpire(zset_key, zset_ttl, ttlChecker)
+	if v, err := db.ZExpire(zset_key, zset_ttl, ttlChecker); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from zexpire != 1")
+	}
 
 	if v, err := db.ZSetTtl(zset_key); err != nil {
 		t.Fatal(err)
@@ -225,8 +333,10 @@ func TestZSetTTL(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if err := db.ZSetPersist(zset_key); err != nil {
+	if v, err := db.ZPersist(zset_key); err != nil {
 		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from zpersist != 1")
 	}
 
 	if v, err := db.ZSetTtl(zset_key); err != nil {

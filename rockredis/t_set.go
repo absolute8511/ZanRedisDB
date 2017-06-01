@@ -355,3 +355,36 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 	err := db.eng.Write(db.defaultWriteOpts, wb)
 	return int64(len(keys)), err
 }
+
+func (db *RockDB) SExpire(key []byte, duration int64, c common.TTLChecker) (int64, error) {
+	if exists, err := db.SKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	} else {
+		if err2 := db.expire(SetType, key, duration, c); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
+
+func (db *RockDB) SPersist(key []byte) (int64, error) {
+	if exists, err := db.SKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	}
+
+	if ttl, err := db.ttl(SetType, key); err != nil || ttl < 0 {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	if err := db.delExpire(SetType, key, db.wb); err != nil {
+		return 0, err
+	} else {
+		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}

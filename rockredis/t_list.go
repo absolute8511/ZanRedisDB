@@ -643,3 +643,36 @@ func (db *RockDB) LKeyExists(key []byte) (int64, error) {
 	}
 	return 0, err
 }
+
+func (db *RockDB) LExpire(key []byte, duration int64, c common.TTLChecker) (int64, error) {
+	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	} else {
+		if err2 := db.expire(ListType, key, duration, c); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
+
+func (db *RockDB) LPersist(key []byte) (int64, error) {
+	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	}
+
+	if ttl, err := db.ttl(ListType, key); err != nil || ttl < 0 {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	if err := db.delExpire(ListType, key, db.wb); err != nil {
+		return 0, err
+	} else {
+		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
