@@ -644,11 +644,11 @@ func (db *RockDB) LKeyExists(key []byte) (int64, error) {
 	return 0, err
 }
 
-func (db *RockDB) LExpire(key []byte, duration int64, c common.TTLChecker) (int64, error) {
+func (db *RockDB) LExpire(key []byte, duration int64) (int64, error) {
 	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
 		return 0, err
 	} else {
-		if err2 := db.expire(ListType, key, duration, c); err2 != nil {
+		if err2 := db.expire(ListType, key, duration); err2 != nil {
 			return 0, err2
 		} else {
 			return 1, nil

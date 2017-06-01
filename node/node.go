@@ -229,7 +229,17 @@ func (self *KVNode) destroy() error {
 }
 
 func (self *KVNode) CleanData() error {
-	return self.store.CleanData()
+	if err := self.store.CleanData(); err != nil {
+		return err
+	}
+
+	//the ttlChecker should be reset after the store cleaned
+	self.registerExpiredCallBack()
+
+	if self.IsLead() {
+		self.store.GetTTLChecker().Start()
+	}
+	return nil
 }
 
 func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {

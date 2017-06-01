@@ -19,6 +19,8 @@ var (
 const (
 	expireCheckInterval = 1
 	expireLimitRange    = 8 * 1024
+
+	logTimeFormatStr = "2006-01-02 15:04:05"
 )
 
 var errExpType = errors.New("invalid expire type")
@@ -87,30 +89,48 @@ func expDecodeTimeKey(tk []byte) (byte, []byte, int64, error) {
 	return tk[pos+9], tk[pos+10:], int64(binary.BigEndian.Uint64(tk[pos+1:])), nil
 }
 
-func (db *RockDB) expire(dataType byte, key []byte, duration int64, c common.TTLChecker) error {
-	return db.expireAt(dataType, key, time.Now().Unix()+duration, c)
+func (db *RockDB) expire(dataType byte, key []byte, duration int64) error {
+	return db.expireAt(dataType, key, time.Now().Unix()+duration)
 }
 
-func (db *RockDB) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch, c common.TTLChecker) error {
+func (db *RockDB) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch) error {
 	mk := expEncodeMetaKey(dataType, key)
+
+	if v, err := db.eng.GetBytes(db.defaultReadOpts, mk); err != nil {
+		return err
+	} else if v != nil {
+		if preTime, err2 := Int64(v, nil); err2 == nil && preTime != when {
+			preTk := expEncodeTimeKey(dataType, key, preTime)
+			wb.Delete(preTk)
+		}
+	}
+
 	tk := expEncodeTimeKey(dataType, key, when)
 
 	wb.Put(tk, mk)
 	wb.Put(mk, PutInt64(when))
 
-	//the underline type of c should be rockredis.*TTLChecker as using the RockDB to store the
-	//expire data
-	c.(*TTLChecker).setNextCheckTime(when, false)
+	db.ttlChecker.setNextCheckTime(when, false)
 
 	return nil
 }
 
-func (db *RockDB) expireAt(dataType byte, key []byte, when int64, c common.TTLChecker) error {
+func (db *RockDB) expireAt(dataType byte, key []byte, when int64) error {
 	mk := expEncodeMetaKey(dataType, key)
-	tk := expEncodeTimeKey(dataType, key, when)
 
 	wb := db.wb
 	wb.Clear()
+
+	if v, err := db.eng.GetBytes(db.defaultReadOpts, mk); err != nil {
+		return err
+	} else if v != nil {
+		if preTime, err2 := Int64(v, nil); err2 == nil && preTime != when {
+			preTk := expEncodeTimeKey(dataType, key, preTime)
+			wb.Delete(preTk)
+		}
+	}
+
+	tk := expEncodeTimeKey(dataType, key, when)
 
 	wb.Put(tk, mk)
 	wb.Put(mk, PutInt64(when))
@@ -118,9 +138,7 @@ func (db *RockDB) expireAt(dataType byte, key []byte, when int64, c common.TTLCh
 	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
 		return err
 	} else {
-		//the underline type of c should be rockredis.*TTLChecker as using the RockDB to store the
-		//expire data
-		c.(*TTLChecker).setNextCheckTime(when, false)
+		db.ttlChecker.setNextCheckTime(when, false)
 		return nil
 	}
 }
@@ -202,12 +220,6 @@ func NewTTLChecker(db *RockDB) *TTLChecker {
 	return c
 }
 
-func (c *TTLChecker) ResetDB(rockdb *RockDB) {
-	c.Lock()
-	c.db = rockdb
-	c.Unlock()
-}
-
 func (c *TTLChecker) Start() {
 	if atomic.CompareAndSwapInt32(&c.checking, 0, 1) {
 		c.quitC = make(chan struct{})
@@ -271,7 +283,6 @@ func (c *TTLChecker) check() {
 
 	c.Lock()
 	nc := c.nc
-	db := c.db
 	c.Unlock()
 
 	if now < nc {
@@ -317,14 +328,16 @@ func (c *TTLChecker) check() {
 
 			if scanned == 1 {
 				//log the first scanned key
-				dbLog.Infof("ttl check start at key:[%s] of type:%d whose expire time is:%d", string(k), dt, nt)
+				dbLog.Infof("ttl check start at key:[%s] of type:%d whose expire time is: %s", string(k),
+					dt, time.Unix(nt, 0).Format(logTimeFormatStr))
 			}
 
 			if nt > now {
 				//the next ttl check time is nt!
 				nc = nt
 				stopCheck = true
-				dbLog.Infof("ttl check end at key:[%s] of type:%d whose expire time is:%d", string(k), dt, nt)
+				dbLog.Infof("ttl check end at key:[%s] of type:%d whose expire time is: %s", string(k),
+					dt, time.Unix(nt, 0).Format(logTimeFormatStr))
 				break
 			}
 
@@ -333,7 +346,7 @@ func (c *TTLChecker) check() {
 				continue
 			}
 
-			if exp, err := Int64(db.eng.GetBytes(db.defaultReadOpts, mk)); err == nil {
+			if exp, err := Int64(c.db.eng.GetBytes(c.db.defaultReadOpts, mk)); err == nil {
 				// check expire again
 				if exp <= now {
 					cb(k)
@@ -347,8 +360,8 @@ func (c *TTLChecker) check() {
 	c.setNextCheckTime(nc, true)
 
 	checkCost := time.Since(checkStart).Nanoseconds() / 1000
-	dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us, the next checking will start at Unix Epoch: %d",
-		eCount, scanned, checkCost, nc)
+	dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us, the next checking will start at: %s",
+		eCount, scanned, checkCost, time.Unix(nc, 0).Format(logTimeFormatStr))
 
 	return
 }

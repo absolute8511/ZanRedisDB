@@ -11,8 +11,7 @@ import (
 // a key-value store
 type KVStore struct {
 	*rockredis.RockDB
-	opts       *KVOptions
-	ttlChecker common.TTLChecker
+	opts *KVOptions
 }
 
 type KVOptions struct {
@@ -28,13 +27,6 @@ func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
 
 	if err := s.openDB(); err != nil {
 		return nil, err
-	}
-
-	switch kvopts.EngType {
-	case rockredis.EngType:
-		s.ttlChecker = rockredis.NewTTLChecker(s.RockDB)
-	default:
-		return nil, errors.New("Not recognized engine type:" + s.opts.EngType)
 	}
 
 	return s, nil
@@ -56,10 +48,6 @@ func (s *KVStore) openDB() error {
 	return err
 }
 
-func (s *KVStore) GetTTLChecker() common.TTLChecker {
-	return s.ttlChecker
-}
-
 func (s *KVStore) CleanData() error {
 	if s.RockDB == nil {
 		nodeLog.Warningf("the db is not opened while clean data")
@@ -70,18 +58,7 @@ func (s *KVStore) CleanData() error {
 	s.Close()
 	os.RemoveAll(dataPath)
 
-	if err := s.openDB(); err != nil {
-		return err
-	} else {
-		switch s.opts.EngType {
-		case rockredis.EngType:
-			s.ttlChecker.(*rockredis.TTLChecker).ResetDB(s.RockDB)
-		default:
-			//handle the other EngType
-		}
-		return nil
-	}
-
+	return s.openDB()
 }
 
 func (s *KVStore) Destroy() error {

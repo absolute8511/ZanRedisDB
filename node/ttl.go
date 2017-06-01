@@ -55,7 +55,7 @@ func (self *KVNode) localSetexCommand(cmd redcon.Command, ts int64) (interface{}
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return nil, err
 	} else {
-		return nil, self.store.SetEx(ts, cmd.Args[1], int64(duration), cmd.Args[3], self.store.GetTTLChecker())
+		return nil, self.store.SetEx(ts, cmd.Args[1], int64(duration), cmd.Args[3])
 	}
 }
 
@@ -63,7 +63,7 @@ func (self *KVNode) localExpireCommand(cmd redcon.Command, ts int64) (interface{
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.Expire(cmd.Args[1], int64(duration), self.store.GetTTLChecker())
+		return self.store.Expire(cmd.Args[1], int64(duration))
 	}
 }
 
@@ -71,7 +71,7 @@ func (self *KVNode) localHashExpireCommand(cmd redcon.Command, ts int64) (interf
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.HExpire(cmd.Args[1], int64(duration), self.store.GetTTLChecker())
+		return self.store.HExpire(cmd.Args[1], int64(duration))
 	}
 }
 
@@ -79,7 +79,7 @@ func (self *KVNode) localListExpireCommand(cmd redcon.Command, ts int64) (interf
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.LExpire(cmd.Args[1], int64(duration), self.store.GetTTLChecker())
+		return self.store.LExpire(cmd.Args[1], int64(duration))
 	}
 }
 
@@ -87,7 +87,7 @@ func (self *KVNode) localSetExpireCommand(cmd redcon.Command, ts int64) (interfa
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.SExpire(cmd.Args[1], int64(duration), self.store.GetTTLChecker())
+		return self.store.SExpire(cmd.Args[1], int64(duration))
 	}
 }
 
@@ -95,7 +95,7 @@ func (self *KVNode) localZSetExpireCommand(cmd redcon.Command, ts int64) (interf
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.ZExpire(cmd.Args[1], int64(duration), self.store.GetTTLChecker())
+		return self.store.ZExpire(cmd.Args[1], int64(duration))
 	}
 }
 
