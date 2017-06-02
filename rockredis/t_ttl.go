@@ -3,6 +3,7 @@ package rockredis
 import (
 	"encoding/binary"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,9 +19,7 @@ var (
 
 const (
 	expireCheckInterval = 1
-	expireLimitRange    = 8 * 1024
-
-	logTimeFormatStr = "2006-01-02 15:04:05"
+	logTimeFormatStr    = "2006-01-02 15:04:05"
 )
 
 var errExpType = errors.New("invalid expire type")
@@ -221,8 +220,13 @@ func NewTTLChecker(db *RockDB) *TTLChecker {
 }
 
 func (c *TTLChecker) Start() {
+	c.Lock()
 	if atomic.CompareAndSwapInt32(&c.checking, 0, 1) {
+		dbLog.Infof("ttl checker started")
+		defer dbLog.Infof("ttl checker exit")
 		c.quitC = make(chan struct{})
+
+		c.Unlock()
 
 		cTicker := time.NewTicker(time.Second * expireCheckInterval)
 		defer cTicker.Stop()
@@ -230,18 +234,22 @@ func (c *TTLChecker) Start() {
 		for {
 			select {
 			case <-cTicker.C:
-				c.check()
+				c.check(c.quitC)
 			case <-c.quitC:
 				return
 			}
 		}
+	} else {
+		c.Unlock()
 	}
 }
 
 func (c *TTLChecker) Stop() {
+	c.Lock()
 	if atomic.CompareAndSwapInt32(&c.checking, 1, 0) {
 		close(c.quitC)
 	}
+	c.Unlock()
 }
 
 func (c *TTLChecker) RegisterKVExpired(f common.OnExpiredFunc) {
@@ -278,7 +286,16 @@ func (c *TTLChecker) setNextCheckTime(when int64, force bool) {
 	c.Unlock()
 }
 
-func (c *TTLChecker) check() {
+func (c *TTLChecker) check(stopChan chan struct{}) {
+	defer func() {
+		if e := recover(); e != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			dbLog.Errorf("check ttl panic: %s:%v", buf, e)
+		}
+	}()
+
 	now := time.Now().Unix()
 
 	c.Lock()
@@ -298,63 +315,60 @@ func (c *TTLChecker) check() {
 	var scanned int64 = 0
 	checkStart := time.Now()
 
-	offset := 0
-	stopCheck := false
-	for ; !stopCheck; offset += expireLimitRange {
-		it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
-			common.RangeClose, offset, expireLimitRange, false)
+	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
+		common.RangeROpen, 0, -1, false)
+	defer it.Close()
+	if err != nil {
+		nc = now + 1
+		return
+	} else if it == nil || !it.Valid() {
+		return
+	}
 
-		if err != nil {
-			nc = now + 1
-			it.Close()
-			break
-		} else if it == nil || !it.Valid() {
-			it.Close()
-			break
-		}
+	for ; it.Valid(); it.Next() {
 
-		now = time.Now().Unix()
-
-		for ; it.Valid(); it.Next() {
-			tk := it.Key()
-			mk := it.Value()
-
-			scanned += 1
-
-			dt, k, nt, err := expDecodeTimeKey(tk)
-			if err != nil {
-				continue
-			}
-
-			if scanned == 1 {
-				//log the first scanned key
-				dbLog.Infof("ttl check start at key:[%s] of type:%d whose expire time is: %s", string(k),
-					dt, time.Unix(nt, 0).Format(logTimeFormatStr))
-			}
-
-			if nt > now {
-				//the next ttl check time is nt!
-				nc = nt
-				stopCheck = true
-				dbLog.Infof("ttl check end at key:[%s] of type:%d whose expire time is: %s", string(k),
-					dt, time.Unix(nt, 0).Format(logTimeFormatStr))
+		if scanned%100 == 0 {
+			select {
+			case <-stopChan:
 				break
-			}
-
-			cb := c.cbs[dt]
-			if tk == nil || cb == nil {
-				continue
-			}
-
-			if exp, err := Int64(c.db.eng.GetBytes(c.db.defaultReadOpts, mk)); err == nil {
-				// check expire again
-				if exp <= now {
-					cb(k)
-					eCount += 1
-				}
+			default:
 			}
 		}
-		it.Close()
+		tk := it.Key()
+		mk := it.Value()
+
+		dt, k, nt, err := expDecodeTimeKey(tk)
+		if err != nil {
+			continue
+		}
+		scanned += 1
+
+		if scanned == 1 {
+			//log the first scanned key
+			dbLog.Infof("ttl check start at key:[%s] of type:%d whose expire time is: %s", string(k),
+				dt, time.Unix(nt, 0).Format(logTimeFormatStr))
+		}
+
+		if nt > now {
+			//the next ttl check time is nt!
+			nc = nt
+			dbLog.Infof("ttl check end at key:[%s] of type:%d whose expire time is: %s", string(k),
+				dt, time.Unix(nt, 0).Format(logTimeFormatStr))
+			break
+		}
+
+		cb := c.cbs[dt]
+		if tk == nil || cb == nil {
+			continue
+		}
+
+		if exp, err := Int64(c.db.eng.GetBytes(c.db.defaultReadOpts, mk)); err == nil {
+			// check expire again
+			if exp <= now {
+				cb(k)
+				eCount += 1
+			}
+		}
 	}
 
 	c.setNextCheckTime(nc, true)

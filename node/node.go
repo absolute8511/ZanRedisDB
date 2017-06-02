@@ -237,7 +237,7 @@ func (self *KVNode) CleanData() error {
 	self.registerExpiredCallBack()
 
 	if self.IsLead() {
-		self.store.GetTTLChecker().Start()
+		self.store.StartTTLChecker()
 	}
 	return nil
 }
@@ -251,13 +251,11 @@ func (self *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool) 
 }
 
 func (self *KVNode) registerExpiredCallBack() {
-	ttlChecker := self.store.GetTTLChecker()
-
-	ttlChecker.RegisterKVExpired(self.createOnExpiredFunc("del"))
-	ttlChecker.RegisterListExpired(self.createOnExpiredFunc("lclear"))
-	ttlChecker.RegisterHashExpired(self.createOnExpiredFunc("hclear"))
-	ttlChecker.RegisterSetExpired(self.createOnExpiredFunc("sclear"))
-	ttlChecker.RegisterZSetExpired(self.createOnExpiredFunc("zclear"))
+	self.store.RegisterKVExpired(self.createOnExpiredFunc("del"))
+	self.store.RegisterListExpired(self.createOnExpiredFunc("lclear"))
+	self.store.RegisterHashExpired(self.createOnExpiredFunc("hclear"))
+	self.store.RegisterSetExpired(self.createOnExpiredFunc("sclear"))
+	self.store.RegisterZSetExpired(self.createOnExpiredFunc("zclear"))
 }
 
 func (self *KVNode) registerHandler() {
@@ -1123,8 +1121,6 @@ func (self *KVNode) ReportMeRaftLeader() {
 		return
 	}
 
-	ttlChecker := self.store.GetTTLChecker()
-
 	if self.rn.IsLead() {
 		if self.rn.config.nodeConfig.NodeID == nid {
 			return
@@ -1136,9 +1132,9 @@ func (self *KVNode) ReportMeRaftLeader() {
 			self.rn.Infof("update %v raft leader to me : %v", self.ns, self.rn.config.ID)
 		}
 		//leader should start the TTLChecker to handle the expired data
-		ttlChecker.Start()
+		self.store.StartTTLChecker()
 	} else {
-		ttlChecker.Stop()
+		self.store.StopTTLChecker()
 	}
 }
 

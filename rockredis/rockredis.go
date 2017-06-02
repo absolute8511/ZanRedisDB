@@ -254,12 +254,22 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	return db, nil
 }
 
-func (r *RockDB) GetTTLChecker() common.TTLChecker {
-	return r.ttlChecker
-}
-
 func GetBackupDir(base string) string {
 	return path.Join(base, "rocksdb_backup")
+}
+
+func (r *RockDB) StartTTLChecker() {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.ttlChecker.Start()
+	}()
+}
+
+func (r *RockDB) StopTTLChecker() {
+	if r.ttlChecker != nil {
+		r.ttlChecker.Stop()
+	}
 }
 
 func (r *RockDB) GetBackupBase() string {
@@ -310,6 +320,7 @@ func (r *RockDB) Close() {
 	default:
 	}
 	close(r.quit)
+	r.StopTTLChecker()
 	r.wg.Wait()
 	r.closeEng()
 	if r.defaultReadOpts != nil {
@@ -317,9 +328,6 @@ func (r *RockDB) Close() {
 	}
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
-	}
-	if r.ttlChecker != nil {
-		r.ttlChecker.Stop()
 	}
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
@@ -586,4 +594,24 @@ func (r *RockDB) ClearBackup(term uint64, index uint64) error {
 	backupDir := r.GetBackupDir()
 	checkpointDir := GetCheckpointDir(term, index)
 	return os.RemoveAll(path.Join(backupDir, checkpointDir))
+}
+
+func (r *RockDB) RegisterKVExpired(f common.OnExpiredFunc) {
+	r.ttlChecker.RegisterKVExpired(f)
+}
+
+func (r *RockDB) RegisterListExpired(f common.OnExpiredFunc) {
+	r.ttlChecker.RegisterListExpired(f)
+}
+
+func (r *RockDB) RegisterSetExpired(f common.OnExpiredFunc) {
+	r.ttlChecker.RegisterSetExpired(f)
+}
+
+func (r *RockDB) RegisterZSetExpired(f common.OnExpiredFunc) {
+	r.ttlChecker.RegisterZSetExpired(f)
+}
+
+func (r *RockDB) RegisterHashExpired(f common.OnExpiredFunc) {
+	r.ttlChecker.RegisterHashExpired(f)
 }

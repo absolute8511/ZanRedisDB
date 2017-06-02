@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,43 +343,61 @@ func TestRockDBTTLChecker(t *testing.T) {
 	defer db.Close()
 
 	kTypeMap := make(map[string]byte)
-	ttlChecker := db.GetTTLChecker().(*TTLChecker)
 
 	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType}
 
+	var lock sync.Mutex
 	createTestExpiredFunc := func(dataType byte) common.OnExpiredFunc {
 		return func(key []byte) error {
+			lock.Lock()
+			defer lock.Unlock()
 			if kt, ok := kTypeMap[string(key)]; !ok {
 				t.Fatal("unknown expired key", string(key))
 			} else if kt != dataType {
 				t.Fatal("mismatched callback called, %d - %d", dataType, t)
 			} else {
 				delete(kTypeMap, string(key))
+				db.wb.Clear()
+				db.delExpire(dataType, key, db.wb)
+				db.eng.Write(db.defaultWriteOpts, db.wb)
 			}
 			return nil
 		}
 	}
 
-	ttlChecker.RegisterKVExpired(createTestExpiredFunc(KVType))
-	ttlChecker.RegisterHashExpired(createTestExpiredFunc(HashType))
-	ttlChecker.RegisterListExpired(createTestExpiredFunc(ListType))
-	ttlChecker.RegisterSetExpired(createTestExpiredFunc(SetType))
-	ttlChecker.RegisterZSetExpired(createTestExpiredFunc(ZSetType))
+	db.RegisterKVExpired(createTestExpiredFunc(KVType))
+	db.RegisterHashExpired(createTestExpiredFunc(HashType))
+	db.RegisterListExpired(createTestExpiredFunc(ListType))
+	db.RegisterSetExpired(createTestExpiredFunc(SetType))
+	db.RegisterZSetExpired(createTestExpiredFunc(ZSetType))
 
-	for i := 0; i < expireLimitRange*3+rand.Intn(expireLimitRange); i++ {
+	db.StartTTLChecker()
+	defer db.StopTTLChecker()
+	for i := 0; i < 10000*3+rand.Intn(10000); i++ {
 		key := "test:ttl_checker:" + strconv.Itoa(i)
 		dataType := dataTypes[rand.Int()%len(dataTypes)]
+		lock.Lock()
 		kTypeMap[key] = dataType
+		lock.Unlock()
 		if err := db.expire(dataType, []byte(key), 2); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
-	ttlChecker.check()
-
-	if len(kTypeMap) != 0 {
-		t.Fatalf("%d key do not expired", len(kTypeMap))
+	start := time.Now()
+	for {
+		lock.Lock()
+		length := len(kTypeMap)
+		lock.Unlock()
+		if length == 0 {
+			break
+		}
+		if time.Since(start) > time.Second*10 {
+			t.Fatalf("%d key do not expired", length)
+		} else {
+			time.Sleep(time.Second)
+		}
 	}
 }
