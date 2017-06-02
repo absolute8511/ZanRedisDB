@@ -17,6 +17,8 @@ var (
 	errExpTimeKey = errors.New("invalid expire time key")
 )
 
+type OnExpiredFunc func([]byte) error
+
 const (
 	expireCheckInterval = 1
 	logTimeFormatStr    = "2006-01-02 15:04:05"
@@ -201,7 +203,7 @@ type TTLChecker struct {
 	sync.Mutex
 	db *RockDB
 
-	cbs      map[byte]common.OnExpiredFunc
+	cbs      map[byte]OnExpiredFunc
 	quitC    chan struct{}
 	checking int32
 
@@ -212,7 +214,7 @@ type TTLChecker struct {
 func NewTTLChecker(db *RockDB) *TTLChecker {
 	c := &TTLChecker{
 		db:  db,
-		cbs: make(map[byte]common.OnExpiredFunc),
+		cbs: make(map[byte]OnExpiredFunc),
 		nc:  time.Now().Unix(),
 	}
 
@@ -252,27 +254,27 @@ func (c *TTLChecker) Stop() {
 	c.Unlock()
 }
 
-func (c *TTLChecker) RegisterKVExpired(f common.OnExpiredFunc) {
+func (c *TTLChecker) RegisterKVExpired(f OnExpiredFunc) {
 	c.register(KVType, f)
 }
 
-func (c *TTLChecker) RegisterListExpired(f common.OnExpiredFunc) {
+func (c *TTLChecker) RegisterListExpired(f OnExpiredFunc) {
 	c.register(ListType, f)
 }
 
-func (c *TTLChecker) RegisterSetExpired(f common.OnExpiredFunc) {
+func (c *TTLChecker) RegisterSetExpired(f OnExpiredFunc) {
 	c.register(SetType, f)
 }
 
-func (c *TTLChecker) RegisterZSetExpired(f common.OnExpiredFunc) {
+func (c *TTLChecker) RegisterZSetExpired(f OnExpiredFunc) {
 	c.register(ZSetType, f)
 }
 
-func (c *TTLChecker) RegisterHashExpired(f common.OnExpiredFunc) {
+func (c *TTLChecker) RegisterHashExpired(f OnExpiredFunc) {
 	c.register(HashType, f)
 }
 
-func (c *TTLChecker) register(dataType byte, f common.OnExpiredFunc) {
+func (c *TTLChecker) register(dataType byte, f OnExpiredFunc) {
 	c.cbs[dataType] = f
 }
 

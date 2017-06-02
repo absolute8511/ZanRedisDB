@@ -3,7 +3,6 @@ package node
 import (
 	"strconv"
 
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 )
 
@@ -168,7 +167,7 @@ func (self *KVNode) zttlCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) createOnExpiredFunc(cmd string) common.OnExpiredFunc {
+func (self *KVNode) createOnExpiredFunc(cmd string) func([]byte) error {
 	return func(key []byte) error {
 		cmd := buildCommand([][]byte{[]byte(cmd), key})
 		_, err := self.Propose(cmd.Raw)
