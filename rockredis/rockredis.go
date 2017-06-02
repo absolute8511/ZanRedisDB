@@ -3,8 +3,6 @@ package rockredis
 import (
 	"errors"
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/gorocksdb"
 	"io"
 	"os"
 	"path"
@@ -15,6 +13,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/gorocksdb"
 )
 
 const (
@@ -174,6 +175,7 @@ type RockDB struct {
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
 	engOpened        int32
+	ttlChecker       *TTLChecker
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -242,6 +244,8 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
 	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
+	db.ttlChecker = NewTTLChecker(db)
+
 	db.wg.Add(1)
 	go func() {
 		defer db.wg.Done()
@@ -252,6 +256,20 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 
 func GetBackupDir(base string) string {
 	return path.Join(base, "rocksdb_backup")
+}
+
+func (r *RockDB) StartTTLChecker() {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.ttlChecker.Start()
+	}()
+}
+
+func (r *RockDB) StopTTLChecker() {
+	if r.ttlChecker != nil {
+		r.ttlChecker.Stop()
+	}
 }
 
 func (r *RockDB) GetBackupBase() string {
@@ -302,6 +320,7 @@ func (r *RockDB) Close() {
 	default:
 	}
 	close(r.quit)
+	r.StopTTLChecker()
 	r.wg.Wait()
 	r.closeEng()
 	if r.defaultReadOpts != nil {
@@ -575,4 +594,24 @@ func (r *RockDB) ClearBackup(term uint64, index uint64) error {
 	backupDir := r.GetBackupDir()
 	checkpointDir := GetCheckpointDir(term, index)
 	return os.RemoveAll(path.Join(backupDir, checkpointDir))
+}
+
+func (r *RockDB) RegisterKVExpired(f OnExpiredFunc) {
+	r.ttlChecker.RegisterKVExpired(f)
+}
+
+func (r *RockDB) RegisterListExpired(f OnExpiredFunc) {
+	r.ttlChecker.RegisterListExpired(f)
+}
+
+func (r *RockDB) RegisterSetExpired(f OnExpiredFunc) {
+	r.ttlChecker.RegisterSetExpired(f)
+}
+
+func (r *RockDB) RegisterZSetExpired(f OnExpiredFunc) {
+	r.ttlChecker.RegisterZSetExpired(f)
+}
+
+func (r *RockDB) RegisterHashExpired(f OnExpiredFunc) {
+	r.ttlChecker.RegisterHashExpired(f)
 }

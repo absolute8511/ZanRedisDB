@@ -113,7 +113,10 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		machineConfig: machineConfig,
 	}
 	s.clusterInfo = clusterInfo
+
 	s.registerHandler()
+	s.registerExpiredCallBack()
+
 	commitC, raftNode, err := newRaftNode(config, transport,
 		join, s, newLeaderChan)
 	if err != nil {
@@ -226,7 +229,17 @@ func (self *KVNode) destroy() error {
 }
 
 func (self *KVNode) CleanData() error {
-	return self.store.CleanData()
+	if err := self.store.CleanData(); err != nil {
+		return err
+	}
+
+	//the ttlChecker should be reset after the store cleaned
+	self.registerExpiredCallBack()
+
+	if self.IsLead() {
+		self.store.StartTTLChecker()
+	}
+	return nil
 }
 
 func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
@@ -235,6 +248,14 @@ func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
 
 func (self *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool) {
 	return self.router.GetMergeCmdHandler(cmd)
+}
+
+func (self *KVNode) registerExpiredCallBack() {
+	self.store.RegisterKVExpired(self.createOnExpiredFunc("del"))
+	self.store.RegisterListExpired(self.createOnExpiredFunc("lclear"))
+	self.store.RegisterHashExpired(self.createOnExpiredFunc("hclear"))
+	self.store.RegisterSetExpired(self.createOnExpiredFunc("sclear"))
+	self.store.RegisterZSetExpired(self.createOnExpiredFunc("zclear"))
 }
 
 func (self *KVNode) registerHandler() {
@@ -299,6 +320,25 @@ func (self *KVNode) registerHandler() {
 	self.router.Register(true, "srem", wrapWriteCommandKSubkeySubkey(self, self.sremCommand))
 	self.router.Register(true, "sclear", wrapWriteCommandK(self, self.sclearCommand))
 	self.router.Register(true, "smclear", wrapWriteCommandKK(self, self.smclearCommand))
+	// for ttl
+	self.router.Register(false, "ttl", wrapReadCommandK(self.ttlCommand))
+	self.router.Register(false, "httl", wrapReadCommandK(self.httlCommand))
+	self.router.Register(false, "lttl", wrapReadCommandK(self.lttlCommand))
+	self.router.Register(false, "sttl", wrapReadCommandK(self.sttlCommand))
+	self.router.Register(false, "zttl", wrapReadCommandK(self.zttlCommand))
+
+	self.router.Register(true, "setex", wrapWriteCommandKVV(self, self.setexCommand))
+	self.router.Register(true, "expire", wrapWriteCommandKV(self, self.expireCommand))
+	self.router.Register(true, "hexpire", wrapWriteCommandKV(self, self.hashExpireCommand))
+	self.router.Register(true, "lexpire", wrapWriteCommandKV(self, self.listExpireCommand))
+	self.router.Register(true, "sexpire", wrapWriteCommandKV(self, self.setExpireCommand))
+	self.router.Register(true, "zexpire", wrapWriteCommandKV(self, self.zsetExpireCommand))
+
+	self.router.Register(true, "persist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "hpersist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "lpersist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "spersist", wrapWriteCommandK(self, self.persistCommand))
+	self.router.Register(true, "zpersist", wrapWriteCommandK(self, self.persistCommand))
 
 	// for scan
 	self.router.Register(false, "hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
@@ -344,6 +384,18 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterInternal("srem", self.localSrem)
 	self.router.RegisterInternal("sclear", self.localSclear)
 	self.router.RegisterInternal("smclear", self.localSmclear)
+	// expire
+	self.router.RegisterInternal("setex", self.localSetexCommand)
+	self.router.RegisterInternal("expire", self.localExpireCommand)
+	self.router.RegisterInternal("lexpire", self.localListExpireCommand)
+	self.router.RegisterInternal("hexpire", self.localHashExpireCommand)
+	self.router.RegisterInternal("sexpire", self.localSetExpireCommand)
+	self.router.RegisterInternal("zexpire", self.localZSetExpireCommand)
+	self.router.RegisterInternal("persist", self.localPersistCommand)
+	self.router.RegisterInternal("hpersist", self.localHashPersistCommand)
+	self.router.RegisterInternal("lpersist", self.localListPersistCommand)
+	self.router.RegisterInternal("spersist", self.localSetPersistCommand)
+	self.router.RegisterInternal("zpersist", self.localZSetPersistCommand)
 }
 
 func (self *KVNode) handleProposeReq() {
@@ -1068,6 +1120,7 @@ func (self *KVNode) ReportMeRaftLeader() {
 		self.rn.Infof("get raft leader from cluster failed: %v", err)
 		return
 	}
+
 	if self.rn.IsLead() {
 		if self.rn.config.nodeConfig.NodeID == nid {
 			return
@@ -1078,6 +1131,10 @@ func (self *KVNode) ReportMeRaftLeader() {
 		} else {
 			self.rn.Infof("update %v raft leader to me : %v", self.ns, self.rn.config.ID)
 		}
+		//leader should start the TTLChecker to handle the expired data
+		self.store.StartTTLChecker()
+	} else {
+		self.store.StopTTLChecker()
 	}
 }
 

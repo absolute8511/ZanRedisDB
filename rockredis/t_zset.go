@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
@@ -389,6 +390,7 @@ func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(ZSetType, key, wb)
 	}
 
 	err := db.eng.Write(db.defaultWriteOpts, wb)
@@ -557,6 +559,7 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(ZSetType, key, wb)
 	}
 
 	return num, nil
@@ -851,6 +854,7 @@ func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType u
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		db.delExpire(ZSetType, key, wb)
 	}
 
 	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
@@ -894,4 +898,37 @@ func (db *RockDB) ZKeyExists(key []byte) (int64, error) {
 		return 1, nil
 	}
 	return 0, err
+}
+
+func (db *RockDB) ZExpire(key []byte, duration int64) (int64, error) {
+	if exists, err := db.ZKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	} else {
+		if err2 := db.expire(ZSetType, key, duration); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
+
+func (db *RockDB) ZPersist(key []byte) (int64, error) {
+	if exists, err := db.ZKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	}
+
+	if ttl, err := db.ttl(ZSetType, key); err != nil || ttl < 0 {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	if err := db.delExpire(ZSetType, key, db.wb); err != nil {
+		return 0, err
+	} else {
+		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
 }

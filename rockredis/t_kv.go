@@ -2,6 +2,8 @@ package rockredis
 
 import (
 	"errors"
+	"time"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 )
 
@@ -126,6 +128,13 @@ func (db *RockDB) DelKeys(keys ...[]byte) {
 	for _, k := range keys {
 		db.KVDel(k)
 	}
+
+	//clear all the expire meta data related to the keys
+	db.wb.Clear()
+	for _, k := range keys {
+		db.delExpire(KVType, k, db.wb)
+	}
+	db.eng.Write(db.defaultWriteOpts, db.wb)
 }
 
 func (db *RockDB) KVExists(key []byte) (int64, error) {
@@ -222,6 +231,8 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		}
 		value = append(value, tsBuf...)
 		wb.Put(key, value)
+		//the expire meta data related to the key should be cleared as the key-value has been reset
+		db.delExpire(KVType, args[i].Key, db.wb)
 	}
 	for t, num := range tableCnt {
 		db.IncrTableKeyCount([]byte(t), int64(num), wb)
@@ -231,8 +242,8 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 	return err
 }
 
-func (db *RockDB) KVSet(ts int64, key []byte, value []byte) error {
-	table, key, err := convertRedisKeyToDBKVKey(key)
+func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
+	table, key, err := convertRedisKeyToDBKVKey(rawKey)
 	if err != nil {
 		return err
 	} else if err = checkValueSize(value); err != nil {
@@ -248,8 +259,40 @@ func (db *RockDB) KVSet(ts int64, key []byte, value []byte) error {
 	tsBuf := PutInt64(ts)
 	value = append(value, tsBuf...)
 	db.wb.Put(key, value)
+
+	db.delExpire(KVType, rawKey, db.wb)
+
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+
 	return err
+}
+
+func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) error {
+	table, key, err := convertRedisKeyToDBKVKey(rawKey)
+	if err != nil {
+		return err
+	} else if err = checkValueSize(value); err != nil {
+		return err
+	}
+	db.wb.Clear()
+	if db.cfg.EnableTableCounter {
+		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		if v == nil {
+			db.IncrTableKeyCount(table, 1, db.wb)
+		}
+	}
+	tsBuf := PutInt64(ts)
+	value = append(value, tsBuf...)
+	db.wb.Put(key, value)
+
+	if err := db.rawExpireAt(KVType, rawKey, duration+time.Now().Unix(), db.wb); err != nil {
+		return err
+	}
+
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+
+	return err
+
 }
 
 func (db *RockDB) SetNX(ts int64, key []byte, value []byte) (int64, error) {
@@ -404,4 +447,37 @@ func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 	}
 
 	return int64(len(oldValue) - tsLen), nil
+}
+
+func (db *RockDB) Expire(key []byte, duration int64) (int64, error) {
+	if exists, err := db.KVExists(key); err != nil || exists != 1 {
+		return 0, err
+	} else {
+		if err2 := db.expire(KVType, key, duration); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
+
+func (db *RockDB) Persist(key []byte) (int64, error) {
+	if exists, err := db.KVExists(key); err != nil || exists != 1 {
+		return 0, err
+	}
+
+	if ttl, err := db.ttl(KVType, key); err != nil || ttl < 0 {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	if err := db.delExpire(KVType, key, db.wb); err != nil {
+		return 0, err
+	} else {
+		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
 }
