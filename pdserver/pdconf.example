@@ -5,7 +5,7 @@ http_address = "0.0.0.0:18001"
 broadcast_interface = "eth0"
 
 ## local reverse proxy port, basically used for collecting the stats 
-reverse_proxy_port = "18003"
+# reverse_proxy_port = "18003"
 
 profile_port = "6667"
 

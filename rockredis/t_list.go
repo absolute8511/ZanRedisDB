@@ -3,6 +3,7 @@ package rockredis
 import (
 	"encoding/binary"
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
@@ -219,6 +220,8 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	if size == 0 {
 		// list is empty after delete
 		db.IncrTableKeyCount(table, -1, wb)
+		//delete the expire data related to the list key
+		db.delExpire(ListType, key, wb)
 	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return value, err
@@ -279,6 +282,8 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 	newLen, _ := db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
 	if llen > 0 && newLen == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+		//delete the expire data related to the list key
+		db.delExpire(ListType, key, wb)
 	}
 
 	return db.eng.Write(db.defaultWriteOpts, wb)
@@ -340,6 +345,8 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	if size == 0 {
 		// list is empty after trim
 		db.IncrTableKeyCount(table, -1, wb)
+		//delete the expire data related to the list key
+		db.delExpire(ListType, key, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -596,6 +603,12 @@ func (db *RockDB) LClear(key []byte) (int64, error) {
 		// TODO: log here , the list maybe corrupt
 	}
 
+	if num > 0 {
+		//delete the expire data related to the list key
+		db.wb.Clear()
+		db.delExpire(ListType, key, db.wb)
+		db.eng.Write(db.defaultWriteOpts, db.wb)
+	}
 	return num, err
 }
 
@@ -629,4 +642,37 @@ func (db *RockDB) LKeyExists(key []byte) (int64, error) {
 		return 1, nil
 	}
 	return 0, err
+}
+
+func (db *RockDB) LExpire(key []byte, duration int64) (int64, error) {
+	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	} else {
+		if err2 := db.expire(ListType, key, duration); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
+}
+
+func (db *RockDB) LPersist(key []byte) (int64, error) {
+	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
+		return 0, err
+	}
+
+	if ttl, err := db.ttl(ListType, key); err != nil || ttl < 0 {
+		return 0, err
+	}
+
+	db.wb.Clear()
+	if err := db.delExpire(ListType, key, db.wb); err != nil {
+		return 0, err
+	} else {
+		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
+			return 0, err2
+		} else {
+			return 1, nil
+		}
+	}
 }

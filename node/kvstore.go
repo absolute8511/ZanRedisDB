@@ -28,6 +28,7 @@ func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
 	if err := s.openDB(); err != nil {
 		return nil, err
 	}
+
 	return s, nil
 }
 
@@ -56,6 +57,7 @@ func (s *KVStore) CleanData() error {
 	dataPath := s.GetDataDir()
 	s.Close()
 	os.RemoveAll(dataPath)
+
 	return s.openDB()
 }
 

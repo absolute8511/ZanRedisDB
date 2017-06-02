@@ -55,13 +55,14 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
 	kv := NewServer(kvOpts)
-	_, err = kv.InitKVNamespace(1, nsConf, false)
+	nsNode, err := kv.InitKVNamespace(1, nsConf, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
 
 	kv.Start()
 	time.Sleep(time.Second)
+	nsNode.StartTTLChecker()
 	return kv, redisport, tmpDir
 }
 
@@ -85,6 +86,7 @@ func TestKV(t *testing.T) {
 
 	key1 := "default:test:a"
 	key2 := "default:test:b"
+	keyExpire := "default:test:xx"
 	if ok, err := goredis.String(c.Do("set", key1, "1234")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
@@ -101,6 +103,22 @@ func TestKV(t *testing.T) {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
+	}
+
+	if ok, err := goredis.String(c.Do("setex", keyExpire, 2, "hello world")); err != nil {
+		t.Fatal(err)
+	} else if ok != OK {
+		t.Fatal(ok)
+	}
+	if v, err := goredis.String(c.Do("get", keyExpire)); err != nil {
+		t.Fatal(err)
+	} else if v != "hello world" {
+		t.Fatal(v)
+	}
+
+	time.Sleep(time.Second * 4)
+	if _, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
+		t.Fatal(err)
 	}
 
 	if v, err := goredis.String(c.Do("get", key1)); err != nil {
