@@ -1111,28 +1111,29 @@ func (self *KVNode) GetLastLeaderChangedTime() int64 {
 	return self.rn.getLastLeaderChangedTime()
 }
 
-func (self *KVNode) ReportMeRaftLeader() {
+func (self *KVNode) OnRaftLeaderChanged() {
 	if self.clusterInfo == nil {
 		return
 	}
-	nid, epoch, err := self.clusterInfo.GetNamespaceLeader(self.ns)
-	if err != nil {
-		self.rn.Infof("get raft leader from cluster failed: %v", err)
-		return
-	}
-
 	if self.rn.IsLead() {
+		nid, epoch, err := self.clusterInfo.GetNamespaceLeader(self.ns)
+		if err != nil {
+			self.rn.Infof("get raft leader from cluster failed: %v", err)
+			return
+		}
+
 		if self.rn.config.nodeConfig.NodeID == nid {
 			return
 		}
+		//leader should start the TTLChecker to handle the expired data
+		self.store.StartTTLChecker()
+
 		_, err = self.clusterInfo.UpdateMeForNamespaceLeader(self.ns, epoch)
 		if err != nil {
 			self.rn.Infof("update raft leader to me failed: %v", err)
 		} else {
 			self.rn.Infof("update %v raft leader to me : %v", self.ns, self.rn.config.ID)
 		}
-		//leader should start the TTLChecker to handle the expired data
-		self.store.StartTTLChecker()
 	} else {
 		self.store.StopTTLChecker()
 	}
