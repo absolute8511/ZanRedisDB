@@ -347,7 +347,7 @@ func TestRockDBTTLChecker(t *testing.T) {
 	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType}
 
 	var lock sync.Mutex
-	createTestExpiredFunc := func(dataType byte) common.OnExpiredFunc {
+	createTestExpiredFunc := func(dataType byte) OnExpiredFunc {
 		return func(key []byte) error {
 			lock.Lock()
 			defer lock.Unlock()

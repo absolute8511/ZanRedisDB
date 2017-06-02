@@ -276,16 +276,3 @@ type IndexSchema struct {
 	HsetIndexes []*HsetIndexSchema `json:"hset_indexes"`
 	JsonIndexes []*JsonIndexSchema `json:"json_indexes"`
 }
-
-type OnExpiredFunc func([]byte) error
-
-type TTLChecker interface {
-	Start()
-	Stop()
-
-	RegisterKVExpired(OnExpiredFunc)
-	RegisterHashExpired(OnExpiredFunc)
-	RegisterListExpired(OnExpiredFunc)
-	RegisterSetExpired(OnExpiredFunc)
-	RegisterZSetExpired(OnExpiredFunc)
-}

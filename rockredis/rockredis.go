@@ -622,22 +622,22 @@ func (r *RockDB) GetAllIndexSchema() (map[string]*common.IndexSchema, error) {
 	return r.indexMgr.GetAllIndexSchemaInfo(r)
 }
 
-func (r *RockDB) RegisterKVExpired(f common.OnExpiredFunc) {
+func (r *RockDB) RegisterKVExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterKVExpired(f)
 }
 
-func (r *RockDB) RegisterListExpired(f common.OnExpiredFunc) {
+func (r *RockDB) RegisterListExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterListExpired(f)
 }
 
-func (r *RockDB) RegisterSetExpired(f common.OnExpiredFunc) {
+func (r *RockDB) RegisterSetExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterSetExpired(f)
 }
 
-func (r *RockDB) RegisterZSetExpired(f common.OnExpiredFunc) {
+func (r *RockDB) RegisterZSetExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterZSetExpired(f)
 }
 
-func (r *RockDB) RegisterHashExpired(f common.OnExpiredFunc) {
+func (r *RockDB) RegisterHashExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterHashExpired(f)
 }
