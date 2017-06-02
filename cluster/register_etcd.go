@@ -449,6 +449,20 @@ func (self *EtcdRegister) GetRemoteNamespaceReplicaInfo(ns string, partition int
 	return &rInfo, nil
 }
 
+func (self *EtcdRegister) GetNamespaceTableSchema(ns string, table string) (*SchemaInfo, error) {
+	rsp, err := self.client.Get(self.getNamespaceTableSchemaPath(ns, table), false, false)
+	if err != nil {
+		if client.IsKeyNotFound(err) {
+			return nil, ErrKeyNotFound
+		}
+		return nil, err
+	}
+	var info SchemaInfo
+	info.Schema = []byte(rsp.Node.Value)
+	info.Epoch = EpochType(rsp.Node.ModifiedIndex)
+	return &info, nil
+}
+
 func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error) {
 	self.nsMutex.Lock()
 	defer self.nsMutex.Unlock()
@@ -910,12 +924,22 @@ func (self *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partition 
 	return nil
 }
 
-func (self *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, schema SchemaInfo) error {
-	_, err := self.client.CompareAndSwap(self.getNamespaceTableSchemaPath(ns, table), string(schema.Schema),
+func (self *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, schema *SchemaInfo) error {
+	if schema.Epoch == 0 {
+		rsp, err := self.client.Create(self.getNamespaceTableSchemaPath(ns, table), string(schema.Schema), 0)
+		if err != nil {
+			return err
+		}
+		schema.Epoch = EpochType(rsp.Node.ModifiedIndex)
+		return nil
+	}
+
+	rsp, err := self.client.CompareAndSwap(self.getNamespaceTableSchemaPath(ns, table), string(schema.Schema),
 		0, "", uint64(schema.Epoch))
 	if err != nil {
 		return err
 	}
+	schema.Epoch = EpochType(rsp.Node.ModifiedIndex)
 	return nil
 }
 

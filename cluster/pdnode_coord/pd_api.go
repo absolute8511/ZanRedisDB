@@ -264,3 +264,12 @@ func (self *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map[st
 	self.triggerCheckNamespaces("", 0, time.Millisecond*500)
 	return nil
 }
+
+func (self *PDCoordinator) AddHIndexSchema(namespace string, table string, hindex *common.HsetIndexSchema) error {
+	hindex.State = common.InitIndex
+	return self.addHIndexSchema(namespace, table, hindex)
+}
+
+func (self *PDCoordinator) DelHIndexSchema(namespace string, table string, hindexName string) error {
+	return self.delHIndexSchema(namespace, table, hindexName)
+}

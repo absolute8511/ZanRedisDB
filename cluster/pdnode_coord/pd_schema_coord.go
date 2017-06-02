@@ -2,6 +2,7 @@ package pdnode_coord
 
 import (
 	"encoding/json"
+	"errors"
 	. "github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"net"
@@ -103,6 +104,7 @@ func (self *PDCoordinator) doSchemaCheck() {
 					if isAllPartsIndexSchemaReady(allPartsSchema, table, hindex.Name, common.BuildDoneIndex) {
 						schemaChanged = true
 						hindex.State = common.ReadyIndex
+						CoordLog().Infof("namespace %v table %v schema info ready: %v", ns, table, indexes)
 					}
 				default:
 				}
@@ -112,11 +114,72 @@ func (self *PDCoordinator) doSchemaCheck() {
 			}
 
 			if schemaChanged {
-				err := self.register.UpdateNamespaceSchema(ns, table, newSchemaInfo)
+				CoordLog().Infof("namespace %v table %v schema info changed: %v", ns, table, indexes)
+				newSchemaInfo.Schema, _ = json.Marshal(indexes)
+				err := self.register.UpdateNamespaceSchema(ns, table, &newSchemaInfo)
 				if err != nil {
 					CoordLog().Infof("update %v-%v schema to register failed: %v", ns, table, err)
 				}
 			}
 		}
 	}
+}
+
+func (self *PDCoordinator) addHIndexSchema(ns string, table string, hindex *common.HsetIndexSchema) error {
+	var indexes common.IndexSchema
+	var newSchema SchemaInfo
+
+	schema, err := self.register.GetNamespaceTableSchema(ns, table)
+	if err != nil {
+		if err != ErrKeyNotFound {
+			return err
+		}
+		newSchema.Epoch = 0
+	} else {
+		newSchema.Epoch = schema.Epoch
+		err := json.Unmarshal(schema.Schema, &indexes)
+		if err != nil {
+			CoordLog().Infof("unmarshal schema data failed: %v", err)
+			return err
+		}
+	}
+
+	for _, hi := range indexes.HsetIndexes {
+		if hi.Name == hindex.Name {
+			return errors.New("index already exist")
+		}
+	}
+	indexes.HsetIndexes = append(indexes.HsetIndexes, hindex)
+	newSchema.Schema, _ = json.Marshal(indexes)
+	return self.register.UpdateNamespaceSchema(ns, table, &newSchema)
+}
+
+func (self *PDCoordinator) delHIndexSchema(ns string, table string, hindexName string) error {
+	var indexes common.IndexSchema
+	var newSchema SchemaInfo
+
+	schema, err := self.register.GetNamespaceTableSchema(ns, table)
+	if err != nil {
+		return err
+	} else {
+		newSchema.Epoch = schema.Epoch
+		err := json.Unmarshal(schema.Schema, &indexes)
+		if err != nil {
+			CoordLog().Infof("unmarshal schema data failed: %v", err)
+			return err
+		}
+	}
+	newHindexes := make([]*common.HsetIndexSchema, 0, len(indexes.HsetIndexes))
+	for _, hi := range indexes.HsetIndexes {
+		if hi.Name == hindexName {
+			CoordLog().Infof("namespace %v table %v index schema deleted: %v", ns, table, hi)
+			continue
+		} else {
+			newHindexes = append(newHindexes, hi)
+		}
+	}
+	indexes.HsetIndexes = newHindexes
+
+	newSchema.Schema, _ = json.Marshal(indexes)
+	return self.register.UpdateNamespaceSchema(ns, table, &newSchema)
 }

@@ -1,7 +1,9 @@
 package pdserver
 
 import (
+	"encoding/json"
 	"errors"
+	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
@@ -78,6 +80,8 @@ func (self *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/upgrade/done", common.Decorate(self.doClusterFinishUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/create", common.Decorate(self.doCreateNamespace, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/delete", common.Decorate(self.doDeleteNamespace, log, common.V1))
+	router.Handle("POST", "/cluster/schema/index/add", common.Decorate(self.doAddIndexSchema, log, common.V1))
+	router.Handle("POST", "/cluster/schema/index/del", common.Decorate(self.doDelIndexSchema, log, common.V1))
 
 	router.Handle("POST", "/loglevel/set", common.Decorate(self.doSetLogLevel, log, common.V1))
 	self.router = router
@@ -388,6 +392,106 @@ func (self *Server) doDeleteNamespace(w http.ResponseWriter, req *http.Request, 
 		sLog.Infof("deleting (%s) with partition %v failed : %v", name, partStr, err)
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
+	return nil, nil
+}
+
+func (self *Server) doAddIndexSchema(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	ns := reqParams.Get("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
+	}
+
+	if !common.IsValidNamespaceName(ns) {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
+	}
+	table := reqParams.Get("table")
+
+	if table == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_TABLE_NAME"}
+	}
+	if !self.pdCoord.IsMineLeader() {
+		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
+	}
+
+	indexType := reqParams.Get("indextype")
+	if indexType == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_TYPE"}
+	}
+	if indexType == "hash_secondary" {
+		data, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+		}
+		var meta common.HsetIndexSchema
+		err = json.Unmarshal(data, &meta)
+		if err != nil {
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+		}
+		sLog.Infof("add hash index : %v, %v", ns, meta)
+		err = self.pdCoord.AddHIndexSchema(ns, table, &meta)
+		if err != nil {
+			sLog.Infof("add hash index failed: %v, %v", ns, err)
+			return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		}
+	} else if indexType == "json_secondary" {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	} else {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	}
+
+	return nil, nil
+}
+
+func (self *Server) doDelIndexSchema(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	ns := reqParams.Get("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
+	}
+
+	if !common.IsValidNamespaceName(ns) {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
+	}
+	table := reqParams.Get("table")
+
+	if table == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_TABLE_NAME"}
+	}
+	if !self.pdCoord.IsMineLeader() {
+		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
+	}
+
+	indexType := reqParams.Get("indextype")
+	if indexType == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_TYPE"}
+	}
+	indexName := reqParams.Get("indexname")
+	if indexName == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_NAME"}
+	}
+
+	if indexType == "hash_secondary" {
+		sLog.Infof("del hash index : %v, %v", ns, indexName)
+		err = self.pdCoord.DelHIndexSchema(ns, table, indexName)
+		if err != nil {
+			sLog.Infof("del hash index failed: %v, %v", ns, err)
+			return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		}
+	} else if indexType == "json_secondary" {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	} else {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	}
+
 	return nil, nil
 }
 

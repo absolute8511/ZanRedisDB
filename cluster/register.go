@@ -158,6 +158,7 @@ type Register interface {
 	GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error)
 	GetNamespacesNotifyChan() chan struct{}
 	GetNamespaceSchemas(ns string) (map[string]SchemaInfo, error)
+	GetNamespaceTableSchema(ns string, table string) (*SchemaInfo, error)
 	Stop()
 }
 
@@ -190,7 +191,7 @@ type PDRegister interface {
 	// if no partition, replica info node should create only once.
 	UpdateNamespacePartReplicaInfo(ns string, partition int, replicaInfo *PartitionReplicaInfo, oldGen EpochType) error
 	PrepareNamespaceMinGID() (int64, error)
-	UpdateNamespaceSchema(ns string, table string, schema SchemaInfo) error
+	UpdateNamespaceSchema(ns string, table string, schema *SchemaInfo) error
 }
 
 type DataNodeRegister interface {
