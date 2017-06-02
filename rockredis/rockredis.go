@@ -3,8 +3,6 @@ package rockredis
 import (
 	"errors"
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/gorocksdb"
 	"io"
 	"os"
 	"path"
@@ -15,6 +13,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/gorocksdb"
 )
 
 const (
@@ -174,6 +175,7 @@ type RockDB struct {
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
 	engOpened        int32
+	ttlChecker       *TTLChecker
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -242,12 +244,18 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
 	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
+	db.ttlChecker = NewTTLChecker(db)
+
 	db.wg.Add(1)
 	go func() {
 		defer db.wg.Done()
 		db.backupLoop()
 	}()
 	return db, nil
+}
+
+func (r *RockDB) GetTTLChecker() common.TTLChecker {
+	return r.ttlChecker
 }
 
 func GetBackupDir(base string) string {
@@ -309,6 +317,9 @@ func (r *RockDB) Close() {
 	}
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
+	}
+	if r.ttlChecker != nil {
+		r.ttlChecker.Stop()
 	}
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
