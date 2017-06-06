@@ -54,6 +54,7 @@ type NamespaceMetaInfo struct {
 	metaEpoch      EpochType
 	EngType        string
 	OptimizedFsync bool
+	SnapCount      int
 	Tags           map[string]bool
 }
 

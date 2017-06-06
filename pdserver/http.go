@@ -78,6 +78,7 @@ func (self *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/upgrade/done", common.Decorate(self.doClusterFinishUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/create", common.Decorate(self.doCreateNamespace, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/delete", common.Decorate(self.doDeleteNamespace, log, common.V1))
+	router.Handle("POST", "/cluster/namespace/meta/update", common.Decorate(self.doUpdateNamespaceMeta, log, common.V1))
 
 	router.Handle("POST", "/loglevel/set", common.Decorate(self.doSetLogLevel, log, common.V1))
 	self.router = router
@@ -387,6 +388,50 @@ func (self *Server) doDeleteNamespace(w http.ResponseWriter, req *http.Request, 
 	if err != nil {
 		sLog.Infof("deleting (%s) with partition %v failed : %v", name, partStr, err)
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
+	}
+	return nil, nil
+}
+
+func (self *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	ns := reqParams.Get("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
+	}
+
+	if !common.IsValidNamespaceName(ns) {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
+	}
+	replicatorStr := reqParams.Get("replicator")
+	replicator := -1
+	if replicatorStr != "" {
+		replicator, err = GetValidReplicator(replicatorStr)
+		if err != nil {
+			return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_REPLICATOR"}
+		}
+	}
+
+	optimizeFsyncStr := reqParams.Get("optimizefsync")
+	snapStr := reqParams.Get("snapcount")
+	snapCount := -1
+	if snapStr != "" {
+		snapCount, err = strconv.Atoi(snapStr)
+		if err != nil {
+			return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_SNAP"}
+		}
+	}
+
+	if !self.pdCoord.IsMineLeader() {
+		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
+	}
+	err = self.pdCoord.ChangeNamespaceMetaParam(ns, replicator, optimizeFsyncStr, snapCount)
+	if err != nil {
+		sLog.Infof("update namespace meta failed: %v, %v", ns, err)
+		return nil, common.HttpErr{Code: 400, Text: err.Error()}
 	}
 	return nil, nil
 }
