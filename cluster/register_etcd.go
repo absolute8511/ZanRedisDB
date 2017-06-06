@@ -114,7 +114,6 @@ type EtcdRegister struct {
 	pdNodeRootPath       string
 	allNamespaceInfos    map[string]map[int]PartitionMetaInfo
 	nsEpoch              EpochType
-	namespaceMetaMap     map[string]NamespaceMetaInfo
 	ifNamespaceChanged   int32
 	watchNamespaceStopCh chan bool
 	nsChangedChan        chan struct{}
@@ -124,7 +123,6 @@ func NewEtcdRegister(host string) *EtcdRegister {
 	client := etcdlock.NewEClient(host)
 	r := &EtcdRegister{
 		allNamespaceInfos:    make(map[string]map[int]PartitionMetaInfo),
-		namespaceMetaMap:     make(map[string]NamespaceMetaInfo),
 		watchNamespaceStopCh: make(chan bool),
 		client:               client,
 		ifNamespaceChanged:   1,
@@ -146,12 +144,6 @@ func (self *EtcdRegister) Stop() {
 	if self.watchNamespaceStopCh != nil {
 		close(self.watchNamespaceStopCh)
 	}
-}
-
-func (self *EtcdRegister) updateNamespaceMeta(ns string, meta NamespaceMetaInfo) {
-	self.nsMutex.Lock()
-	self.namespaceMetaMap[ns] = meta
-	self.nsMutex.Unlock()
 }
 
 func (self *EtcdRegister) GetAllPDNodes() ([]NodeInfo, error) {
@@ -363,6 +355,7 @@ func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 			if keyLen < 2 {
 				continue
 			}
+			mInfo.metaEpoch = EpochType(node.ModifiedIndex)
 			nsName := keys[keyLen-2]
 			metaMap[nsName] = mInfo
 		} else if key == NAMESPACE_REAL_LEADER {
@@ -441,12 +434,25 @@ func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, erro
 
 func (self *EtcdRegister) GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, error) {
 	self.nsMutex.Lock()
-	meta, ok := self.namespaceMetaMap[ns]
+	parts, ok := self.allNamespaceInfos[ns]
 	self.nsMutex.Unlock()
-	if !ok {
-		return meta, ErrKeyNotFound
+	var meta NamespaceMetaInfo
+	if !ok || len(parts) == 0 {
+		rsp, err := self.client.Get(self.getNamespaceMetaPath(ns), false, false)
+		if err != nil {
+			if client.IsKeyNotFound(err) {
+				return meta, ErrKeyNotFound
+			}
+			return meta, err
+		}
+		err = json.Unmarshal([]byte(rsp.Node.Value), &meta)
+		if err != nil {
+			return meta, err
+		}
+		meta.metaEpoch = EpochType(rsp.Node.ModifiedIndex)
+		return meta, nil
 	}
-	return meta, nil
+	return parts[0].NamespaceMetaInfo, nil
 }
 
 func (self *EtcdRegister) getClusterPath() string {
@@ -781,7 +787,6 @@ func (self *PDEtcdRegister) CreateNamespace(ns string, meta *NamespaceMetaInfo) 
 	}
 
 	meta.metaEpoch = EpochType(rsp.Node.ModifiedIndex)
-	self.updateNamespaceMeta(ns, *meta)
 	return nil
 }
 
@@ -818,7 +823,6 @@ func (self *PDEtcdRegister) UpdateNamespaceMetaInfo(ns string, meta *NamespaceMe
 
 	self.nsMutex.Lock()
 	defer self.nsMutex.Unlock()
-	delete(self.namespaceMetaMap, ns)
 	atomic.StoreInt32(&self.ifNamespaceChanged, 1)
 	rsp, err := self.client.CompareAndSwap(self.getNamespaceMetaPath(ns), string(value), 0, "", uint64(oldGen))
 	if err != nil {
@@ -830,14 +834,12 @@ func (self *PDEtcdRegister) UpdateNamespaceMetaInfo(ns string, meta *NamespaceMe
 		return err
 	}
 	meta.metaEpoch = EpochType(rsp.Node.ModifiedIndex)
-	self.namespaceMetaMap[ns] = *meta
 
 	return nil
 }
 
 func (self *PDEtcdRegister) DeleteWholeNamespace(ns string) error {
 	self.nsMutex.Lock()
-	delete(self.namespaceMetaMap, ns)
 	atomic.StoreInt32(&self.ifNamespaceChanged, 1)
 	rsp, err := self.client.Delete(self.getNamespacePath(ns), true)
 	coordLog.Infof("delete whole topic: %v, %v, %v", ns, err, rsp)
