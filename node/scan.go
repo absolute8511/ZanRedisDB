@@ -60,11 +60,13 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
-	splits := bytes.Split(cursor, []byte(":"))
+
+	splits := bytes.SplitN(cursor, []byte(":"), 2)
 	if len(splits) != 2 {
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
 	}
-	set := string(splits[0])
+
+	set := splits[0]
 
 	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
@@ -77,16 +79,19 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 		nextCursor = []byte("")
 	} else {
 		item := ay[length-1]
-		sp := bytes.Split(item, []byte(":"))
-		if len(sp) != 2 || string(sp[0]) != set {
-			nextCursor = []byte("")
+		pos := bytes.IndexAny(item, ":")
+		if pos != -1 && !bytes.Equal(item[:pos], set) {
 			for idx, v := range ay {
-				sp := bytes.Split(v, []byte(":"))
-				if len(sp) != 2 || string(sp[0]) != set {
+				pos := bytes.IndexAny(v, ":")
+				if pos == -1 || !bytes.Equal(v[:pos], set) {
+					nextCursor = []byte("")
 					ay = ay[:idx]
 					break
 				}
 			}
+		} else if pos == -1 {
+			nextCursor = []byte("")
+			ay = ay[:0]
 		} else {
 			nextCursor = ay[len(ay)-1]
 		}
@@ -132,11 +137,11 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
-	splits := bytes.Split(cursor, []byte(":"))
+	splits := bytes.SplitN(cursor, []byte(":"), 2)
 	if len(splits) != 2 {
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
 	}
-	set := string(splits[0])
+	set := splits[0]
 
 	var ay [][]byte
 
@@ -153,16 +158,19 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 		nextCursor = []byte("")
 	} else {
 		item := ay[length-1]
-		sp := bytes.Split(item, []byte(":"))
-		if len(sp) != 2 || string(sp[0]) != set {
-			nextCursor = []byte("")
+		pos := bytes.IndexAny(item, ":")
+		if pos != -1 && !bytes.Equal(item[:pos], set) {
 			for idx, v := range ay {
-				sp := bytes.Split(v, []byte(":"))
-				if len(sp) != 2 || string(sp[0]) != set {
+				pos := bytes.IndexAny(v, ":")
+				if pos == -1 || !bytes.Equal(v[:pos], set) {
+					nextCursor = []byte("")
 					ay = ay[:idx]
 					break
 				}
 			}
+		} else if pos == -1 {
+			nextCursor = []byte("")
+			ay = ay[:0]
 		} else {
 			nextCursor = ay[len(ay)-1]
 		}
