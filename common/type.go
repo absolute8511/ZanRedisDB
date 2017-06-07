@@ -30,6 +30,7 @@ var (
 	ErrInvalidScanCursor = errors.New("invalid scan cursor")
 	ErrScanCursorNoTable = errors.New("scan cursor must has table")
 	ErrUnexpectError     = errors.New("unexpected error")
+	ErrInvalidPrefix     = errors.New("invalid prefix")
 )
 
 // for out use
@@ -112,6 +113,16 @@ func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
 	namespace := string(rawKey[:index])
 	realKey := rawKey[index+1:]
 	return namespace, realKey, nil
+}
+
+func ExtraSet(rawKey []byte) ([]byte, []byte, error) {
+	pos := bytes.IndexByte(rawKey, KEYSEP)
+	if pos == -1 {
+		return nil, nil, ErrInvalidPrefix
+	}
+	set := rawKey[:pos]
+	other := rawKey[pos+1:]
+	return set, other, nil
 }
 
 type ScorePair struct {
