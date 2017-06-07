@@ -79,7 +79,7 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	}
 
 	for idx, v := range ay {
-		sp := bytes.Split(v)
+		sp := bytes.Split(v, []byte(":"))
 		if len(sp) != 2 || string(sp[0]) != set {
 			nextCursor = []byte("")
 			ay = ay[:idx]
@@ -148,7 +148,7 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	}
 
 	for idx, v := range ay {
-		sp := bytes.Split(v)
+		sp := bytes.Split(v, []byte(":"))
 		if len(sp) != 2 || string(sp[0]) != set {
 			nextCursor = []byte("")
 			ay = ay[:idx]
