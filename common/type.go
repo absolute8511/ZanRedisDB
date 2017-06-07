@@ -53,6 +53,10 @@ const (
 	ZSetName = "ZSET"
 )
 
+const (
+	KEYSEP = byte(':')
+)
+
 func (d DataType) String() string {
 	switch d {
 	case KV:
