@@ -72,20 +72,26 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	}
 
 	var nextCursor []byte
-	if len(ay) < count || (count == 0 && len(ay) == 0) {
+	length := len(ay)
+	if length < count || (count == 0 && length == 0) {
 		nextCursor = []byte("")
 	} else {
-		nextCursor = ay[len(ay)-1]
-	}
-
-	for idx, v := range ay {
-		sp := bytes.Split(v, []byte(":"))
+		item := ay[length-1]
+		sp := bytes.Split(item, []byte(":"))
 		if len(sp) != 2 || string(sp[0]) != set {
 			nextCursor = []byte("")
-			ay = ay[:idx]
-			break
+			for idx, v := range ay {
+				sp := bytes.Split(v, []byte(":"))
+				if len(sp) != 2 || string(sp[0]) != set {
+					ay = ay[:idx]
+					break
+				}
+			}
+		} else {
+			nextCursor = ay[len(ay)-1]
 		}
 	}
+
 	_, pid := common.GetNamespaceAndPartition(self.ns)
 	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
 }
@@ -141,18 +147,24 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	}
 
 	var nextCursor []byte
-	if len(ay) < count || (count == 0 && len(ay) == 0) {
+
+	length := len(ay)
+	if length < count || (count == 0 && length == 0) {
 		nextCursor = []byte("")
 	} else {
-		nextCursor = ay[len(ay)-1]
-	}
-
-	for idx, v := range ay {
-		sp := bytes.Split(v, []byte(":"))
+		item := ay[length-1]
+		sp := bytes.Split(item, []byte(":"))
 		if len(sp) != 2 || string(sp[0]) != set {
 			nextCursor = []byte("")
-			ay = ay[:idx]
-			break
+			for idx, v := range ay {
+				sp := bytes.Split(v, []byte(":"))
+				if len(sp) != 2 || string(sp[0]) != set {
+					ay = ay[:idx]
+					break
+				}
+			}
+		} else {
+			nextCursor = ay[len(ay)-1]
 		}
 	}
 	_, pid := common.GetNamespaceAndPartition(self.ns)
