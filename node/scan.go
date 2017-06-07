@@ -79,17 +79,18 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 		nextCursor = []byte("")
 	} else {
 		item := ay[length-1]
-		pos := bytes.IndexAny(item, ":")
-		if pos != -1 && !bytes.Equal(item[:pos], set) {
+		tab, _, err := common.ExtraSet(item)
+		if err == nil && !bytes.Equal(tab, set) {
 			for idx, v := range ay {
-				pos := bytes.IndexAny(v, ":")
-				if pos == -1 || !bytes.Equal(v[:pos], set) {
+
+				tab, _, err := common.ExtraSet(v)
+				if err != nil || !bytes.Equal(tab, set) {
 					nextCursor = []byte("")
 					ay = ay[:idx]
 					break
 				}
 			}
-		} else if pos == -1 {
+		} else if err != nil {
 			nextCursor = []byte("")
 			ay = ay[:0]
 		} else {
@@ -158,17 +159,18 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 		nextCursor = []byte("")
 	} else {
 		item := ay[length-1]
-		pos := bytes.IndexAny(item, ":")
-		if pos != -1 && !bytes.Equal(item[:pos], set) {
+		tab, _, err := common.ExtraSet(item)
+		if err == nil && !bytes.Equal(tab, set) {
 			for idx, v := range ay {
-				pos := bytes.IndexAny(v, ":")
-				if pos == -1 || !bytes.Equal(v[:pos], set) {
+
+				tab, _, err := common.ExtraSet(v)
+				if err != nil || !bytes.Equal(tab, set) {
 					nextCursor = []byte("")
 					ay = ay[:idx]
 					break
 				}
 			}
-		} else if pos == -1 {
+		} else if err != nil {
 			nextCursor = []byte("")
 			ay = ay[:0]
 		} else {
