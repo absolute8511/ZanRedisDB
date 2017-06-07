@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -59,6 +60,11 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
+	splits := bytes.Split(cursor, []byte(":"))
+	if len(splits) != 2 {
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+	}
+	set := string(splits[0])
 
 	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
@@ -70,6 +76,14 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 		nextCursor = []byte("")
 	} else {
 		nextCursor = ay[len(ay)-1]
+	}
+
+	for idx, v := range ay {
+		if !strings.HasPrefix(string(v), set) {
+			nextCursor = []byte("")
+			ay = ay[:idx]
+			break
+		}
 	}
 	_, pid := common.GetNamespaceAndPartition(self.ns)
 	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
@@ -107,10 +121,15 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
 
 	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
-
 	if err != nil {
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
+
+	splits := bytes.Split(cursor, []byte(":"))
+	if len(splits) != 2 {
+		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+	}
+	set := string(splits[0])
 
 	var ay [][]byte
 
@@ -125,6 +144,14 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 		nextCursor = []byte("")
 	} else {
 		nextCursor = ay[len(ay)-1]
+	}
+
+	for idx, v := range ay {
+		if !strings.HasPrefix(string(v), set) {
+			nextCursor = []byte("")
+			ay = ay[:idx]
+			break
+		}
 	}
 	_, pid := common.GetNamespaceAndPartition(self.ns)
 	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
