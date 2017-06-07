@@ -45,7 +45,7 @@ func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
 	defer func(start time.Time) {
 		scanCost := time.Since(scanStart)
 		if scanCost >= 5*time.Second {
-			sLog.Infof("slow write command: %v, cost: %v", string(cmd.Raw), scanCost)
+			sLog.Infof("slow merge command: %v, cost: %v", string(cmd.Raw), scanCost)
 		}
 		s.scanStats.UpdateScanStats(scanCost.Nanoseconds() / 1000)
 		atomic.AddInt32(&scanJobCount, -1)
