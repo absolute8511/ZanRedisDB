@@ -439,6 +439,8 @@ func (self *KVNode) handleProposeReq() {
 			}
 			reqList.ReqNum = int32(len(reqList.Reqs))
 			buffer, err := reqList.Marshal()
+			// buffer will be reused by raft?
+			// TODO:buffer, err := reqList.MarshalTo()
 			if err != nil {
 				self.rn.Infof("failed to marshal request: %v", err)
 				for _, r := range reqList.Reqs {
