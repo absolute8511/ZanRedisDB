@@ -18,10 +18,12 @@ var (
 	lookup  = flagSet.String("lookup", "", "lookup list, split by ','")
 	ns      = flagSet.String("ns", "", "namespace of restore")
 	set     = flagSet.String("set", "", "table name of restore")
+	qps     = flagSet.Int("qps", 1000, "qps")
 	pass    = flagSet.String("pass", "", "password of zankv")
 )
 var (
 	oriNS string
+	tm    time.Duration
 )
 
 const (
@@ -31,7 +33,7 @@ const (
 
 func help() {
 	fmt.Println("Usage:")
-	fmt.Println("\t", os.Args[0], "[-data restore] -lookup lookuplist -ns namespace -table table_name ")
+	fmt.Println("\t", os.Args[0], "[-data restore] -lookup lookuplist -ns namespace -table table_name [-qps 1000]")
 	os.Exit(0)
 }
 
@@ -67,6 +69,9 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 	var total uint64
 	var realKey []byte
 	for {
+		defer func() {
+			time.Sleep(tm)
+		}()
 		n, err = file.Read(lenBuf)
 		if err != nil {
 			if err == io.EOF {
@@ -289,6 +294,8 @@ func main() {
 	flagSet.Parse(os.Args[1:])
 
 	checkParameter()
+
+	tm = time.Duration(1000000 / *qps) * time.Microsecond
 
 	restore()
 	fmt.Println("restore finished.")

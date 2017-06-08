@@ -309,7 +309,7 @@ func TestKVMergecan(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge1:", "KV")); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge1:", "KV", "COUNT", 1000)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))

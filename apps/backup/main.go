@@ -20,12 +20,14 @@ var (
 	ns       = flagSet.String("ns", "", "namespace of backup")
 	set      = flagSet.String("set", "", "table name of backup")
 	backType = flagSet.String("type", "all", "which type you want to backup,split by ',' for multiple")
+	qps      = flagSet.Int("qps", 1000, "qps")
 	pass     = flagSet.String("pass", "", "password of zankv")
 )
 
 var (
 	backTypes []string
 	wg        sync.WaitGroup
+	tm        time.Duration
 )
 
 const (
@@ -35,7 +37,7 @@ const (
 
 func help() {
 	fmt.Println("Usage:")
-	fmt.Println("\t", os.Args[0], "[-data_dir backup] -lookup lookuplist -ns namespace -table table_name -type all|kv[,hash,set,zset,list]")
+	fmt.Println("\t", os.Args[0], "[-data_dir backup] -lookup lookuplist -ns namespace -table table_name -type all|kv[,hash,set,zset,list] [-qps 100] ")
 	os.Exit(0)
 }
 
@@ -107,6 +109,9 @@ func kvbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 
 	lenBuf := make([]byte, 4)
 	for res := range ch {
+		defer func() {
+			time.Sleep(tm * time.Microsecond)
+		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
 		n, err := file.Write(lenBuf)
@@ -130,11 +135,12 @@ func kvbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 			break
 		}
 
-		splits := bytes.Split(res, []byte(":"))
+		splits := bytes.SplitN(res, []byte(":"), 2)
 		if len(splits) != 2 {
 			fmt.Printf("key error. [ns=%s, key=%s]\n", *ns, string(res))
 			break
 		}
+		fmt.Println("key:", string(res))
 		val, err := client.KVGet(*set, splits[1])
 		if err != nil {
 			fmt.Printf("get value error. [ns=%s, key=%s, err=%v]\n", *ns, string(res), err)
@@ -168,6 +174,9 @@ func hbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	lenBuf := make([]byte, 4)
 	var itemNum uint32
 	for res := range ch {
+		defer func() {
+			time.Sleep(tm * time.Microsecond)
+		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
 		n, err := file.Write(lenBuf)
@@ -250,6 +259,9 @@ func sbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	lenBuf := make([]byte, 4)
 	var itemNum uint32
 	for res := range ch {
+		defer func() {
+			time.Sleep(tm * time.Microsecond)
+		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
 		n, err := file.Write(lenBuf)
@@ -327,6 +339,9 @@ func zbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 
 	var itemNum uint32
 	for res := range ch {
+		defer func() {
+			time.Sleep(tm * time.Microsecond)
+		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
 		n, err := file.Write(lenBuf)
@@ -442,6 +457,9 @@ func lbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	lenBuf := make([]byte, 4)
 	var itemNum uint32
 	for res := range ch {
+		defer func() {
+			time.Sleep(tm * time.Microsecond)
+		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
 		n, err := file.Write(lenBuf)
@@ -671,6 +689,8 @@ func main() {
 		fmt.Println("file is already exist and is not dir. ", *dataDir)
 		return
 	}
+
+	tm = time.Duration(1000000 / *qps) * time.Microsecond
 
 	for _, t := range backTypes {
 		wg.Add(1)

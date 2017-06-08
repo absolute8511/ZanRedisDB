@@ -78,10 +78,15 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	if length < count || (count == 0 && length == 0) {
 		nextCursor = []byte("")
 	} else {
-		item := ay[length-1]
+		nextCursor = ay[len(ay)-1]
+	}
 
+	if length > 0 {
+		item := ay[length-1]
 		tab, _, err := common.ExtraTable(item)
 		if err == nil && !bytes.Equal(tab, table) {
+
+			nextCursor = []byte("")
 			for idx, v := range ay {
 
 				tab, _, err := common.ExtraTable(v)
@@ -91,11 +96,6 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 					break
 				}
 			}
-		} else if err != nil {
-			nextCursor = []byte("")
-			ay = ay[:0]
-		} else {
-			nextCursor = ay[len(ay)-1]
 		}
 	}
 
@@ -160,9 +160,15 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	if length < count || (count == 0 && length == 0) {
 		nextCursor = []byte("")
 	} else {
+		nextCursor = ay[len(ay)-1]
+	}
+
+	if length > 0 {
 		item := ay[length-1]
 		tab, _, err := common.ExtraTable(item)
 		if err == nil && !bytes.Equal(tab, table) {
+
+			nextCursor = []byte("")
 			for idx, v := range ay {
 
 				tab, _, err := common.ExtraTable(v)
@@ -172,11 +178,6 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 					break
 				}
 			}
-		} else if err != nil {
-			nextCursor = []byte("")
-			ay = ay[:0]
-		} else {
-			nextCursor = ay[len(ay)-1]
 		}
 	}
 	_, pid := common.GetNamespaceAndPartition(self.ns)
