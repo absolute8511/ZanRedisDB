@@ -292,3 +292,34 @@ func testMergeSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 
 	checkMergeAdvanceScan(t, c, "SET")
 }
+
+func TestKVMergeScan(t *testing.T) {
+
+	c := getMergeTestConn(t)
+	defer c.Close()
+
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("set", "default:testscanmerge:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("set", "default:testscanmerge1:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge1:", "KV", "COUNT", 1000)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		a, err := goredis.Strings(ay[1], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(a) != 20 {
+			t.Fatal("want 20 get ", len(a))
+		}
+	}
+}
