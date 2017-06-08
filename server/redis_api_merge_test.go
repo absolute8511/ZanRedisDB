@@ -293,7 +293,7 @@ func testMergeSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	checkMergeAdvanceScan(t, c, "SET")
 }
 
-func TestKVMergeScan(t *testing.T) {
+func TestKVMergeScanCrossTable(t *testing.T) {
 
 	c := getMergeTestConn(t)
 	defer c.Close()
