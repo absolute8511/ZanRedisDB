@@ -225,6 +225,11 @@ func testMergekvsMergecan(t *testing.T, c *goredis.PoolConn) {
 			t.Fatal(err)
 		}
 	}
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("set", "default:testscanmerge1:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	checkMergeAdvanceScan(t, c, "KV")
 }
 
@@ -234,13 +239,22 @@ func testMergeHashKeyScan(t *testing.T, c *goredis.PoolConn) {
 			t.Fatal(err)
 		}
 	}
-
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("hset", "default:testscanmerge1:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i), []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	checkMergeAdvanceScan(t, c, "HASH")
 }
 
 func testMergeListKeyScan(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
 		if _, err := c.Do("lpush", "default:testscanmerge:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("lpush", "default:testscanmerge1:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -255,12 +269,23 @@ func testMergeZSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 		}
 	}
 
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("zadd", "default:testscanmerge1:"+fmt.Sprintf("%d", i), i, []byte("value")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	checkMergeAdvanceScan(t, c, "ZSET")
 }
 
 func testMergeSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
 		if _, err := c.Do("sadd", "default:testscanmerge:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := c.Do("sadd", "default:testscanmerge1:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -679,6 +679,10 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.PartitionNum = nsInfo.PartitionNum
 	nsConf.Replicator = nsInfo.Replica
 	nsConf.OptimizedFsync = nsInfo.OptimizedFsync
+	if nsInfo.SnapCount > 100 {
+		nsConf.SnapCount = nsInfo.SnapCount
+		nsConf.SnapCatchup = nsInfo.SnapCount / 2
+	}
 	nsConf.RaftGroupConf.GroupID = uint64(nsInfo.MinGID) + uint64(nsInfo.Partition)
 	nsConf.RaftGroupConf.SeedNodes = make([]node.ReplicaInfo, 0)
 	for _, nid := range nsInfo.GetISR() {

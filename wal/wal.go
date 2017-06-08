@@ -84,14 +84,14 @@ type WAL struct {
 	enti    uint64   // index of the last entry saved to the wal
 	encoder *encoder // encoder to encode records
 
-	locks           []*fileutil.LockedFile // the locked files the WAL holds (the name is increasing)
-	fp              *filePipeline
-	optimized_fsync bool
+	locks          []*fileutil.LockedFile // the locked files the WAL holds (the name is increasing)
+	fp             *filePipeline
+	optimizedFsync bool
 }
 
 // Create creates a WAL ready for appending records. The given metadata is
 // recorded at the head of each WAL file, and can be retrieved with ReadAll.
-func Create(dirpath string, metadata []byte, optimized_fsync bool) (*WAL, error) {
+func Create(dirpath string, metadata []byte, optimizedFsync bool) (*WAL, error) {
 	if Exist(dirpath) {
 		return nil, os.ErrExist
 	}
@@ -120,9 +120,9 @@ func Create(dirpath string, metadata []byte, optimized_fsync bool) (*WAL, error)
 	}
 
 	w := &WAL{
-		dir:             dirpath,
-		metadata:        metadata,
-		optimized_fsync: optimized_fsync,
+		dir:            dirpath,
+		metadata:       metadata,
+		optimizedFsync: optimizedFsync,
 	}
 	w.encoder, err = newFileEncoder(f.File, 0)
 	if err != nil {
@@ -164,8 +164,8 @@ func Create(dirpath string, metadata []byte, optimized_fsync bool) (*WAL, error)
 // The returned WAL is ready to read and the first record will be the one after
 // the given snap. The WAL cannot be appended to before reading out all of its
 // previous records.
-func Open(dirpath string, snap walpb.Snapshot, optimized_fsync bool) (*WAL, error) {
-	w, err := openAtIndex(dirpath, snap, true, optimized_fsync)
+func Open(dirpath string, snap walpb.Snapshot, optimizedFsync bool) (*WAL, error) {
+	w, err := openAtIndex(dirpath, snap, true, optimizedFsync)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func OpenForRead(dirpath string, snap walpb.Snapshot) (*WAL, error) {
 	return openAtIndex(dirpath, snap, false, false)
 }
 
-func openAtIndex(dirpath string, snap walpb.Snapshot, write bool, optimized_fsync bool) (*WAL, error) {
+func openAtIndex(dirpath string, snap walpb.Snapshot, write bool, optimizedFsync bool) (*WAL, error) {
 	names, err := readWalNames(dirpath)
 	if err != nil {
 		return nil, err
@@ -222,12 +222,12 @@ func openAtIndex(dirpath string, snap walpb.Snapshot, write bool, optimized_fsyn
 
 	// create a WAL ready for reading
 	w := &WAL{
-		dir:             dirpath,
-		start:           snap,
-		decoder:         newDecoder(rs...),
-		readClose:       closer,
-		locks:           ls,
-		optimized_fsync: optimized_fsync,
+		dir:            dirpath,
+		start:          snap,
+		decoder:        newDecoder(rs...),
+		readClose:      closer,
+		locks:          ls,
+		optimizedFsync: optimizedFsync,
 	}
 
 	if write {
@@ -242,6 +242,12 @@ func openAtIndex(dirpath string, snap walpb.Snapshot, write bool, optimized_fsyn
 	}
 
 	return w, nil
+}
+
+func (w *WAL) ChangeFsyncFlag(optimizeFsync bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.optimizedFsync = optimizeFsync
 }
 
 // ReadAll reads out records of the current WAL.
@@ -558,7 +564,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 
 	mustSync := raft.MustSync(st, w.state, len(ents))
 	fsync := !raft.IsEmptyHardState(st) && (st.Vote != w.state.Vote || st.Term != w.state.Term)
-	if !w.optimized_fsync {
+	if !w.optimizedFsync {
 		fsync = true
 	}
 

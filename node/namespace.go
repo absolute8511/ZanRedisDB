@@ -152,7 +152,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 		nsMetas:       make(map[string]NamespaceMeta),
 		raftTransport: transport,
 		machineConf:   conf,
-		newLeaderChan: make(chan string, 16),
+		newLeaderChan: make(chan string, 2048),
 		stopC:         make(chan struct{}),
 	}
 	regID, err := ns.LoadMachineRegID()
@@ -490,22 +490,25 @@ func (self *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error
 }
 
 func (self *NamespaceMgr) checkNamespaceRaftLeader() {
-	ticker := time.NewTicker(time.Second * 5)
+	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	leaderNodes := make([]*NamespaceNode, 0)
-	// while close or remove raft node, we need check if any remote transport peer
-	// should be closed.
+	// report to leader may failed, so we need retry and check period
 	doCheck := func() {
 		leaderNodes = leaderNodes[:0]
 		self.mutex.RLock()
 		for _, v := range self.kvNodes {
-			if v.IsReady() && v.Node.IsLead() {
-				leaderNodes = append(leaderNodes, v)
+			if v.IsReady() {
+				if v.Node.IsLead() {
+					leaderNodes = append(leaderNodes, v)
+				} else {
+					v.Node.store.StopTTLChecker()
+				}
 			}
 		}
 		self.mutex.RUnlock()
 		for _, v := range leaderNodes {
-			v.Node.ReportMeRaftLeader()
+			v.Node.ReportMeLeaderToCluster()
 		}
 	}
 
@@ -520,7 +523,7 @@ func (self *NamespaceMgr) checkNamespaceRaftLeader() {
 			if !ok {
 				nodeLog.Infof("leader changed namespace not found: %v", ns)
 			} else if v.IsReady() {
-				v.Node.ReportMeRaftLeader()
+				v.Node.OnRaftLeaderChanged()
 			}
 		case <-self.stopC:
 			return

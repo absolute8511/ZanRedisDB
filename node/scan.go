@@ -66,7 +66,7 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
 	}
 
-	set := splits[0]
+	table := splits[0]
 
 	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
@@ -79,12 +79,13 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 		nextCursor = []byte("")
 	} else {
 		item := ay[length-1]
-		tab, _, err := common.ExtraSet(item)
-		if err == nil && !bytes.Equal(tab, set) {
+
+		tab, _, err := common.ExtraTable(item)
+		if err == nil && !bytes.Equal(tab, table) {
 			for idx, v := range ay {
 
-				tab, _, err := common.ExtraSet(v)
-				if err != nil || !bytes.Equal(tab, set) {
+				tab, _, err := common.ExtraTable(v)
+				if err != nil || !bytes.Equal(tab, table) {
 					nextCursor = []byte("")
 					ay = ay[:idx]
 					break
@@ -142,7 +143,8 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	if len(splits) != 2 {
 		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
 	}
-	set := splits[0]
+
+	table := splits[0]
 
 	var ay [][]byte
 
@@ -159,12 +161,12 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 		nextCursor = []byte("")
 	} else {
 		item := ay[length-1]
-		tab, _, err := common.ExtraSet(item)
-		if err == nil && !bytes.Equal(tab, set) {
+		tab, _, err := common.ExtraTable(item)
+		if err == nil && !bytes.Equal(tab, table) {
 			for idx, v := range ay {
 
-				tab, _, err := common.ExtraSet(v)
-				if err != nil || !bytes.Equal(tab, set) {
+				tab, _, err := common.ExtraTable(v)
+				if err != nil || !bytes.Equal(tab, table) {
 					nextCursor = []byte("")
 					ay = ay[:idx]
 					break

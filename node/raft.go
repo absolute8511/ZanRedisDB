@@ -753,7 +753,7 @@ func (rc *raftNode) serveChannels() {
 	}()
 
 	// event loop on raft state machine updates
-	isLeader := false
+	isMeNewLeader := false
 	for {
 		select {
 		// store raft entries to wal, then publish over commit channel
@@ -763,13 +763,15 @@ func (rc *raftNode) serveChannels() {
 				return
 			}
 			if rd.SoftState != nil {
-				isLeader = rd.RaftState == raft.StateLeader
-				if lead := atomic.LoadUint64(&rc.lead); rd.SoftState.Lead != raft.None && lead != rd.SoftState.Lead {
-					rc.Infof("leader changed from %v to %v", lead, rd.SoftState)
+				isMeNewLeader = rd.RaftState == raft.StateLeader
+				oldLead := atomic.LoadUint64(&rc.lead)
+				isMeLosingLeader := (oldLead == uint64(rc.config.ID)) && !isMeNewLeader
+				if rd.SoftState.Lead != raft.None && oldLead != rd.SoftState.Lead {
+					rc.Infof("leader changed from %v to %v", oldLead, rd.SoftState)
 					atomic.StoreInt64(&rc.lastLeaderChangedTs, time.Now().UnixNano())
-					if isLeader {
-						rc.triggerNewLeader()
-					}
+				}
+				if isMeNewLeader || isMeLosingLeader {
+					rc.triggerLeaderChanged()
 				}
 				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
 			}
@@ -786,7 +788,7 @@ func (rc *raftNode) serveChannels() {
 			raftDone := make(chan struct{}, 1)
 			var applyWaitDone chan struct{}
 			waitApply := false
-			if !isLeader {
+			if !isMeNewLeader {
 				// Candidate or follower needs to wait for all pending configuration
 				// changes to be applied before sending messages.
 				// Otherwise we might incorrectly count votes (e.g. votes from removed members).
@@ -806,7 +808,7 @@ func (rc *raftNode) serveChannels() {
 			}
 
 			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, raftDone, applyWaitDone)
-			if isLeader {
+			if isMeNewLeader {
 				rc.transport.Send(rc.processMessages(rd.Messages))
 			}
 			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
@@ -826,7 +828,7 @@ func (rc *raftNode) serveChannels() {
 				rc.Infof("raft applied incoming snapshot at index: %v", rd.Snapshot.String())
 			}
 			rc.raftStorage.Append(rd.Entries)
-			if !isLeader {
+			if !isMeNewLeader {
 				msgs := rc.processMessages(rd.Messages)
 				raftDone <- struct{}{}
 				if waitApply {
@@ -944,10 +946,10 @@ func (rc *raftNode) getLastLeaderChangedTime() int64 {
 	return atomic.LoadInt64(&rc.lastLeaderChangedTs)
 }
 
-func (rc *raftNode) triggerNewLeader() {
+func (rc *raftNode) triggerLeaderChanged() {
 	select {
 	case rc.newLeaderChan <- rc.config.GroupName:
-	default:
+	case <-rc.stopc:
 	}
 }
 

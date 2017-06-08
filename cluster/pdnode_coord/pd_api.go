@@ -129,7 +129,8 @@ func (self *PDCoordinator) deleteNamespacePartition(namespace string, pid int) e
 	return nil
 }
 
-func (self *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newReplicator int) error {
+func (self *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newReplicator int,
+	optimizeFsync string, snapCount int) error {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
 		CoordLog().Infof("not leader while create namespace")
 		return ErrNotLeader
@@ -157,6 +158,14 @@ func (self *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newReplica
 		meta = oldMeta
 		if newReplicator > 0 {
 			meta.Replica = newReplicator
+		}
+		if snapCount > 0 {
+			meta.SnapCount = snapCount
+		}
+		if optimizeFsync == "true" {
+			meta.OptimizedFsync = true
+		} else if optimizeFsync == "false" {
+			meta.OptimizedFsync = false
 		}
 		err = self.updateNamespaceMeta(currentNodes, namespace, &meta)
 		if err != nil {
