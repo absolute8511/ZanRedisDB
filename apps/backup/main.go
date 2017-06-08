@@ -110,7 +110,7 @@ func kvbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	lenBuf := make([]byte, 4)
 	for res := range ch {
 		defer func() {
-			time.Sleep(tm * time.Microsecond)
+			time.Sleep(tm)
 		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
@@ -175,7 +175,7 @@ func hbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	var itemNum uint32
 	for res := range ch {
 		defer func() {
-			time.Sleep(tm * time.Microsecond)
+			time.Sleep(tm)
 		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
@@ -260,7 +260,7 @@ func sbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	var itemNum uint32
 	for res := range ch {
 		defer func() {
-			time.Sleep(tm * time.Microsecond)
+			time.Sleep(tm)
 		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
@@ -340,7 +340,7 @@ func zbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	var itemNum uint32
 	for res := range ch {
 		defer func() {
-			time.Sleep(tm * time.Microsecond)
+			time.Sleep(tm)
 		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
@@ -458,7 +458,7 @@ func lbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	var itemNum uint32
 	for res := range ch {
 		defer func() {
-			time.Sleep(tm * time.Microsecond)
+			time.Sleep(tm)
 		}()
 		keyLen := len(res)
 		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
