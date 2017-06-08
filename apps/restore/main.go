@@ -125,16 +125,13 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 		realKey = append(realKey, []byte(":")...)
 		realKey = append(realKey, key...)
 
-		val, err := client.KVGet(*set, realKey)
-		if err == nil {
-			fmt.Printf("key is already exsits in kv.[key=%s, realKey=%s, val=%v]\n", string(key), realKey, val)
-			continue
-		}
-
-		err = client.KVSet(*set, realKey, val)
+		val, err := client.KVSetnx(*set, realKey)
 		if err != nil {
 			fmt.Printf("restore error. [key=%s, realKey=%s, val=%v, err=%v]\n", key, realKey, val, err)
-			continue
+			break
+		}
+		if val == 0 {
+			fmt.Printf("key is already exsits in kv.[key=%s, realKey=%s, val=%v]\n", string(key), realKey, val)
 		}
 		total++
 	}
