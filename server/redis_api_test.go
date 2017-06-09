@@ -117,8 +117,15 @@ func TestKV(t *testing.T) {
 	}
 
 	time.Sleep(time.Second * 4)
-	if _, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
-		t.Fatal(err)
+	if v, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
+		if err == nil && v == "hello world" {
+			time.Sleep(time.Second * 8)
+			if v, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
+				t.Fatalf("get expired key error: %v, %v", v, err)
+			}
+		} else {
+			t.Fatalf("get expired key error: %v, %v", v, err)
+		}
 	}
 
 	if v, err := goredis.String(c.Do("get", key1)); err != nil {

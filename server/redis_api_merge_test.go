@@ -293,7 +293,7 @@ func testMergeSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	checkMergeAdvanceScan(t, c, "SET")
 }
 
-func TestKVMergecan(t *testing.T) {
+func TestKVMergeScanCrossTable(t *testing.T) {
 
 	c := getMergeTestConn(t)
 	defer c.Close()
@@ -318,9 +318,8 @@ func TestKVMergecan(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		for _, v := range a {
-			fmt.Println(v)
+		if len(a) != 20 {
+			t.Fatal("want 20 get ", len(a))
 		}
 	}
 }
