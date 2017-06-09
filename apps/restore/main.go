@@ -17,13 +17,14 @@ var (
 	data    = flagSet.String("data", "data", "back up data dir name")
 	lookup  = flagSet.String("lookup", "", "lookup list, split by ','")
 	ns      = flagSet.String("ns", "", "namespace of restore")
-	set     = flagSet.String("set", "", "table name of restore")
+	table   = flagSet.String("table", "", "table name of restore")
 	qps     = flagSet.Int("qps", 1000, "qps")
 	pass    = flagSet.String("pass", "", "password of zankv")
 )
 var (
-	oriNS string
-	tm    time.Duration
+	oriNS    string
+	oriTable string
+	tm       time.Duration
 )
 
 const (
@@ -43,16 +44,6 @@ func checkParameter() {
 		help()
 	}
 
-	if len(*ns) <= 0 {
-		fmt.Println("Error:must specify the namespace")
-		help()
-	}
-
-	if len(*set) <= 0 {
-		fmt.Println("Error:must specify the table name")
-		help()
-	}
-
 	if len(*data) <= 0 {
 		fmt.Println("Error:must specify the back up data dir, default is 'data_dir'")
 		help()
@@ -67,7 +58,7 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 	var n int
 	var err error
 	var total uint64
-	var realKey []byte
+	//	var realKey []byte
 	for {
 		defer func() {
 			time.Sleep(tm)
@@ -125,18 +116,15 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 			break
 		}
 
-		realKey = realKey[:0]
-		realKey = append(realKey, []byte(oriNS)...)
-		realKey = append(realKey, []byte(":")...)
-		realKey = append(realKey, key...)
-
-		val, err := client.KVSetnx(*set, realKey)
+		val, err := client.KVSetnx(oriTable, key, value)
 		if err != nil {
-			fmt.Printf("restore error. [key=%s, realKey=%s, val=%v, err=%v]\n", key, realKey, val, err)
+			fmt.Printf("restore error. [key=%s, val=%v, err=%v]\n", key, val, err)
 			break
 		}
 		if val == 0 {
-			fmt.Printf("key is already exsits in kv.[key=%s, realKey=%s, val=%v]\n", string(key), realKey, val)
+			fmt.Printf("key is already exsits in kv.[key=%s]\n", string(key))
+		} else {
+			fmt.Printf("restore success. [key=%s]\n", string(key))
 		}
 		total++
 	}
@@ -160,22 +148,6 @@ func lrestore(file *os.File, client *sdk.ZanRedisClient) {
 }
 
 func restore() {
-
-	lookupList := strings.Split(*lookup, ",")
-
-	conf := &sdk.Conf{
-		LookupList:   lookupList,
-		DialTimeout:  1 * time.Second,
-		ReadTimeout:  1 * time.Second,
-		WriteTimeout: 1 * time.Second,
-		TendInterval: 100,
-		Namespace:    *ns,
-		Password:     *pass,
-	}
-	client := sdk.NewZanRedisClient(conf)
-	client.Start()
-	defer client.Stop()
-
 	file, err := os.Open(*data)
 	if err != nil {
 		fmt.Printf("open file error. [path=%s, err=%v]\n", *data, err)
@@ -255,8 +227,41 @@ func restore() {
 		fmt.Printf("read origin namespace length not equal. [path=%s, ns=%s, n=%d, len=%d]\n", *data, string(oriNSBuf), n, length)
 		return
 	}
+	if len(*ns) > 0 {
+		oriNS = *ns
+	} else {
+		oriNS = string(oriNSBuf)
+	}
 
-	oriNS = string(oriNSBuf)
+	n, err = file.Read(lenBuf)
+	if err != nil {
+		fmt.Printf("read origin table's len error. [path=%s, err=%v]\n", *data, err)
+		return
+	}
+
+	if n != 4 {
+		fmt.Printf("read origin table's len length not equal. [path=%s, n=%d]\n", *data, n)
+		return
+	}
+
+	length = binary.BigEndian.Uint32(lenBuf)
+
+	oriTableBuf := make([]byte, length)
+	n, err = file.Read(oriTableBuf)
+	if err != nil {
+		fmt.Printf("read origin table error. [path=%s, err=%v]\n", *data, err)
+		return
+	}
+
+	if uint32(n) != length {
+		fmt.Printf("read origin table length not equal. [path=%s, table=%s, n=%d, len=%d]\n", *data, string(oriTableBuf), n, length)
+		return
+	}
+	if len(*table) > 0 {
+		oriTable = *table
+	} else {
+		oriTable = string(oriTableBuf)
+	}
 
 	tp := make([]byte, 1)
 
@@ -272,6 +277,21 @@ func restore() {
 	}
 
 	t := tp[0]
+
+	lookupList := strings.Split(*lookup, ",")
+
+	conf := &sdk.Conf{
+		LookupList:   lookupList,
+		DialTimeout:  1 * time.Second,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
+		TendInterval: 100,
+		Namespace:    oriNS,
+		Password:     *pass,
+	}
+	client := sdk.NewZanRedisClient(conf)
+	client.Start()
+	defer client.Stop()
 
 	switch t {
 	case 0:
