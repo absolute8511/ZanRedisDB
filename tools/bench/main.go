@@ -147,7 +147,8 @@ func benchSetEx() {
 		value := make([]byte, *valueSize)
 		copy(value, valueSample)
 		n := atomic.AddInt64(&kvSetBase, 1)
-		tmp := fmt.Sprintf("%010d", int(n))
+		ttl := rand.Int31n(int32(*maxExpireSecs-*minExpireSecs)) + int32(*minExpireSecs)
+		tmp := fmt.Sprintf("%010d-%d", int(n), ttl)
 		ts := time.Now().String()
 		index := 0
 		copy(value[index:], magicIdentify)
@@ -163,8 +164,7 @@ func benchSetEx() {
 		if *valueSize > len(magicIdentify) {
 			copy(value[len(value)-len(magicIdentify):], magicIdentify)
 		}
-		ttl := rand.Int31n(int32(*maxExpireSecs-*minExpireSecs)) + int32(*minExpireSecs)
-		return waitBench(c, "SETEX", ttl, tmp, value)
+		return waitBench(c, "SETEX", tmp, ttl, value)
 	}
 
 	bench("setex", f)
