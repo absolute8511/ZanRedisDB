@@ -148,7 +148,7 @@ func benchSetEx() {
 		copy(value, valueSample)
 		n := atomic.AddInt64(&kvSetBase, 1)
 		ttl := rand.Int31n(int32(*maxExpireSecs-*minExpireSecs)) + int32(*minExpireSecs)
-		tmp := fmt.Sprintf("%010d-%d", int(n), ttl)
+		tmp := fmt.Sprintf("%010d-%d-%s", int(n), ttl, time.Now().String())
 		ts := time.Now().String()
 		index := 0
 		copy(value[index:], magicIdentify)

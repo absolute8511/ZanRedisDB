@@ -79,6 +79,7 @@ func (self *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/namespace/create", common.Decorate(self.doCreateNamespace, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/delete", common.Decorate(self.doDeleteNamespace, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/meta/update", common.Decorate(self.doUpdateNamespaceMeta, log, common.V1))
+	router.Handle("POST", "/stable/nodenum", common.Decorate(self.doSetStableNodeNum, log, common.V1))
 
 	router.Handle("POST", "/loglevel/set", common.Decorate(self.doSetLogLevel, log, common.V1))
 	self.router = router
@@ -431,6 +432,26 @@ func (self *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Reque
 	err = self.pdCoord.ChangeNamespaceMetaParam(ns, replicator, optimizeFsyncStr, snapCount)
 	if err != nil {
 		sLog.Infof("update namespace meta failed: %v, %v", ns, err)
+		return nil, common.HttpErr{Code: 400, Text: err.Error()}
+	}
+	return nil, nil
+}
+
+func (self *Server) doSetStableNodeNum(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	numStr := reqParams.Get("number")
+	if numStr == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NUMBER"}
+	}
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "BAD_ARG_STRING"}
+	}
+	err = self.pdCoord.SetClusterStableNodeNum(num)
+	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: err.Error()}
 	}
 	return nil, nil
