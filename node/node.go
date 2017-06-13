@@ -778,6 +778,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 						if err != nil {
 							self.w.Trigger(reqID, err)
 						} else {
+							cmdStart := time.Now()
 							cmdName := strings.ToLower(string(cmd.Args[0]))
 							if batchSet != nil {
 								if cmdName == "set" {
@@ -789,9 +790,12 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 								}
 								if len(batchSet) > 1 {
 									h, _ := self.router.GetInternalCmdHandler(string(batchSet[0]))
-									cmdStart := time.Now()
 									_, err := h(redcon.Command{Raw: nil, Args: batchSet}, req.Header.Timestamp)
 									cmdCost := time.Since(cmdStart)
+									if cmdCost >= time.Second {
+										self.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
+											cmdName, len(batchReqIDList), cmdCost)
+									}
 									self.dbWriteStats.UpdateWriteStats(int64(len(batchSet[2]))*int64(len(batchReqIDList)), cmdCost.Nanoseconds()/1000)
 									// write the future response or error
 									for _, rid := range batchReqIDList {
@@ -813,7 +817,6 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 								self.rn.Infof("unsupported redis command: %v", cmd)
 								self.w.Trigger(reqID, common.ErrInvalidCommand)
 							} else {
-								cmdStart := time.Now()
 								v, err := h(cmd, req.Header.Timestamp)
 								cmdCost := time.Since(cmdStart)
 								if cmdCost >= time.Second {
