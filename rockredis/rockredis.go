@@ -33,6 +33,8 @@ func GetCheckpointDir(term uint64, index uint64) string {
 	return fmt.Sprintf("%016x-%016x", term, index)
 }
 
+var batchableCmds map[string]bool
+
 type RockOptions struct {
 	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
 	BlockSize                      int    `json:"block_size"`
@@ -176,6 +178,7 @@ type RockDB struct {
 	backupC          chan *BackupInfo
 	engOpened        int32
 	ttlChecker       *TTLChecker
+	isBatching       int32
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -614,4 +617,51 @@ func (r *RockDB) RegisterZSetExpired(f OnExpiredFunc) {
 
 func (r *RockDB) RegisterHashExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterHashExpired(f)
+}
+
+func (r *RockDB) BeginBatchWrite() error {
+	if atomic.CompareAndSwapInt32(&r.isBatching, 0, 1) {
+		r.wb.Clear()
+		return nil
+	}
+	return errors.New("another batching is waiting")
+}
+
+func (r *RockDB) MaybeClearBatch() {
+	if atomic.LoadInt32(&r.isBatching) == 1 {
+		return
+	}
+	r.wb.Clear()
+}
+
+func (r *RockDB) MaybeCommitBatch() error {
+	if atomic.LoadInt32(&r.isBatching) == 1 {
+		return nil
+	}
+	return r.eng.Write(r.defaultWriteOpts, r.wb)
+}
+
+func (r *RockDB) CommitBatchWrite() error {
+	err := r.eng.Write(r.defaultWriteOpts, r.wb)
+	atomic.StoreInt32(&r.isBatching, 0)
+	return err
+}
+
+func IsBatchableWrite(cmd string) bool {
+	_, ok := batchableCmds[cmd]
+	return ok
+}
+
+func init() {
+	batchableCmds = make(map[string]bool)
+	// command need response value (not just error or ok) can not be batched
+	//batchableCmds["incr"] = true
+	batchableCmds["set"] = true
+	batchableCmds["mset"] = true
+	//batchableCmds["setnx"] = true
+	batchableCmds["setex"] = true
+	//batchableCmds["setrange"] = true
+	//batchableCmds["append"] = true
+	//batchableCmds["persist"] = true
+	batchableCmds["del"] = true
 }

@@ -41,6 +41,7 @@ const (
 	RedisReq       int8 = 0
 	HTTPReq        int8 = 1
 	proposeTimeout      = time.Second * 10
+	maxBatchCmdNum      = 500
 )
 
 type nodeProgress struct {
@@ -766,11 +767,10 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 					self.rn.Infof("request check failed %v, real len:%v",
 						reqList, len(reqList.Reqs))
 				}
-				var batchSet [][]byte
-				if len(reqList.Reqs) > 1 {
-					batchSet = append(batchSet, []byte("mset"))
-				}
+				batching := false
 				var batchReqIDList []uint64
+				var batchReqRspList []interface{}
+				var batchStart time.Time
 				for reqIndex, req := range reqList.Reqs {
 					reqID := req.Header.ID
 					if req.Header.DataType == 0 {
@@ -780,38 +780,69 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 						} else {
 							cmdStart := time.Now()
 							cmdName := strings.ToLower(string(cmd.Args[0]))
-							if batchSet != nil {
-								if cmdName == "set" {
-									batchSet = append(batchSet, cmd.Args[1:]...)
+							handled := false
+							if self.store.IsBatchableWrite(cmdName) && len(batchReqIDList) < maxBatchCmdNum {
+								if !batching {
+									err := self.store.BeginBatchWrite()
+									if err != nil {
+										self.rn.Infof("bengin batch command %v failed: %v, %v", cmdName, cmd, err)
+										self.w.Trigger(reqID, err)
+										continue
+									}
+									batchStart = time.Now()
+									batching = true
+								}
+								handled = true
+								h, ok := self.router.GetInternalCmdHandler(cmdName)
+								if !ok {
+									self.rn.Infof("unsupported redis command: %v", cmdName)
+									self.w.Trigger(reqID, common.ErrInvalidCommand)
+								} else {
+									v, err := h(cmd, req.Header.Timestamp)
+									if err != nil {
+										self.w.Trigger(reqID, err)
+										continue
+									}
 									batchReqIDList = append(batchReqIDList, reqID)
+									batchReqRspList = append(batchReqRspList, v)
+									self.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
 								}
-								if cmdName == "set" && reqIndex < len(reqList.Reqs)-1 {
-									continue
+								if nodeLog.Level() > common.LOG_DETAIL {
+									self.rn.Infof("batching redis command: %v", cmdName)
 								}
-								if len(batchSet) > 1 {
-									h, _ := self.router.GetInternalCmdHandler(string(batchSet[0]))
-									_, err := h(redcon.Command{Raw: nil, Args: batchSet}, req.Header.Timestamp)
-									cmdCost := time.Since(cmdStart)
-									if cmdCost >= time.Second {
-										self.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
-											cmdName, len(batchReqIDList), cmdCost)
-									}
-									self.dbWriteStats.UpdateWriteStats(int64(len(batchSet[2]))*int64(len(batchReqIDList)), cmdCost.Nanoseconds()/1000)
-									// write the future response or error
-									for _, rid := range batchReqIDList {
-										if err != nil {
-											self.w.Trigger(rid, err)
-										} else {
-											self.w.Trigger(rid, nil)
-										}
-									}
-									batchSet = nil
-									batchReqIDList = nil
-								}
-								if cmdName == "set" {
+								if reqIndex < len(reqList.Reqs)-1 {
 									continue
 								}
 							}
+							if batching {
+								err := self.store.CommitBatchWrite()
+								batching = false
+								batchCost := time.Since(batchStart)
+								if nodeLog.Level() >= common.LOG_DETAIL {
+									self.rn.Infof("batching command number: %v", len(batchReqIDList))
+								}
+								// write the future response or error
+								for idx, rid := range batchReqIDList {
+									if err != nil {
+										self.w.Trigger(rid, err)
+									} else {
+										self.w.Trigger(rid, batchReqRspList[idx])
+									}
+								}
+								if batchCost >= time.Second {
+									self.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
+										cmdName, len(batchReqIDList), batchCost)
+								}
+								if len(batchReqIDList) > 0 {
+									self.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+								}
+								batchReqIDList = batchReqIDList[:0]
+								batchReqRspList = batchReqRspList[:0]
+							}
+							if handled {
+								continue
+							}
+
 							h, ok := self.router.GetInternalCmdHandler(cmdName)
 							if !ok {
 								self.rn.Infof("unsupported redis command: %v", cmd)
@@ -831,11 +862,34 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 								}
 							}
 						}
-					} else if req.Header.DataType == int32(HTTPReq) {
-						//TODO: try other protocol command
-						self.w.Trigger(reqID, errUnknownData)
 					} else {
-						self.w.Trigger(reqID, errUnknownData)
+						if batching {
+							err := self.store.CommitBatchWrite()
+							batching = false
+							batchCost := time.Since(batchStart)
+							// write the future response or error
+							for _, rid := range batchReqIDList {
+								if err != nil {
+									self.w.Trigger(rid, err)
+								} else {
+									self.w.Trigger(rid, nil)
+								}
+							}
+							if batchCost >= time.Second {
+								self.rn.Infof("slow batch write command batch: %v, cost: %v",
+									len(batchReqIDList), batchCost)
+							}
+							if len(batchReqIDList) > 0 {
+								self.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+							}
+							batchReqIDList = batchReqIDList[:0]
+						}
+						if req.Header.DataType == int32(HTTPReq) {
+							//TODO: try other protocol command
+							self.w.Trigger(reqID, errUnknownData)
+						} else {
+							self.w.Trigger(reqID, errUnknownData)
+						}
 					}
 				}
 				cost := time.Since(start)
