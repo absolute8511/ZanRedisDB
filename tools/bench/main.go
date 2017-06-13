@@ -24,6 +24,8 @@ var tests = flag.String("t", "set,get,randget,del,lpush,lrange,lpop,hset,hget,hd
 var primaryKeyCnt = flag.Int("pkn", 100, "primary key count for hash,list,set,zset")
 var namespace = flag.String("namespace", "default", "the prefix namespace")
 var table = flag.String("table", "test", "the table to write")
+var maxExpireSecs = flag.Int("maxExpire", 60, "max expire seconds to be allowed with setex")
+var minExpireSecs = flag.Int("minExpire", 10, "min expire seconds to be allowed with setex")
 var wg sync.WaitGroup
 
 var client *goredis.Client
@@ -161,7 +163,8 @@ func benchSetEx() {
 		if *valueSize > len(magicIdentify) {
 			copy(value[len(value)-len(magicIdentify):], magicIdentify)
 		}
-		return waitBench(c, "SETEX", tmp, value)
+		ttl := rand.Int31n(int32(*maxExpireSecs-*minExpireSecs)) + int32(*minExpireSecs)
+		return waitBench(c, "SETEX", ttl, tmp, value)
 	}
 
 	bench("setex", f)
