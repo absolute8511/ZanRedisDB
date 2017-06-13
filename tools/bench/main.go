@@ -126,6 +126,47 @@ func benchSet() {
 	bench("set", f)
 }
 
+func benchSetEx() {
+	atomic.StoreInt64(&kvSetBase, 0)
+
+	valueSample := make([]byte, *valueSize)
+	for i := 0; i < len(valueSample); i++ {
+		valueSample[i] = byte(i % 255)
+	}
+	magicIdentify := make([]byte, 9+3+3)
+	for i := 0; i < len(magicIdentify); i++ {
+		if i < 3 || i > len(magicIdentify)-3 {
+			magicIdentify[i] = 0
+		} else {
+			magicIdentify[i] = byte(i % 3)
+		}
+	}
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
+		value := make([]byte, *valueSize)
+		copy(value, valueSample)
+		n := atomic.AddInt64(&kvSetBase, 1)
+		tmp := fmt.Sprintf("%010d", int(n))
+		ts := time.Now().String()
+		index := 0
+		copy(value[index:], magicIdentify)
+		index += len(magicIdentify)
+		if index < *valueSize {
+			copy(value[index:], ts)
+			index += len(ts)
+		}
+		if index < *valueSize {
+			copy(value[index:], tmp)
+			index += len(tmp)
+		}
+		if *valueSize > len(magicIdentify) {
+			copy(value[len(value)-len(magicIdentify):], magicIdentify)
+		}
+		return waitBench(c, "SETEX", tmp, value)
+	}
+
+	bench("setex", f)
+}
+
 func benchGet() {
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&kvGetBase, 1)
@@ -422,6 +463,8 @@ func main() {
 			switch strings.ToLower(s) {
 			case "set":
 				benchSet()
+			case "setex":
+				benchSetEx()
 			case "get":
 				benchGet()
 			case "randget":
