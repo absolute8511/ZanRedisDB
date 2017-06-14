@@ -50,6 +50,7 @@ type RockOptions struct {
 	MaxBackgroundCompactions       int    `json:"max_background_compactions"`
 	MinLevelToCompress             int    `json:"min_level_to_compress"`
 	MaxMainifestFileSize           uint64 `json:"max_mainifest_file_size"`
+	RateBytesPerSec                int64  `json:"rate_bytes_per_sec"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -93,6 +94,9 @@ func FillDefaultOptions(opts *RockOptions) {
 	}
 	if opts.MaxMainifestFileSize <= 0 {
 		opts.MaxMainifestFileSize = 1024 * 1024 * 32
+	}
+	if opts.RateBytesPerSec <= 0 {
+		opts.RateBytesPerSec = 1024 * 1024 * 64
 	}
 }
 
@@ -173,6 +177,7 @@ type RockDB struct {
 	defaultWriteOpts *gorocksdb.WriteOptions
 	defaultReadOpts  *gorocksdb.ReadOptions
 	wb               *gorocksdb.WriteBatch
+	lruCache         *gorocksdb.Cache
 	quit             chan struct{}
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
@@ -195,17 +200,20 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto.SetBlockSize(cfg.BlockSize)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(cfg.BlockCache))
+	lru := gorocksdb.NewLRUCache(cfg.BlockCache)
+	bbto.SetBlockCache(lru)
 	// cache index and filter blocks can save some memory,
 	// if not cache, the index and filter will be pre-loaded in memory
 	bbto.SetCacheIndexAndFilterBlocks(cfg.CacheIndexAndFilterBlocks)
 	// /* filter should not block_based, use sst based to reduce cpu */
 	filter := gorocksdb.NewBloomFilter(10, false)
 	bbto.SetFilterPolicy(filter)
+	rateLimiter := gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec)
 	opts := gorocksdb.NewDefaultOptions()
 	// optimize filter for hit, use less memory since last level will has no bloom filter
 	// opts.OptimizeFilterForHits(true)
 	opts.SetBlockBasedTableFactory(bbto)
+	opts.SetRateLimiter(rateLimiter)
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
@@ -232,6 +240,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	db := &RockDB{
 		cfg:              cfg,
 		dbOpts:           opts,
+		lruCache:         lru,
 		defaultReadOpts:  cfg.DefaultReadOpts,
 		defaultWriteOpts: cfg.DefaultWriteOpts,
 		wb:               gorocksdb.NewWriteBatch(),
@@ -328,9 +337,18 @@ func (r *RockDB) Close() {
 	r.closeEng()
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
+		r.defaultReadOpts = nil
 	}
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
+	}
+	if r.dbOpts != nil {
+		r.dbOpts.Destroy()
+		r.dbOpts = nil
+	}
+	if r.lruCache != nil {
+		r.lruCache.Destroy()
+		r.lruCache = nil
 	}
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
