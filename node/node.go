@@ -771,6 +771,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 				var batchReqIDList []uint64
 				var batchReqRspList []interface{}
 				var batchStart time.Time
+				dupCheckMap := make(map[string]bool, len(reqList.Reqs))
 				for reqIndex, req := range reqList.Reqs {
 					reqID := req.Header.ID
 					if req.Header.DataType == 0 {
@@ -780,8 +781,12 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 						} else {
 							cmdStart := time.Now()
 							cmdName := strings.ToLower(string(cmd.Args[0]))
+							_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
+							_, ok := dupCheckMap[string(pk)]
 							handled := false
-							if self.store.IsBatchableWrite(cmdName) && len(batchReqIDList) < maxBatchCmdNum {
+							if self.store.IsBatchableWrite(cmdName) &&
+								len(batchReqIDList) < maxBatchCmdNum &&
+								!ok {
 								if !batching {
 									err := self.store.BeginBatchWrite()
 									if err != nil {
@@ -798,6 +803,9 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 									self.rn.Infof("unsupported redis command: %v", cmdName)
 									self.w.Trigger(reqID, common.ErrInvalidCommand)
 								} else {
+									if pk != nil {
+										dupCheckMap[string(pk)] = true
+									}
 									v, err := h(cmd, req.Header.Timestamp)
 									if err != nil {
 										self.w.Trigger(reqID, err)
@@ -816,6 +824,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 							}
 							if batching {
 								err := self.store.CommitBatchWrite()
+								dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 								batching = false
 								batchCost := time.Since(batchStart)
 								if nodeLog.Level() >= common.LOG_DETAIL {
@@ -865,6 +874,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 					} else {
 						if batching {
 							err := self.store.CommitBatchWrite()
+							dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 							batching = false
 							batchCost := time.Since(batchStart)
 							// write the future response or error
