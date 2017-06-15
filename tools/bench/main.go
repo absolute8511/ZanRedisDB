@@ -55,6 +55,9 @@ func waitBench(c *goredis.PoolConn, cmd string, args ...interface{}) error {
 func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) error) {
 	wg.Add(*clients)
 
+	done := int32(0)
+	currentNumList := make([]int64, *clients)
+	errCnt := int64(0)
 	t1 := time.Now()
 	for i := 0; i < *clients; i++ {
 		go func(clientIndex int) {
@@ -63,15 +66,46 @@ func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) err
 			for j := 0; j < loop; j++ {
 				err = f(c, clientIndex, j)
 				if err != nil {
-					break
+					if atomic.AddInt64(&errCnt, 1) > int64(*clients)*100 {
+						break
+					}
 				}
+				atomic.AddInt64(&currentNumList[clientIndex], 1)
 			}
 			c.Close()
 			wg.Done()
 		}(i)
 	}
 
+	go func() {
+		lastNum := int64(0)
+		lastTime := time.Now()
+		for atomic.LoadInt32(&done) == 0 {
+			time.Sleep(time.Second * 30)
+			t2 := time.Now()
+			d := t2.Sub(lastTime)
+			num := int64(0)
+			for i, _ := range currentNumList {
+				num += atomic.LoadInt64(&currentNumList[i])
+			}
+			if num <= lastNum {
+				continue
+			}
+			fmt.Printf("%s: %s %0.3f micros/op, %0.2fop/s, err: %v, num:%v\n",
+				cmd,
+				d.String(),
+				float64(d.Nanoseconds()/1e3)/float64(num-lastNum),
+				float64(num-lastNum)/d.Seconds(),
+				atomic.LoadInt64(&errCnt),
+				num,
+			)
+			lastNum = num
+			lastTime = t2
+		}
+	}()
+
 	wg.Wait()
+	atomic.StoreInt32(&done, 1)
 
 	t2 := time.Now()
 
