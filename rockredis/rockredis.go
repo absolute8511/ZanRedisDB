@@ -95,9 +95,6 @@ func FillDefaultOptions(opts *RockOptions) {
 	if opts.MaxMainifestFileSize <= 0 {
 		opts.MaxMainifestFileSize = 1024 * 1024 * 32
 	}
-	if opts.RateBytesPerSec <= 0 {
-		opts.RateBytesPerSec = 1024 * 1024 * 64
-	}
 }
 
 type RockConfig struct {
@@ -208,12 +205,16 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	// /* filter should not block_based, use sst based to reduce cpu */
 	filter := gorocksdb.NewBloomFilter(10, false)
 	bbto.SetFilterPolicy(filter)
-	rateLimiter := gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec)
 	opts := gorocksdb.NewDefaultOptions()
 	// optimize filter for hit, use less memory since last level will has no bloom filter
 	// opts.OptimizeFilterForHits(true)
 	opts.SetBlockBasedTableFactory(bbto)
-	opts.SetRateLimiter(rateLimiter)
+
+	if cfg.RateBytesPerSec > 0 {
+		rateLimiter := gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec)
+		opts.SetRateLimiter(rateLimiter)
+	}
+
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
