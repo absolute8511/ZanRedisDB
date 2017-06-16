@@ -44,6 +44,10 @@ const (
 	maxBatchCmdNum      = 500
 )
 
+const (
+	HttpProposeOp_Backup int = 1
+)
+
 type nodeProgress struct {
 	confState raftpb.ConfState
 	snapi     uint64
@@ -53,6 +57,11 @@ type nodeProgress struct {
 type internalReq struct {
 	reqData InternalRaftRequest
 	done    chan struct{}
+}
+
+type httpProposeData struct {
+	ProposeOp  int
+	NeedBackup bool
 }
 
 // a key-value node backed by raft
@@ -165,6 +174,14 @@ func (self *KVNode) Stop() {
 
 func (self *KVNode) OptimizeDB() {
 	self.store.CompactRange()
+	// since we can not know whether leader or follower is done on optimize
+	// we backup anyway after optimize
+	p := &httpProposeData{
+		ProposeOp:  HttpProposeOp_Backup,
+		NeedBackup: true,
+	}
+	d, _ := json.Marshal(p)
+	self.HTTPPropose(d)
 }
 
 func (self *KVNode) IsLead() bool {
@@ -721,7 +738,8 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	np.appliedi = applyEvent.snapshot.Metadata.Index
 }
 
-func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
+// return if configure changed and whether need force backup
+func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	var lastCommittedIndex uint64
 	if len(applyEvent.ents) > 0 {
 		lastCommittedIndex = applyEvent.ents[len(applyEvent.ents)-1].Index
@@ -734,7 +752,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 	}
 	self.applySnapshot(np, applyEvent)
 	if len(applyEvent.ents) == 0 {
-		return false
+		return false, false
 	}
 	firsti := applyEvent.ents[0].Index
 	if firsti > np.appliedi+1 {
@@ -745,10 +763,11 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 		ents = applyEvent.ents[np.appliedi+1-firsti:]
 	}
 	if len(ents) == 0 {
-		return false
+		return false, false
 	}
 	var shouldStop bool
 	var confChanged bool
+	forceBackup := false
 	for i := range ents {
 		evnt := ents[i]
 		switch evnt.Type {
@@ -895,8 +914,19 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 							batchReqIDList = batchReqIDList[:0]
 						}
 						if req.Header.DataType == int32(HTTPReq) {
-							//TODO: try other protocol command
-							self.w.Trigger(reqID, errUnknownData)
+							var p httpProposeData
+							err := json.Unmarshal(req.Data, &p)
+							if err != nil {
+								self.rn.Infof("failed to unmarshal http propose: %v", req.String())
+								self.w.Trigger(reqID, err)
+							}
+							if p.ProposeOp == HttpProposeOp_Backup {
+								self.rn.Infof("got force backup request")
+								forceBackup = true
+								self.w.Trigger(reqID, nil)
+							} else {
+								self.w.Trigger(reqID, errUnknownData)
+							}
 						} else {
 							self.w.Trigger(reqID, errUnknownData)
 						}
@@ -930,9 +960,9 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 				self.Stop()
 			}
 		}()
-		return false
+		return false, false
 	}
-	return confChanged
+	return confChanged, forceBackup
 }
 
 func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
@@ -965,9 +995,9 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 			if ent.raftDone == nil {
 				nodeLog.Panicf("wrong events : %v", ent)
 			}
-			confChanged := self.applyAll(&np, &ent)
+			confChanged, forceBackup := self.applyAll(&np, &ent)
 			<-ent.raftDone
-			self.maybeTriggerSnapshot(&np, confChanged)
+			self.maybeTriggerSnapshot(&np, confChanged, forceBackup)
 			self.rn.handleSendSnapshot(&np)
 			if ent.applyWaitDone != nil {
 				close(ent.applyWaitDone)
@@ -978,19 +1008,23 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 	}
 }
 
-func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
+func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, forceBackup bool) {
 	if np.appliedi-np.snapi <= 0 {
-		return
-	}
-	if !confChanged && np.appliedi-np.snapi <= uint64(self.rn.config.SnapCount) {
 		return
 	}
 	if np.appliedi <= self.rn.lastIndex {
 		// replaying local log
+		self.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, self.rn.lastIndex)
 		return
 	}
 	if self.rn.Lead() == raft.None {
 		return
+	}
+
+	if !forceBackup {
+		if !confChanged && np.appliedi-np.snapi <= uint64(self.rn.config.SnapCount) {
+			return
+		}
 	}
 
 	self.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)

@@ -319,6 +319,9 @@ func (c *TTLChecker) check(stopChan chan struct{}) {
 
 	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
 		common.RangeROpen, 0, -1, false)
+	if err != nil {
+		return
+	}
 	defer it.Close()
 	if err != nil {
 		nc = now + 1
