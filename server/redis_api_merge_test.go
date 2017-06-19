@@ -379,31 +379,37 @@ func checkListBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 	}
 
 	var equalCount int
-	success := true
 	length := len(a)
-FATAL:
+
 	for _, val := range values {
 		for i := 0; i < length; i = i + 2 {
 			k := a[i].([]byte)
+			//			fmt.Println("key:", string(k))
 			if val.(string) == string(k) {
 				equalCount++
 				splits := bytes.SplitN(k, []byte(":"), 2)
 				if len(splits) != 2 {
-					success = false
-					break FATAL
+					t.Fatal("invlid key format. key:", string(k))
 				}
 
 				v := a[i+1].([]interface{})
-				if string(splits[1]) != string(v[0].([]byte)) {
-					success = false
-					break FATAL
+				length := len(v)
+				for j := 0; j < length; j++ {
+					lvalue := v[j].([]byte)
+					lvalue_splits := bytes.SplitN(lvalue, []byte("_"), 3)
+					if len(lvalue_splits) != 3 {
+						t.Fatal("invlid value format. lvalue:", string(lvalue))
+					}
+
+					if string(splits[1]) != string(lvalue_splits[1]) {
+						t.Fatal("invlid value format. lvalue:", string(lvalue), "; i:", string(splits[1]), "; j:", j)
+					}
+					//					fmt.Println(string(zvalue))
 				}
 			}
 		}
 	}
-	if !success {
-		t.Fatal("failed")
-	}
+
 	if equalCount != len(values) {
 		t.Fatal("equal count not equal")
 	}
@@ -428,6 +434,7 @@ FATAL:
 		for i := 0; i < length; i = i + 2 {
 			k := a[i].([]byte)
 			if val.(string) == string(k) {
+
 				equalCount++
 				splits := bytes.SplitN(k, []byte(":"), 2)
 				if len(splits) != 2 {
@@ -435,15 +442,33 @@ FATAL:
 					break FATAL
 				}
 
-				v := a[i+1].([]interface{})
-				if string(splits[1]) != string(v[0].([]byte)) {
-					t.Fatal("hash key error")
+				fieldcount, err := strconv.Atoi(string(splits[1]))
+				if err != nil {
+					t.Fatal(err)
 				}
+				v := a[i+1].([]interface{})
+				for j := 0; j <= fieldcount*2; j = j + 2 {
 
-				hashvalue := fmt.Sprintf("value_%s", splits[1])
-				if hashvalue != string(v[1].([]byte)) {
-					success = false
-					break FATAL
+					hashkey := v[j].([]byte)
+					hashvalue := v[j+1].([]byte)
+
+					hashvalue_splits := bytes.SplitN(hashvalue, []byte("_"), 3)
+					if len(hashvalue_splits) != 3 {
+						t.Fatal("hash value formats error")
+						success = false
+						break FATAL
+					}
+
+					if string(hashkey) != string(hashvalue_splits[2]) {
+						t.Fatal("hash key error, hashkey:", hashkey, "; hashvalue_splits[2]:", hashvalue_splits[2])
+						success = false
+						break FATAL
+					}
+					if string(splits[1]) != string(hashvalue_splits[1]) {
+						t.Fatal("hash value error, key index:", splits[1], "; hashvalue_splits[1]:", hashvalue_splits[1])
+						success = false
+						break FATAL
+					}
 				}
 
 			}
@@ -451,6 +476,52 @@ FATAL:
 	}
 	if !success {
 		t.Fatal("failed")
+	}
+	if equalCount != len(values) {
+		t.Fatal("equal count not equal")
+	}
+
+}
+
+func checkSetBackupValues(t *testing.T, ay interface{}, values []interface{}) {
+	a, err := goredis.MultiBulk(ay, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(a) != len(values)*2 {
+		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)*2))
+	}
+
+	var equalCount int
+	length := len(a)
+	for _, val := range values {
+		for i := 0; i < length; i = i + 2 {
+			k := a[i].([]byte)
+			//			fmt.Println("key:", string(k))
+			if val.(string) == string(k) {
+				equalCount++
+				splits := bytes.SplitN(k, []byte(":"), 2)
+				if len(splits) != 2 {
+					t.Fatal("invlid key format. key:", string(k))
+				}
+
+				v := a[i+1].([]interface{})
+				length := len(v)
+				for j := 0; j < length; j++ {
+					svalue := v[j].([]byte)
+					svalue_splits := bytes.SplitN(svalue, []byte("_"), 3)
+					if len(svalue_splits) != 3 {
+						t.Fatal("invlid value format. svalue:", string(svalue))
+					}
+
+					if string(splits[1]) != string(svalue_splits[1]) {
+						t.Fatal("invlid value format. svalue:", string(svalue), "; i:", string(splits[1]), "; j:", j)
+					}
+					//					fmt.Println(string(svalue))
+				}
+			}
+		}
 	}
 	if equalCount != len(values) {
 		t.Fatal("equal count not equal")
@@ -469,9 +540,8 @@ func checkZSetBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 	}
 
 	var equalCount int
-	success := true
 	length := len(a)
-FATAL:
+
 	for _, val := range values {
 		for i := 0; i < length; i = i + 2 {
 			k := a[i].([]byte)
@@ -479,27 +549,38 @@ FATAL:
 				equalCount++
 				splits := bytes.SplitN(k, []byte(":"), 2)
 				if len(splits) != 2 {
-					success = false
-					break FATAL
-				}
-				v := a[i+1].([]interface{})
-				member := fmt.Sprintf("value_%s", splits[1])
-				if string(v[0].([]byte)) != member {
-					success = false
-					break FATAL
+					t.Fatal("key format error", string(k))
 				}
 
-				if !bytes.Equal(splits[1], v[1].([]byte)) {
-					success = false
-					break FATAL
+				fieldcount, err := strconv.Atoi(string(splits[1]))
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				v := a[i+1].([]interface{})
+				for j := 0; j <= fieldcount*2; j = j + 2 {
+					zvalue := v[j].([]byte)
+					zscore := v[j+1].([]byte)
+					//					fmt.Println("zvalue:", string(zvalue), "; zscore:", string(zscore))
+
+					zvalue_splits := bytes.SplitN(zvalue, []byte("_"), 3)
+					if len(zvalue_splits) != 3 {
+						t.Fatal("zvalue value format error")
+					}
+
+					if string(zvalue_splits[1]) != string(splits[1]) {
+						t.Fatal("zvalue error. zvalue:", string(zvalue))
+					}
+
+					if string(zvalue_splits[2]) != string(zscore) {
+						t.Fatal("zcore error. zvalue:", string(zvalue), "; zscore:", string(zscore))
+					}
 				}
 
 			}
 		}
 	}
-	if !success {
-		t.Fatal("failed")
-	}
+
 	if equalCount != len(values) {
 		t.Fatal("equal count not equal")
 	}
@@ -510,10 +591,12 @@ func checkBackupValues(t *testing.T, ay interface{}, tp string, values ...interf
 	switch tp {
 	case "KV":
 		checkKVBackupValues(t, ay, values)
-	case "LIST", "SET":
+	case "LIST":
 		checkListBackupValues(t, ay, values)
 	case "HASH":
 		checkHashBackupValues(t, ay, values)
+	case "SET":
+		checkSetBackupValues(t, ay, values)
 	case "ZSET":
 		checkZSetBackupValues(t, ay, values)
 	}
@@ -632,15 +715,19 @@ func testKVBackup(t *testing.T, c *goredis.PoolConn) {
 
 func testHashBackup(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		value := fmt.Sprintf("value_%d", i)
-		if _, err := c.Do("hset", "default:testscanmerge:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i), []byte(value)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("hset", "default:testscanmerge:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", j), []byte(value)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	for i := 0; i < 20; i++ {
-		value := fmt.Sprintf("value_%d", i)
-		if _, err := c.Do("hset", "default:testscanmerge1:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i), []byte(value)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("hset", "default:testscanmerge1:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", j), []byte(value)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	checkBackup(t, c, "HASH")
@@ -649,13 +736,19 @@ func testHashBackup(t *testing.T, c *goredis.PoolConn) {
 
 func testListBackup(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("lpush", "default:testscanmerge:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("lpush", "default:testscanmerge:"+fmt.Sprintf("%d", i), value); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("lpush", "default:testscanmerge1:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("lpush", "default:testscanmerge1:"+fmt.Sprintf("%d", i), value); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -666,13 +759,19 @@ func testListBackup(t *testing.T, c *goredis.PoolConn) {
 
 func testSetBackup(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("sadd", "default:testscanmerge:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("sadd", "default:testscanmerge:"+fmt.Sprintf("%d", i), value); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("sadd", "default:testscanmerge1:"+fmt.Sprintf("%d", i), fmt.Sprintf("%d", i)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("sadd", "default:testscanmerge1:"+fmt.Sprintf("%d", i), value); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -682,16 +781,20 @@ func testSetBackup(t *testing.T, c *goredis.PoolConn) {
 
 func testZSetBackup(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		value := fmt.Sprintf("value_%d", i)
-		if _, err := c.Do("zadd", "default:testscanmerge:"+fmt.Sprintf("%d", i), i, []byte(value)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("zadd", "default:testscanmerge:"+fmt.Sprintf("%d", i), j, []byte(value)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
 	for i := 0; i < 20; i++ {
-		value := fmt.Sprintf("value_%d", i)
-		if _, err := c.Do("zadd", "default:testscanmerge1:"+fmt.Sprintf("%d", i), i, []byte(value)); err != nil {
-			t.Fatal(err)
+		for j := 0; j <= i; j++ {
+			value := fmt.Sprintf("value_%d_%d", i, j)
+			if _, err := c.Do("zadd", "default:testscanmerge1:"+fmt.Sprintf("%d", i), j, []byte(value)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
