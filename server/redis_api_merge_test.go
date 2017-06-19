@@ -384,7 +384,6 @@ func checkListBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 	for _, val := range values {
 		for i := 0; i < length; i = i + 2 {
 			k := a[i].([]byte)
-			//			fmt.Println("key:", string(k))
 			if val.(string) == string(k) {
 				equalCount++
 				splits := bytes.SplitN(k, []byte(":"), 2)
@@ -404,7 +403,6 @@ func checkListBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 					if string(splits[1]) != string(lvalue_splits[1]) {
 						t.Fatal("invlid value format. lvalue:", string(lvalue), "; i:", string(splits[1]), "; j:", j)
 					}
-					//					fmt.Println(string(zvalue))
 				}
 			}
 		}
@@ -498,7 +496,6 @@ func checkSetBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 	for _, val := range values {
 		for i := 0; i < length; i = i + 2 {
 			k := a[i].([]byte)
-			//			fmt.Println("key:", string(k))
 			if val.(string) == string(k) {
 				equalCount++
 				splits := bytes.SplitN(k, []byte(":"), 2)
@@ -518,7 +515,6 @@ func checkSetBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 					if string(splits[1]) != string(svalue_splits[1]) {
 						t.Fatal("invlid value format. svalue:", string(svalue), "; i:", string(splits[1]), "; j:", j)
 					}
-					//					fmt.Println(string(svalue))
 				}
 			}
 		}
@@ -549,7 +545,7 @@ func checkZSetBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 				equalCount++
 				splits := bytes.SplitN(k, []byte(":"), 2)
 				if len(splits) != 2 {
-					t.Fatal("key format error", string(k))
+					t.Fatal("key format error. key:", string(k))
 				}
 
 				fieldcount, err := strconv.Atoi(string(splits[1]))
@@ -561,7 +557,6 @@ func checkZSetBackupValues(t *testing.T, ay interface{}, values []interface{}) {
 				for j := 0; j <= fieldcount*2; j = j + 2 {
 					zvalue := v[j].([]byte)
 					zscore := v[j+1].([]byte)
-					//					fmt.Println("zvalue:", string(zvalue), "; zscore:", string(zscore))
 
 					zvalue_splits := bytes.SplitN(zvalue, []byte("_"), 3)
 					if len(zvalue_splits) != 3 {
