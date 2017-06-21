@@ -1014,7 +1014,9 @@ func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, for
 	}
 	if np.appliedi <= self.rn.lastIndex {
 		// replaying local log
-		self.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, self.rn.lastIndex)
+		if forceBackup {
+			self.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, self.rn.lastIndex)
+		}
 		return
 	}
 	if self.rn.Lead() == raft.None {
