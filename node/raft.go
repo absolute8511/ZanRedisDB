@@ -41,7 +41,7 @@ import (
 )
 
 const (
-	DefaultSnapCount = 50000
+	DefaultSnapCount = 160000
 
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
@@ -128,7 +128,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		rconfig.SnapCount = DefaultSnapCount
 	}
 	if rconfig.SnapCatchup <= 0 {
-		rconfig.SnapCatchup = rconfig.SnapCount / 2
+		rconfig.SnapCatchup = rconfig.SnapCount / 4
 	}
 
 	rc := &raftNode{

@@ -24,6 +24,8 @@ var tests = flag.String("t", "set,get,randget,del,lpush,lrange,lpop,hset,hget,hd
 var primaryKeyCnt = flag.Int("pkn", 100, "primary key count for hash,list,set,zset")
 var namespace = flag.String("namespace", "default", "the prefix namespace")
 var table = flag.String("table", "test", "the table to write")
+var maxExpireSecs = flag.Int("maxExpire", 60, "max expire seconds to be allowed with setex")
+var minExpireSecs = flag.Int("minExpire", 10, "min expire seconds to be allowed with setex")
 var wg sync.WaitGroup
 
 var client *goredis.Client
@@ -53,6 +55,9 @@ func waitBench(c *goredis.PoolConn, cmd string, args ...interface{}) error {
 func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) error) {
 	wg.Add(*clients)
 
+	done := int32(0)
+	currentNumList := make([]int64, *clients)
+	errCnt := int64(0)
 	t1 := time.Now()
 	for i := 0; i < *clients; i++ {
 		go func(clientIndex int) {
@@ -61,15 +66,46 @@ func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) err
 			for j := 0; j < loop; j++ {
 				err = f(c, clientIndex, j)
 				if err != nil {
-					break
+					if atomic.AddInt64(&errCnt, 1) > int64(*clients)*100 {
+						break
+					}
 				}
+				atomic.AddInt64(&currentNumList[clientIndex], 1)
 			}
 			c.Close()
 			wg.Done()
 		}(i)
 	}
 
+	go func() {
+		lastNum := int64(0)
+		lastTime := time.Now()
+		for atomic.LoadInt32(&done) == 0 {
+			time.Sleep(time.Second * 30)
+			t2 := time.Now()
+			d := t2.Sub(lastTime)
+			num := int64(0)
+			for i, _ := range currentNumList {
+				num += atomic.LoadInt64(&currentNumList[i])
+			}
+			if num <= lastNum {
+				continue
+			}
+			fmt.Printf("%s: %s %0.3f micros/op, %0.2fop/s, err: %v, num:%v\n",
+				cmd,
+				d.String(),
+				float64(d.Nanoseconds()/1e3)/float64(num-lastNum),
+				float64(num-lastNum)/d.Seconds(),
+				atomic.LoadInt64(&errCnt),
+				num,
+			)
+			lastNum = num
+			lastTime = t2
+		}
+	}()
+
 	wg.Wait()
+	atomic.StoreInt32(&done, 1)
 
 	t2 := time.Now()
 
@@ -124,6 +160,48 @@ func benchSet() {
 	}
 
 	bench("set", f)
+}
+
+func benchSetEx() {
+	atomic.StoreInt64(&kvSetBase, 0)
+
+	valueSample := make([]byte, *valueSize)
+	for i := 0; i < len(valueSample); i++ {
+		valueSample[i] = byte(i % 255)
+	}
+	magicIdentify := make([]byte, 9+3+3)
+	for i := 0; i < len(magicIdentify); i++ {
+		if i < 3 || i > len(magicIdentify)-3 {
+			magicIdentify[i] = 0
+		} else {
+			magicIdentify[i] = byte(i % 3)
+		}
+	}
+	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
+		value := make([]byte, *valueSize)
+		copy(value, valueSample)
+		n := atomic.AddInt64(&kvSetBase, 1)
+		ttl := rand.Int31n(int32(*maxExpireSecs-*minExpireSecs)) + int32(*minExpireSecs)
+		tmp := fmt.Sprintf("%010d-%d-%s", int(n), ttl, time.Now().String())
+		ts := time.Now().String()
+		index := 0
+		copy(value[index:], magicIdentify)
+		index += len(magicIdentify)
+		if index < *valueSize {
+			copy(value[index:], ts)
+			index += len(ts)
+		}
+		if index < *valueSize {
+			copy(value[index:], tmp)
+			index += len(tmp)
+		}
+		if *valueSize > len(magicIdentify) {
+			copy(value[len(value)-len(magicIdentify):], magicIdentify)
+		}
+		return waitBench(c, "SETEX", tmp, ttl, value)
+	}
+
+	bench("setex", f)
 }
 
 func benchGet() {
@@ -422,6 +500,8 @@ func main() {
 			switch strings.ToLower(s) {
 			case "set":
 				benchSet()
+			case "setex":
+				benchSetEx()
 			case "get":
 				benchGet()
 			case "randget":

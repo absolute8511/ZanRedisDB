@@ -101,7 +101,7 @@ func (db *RockDB) KVDel(key []byte) error {
 	if err != nil {
 		return err
 	}
-	db.wb.Clear()
+	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
 		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
 		if v != nil {
@@ -109,7 +109,7 @@ func (db *RockDB) KVDel(key []byte) error {
 		}
 	}
 	db.wb.Delete(key)
-	return db.eng.Write(db.defaultWriteOpts, db.wb)
+	return db.MaybeCommitBatch()
 }
 
 func (db *RockDB) Decr(ts int64, key []byte) (int64, error) {
@@ -130,11 +130,11 @@ func (db *RockDB) DelKeys(keys ...[]byte) {
 	}
 
 	//clear all the expire meta data related to the keys
-	db.wb.Clear()
+	db.MaybeClearBatch()
 	for _, k := range keys {
 		db.delExpire(KVType, k, db.wb)
 	}
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.MaybeCommitBatch()
 }
 
 func (db *RockDB) KVExists(key []byte) (int64, error) {
@@ -202,8 +202,7 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		return errTooMuchBatchSize
 	}
 
-	wb := db.wb
-	wb.Clear()
+	db.MaybeClearBatch()
 
 	var err error
 	var key []byte
@@ -230,15 +229,15 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 			}
 		}
 		value = append(value, tsBuf...)
-		wb.Put(key, value)
+		db.wb.Put(key, value)
 		//the expire meta data related to the key should be cleared as the key-value has been reset
 		db.delExpire(KVType, args[i].Key, db.wb)
 	}
 	for t, num := range tableCnt {
-		db.IncrTableKeyCount([]byte(t), int64(num), wb)
+		db.IncrTableKeyCount([]byte(t), int64(num), db.wb)
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.MaybeCommitBatch()
 	return err
 }
 
@@ -249,7 +248,7 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	} else if err = checkValueSize(value); err != nil {
 		return err
 	}
-	db.wb.Clear()
+	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
 		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
 		if v == nil {
@@ -262,7 +261,7 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 
 	db.delExpire(KVType, rawKey, db.wb)
 
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.MaybeCommitBatch()
 
 	return err
 }
@@ -274,7 +273,7 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	} else if err = checkValueSize(value); err != nil {
 		return err
 	}
-	db.wb.Clear()
+	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
 		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
 		if v == nil {
@@ -289,7 +288,7 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 		return err
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.MaybeCommitBatch()
 
 	return err
 

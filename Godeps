@@ -9,7 +9,7 @@ github.com/julienschmidt/httprouter
 github.com/prometheus/client_golang/prometheus
 github.com/reechou/xlock2
 github.com/spaolacci/murmur3
-github.com/tidwall/redcon
+github.com/absolute8511/redcon
 github.com/xiang90/probing
 github.com/siddontang/goredis
 github.com/mreiferson/go-options

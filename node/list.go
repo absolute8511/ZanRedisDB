@@ -1,7 +1,7 @@
 package node
 
 import (
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 	"strconv"
 )
 

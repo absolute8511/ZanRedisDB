@@ -35,6 +35,14 @@ func (self *PDCoordinator) GetAllNamespaces() (map[string]map[int]PartitionMetaI
 	return ns, int64(epoch), err
 }
 
+func (self *PDCoordinator) SetClusterStableNodeNum(num int) error {
+	if int32(num) > atomic.LoadInt32(&self.stableNodeNum) {
+		return errors.New("cluster stable node number can not be increased by manunal, only decrease allowed")
+	}
+	atomic.StoreInt32(&self.stableNodeNum, int32(num))
+	return nil
+}
+
 func (self *PDCoordinator) SetClusterUpgradeState(upgrading bool) error {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
 		CoordLog().Infof("not leader while delete namespace")
