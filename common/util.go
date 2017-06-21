@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 )
 
 const (

@@ -25,8 +25,8 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/absolute8511/redcon"
 	"github.com/coreos/etcd/pkg/wait"
-	"github.com/tidwall/redcon"
 )
 
 var (

@@ -19,8 +19,8 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/absolute8511/redcon"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/tidwall/redcon"
 	"golang.org/x/net/context"
 )
 

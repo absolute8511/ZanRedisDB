@@ -3,7 +3,7 @@ package node
 import (
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 )
 
 // all pipeline command handle here
