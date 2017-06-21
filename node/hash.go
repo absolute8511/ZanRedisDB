@@ -1,9 +1,10 @@
 package node
 
 import (
+	"strconv"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
-	"strconv"
 )
 
 func (self *KVNode) hgetCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -140,4 +141,16 @@ func (self *KVNode) localHDelCommand(cmd redcon.Command, ts int64) (interface{},
 
 func (self *KVNode) localHclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.HClear(cmd.Args[1])
+}
+
+func (self *KVNode) localHMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	var count int64 = 0
+	for _, hkey := range cmd.Args[1:] {
+		if _, err := self.store.HClear(hkey); err == nil {
+			count++
+		} else {
+			return count, err
+		}
+	}
+	return count, nil
 }

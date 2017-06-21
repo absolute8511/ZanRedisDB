@@ -266,3 +266,8 @@ type ScanResult struct {
 	PartionId  string
 	Error      error
 }
+
+type ExpiredData struct {
+	DataType
+	Key []byte
+}
