@@ -96,16 +96,6 @@ func (db *RockDB) expire(dataType byte, key []byte, duration int64) error {
 
 func (db *RockDB) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch) error {
 	mk := expEncodeMetaKey(dataType, key)
-
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, mk); err != nil {
-		return err
-	} else if v != nil {
-		if preTime, err2 := Int64(v, nil); err2 == nil && preTime != when {
-			preTk := expEncodeTimeKey(dataType, key, preTime)
-			wb.Delete(preTk)
-		}
-	}
-
 	tk := expEncodeTimeKey(dataType, key, when)
 
 	wb.Put(tk, mk)
@@ -121,15 +111,6 @@ func (db *RockDB) expireAt(dataType byte, key []byte, when int64) error {
 
 	wb := db.wb
 	wb.Clear()
-
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, mk); err != nil {
-		return err
-	} else if v != nil {
-		if preTime, err2 := Int64(v, nil); err2 == nil && preTime != when {
-			preTk := expEncodeTimeKey(dataType, key, preTime)
-			wb.Delete(preTk)
-		}
-	}
 
 	tk := expEncodeTimeKey(dataType, key, when)
 
@@ -184,19 +165,9 @@ func (db *RockDB) ttl(dataType byte, key []byte) (t int64, err error) {
 
 func (db *RockDB) delExpire(dataType byte, key []byte, wb *gorocksdb.WriteBatch) error {
 	mk := expEncodeMetaKey(dataType, key)
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, mk); err != nil {
-		return err
-	} else if v == nil {
-		return nil
-	} else if when, err2 := Int64(v, nil); err2 != nil {
-		return err2
-	} else {
-		tk := expEncodeTimeKey(dataType, key, when)
 
-		wb.Delete(mk)
-		wb.Delete(tk)
-		return nil
-	}
+	wb.Delete(mk)
+	return nil
 }
 
 type TTLChecker struct {
