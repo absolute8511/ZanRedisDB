@@ -95,7 +95,7 @@ func checkParameter() {
 	}
 }
 
-func kvbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
+func kvbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{0}
 	n, err := file.Write(tp)
 	if err != nil {
@@ -108,11 +108,11 @@ func kvbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	}
 
 	lenBuf := make([]byte, 4)
-	for res := range ch {
+	for c := range ch {
 		defer func() {
 			time.Sleep(tm)
 		}()
-
+		res := c.([]byte)
 		splits := bytes.SplitN(res, []byte(":"), 2)
 		if len(splits) != 2 {
 			fmt.Printf("key error. [ns=%s, table=%s, key=%s]\n", *ns, *table, string(res))
@@ -171,24 +171,24 @@ func kvbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
 	}
 }
 
-func hbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
+func hbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 }
 
-func sbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
+func sbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 }
 
-func zbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
+func zbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 }
 
-func lbackup(ch chan []byte, file *os.File, client *sdk.ZanRedisClient) {
+func lbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 }
 
 func backup(t string) {
-	defer wg.Add(-1)
+	defer wg.Done()
 
 	lookupList := strings.Split(*lookup, ",")
 
@@ -205,8 +205,8 @@ func backup(t string) {
 	client.Start()
 	defer client.Stop()
 
-	ch := make(chan []byte)
-	go client.AdvScanChannel(t, *table, ch)
+	ch := make(chan interface{})
+	go client.Backup(t, *table, ch)
 	path := fmt.Sprintf("%s/%s:%s:%s:%s.db", *dataDir, t, time.Now().Format("2006-01-02"), *ns, *table)
 	var file *os.File
 	_, err := os.Stat(path)

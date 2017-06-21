@@ -89,7 +89,7 @@ func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, error) {
 				wg.Add(1)
 				cmds[i].Args[countIndex] = []byte(strconv.Itoa(everyCount))
 				go func(index int, handle common.MergeCommandFunc) {
-					defer wg.Add(-1)
+					defer wg.Done()
 					results[index], _ = handle(cmds[index])
 				}(i, h)
 			}
