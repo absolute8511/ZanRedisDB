@@ -259,8 +259,7 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	value = append(value, tsBuf...)
 	db.wb.Put(key, value)
 
-	db.delExpire(KVType, rawKey, db.wb)
-
+	//db.delExpire(KVType, rawKey, db.wb)
 	err = db.MaybeCommitBatch()
 
 	return err
