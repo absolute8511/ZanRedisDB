@@ -16,6 +16,7 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
+	"github.com/shirou/gopsutil/mem"
 )
 
 const (
@@ -38,7 +39,7 @@ var batchableCmds map[string]bool
 type RockOptions struct {
 	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
 	BlockSize                      int    `json:"block_size"`
-	BlockCache                     int    `json:"block_cache"`
+	BlockCache                     int64  `json:"block_cache"`
 	CacheIndexAndFilterBlocks      bool   `json:"cache_index_and_filter_blocks"`
 	WriteBufferSize                int    `json:"write_buffer_size"`
 	MaxWriteBufferNumber           int    `json:"max_write_buffer_number"`
@@ -62,7 +63,15 @@ func FillDefaultOptions(opts *RockOptions) {
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
 	if opts.BlockCache <= 0 {
-		opts.BlockCache = 1024 * 1024 * 256
+		v, err := mem.VirtualMemory()
+		if err != nil {
+			opts.BlockCache = 1024 * 1024 * 256
+		} else {
+			opts.BlockCache = int64(v.Total / 100 * 2)
+			if opts.BlockCache < 1024*1024*128 {
+				opts.BlockCache = 1024 * 1024 * 128
+			}
+		}
 	}
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
 	if opts.WriteBufferSize <= 0 {
