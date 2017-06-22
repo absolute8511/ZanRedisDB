@@ -474,7 +474,7 @@ func (self *KVNode) handleProposeReq() {
 			//self.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
-			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout*2)
 			self.rn.node.Propose(ctx, buffer)
 			select {
 			case <-lastReq.done:
@@ -516,7 +516,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		case self.reqProposeC <- req:
 		case <-self.stopChan:
 			self.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
-		case <-time.After(proposeTimeout):
+		case <-time.After(proposeTimeout / 2):
 			self.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
 		}
 	}
@@ -1017,7 +1017,9 @@ func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, for
 	}
 	if np.appliedi <= self.rn.lastIndex {
 		// replaying local log
-		self.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, self.rn.lastIndex)
+		if forceBackup {
+			self.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, self.rn.lastIndex)
+		}
 		return
 	}
 	if self.rn.Lead() == raft.None {
