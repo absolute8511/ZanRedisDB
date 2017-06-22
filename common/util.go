@@ -119,8 +119,17 @@ func IsMergeScanCommand(cmd string) bool {
 	return false
 }
 
+func IsMergeBackupCommand(cmd string) bool {
+	if cmd == "backup" {
+		return true
+	}
+	return false
+}
+
 func IsMergeCommand(cmd string) bool {
 	if IsMergeScanCommand(cmd) {
+		return true
+	} else if IsMergeBackupCommand(cmd) {
 		return true
 	}
 

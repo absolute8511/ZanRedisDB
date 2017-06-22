@@ -367,6 +367,9 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterMerge("scan", wrapMergeCommand(self.scanCommand))
 	self.router.RegisterMerge("advscan", self.advanceScanCommand)
 
+	//for backup
+	self.router.RegisterMerge("backup", self.backupCommand)
+
 	// only write command need to be registered as internal
 	// kv
 	self.router.RegisterInternal("del", self.localDelCommand)

@@ -120,6 +120,7 @@ func ExtraTable(rawKey []byte) ([]byte, []byte, error) {
 	if pos == -1 {
 		return nil, nil, ErrInvalidPrefix
 	}
+
 	table := rawKey[:pos]
 	other := rawKey[pos+1:]
 	return table, other, nil
@@ -261,7 +262,9 @@ type IClusterInfo interface {
 }
 
 type ScanResult struct {
-	Result     interface{}
+	Keys       [][]byte
+	Values     map[string]interface{}
+	Type       DataType
 	NextCursor []byte
 	PartionId  string
 	Error      error
