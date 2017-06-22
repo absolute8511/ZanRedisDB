@@ -338,7 +338,8 @@ func (c *TTLChecker) check(stopChan chan struct{}) {
 			continue
 		}
 
-		if exp, err := Int64(c.db.eng.GetBytes(c.db.defaultReadOpts, mk)); err == nil {
+		// never use read lock in iterator since it may cause deadlock
+		if exp, err := Int64(c.db.eng.GetBytesNoLock(c.db.defaultReadOpts, mk)); err == nil {
 			// check expire again
 			if exp <= now {
 				cb(k)
