@@ -20,7 +20,7 @@ func SetLogger(level int32, logger common.Logger) {
 
 func buildCommand(args [][]byte) redcon.Command {
 	// build a pipeline command
-	buf := make([]byte, 0, 128)
+	buf := make([]byte, 0, 512)
 	buf = append(buf, '*')
 	buf = append(buf, strconv.FormatInt(int64(len(args)), 10)...)
 	buf = append(buf, '\r', '\n')
