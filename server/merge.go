@@ -30,9 +30,11 @@ func (s *Server) doMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 	cmdName := qcmdlower(cmd.Args[0])
 
 	if common.IsMergeScanCommand(cmdName) {
-		s.doMergeScan(conn, cmd)
-	} else if common.IsMergeBackupCommand(cmdName) {
-		s.doMergeBackup(conn, cmd)
+		if common.IsFullScanCommand(cmdName) {
+			s.doMergeFullScan(conn, cmd)
+		} else {
+			s.doMergeScan(conn, cmd)
+		}
 	}
 
 }
@@ -104,7 +106,7 @@ func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, error) {
 	}
 }
 
-func (s *Server) doMergeBackup(conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 	results, err := s.doScanCommon(cmd)
 	if err != nil {
 		conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
@@ -112,13 +114,13 @@ func (s *Server) doMergeBackup(conn redcon.Conn, cmd redcon.Command) {
 	}
 
 	nextCursorBytes := []byte("")
-	result := make(map[string]interface{})
 	var dataType common.DataType
+	var count int
 	for _, res := range results {
-		realRes := res.(*common.ScanResult)
+		realRes := res.(*common.FullScanResult)
 		if realRes.Error == nil {
 			dataType = realRes.Type
-			v := reflect.ValueOf(realRes.Keys)
+			v := reflect.ValueOf(realRes.Results)
 			if v.Kind() != reflect.Slice {
 				continue
 			}
@@ -130,11 +132,7 @@ func (s *Server) doMergeBackup(conn redcon.Conn, cmd redcon.Command) {
 				nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
 				nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
 			}
-			cnt := len(realRes.Keys)
-			for i := 0; i < cnt; i++ {
-				key := realRes.Keys[i]
-				result[string(key)] = realRes.Values[string(key)]
-			}
+			count += len(realRes.Results)
 		} else {
 			//TODO: log sth
 		}
@@ -146,44 +144,67 @@ func (s *Server) doMergeBackup(conn redcon.Conn, cmd redcon.Command) {
 
 	switch dataType {
 	case common.KV:
-		conn.WriteArray(len(result) * 2)
-		for k, v := range result {
-			conn.WriteBulkString(k)
-			conn.WriteBulk(v.([]byte))
-		}
-	case common.LIST, common.SET:
-		conn.WriteArray(len(result) * 2)
-		for k, v := range result {
-			conn.WriteBulkString(k)
-			val := v.([][]byte)
-			conn.WriteArray(len(val))
-			for _, l := range val {
-				conn.WriteBulk(l)
+		conn.WriteArray(count * 2)
+		for _, res := range results {
+			realRes := res.(*common.FullScanResult)
+			if realRes.Error == nil {
+				for _, r := range realRes.Results {
+					conn.WriteBulk(r.([][]byte)[0])
+					conn.WriteBulk(r.([][]byte)[1])
+				}
 			}
 		}
 	case common.HASH:
-		conn.WriteArray(len(result) * 2)
-		for k, v := range result {
-			conn.WriteBulkString(k)
-			val := v.([]common.KVRecord)
-			conn.WriteArray(len(val) * 2)
-			for _, r := range val {
-				conn.WriteBulk(r.Key)
-				conn.WriteBulk(r.Value)
+		conn.WriteArray(count * 3)
+		for _, res := range results {
+			realRes := res.(*common.FullScanResult)
+			if realRes.Error == nil {
+				for _, r := range realRes.Results {
+					realR := r.([][]byte)
+					length := len(realR)
+					conn.WriteArray(length)
+					for _, v := range realR {
+						conn.WriteBulk(v)
+					}
+				}
 			}
 		}
-	case common.ZSET:
-		conn.WriteArray(len(result) * 2)
-		for k, v := range result {
-			conn.WriteBulkString(k)
-			val := v.([]common.ScorePair)
-			conn.WriteArray(len(val) * 2)
-			for _, s := range val {
-				conn.WriteBulk(s.Member)
-				conn.WriteBulkString(strconv.FormatInt(s.Score, 10))
-			}
-		}
+		/*
+			case common.LIST, common.SET:
+				conn.WriteArray(len(result) * 2)
+				for k, v := range result {
+					conn.WriteBulkString(k)
+					val := v.([][]byte)
+					conn.WriteArray(len(val))
+					for _, l := range val {
+						conn.WriteBulk(l)
+					}
+				}
+					case common.HASH:
+						conn.WriteArray(len(result) * 2)
+						for k, v := range result {
+							conn.WriteBulkString(k)
+							val := v.([]common.KVRecord)
+							conn.WriteArray(len(val) * 2)
+							for _, r := range val {
+								conn.WriteBulk(r.Key)
+								conn.WriteBulk(r.Value)
+							}
+						}
+					case common.ZSET:
+						conn.WriteArray(len(result) * 2)
+						for k, v := range result {
+							conn.WriteBulkString(k)
+							val := v.([]common.ScorePair)
+							conn.WriteArray(len(val) * 2)
+							for _, s := range val {
+								conn.WriteBulk(s.Member)
+								conn.WriteBulkString(strconv.FormatInt(s.Score, 10))
+							}
+						}
+		*/
 	}
+
 }
 
 func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {

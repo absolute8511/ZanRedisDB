@@ -10,21 +10,6 @@ import (
 var errDataType = errors.New("error data type")
 var errMetaKey = errors.New("error meta key")
 
-func (db *RockDB) AdvanceScan(dataType common.DataType, cursor []byte, count int, match string) *common.ScanResult {
-	storeDataType, err := getDataStoreType(dataType)
-	if err != nil {
-		return &common.ScanResult{
-			Keys:       nil,
-			Values:     nil,
-			Type:       common.NONE,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
-	}
-	return db.advanceScanGeneric(storeDataType, cursor, count, match)
-}
-
 func (db *RockDB) Scan(dataType common.DataType, cursor []byte, count int, match string) ([][]byte, error) {
 	storeDataType, err := getDataStoreType(dataType)
 	if err != nil {
@@ -169,114 +154,6 @@ func checkScanCount(count int) int {
 	}
 	return count
 }
-func (db *RockDB) advanceScanGenericUseBuffer(storeDataType byte, key []byte, count int,
-	match string, inputBuffer [][]byte) *common.ScanResult {
-	r, err := buildMatchRegexp(match)
-	if err != nil {
-		return &common.ScanResult{
-			Keys:       nil,
-			Values:     nil,
-			Type:       common.NONE,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
-	}
-
-	minKey, maxKey, err := buildScanKeyRange(storeDataType, key)
-	if err != nil {
-		return &common.ScanResult{
-			Keys:       nil,
-			Values:     nil,
-			Type:       common.NONE,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
-	}
-	count = checkScanCount(count)
-
-	it, err := db.buildScanIterator(minKey, maxKey)
-	if err != nil {
-		return &common.ScanResult{
-			Keys:       nil,
-			Values:     nil,
-			Type:       common.NONE,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
-	}
-
-	var v [][]byte
-	if inputBuffer != nil {
-		v = inputBuffer
-	} else {
-		v = make([][]byte, 0, count)
-	}
-	result := make(map[string]interface{})
-	for i := 0; it.Valid() && i < count; it.Next() {
-		if k, err := decodeScanKey(storeDataType, it.Key()); err != nil {
-			continue
-		} else if r != nil && !r.Match(string(k)) {
-			continue
-		} else {
-			i++
-			switch storeDataType {
-			case KVType:
-				value, err := db.eng.GetBytes(db.defaultReadOpts, it.Key())
-				if err == nil {
-					if len(value) >= tsLen {
-						value = value[:len(value)-tsLen]
-					}
-
-					v = append(v, k)
-					result[string(k)] = value
-				}
-			case LMetaType:
-				value, err := db.LRange(k, 0, -1)
-				if err == nil {
-					result[string(k)] = value
-					v = append(v, k)
-				}
-			case HSizeType:
-				_, valCh, err := db.HGetAll(k)
-				if err == nil {
-					var records []common.KVRecord
-					for value := range valCh {
-						if value.Err == nil {
-							records = append(records, value.Rec)
-						}
-					}
-					result[string(k)] = records
-					v = append(v, k)
-				}
-			case SSizeType:
-				value, err := db.SMembers(k)
-				if err == nil {
-					result[string(k)] = value
-					v = append(v, k)
-				}
-			case ZSizeType:
-				value, err := db.ZRangeGeneric(k, 0, -1, false)
-				if err == nil {
-					result[string(k)] = value
-					v = append(v, k)
-				}
-			}
-		}
-	}
-	it.Close()
-	return &common.ScanResult{
-		Keys:       v,
-		Values:     result,
-		Type:       common.NONE,
-		NextCursor: nil,
-		PartionId:  "",
-		Error:      nil,
-	}
-
-}
 
 func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int,
 	match string, inputBuffer [][]byte) ([][]byte, error) {
@@ -316,12 +193,6 @@ func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int
 	it.Close()
 	return v, nil
 
-}
-
-func (db *RockDB) advanceScanGeneric(storeDataType byte, key []byte, count int,
-	match string) *common.ScanResult {
-
-	return db.advanceScanGenericUseBuffer(storeDataType, key, count, match, nil)
 }
 
 func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,

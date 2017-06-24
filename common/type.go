@@ -263,7 +263,13 @@ type IClusterInfo interface {
 
 type ScanResult struct {
 	Keys       [][]byte
-	Values     map[string]interface{}
+	NextCursor []byte
+	PartionId  string
+	Error      error
+}
+
+type FullScanResult struct {
+	Results    []interface{}
 	Type       DataType
 	NextCursor []byte
 	PartionId  string
