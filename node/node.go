@@ -1070,7 +1070,7 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		hasBackup, _ := self.checkLocalBackup(raftSnapshot)
 		if !hasBackup {
 			self.rn.Infof("local no backup for snapshot, copy from remote\n")
-			syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
+			syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot, retry)
 			if syncAddr == "" && syncDir == "" {
 				return errors.New("no backup available from others")
 			}
@@ -1151,7 +1151,7 @@ func newDeadlineTransport(timeout time.Duration) *http.Transport {
 	return transport
 }
 
-func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, string) {
+func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot, retry int) (string, string) {
 	// we need find the right backup data match with the raftsnapshot
 	// for each cluster member, it need check the term+index and the backup meta to
 	// make sure the data is valid
@@ -1159,11 +1159,11 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	syncDir := ""
 	h := self.machineConfig.BroadcastAddr
 
-	retry := 0
+	innerRetry := 0
 	var snapSyncInfoList []common.SnapshotSyncInfo
 	var err error
-	for retry < 3 {
-		retry++
+	for innerRetry < 3 {
+		innerRetry++
 		snapSyncInfoList, err = self.clusterInfo.GetSnapshotSyncInfo(self.ns)
 		if err != nil {
 			self.rn.Infof("get snapshot info failed: %v", err)
@@ -1178,6 +1178,8 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	}
 
 	self.rn.Infof("current cluster raft nodes info: %v", snapSyncInfoList)
+	syncAddrList := make([]string, 0)
+	syncDirList := make([]string, 0)
 	for _, ssi := range snapSyncInfoList {
 		if ssi.ReplicaID == uint64(self.rn.config.ID) {
 			continue
@@ -1188,8 +1190,8 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 		req, _ := http.NewRequest("GET", "http://"+ssi.RemoteAddr+":"+
 			ssi.HttpAPIPort+common.APICheckBackup+"/"+self.ns, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
-		if err != nil {
-			self.rn.Infof("request error: %v", err)
+		if err != nil || rsp.StatusCode != http.StatusOK {
+			self.rn.Infof("request error: %v, %v", err, rsp)
 			continue
 		}
 		rsp.Body.Close()
@@ -1200,14 +1202,17 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 				continue
 			}
 			// local node with different directory
-			syncAddr = ""
-			syncDir = path.Join(ssi.DataRoot, self.ns)
+			syncAddrList = append(syncAddrList, "")
+			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, self.ns))
 		} else {
 			// for remote snapshot, we do rsync from remote module
-			syncAddr = ssi.RemoteAddr
-			syncDir = path.Join(ssi.RsyncModule, self.ns)
+			syncAddrList = append(syncAddrList, ssi.RemoteAddr)
+			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, self.ns))
 		}
-		break
+	}
+	if len(syncAddrList) > 0 {
+		syncAddr = syncAddrList[retry%len(syncAddrList)]
+		syncDir = syncDirList[retry%len(syncDirList)]
 	}
 	self.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
 	return syncAddr, syncDir

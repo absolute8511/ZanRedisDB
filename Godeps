@@ -14,3 +14,5 @@ github.com/xiang90/probing
 github.com/siddontang/goredis
 github.com/mreiferson/go-options
 github.com/BurntSushi/toml
+github.com/shirou/gopsutil
+golang.org/x/sys
