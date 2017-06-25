@@ -35,19 +35,19 @@ func TestZSetCodec(t *testing.T) {
 		t.Fatal(string(k))
 	}
 
-	ek = zEncodeSetKey(key, member)
+	ek, _ = convertRedisKeyToDBZSetKey(key, member)
 	if k, m, err := zDecodeSetKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "test:key" {
+	} else if string(k) != "key" {
 		t.Fatal(string(k))
 	} else if string(m) != "member" {
 		t.Fatal(string(m))
 	}
 
-	ek = zEncodeScoreKey(key, member, 100)
+	ek, _ = convertRedisKeyToDBZScoreKey(key, member, 100)
 	if k, m, s, err := zDecodeScoreKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "test:key" {
+	} else if string(k) != "key" {
 		t.Fatal(string(k))
 	} else if string(m) != "member" {
 		t.Fatal(string(m))

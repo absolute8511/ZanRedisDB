@@ -20,10 +20,10 @@ func TestListCodec(t *testing.T) {
 		t.Fatal(string(k))
 	}
 
-	ek = lEncodeListKey(key, 1024)
+	ek, _ = convertRedisKeyToDBListKey(key, 1024)
 	if k, seq, err := lDecodeListKey(ek); err != nil {
 		t.Fatal(err)
-	} else if string(k) != "test:key" {
+	} else if string(k) != "key" {
 		t.Fatal(string(k))
 	} else if seq != 1024 {
 		t.Fatal(seq)

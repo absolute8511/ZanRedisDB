@@ -14,6 +14,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 )
 
 var testOnce sync.Once
@@ -23,9 +24,7 @@ var OK = "OK"
 
 func startTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.Nil(t, err)
 	t.Logf("dir:%v\n", tmpDir)
 	ioutil.WriteFile(
 		path.Join(tmpDir, "myid"),
@@ -411,54 +410,41 @@ func TestKVErrorParams(t *testing.T) {
 	key1 := "default:test:kv_erra"
 	key2 := "default:test:kv_errb"
 	key3 := "default:test:kv_errc"
-	if _, err := c.Do("get", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err := c.Do("get", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("set", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("set", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("getset", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("getset", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("setnx", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("setnx", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("exists", key1, key2); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("exists", key1, key2)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("incr", key1, key2); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("incr", key1, key2)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("incrby", key1); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("incrby", key1)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("decrby", key1); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("decrby", key1)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("del"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
+	_, err = c.Do("del")
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("mset"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
+	_, err = c.Do("mset")
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("mset", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
+	_, err = c.Do("mset", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("mget"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
-
+	_, err = c.Do("mget")
+	assert.NotNil(t, err)
 }
 
 func TestHash(t *testing.T) {

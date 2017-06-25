@@ -52,12 +52,33 @@ func sDecodeSizeKey(ek []byte) ([]byte, error) {
 	return ek[pos:], nil
 }
 
-func sEncodeSetKey(key []byte, member []byte) []byte {
-	buf := make([]byte, len(key)+len(member)+1+1+2)
+func convertRedisKeyToDBSKey(key []byte, member []byte) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkSetKMSize(rk, member); err != nil {
+		return nil, err
+	}
+	dbKey := sEncodeSetKey(table, rk, member)
+	return dbKey, nil
+}
+
+func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
+	buf := make([]byte, len(table)+2+1+len(key)+len(member)+1+1+2)
 
 	pos := 0
 
 	buf[pos] = SetType
+	pos++
+
+	// in order to make sure all the table data are in the same range
+	// we need make sure we has the same table prefix
+	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
+	pos += 2
+	copy(buf[pos:], table)
+	pos += len(table)
+	buf[pos] = tableStartSep
 	pos++
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
@@ -86,6 +107,21 @@ func sDecodeSetKey(ek []byte) ([]byte, []byte, error) {
 		return nil, nil, errSetKey
 	}
 
+	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
+	pos += 2
+	if tableLen+pos > len(ek) {
+		return nil, nil, errSetKey
+	}
+	_ = ek[pos : pos+tableLen]
+	pos += tableLen
+	if ek[pos] != tableStartSep {
+		return nil, nil, errSetKey
+	}
+	pos++
+	if pos+2 > len(ek) {
+		return nil, nil, errSetKey
+	}
+
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 
@@ -105,12 +141,12 @@ func sDecodeSetKey(ek []byte) ([]byte, []byte, error) {
 	return key, member, nil
 }
 
-func sEncodeStartKey(key []byte) []byte {
-	return sEncodeSetKey(key, nil)
+func sEncodeStartKey(table []byte, key []byte) []byte {
+	return sEncodeSetKey(table, key, nil)
 }
 
-func sEncodeStopKey(key []byte) []byte {
-	k := sEncodeSetKey(key, nil)
+func sEncodeStopKey(table []byte, key []byte) []byte {
+	k := sEncodeSetKey(table, key, nil)
 
 	k[len(k)-1] = setStopSep
 
@@ -118,14 +154,14 @@ func sEncodeStopKey(key []byte) []byte {
 }
 
 func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
-	table := extractTableFromRedisKey(key)
+	table, rk, err := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return 0
 	}
 
 	sk := sEncodeSizeKey(key)
-	start := sEncodeStartKey(key)
-	stop := sEncodeStopKey(key)
+	start := sEncodeStartKey(table, rk)
+	stop := sEncodeStopKey(table, rk)
 
 	var num int64 = 0
 	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
@@ -167,12 +203,15 @@ func (db *RockDB) sIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (
 }
 
 func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) (int64, error) {
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
+	table, _, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
 	}
 
-	ek := sEncodeSetKey(key, member)
+	ek, err := convertRedisKeyToDBSKey(key, member)
+	if err != nil {
+		return 0, err
+	}
 
 	var n int64 = 1
 	if v, _ := db.eng.GetBytes(db.defaultReadOpts, ek); v != nil {
@@ -193,7 +232,7 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	table := extractTableFromRedisKey(key)
+	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return 0, errTableName
 	}
@@ -208,7 +247,7 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 		if err := checkSetKMSize(key, args[i]); err != nil {
 			return 0, err
 		}
-		ek = sEncodeSetKey(key, args[i])
+		ek = sEncodeSetKey(table, rk, args[i])
 
 		// TODO: how to tell not found and nil value (member value is also nil)
 		if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
@@ -252,7 +291,10 @@ func (db *RockDB) SKeyExists(key []byte) (int64, error) {
 }
 
 func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
-	ek := sEncodeSetKey(key, member)
+	ek, err := convertRedisKeyToDBSKey(key, member)
+	if err != nil {
+		return 0, err
+	}
 
 	var n int64 = 1
 	if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
@@ -268,8 +310,12 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 		return nil, err
 	}
 
-	start := sEncodeStartKey(key)
-	stop := sEncodeStopKey(key)
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+	start := sEncodeStartKey(table, rk)
+	stop := sEncodeStopKey(table, rk)
 
 	v := make([][]byte, 0, 16)
 
@@ -290,7 +336,7 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 }
 
 func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
-	table := extractTableFromRedisKey(key)
+	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return 0, errTableName
 	}
@@ -308,7 +354,7 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 			return 0, err
 		}
 
-		ek = sEncodeSetKey(key, args[i])
+		ek = sEncodeSetKey(table, rk, args[i])
 		v, err = db.eng.GetBytes(db.defaultReadOpts, ek)
 		if v == nil {
 			continue
