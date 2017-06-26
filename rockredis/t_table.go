@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
@@ -42,12 +43,12 @@ func checkTableName(table []byte) error {
 	return nil
 }
 
-func extractTableFromRedisKey(key []byte) []byte {
+func extractTableFromRedisKey(key []byte) ([]byte, []byte, error) {
 	index := bytes.IndexByte(key, tableStartSep)
 	if index == -1 {
-		return nil
+		return nil, nil, errTableName
 	}
-	return key[:index]
+	return key[:index], key[index+1:], nil
 }
 
 func encodeTableMetaKey(table []byte) []byte {
@@ -79,6 +80,34 @@ func encodeTableMetaStopKey() []byte {
 	t := encodeTableMetaKey(nil)
 	t[len(t)-1] = t[len(t)-1] + 1
 	return t
+}
+
+func encodeDataTableStart(dataType byte, table []byte) []byte {
+	bufLen := len(table) + 2 + 1 + 1
+	if dataType == KVType {
+		// kv has no table length prefix
+		bufLen = len(table) + 1 + 1
+	}
+	buf := make([]byte, bufLen)
+
+	pos := 0
+	buf[pos] = dataType
+	pos++
+
+	if dataType != KVType {
+		binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
+		pos += 2
+	}
+	copy(buf[pos:], table)
+	pos += len(table)
+	buf[pos] = tableStartSep
+	return buf
+}
+
+func encodeDataTableEnd(dataType byte, table []byte) []byte {
+	k := encodeDataTableStart(dataType, table)
+	k[len(k)-1] = k[len(k)-1] + 1
+	return k
 }
 
 func (db *RockDB) GetTables() chan []byte {

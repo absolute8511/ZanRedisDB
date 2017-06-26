@@ -20,13 +20,15 @@ func TestHashCodec(t *testing.T) {
 		t.Fatal(string(k))
 	}
 
-	ek = hEncodeHashKey(key, field)
-	if k, f, err := hDecodeHashKey(ek); err != nil {
+	ek = hEncodeHashKey([]byte("test"), key, field)
+	if table, k, f, err := hDecodeHashKey(ek); err != nil {
 		t.Fatal(err)
 	} else if string(k) != "key" {
 		t.Fatal(string(k))
 	} else if string(f) != "field" {
 		t.Fatal(string(f))
+	} else if string(table) != "test" {
+		t.Fatal(string(table))
 	}
 }
 

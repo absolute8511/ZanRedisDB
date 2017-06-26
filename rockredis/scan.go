@@ -231,13 +231,18 @@ func encodeSpecificDataScanMaxKey(storeDataType byte, key []byte, cursor []byte)
 }
 
 func encodeSpecificDataScanKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+
 	switch storeDataType {
 	case HashType:
-		return hEncodeHashKey(key, cursor), nil
+		return hEncodeHashKey(table, rk, cursor), nil
 	case ZSetType:
-		return zEncodeSetKey(key, cursor), nil
+		return zEncodeSetKey(table, rk, cursor), nil
 	case SetType:
-		return sEncodeSetKey(key, cursor), nil
+		return sEncodeSetKey(table, rk, cursor), nil
 	default:
 		return nil, errDataType
 	}
@@ -280,7 +285,7 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 	defer it.Close()
 
 	for i := 0; it.Valid() && i < count; it.Next() {
-		_, f, err := hDecodeHashKey(it.Key())
+		_, _, f, err := hDecodeHashKey(it.Key())
 		if err != nil {
 			return nil, err
 		} else if r != nil && !r.Match(string(f)) {

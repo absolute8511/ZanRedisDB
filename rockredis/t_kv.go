@@ -15,7 +15,7 @@ var errKVKey = errors.New("invalid encode kv key")
 var errInvalidDBValue = errors.New("invalide db value")
 
 func convertRedisKeyToDBKVKey(key []byte) ([]byte, []byte, error) {
-	table := extractTableFromRedisKey(key)
+	table, _, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return nil, nil, errTableName
 	}

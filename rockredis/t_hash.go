@@ -19,17 +19,17 @@ const (
 	hashStartSep byte = ':'
 )
 
-func convertRedisKeyToDBHKey(key []byte, field []byte) ([]byte, []byte, error) {
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return nil, nil, errTableName
+func convertRedisKeyToDBHKey(key []byte, field []byte) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
 	}
 
-	if err := checkHashKFSize(key, field); err != nil {
-		return nil, nil, err
+	if err := checkHashKFSize(rk, field); err != nil {
+		return nil, err
 	}
-	key = hEncodeHashKey(key, field)
-	return table, key, nil
+	key = hEncodeHashKey(table, key[len(table)+1:], field)
+	return key, nil
 }
 
 func checkHashKFSize(key []byte, field []byte) error {
@@ -66,11 +66,20 @@ func hDecodeSizeKey(ek []byte) ([]byte, error) {
 	return ek[pos:], nil
 }
 
-func hEncodeHashKey(key []byte, field []byte) []byte {
-	buf := make([]byte, len(key)+len(field)+1+1+2)
+func hEncodeHashKey(table []byte, key []byte, field []byte) []byte {
+	buf := make([]byte, len(table)+2+1+len(key)+len(field)+1+1+2)
 
 	pos := 0
 	buf[pos] = HashType
+	pos++
+
+	// in order to make sure all the table data are in the same range
+	// we need make sure we has the same table prefix
+	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
+	pos += 2
+	copy(buf[pos:], table)
+	pos += len(table)
+	buf[pos] = tableStartSep
 	pos++
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
@@ -85,52 +94,72 @@ func hEncodeHashKey(key []byte, field []byte) []byte {
 	return buf
 }
 
-func hDecodeHashKey(ek []byte) ([]byte, []byte, error) {
+func hDecodeHashKey(ek []byte) ([]byte, []byte, []byte, error) {
 	pos := 0
 	if pos+1 > len(ek) || ek[pos] != HashType {
-		return nil, nil, errHashKey
+		return nil, nil, nil, errHashKey
 	}
 	pos++
 
 	if pos+2 > len(ek) {
-		return nil, nil, errHashKey
+		return nil, nil, nil, errHashKey
+	}
+
+	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
+	pos += 2
+	if tableLen+pos > len(ek) {
+		return nil, nil, nil, errHashKey
+	}
+	table := ek[pos : pos+tableLen]
+	pos += tableLen
+	if ek[pos] != tableStartSep {
+		return nil, nil, nil, errHashKey
+	}
+	pos++
+	if pos+2 > len(ek) {
+		return nil, nil, nil, errHashKey
 	}
 
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 
 	if keyLen+pos > len(ek) {
-		return nil, nil, errHashKey
+		return nil, nil, nil, errHashKey
 	}
 
 	key := ek[pos : pos+keyLen]
 	pos += keyLen
 
 	if ek[pos] != hashStartSep {
-		return nil, nil, errHashKey
+		return nil, nil, nil, errHashKey
 	}
 
 	pos++
 	field := ek[pos:]
-	return key, field, nil
+	return table, key, field, nil
 }
 
-func hEncodeStartKey(key []byte) []byte {
-	return hEncodeHashKey(key, nil)
+func hEncodeStartKey(table []byte, key []byte) []byte {
+	return hEncodeHashKey(table, key, nil)
 }
 
-func hEncodeStopKey(key []byte) []byte {
-	k := hEncodeHashKey(key, nil)
+func hEncodeStopKey(table []byte, key []byte) []byte {
+	k := hEncodeHashKey(table, key, nil)
 	k[len(k)-1] = k[len(k)-1] + 1
 	return k
 }
 
 // return if we create the new field or override it
 func (db *RockDB) hSetField(hkey []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) (int64, error) {
-	table, ek, err := convertRedisKeyToDBHKey(hkey, field)
+	table, rk, err := extractTableFromRedisKey(hkey)
+
 	if err != nil {
 		return 0, err
 	}
+	if err := checkHashKFSize(rk, field); err != nil {
+		return 0, err
+	}
+	ek := hEncodeHashKey(table, rk, field)
 
 	created := int64(1)
 	if v, _ := db.eng.GetBytes(db.defaultReadOpts, ek); v != nil {
@@ -201,7 +230,7 @@ func (db *RockDB) HMset(key []byte, args ...common.KVRecord) error {
 	if len(args) == 0 {
 		return nil
 	}
-	table, _, err := convertRedisKeyToDBHKey(key, args[0].Key)
+	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
 		return err
 	}
@@ -209,12 +238,12 @@ func (db *RockDB) HMset(key []byte, args ...common.KVRecord) error {
 
 	var num int64 = 0
 	for i := 0; i < len(args); i++ {
-		if err = checkHashKFSize(key, args[i].Key); err != nil {
+		if err = checkHashKFSize(rk, args[i].Key); err != nil {
 			return err
 		} else if err = checkValueSize(args[i].Value); err != nil {
 			return err
 		}
-		ek := hEncodeHashKey(key, args[i].Key)
+		ek := hEncodeHashKey(table, rk, args[i].Key)
 
 		if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
 			return err
@@ -238,7 +267,11 @@ func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	return db.eng.GetBytes(db.defaultReadOpts, hEncodeHashKey(key, field))
+	dbKey, err := convertRedisKeyToDBHKey(key, field)
+	if err != nil {
+		return nil, err
+	}
+	return db.eng.GetBytes(db.defaultReadOpts, dbKey)
 }
 
 func (db *RockDB) HKeyExists(key []byte) (int64, error) {
@@ -275,7 +308,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	if len(args) == 0 {
 		return 0, nil
 	}
-	table, _, err := convertRedisKeyToDBHKey(key, args[0])
+	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
 		return 0, err
 	}
@@ -289,11 +322,11 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	var num int64 = 0
 	var newNum int64 = -1
 	for i := 0; i < len(args); i++ {
-		if err := checkHashKFSize(key, args[i]); err != nil {
+		if err := checkHashKFSize(rk, args[i]); err != nil {
 			return 0, err
 		}
 
-		ek = hEncodeHashKey(key, args[i])
+		ek = hEncodeHashKey(table, rk, args[i])
 		v, err = db.eng.GetBytes(db.defaultReadOpts, ek)
 		if v == nil {
 			continue
@@ -316,8 +349,12 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 
 func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch) int64 {
 	sk := hEncodeSizeKey(hkey)
-	start := hEncodeStartKey(hkey)
-	stop := hEncodeStopKey(hkey)
+	table, rk, err := extractTableFromRedisKey(hkey)
+	if err != nil {
+		return 0
+	}
+	start := hEncodeStartKey(table, rk)
+	stop := hEncodeStopKey(table, rk)
 
 	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
@@ -344,7 +381,7 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	table := extractTableFromRedisKey(hkey)
+	table, rk, err := extractTableFromRedisKey(hkey)
 	if len(table) == 0 {
 		return 0, errTableName
 	}
@@ -352,8 +389,8 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	if hlen > RANGE_DELETE_NUM {
 		var r gorocksdb.Range
 		sk := hEncodeSizeKey(hkey)
-		r.Start = hEncodeStartKey(hkey)
-		r.Limit = hEncodeStopKey(hkey)
+		r.Start = hEncodeStartKey(table, rk)
+		r.Limit = hEncodeStopKey(table, rk)
 		db.eng.DeleteFilesInRange(r)
 		db.eng.CompactRange(r)
 		db.eng.Delete(db.defaultWriteOpts, sk)
@@ -386,7 +423,10 @@ func (db *RockDB) HIncrBy(key []byte, field []byte, delta int64) (int64, error) 
 	var ek []byte
 	var err error
 
-	ek = hEncodeHashKey(key, field)
+	ek, err = convertRedisKeyToDBHKey(key, field)
+	if err != nil {
+		return 0, err
+	}
 	var n int64 = 0
 	if n, err = StrInt64(db.eng.GetBytes(db.defaultReadOpts, ek)); err != nil {
 		return 0, err
@@ -408,8 +448,12 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 		return 0, nil, err
 	}
 
-	start := hEncodeStartKey(key)
-	stop := hEncodeStopKey(key)
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, nil, err
+	}
+	start := hEncodeStartKey(table, rk)
+	stop := hEncodeStopKey(table, rk)
 	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
@@ -428,7 +472,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {
-			_, f, err := hDecodeHashKey(it.Key())
+			_, _, f, err := hDecodeHashKey(it.Key())
 			select {
 			case v <- common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: it.Value()},
@@ -452,19 +496,20 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
+	table, rk, err := extractTableFromRedisKey(key)
 
-	len, err := db.HLen(key)
+	length, err := db.HLen(key)
 	if err != nil {
 		return 0, nil, err
 	}
-	if len >= MAX_BATCH_NUM {
-		return len, nil, errTooMuchBatchSize
+	if length >= MAX_BATCH_NUM {
+		return length, nil, errTooMuchBatchSize
 	}
 	v := make(chan common.KVRecordRet, 16)
 
 	go func() {
-		start := hEncodeStartKey(key)
-		stop := hEncodeStopKey(key)
+		start := hEncodeStartKey(table, rk)
+		stop := hEncodeStopKey(table, rk)
 		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		if err != nil {
 			v <- common.KVRecordRet{
@@ -477,7 +522,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 		defer it.Close()
 		defer close(v)
 		for ; it.Valid(); it.Next() {
-			_, f, err := hDecodeHashKey(it.Key())
+			_, _, f, err := hDecodeHashKey(it.Key())
 			v <- common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: nil},
 				Err: err,
@@ -485,7 +530,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 		}
 	}()
 
-	return len, v, nil
+	return length, v, nil
 }
 
 func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
@@ -493,19 +538,23 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 		return 0, nil, err
 	}
 
-	len, err := db.HLen(key)
+	length, err := db.HLen(key)
 	if err != nil {
 		return 0, nil, err
 	}
-	if len >= MAX_BATCH_NUM {
-		return len, nil, errTooMuchBatchSize
+	if length >= MAX_BATCH_NUM {
+		return length, nil, errTooMuchBatchSize
+	}
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return length, nil, err
 	}
 
 	v := make(chan common.KVRecordRet, 16)
 
 	go func() {
-		start := hEncodeStartKey(key)
-		stop := hEncodeStopKey(key)
+		start := hEncodeStartKey(table, rk)
+		stop := hEncodeStopKey(table, rk)
 		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		if err != nil {
 			v <- common.KVRecordRet{
@@ -525,7 +574,7 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 		}
 	}()
 
-	return len, v, nil
+	return length, v, nil
 }
 
 func (db *RockDB) HExpire(key []byte, duration int64) (int64, error) {

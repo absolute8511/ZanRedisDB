@@ -60,11 +60,31 @@ func lEncodeMaxKey() []byte {
 	return ek
 }
 
-func lEncodeListKey(key []byte, seq int64) []byte {
-	buf := make([]byte, len(key)+1+2+8)
+func convertRedisKeyToDBListKey(key []byte, seq int64) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkKeySize(rk); err != nil {
+		return nil, err
+	}
+	return lEncodeListKey(table, rk, seq), nil
+}
+
+func lEncodeListKey(table []byte, key []byte, seq int64) []byte {
+	buf := make([]byte, len(table)+2+1+len(key)+1+2+8)
 
 	pos := 0
 	buf[pos] = ListType
+	pos++
+	// in order to make sure all the table data are in the same range
+	// we need make sure we has the same table prefix
+	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
+	pos += 2
+	copy(buf[pos:], table)
+	pos += len(table)
+	buf[pos] = tableStartSep
 	pos++
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
@@ -92,6 +112,24 @@ func lDecodeListKey(ek []byte) (key []byte, seq int64, err error) {
 		return
 	}
 
+	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
+	pos += 2
+	if tableLen+pos > len(ek) {
+		err = errListKey
+		return
+	}
+	_ = ek[pos : pos+tableLen]
+	pos += tableLen
+	if ek[pos] != tableStartSep {
+		err = errListKey
+		return
+	}
+	pos++
+	if pos+2 > len(ek) {
+		err = errListKey
+		return
+	}
+
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 	if keyLen+pos+8 != len(ek) {
@@ -109,7 +147,7 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		return 0, err
 	}
 
-	table := extractTableFromRedisKey(key)
+	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return 0, errTableName
 	}
@@ -149,7 +187,7 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		return 0, errListSeq
 	}
 	for i := 0; i < pushCnt; i++ {
-		ek := lEncodeListKey(key, seq+int64(i)*delta)
+		ek := lEncodeListKey(table, rk, seq+int64(i)*delta)
 		wb.Put(ek, args[i])
 	}
 	if size == 0 && pushCnt > 0 {
@@ -172,7 +210,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	if err := checkKeySize(key); err != nil {
 		return nil, err
 	}
-	table := extractTableFromRedisKey(key)
+	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return nil, errTableName
 	}
@@ -200,7 +238,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 		seq = tailSeq
 	}
 
-	itemKey := lEncodeListKey(key, seq)
+	itemKey := lEncodeListKey(table, rk, seq)
 	value, err = db.eng.GetBytes(db.defaultReadOpts, itemKey)
 	if err != nil {
 		return nil, err
@@ -231,7 +269,7 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 	if err := checkKeySize(key); err != nil {
 		return err
 	}
-	table := extractTableFromRedisKey(key)
+	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return errTableName
 	}
@@ -270,12 +308,12 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 
 	if start > 0 {
 		for i := int64(0); i < start; i++ {
-			wb.Delete(lEncodeListKey(key, headSeq+i))
+			wb.Delete(lEncodeListKey(table, rk, headSeq+i))
 		}
 	}
 	if stop < int64(llen-1) {
 		for i := int64(stop + 1); i < llen; i++ {
-			wb.Delete(lEncodeListKey(key, headSeq+i))
+			wb.Delete(lEncodeListKey(table, rk, headSeq+i))
 		}
 	}
 
@@ -297,7 +335,7 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	if trimSize == 0 {
 		return 0, nil
 	}
-	table := extractTableFromRedisKey(key)
+	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return 0, errTableName
 	}
@@ -334,7 +372,7 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	}
 
 	for trimSeq := trimStartSeq; trimSeq <= trimEndSeq; trimSeq++ {
-		itemKey := lEncodeListKey(key, trimSeq)
+		itemKey := lEncodeListKey(table, rk, trimSeq)
 		wb.Delete(itemKey)
 	}
 
@@ -356,7 +394,7 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 //	ps : here just focus on deleting the list data,
 //		 any other likes expire is ignore.
 func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
-	table := extractTableFromRedisKey(key)
+	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return 0
 	}
@@ -374,8 +412,8 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	}
 
 	var num int64 = 0
-	startKey := lEncodeListKey(key, headSeq)
-	stopKey := lEncodeListKey(key, tailSeq)
+	startKey := lEncodeListKey(table, rk, headSeq)
+	stopKey := lEncodeListKey(table, rk, tailSeq)
 	if size > RANGE_DELETE_NUM {
 		var r gorocksdb.Range
 		r.Start = startKey
@@ -459,7 +497,10 @@ func (db *RockDB) LIndex(key []byte, index int64) ([]byte, error) {
 		seq = tailSeq + index + 1
 	}
 
-	sk := lEncodeListKey(key, seq)
+	sk, err := convertRedisKeyToDBListKey(key, seq)
+	if err != nil {
+		return nil, err
+	}
 	return db.eng.GetBytes(db.defaultReadOpts, sk)
 }
 
@@ -523,7 +564,10 @@ func (db *RockDB) LSet(key []byte, index int64, value []byte) error {
 	if seq < headSeq || seq > tailSeq {
 		return errListIndex
 	}
-	sk := lEncodeListKey(key, seq)
+	sk, err := convertRedisKeyToDBListKey(key, seq)
+	if err != nil {
+		return err
+	}
 	err = db.eng.Put(db.defaultWriteOpts, sk, value)
 	return err
 }
@@ -569,7 +613,10 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 
 	v := make([][]byte, 0, limit)
 
-	startKey := lEncodeListKey(key, headSeq)
+	startKey, err := convertRedisKeyToDBListKey(key, headSeq)
+	if err != nil {
+		return nil, err
+	}
 	rit, err := NewDBRangeLimitIterator(db.eng, startKey, nil, common.RangeClose, 0, int(limit), false)
 	if err != nil {
 		return nil, err
