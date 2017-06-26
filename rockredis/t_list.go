@@ -419,7 +419,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 		r.Start = startKey
 		r.Limit = stopKey
 		db.eng.DeleteFilesInRange(r)
-		db.eng.CompactRange(r)
+		//db.eng.CompactRange(r)
 	}
 
 	rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)

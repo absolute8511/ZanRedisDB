@@ -1457,6 +1457,31 @@ func TestZSetRank(t *testing.T) {
 	if _, err := goredis.Int(c.Do("zrevrank", key, "e")); err != goredis.ErrNil {
 		t.Fatal(err)
 	}
+
+	key2 := "default:test:myzset2"
+	if _, err := goredis.Int(c.Do("zadd", key2, 0, "val0", 1, "val1", 2, "val2", 3, "val3")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goredis.Int(c.Do("zadd", key2, 4, "val4", 5, "val5", 6, "val6")); err != nil {
+		t.Fatal(err)
+	}
+	// this is used to test the case for iterator seek to max may cause seek to the next last data
+	keyExpire := "default:test:myexpkey"
+	keyExpire2 := "default:test:myexpkey2"
+	c.Do("setex", keyExpire, 10, "v1")
+	c.Do("setex", keyExpire2, 10, "v1")
+
+	if n, err := goredis.Int(c.Do("zrank", key2, "val3")); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zrevrank", key2, "val3")); err != nil {
+		t.Fatalf("cmd error: %v", err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
 }
 
 func testZSetRange(ay []interface{}, checkValues ...interface{}) error {

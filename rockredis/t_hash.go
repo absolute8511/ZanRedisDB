@@ -393,7 +393,7 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 		r.Start = hEncodeStartKey(table, rk)
 		r.Limit = hEncodeStopKey(table, rk)
 		db.eng.DeleteFilesInRange(r)
-		db.eng.CompactRange(r)
+		//db.eng.CompactRange(r)
 		db.eng.Delete(db.defaultWriteOpts, sk)
 	}
 	wb := db.wb
