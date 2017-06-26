@@ -163,7 +163,7 @@ func (db *RockDB) hSetField(hkey []byte, field []byte, value []byte, wb *gorocks
 	ek := hEncodeHashKey(table, rk, field)
 
 	created := int64(1)
-	if v, _ := db.eng.GetBytes(db.defaultReadOpts, ek); v != nil {
+	if v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); v != nil {
 		created = 0
 		if bytes.Equal(v, value) {
 			return created, nil
@@ -194,7 +194,7 @@ func (db *RockDB) hIncrSize(hkey []byte, delta int64, wb *gorocksdb.WriteBatch) 
 
 	var err error
 	var size int64 = 0
-	if size, err = Int64(db.eng.GetBytes(db.defaultReadOpts, sk)); err != nil {
+	if size, err = Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk)); err != nil {
 		return 0, err
 	} else {
 		size += delta
@@ -246,7 +246,7 @@ func (db *RockDB) HMset(key []byte, args ...common.KVRecord) error {
 		}
 		ek := hEncodeHashKey(table, rk, args[i].Key)
 
-		if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+		if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
 			return err
 		} else if v == nil {
 			num++
@@ -328,7 +328,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		}
 
 		ek = hEncodeHashKey(table, rk, args[i])
-		v, err = db.eng.GetBytes(db.defaultReadOpts, ek)
+		v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 		if v == nil {
 			continue
 		} else {
@@ -429,7 +429,7 @@ func (db *RockDB) HIncrBy(key []byte, field []byte, delta int64) (int64, error) 
 		return 0, err
 	}
 	var n int64 = 0
-	if n, err = StrInt64(db.eng.GetBytes(db.defaultReadOpts, ek)); err != nil {
+	if n, err = StrInt64(db.eng.GetBytesNoLock(db.defaultReadOpts, ek)); err != nil {
 		return 0, err
 	}
 

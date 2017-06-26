@@ -239,7 +239,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	}
 
 	itemKey := lEncodeListKey(table, rk, seq)
-	value, err = db.eng.GetBytes(db.defaultReadOpts, itemKey)
+	value, err = db.eng.GetBytesNoLock(db.defaultReadOpts, itemKey)
 	if err != nil {
 		return nil, err
 	}

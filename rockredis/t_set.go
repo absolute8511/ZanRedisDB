@@ -187,7 +187,7 @@ func (db *RockDB) sIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (
 
 	var err error
 	var size int64 = 0
-	if size, err = Int64(db.eng.GetBytes(db.defaultReadOpts, sk)); err != nil {
+	if size, err = Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk)); err != nil {
 		return 0, err
 	} else {
 		size += delta
@@ -214,7 +214,7 @@ func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) 
 	}
 
 	var n int64 = 1
-	if v, _ := db.eng.GetBytes(db.defaultReadOpts, ek); v != nil {
+	if v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); v != nil {
 		n = 0
 	} else {
 		if newNum, err := db.sIncrSize(key, 1, wb); err != nil {
@@ -250,7 +250,7 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 		ek = sEncodeSetKey(table, rk, args[i])
 
 		// TODO: how to tell not found and nil value (member value is also nil)
-		if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+		if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
 			return 0, err
 		} else if v == nil {
 			num++
@@ -355,7 +355,7 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 		}
 
 		ek = sEncodeSetKey(table, rk, args[i])
-		v, err = db.eng.GetBytes(db.defaultReadOpts, ek)
+		v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 		if v == nil {
 			continue
 		} else {

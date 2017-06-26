@@ -301,7 +301,7 @@ func (db *RockDB) zSetItem(key []byte, score int64, member []byte, wb *gorocksdb
 		return 0, err
 	}
 
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+	if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
 		return 0, err
 	} else if v != nil {
 		exists = 1
@@ -332,7 +332,7 @@ func (db *RockDB) zDelItem(key []byte, member []byte,
 	if err != nil {
 		return 0, err
 	}
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+	if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
 		return 0, err
 	} else if v == nil {
 		//not exists
@@ -404,7 +404,7 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 func (db *RockDB) zIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	sk := zEncodeSizeKey(key)
 
-	size, err := Int64(db.eng.GetBytes(db.defaultReadOpts, sk))
+	size, err := Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk))
 	if err != nil {
 		return 0, err
 	} else {
@@ -500,7 +500,7 @@ func (db *RockDB) ZIncrBy(key []byte, delta int64, member []byte) (int64, error)
 	ek := zEncodeSetKey(table, rk, member)
 
 	var oldScore int64 = 0
-	v, err := db.eng.GetBytes(db.defaultReadOpts, ek)
+	v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 	if err != nil {
 		return InvalidScore, err
 	} else if v == nil {
