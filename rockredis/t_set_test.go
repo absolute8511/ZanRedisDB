@@ -21,12 +21,14 @@ func TestSetCodec(t *testing.T) {
 	}
 
 	ek, _ = convertRedisKeyToDBSKey(key, member)
-	if k, m, err := sDecodeSetKey(ek); err != nil {
+	if tb, k, m, err := sDecodeSetKey(ek); err != nil {
 		t.Fatal(err)
 	} else if string(k) != "key" {
 		t.Fatal(string(k))
 	} else if string(m) != "member" {
 		t.Fatal(string(m))
+	} else if string(tb) != "test" {
+		t.Fatal(string(tb))
 	}
 }
 

@@ -191,8 +191,9 @@ func TestRockDBScanTableForList(t *testing.T) {
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
-			k, _, err := lDecodeListKey(it.Key())
+			tb, k, _, err := lDecodeListKey(it.Key())
 			assert.Nil(t, err)
+			assert.Equal(t, "test", string(tb))
 			if !strings.HasPrefix(string(k), "test") {
 				t.Fatal("should has table prefix for key")
 			}
@@ -210,8 +211,9 @@ func TestRockDBScanTableForList(t *testing.T) {
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
-			k, _, err := lDecodeListKey(it.Key())
+			tb, k, _, err := lDecodeListKey(it.Key())
 			assert.Nil(t, err)
+			assert.Equal(t, "test2", string(tb))
 
 			if !strings.HasPrefix(string(k), "test2") {
 				t.Fatal("should has table prefix for key")
@@ -255,8 +257,9 @@ func TestRockDBScanTableForSet(t *testing.T) {
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
-			k, m, err := sDecodeSetKey(it.Key())
+			tb, k, m, err := sDecodeSetKey(it.Key())
 			assert.Nil(t, err)
+			assert.Equal(t, "test", string(tb))
 			if !strings.HasPrefix(string(k), "test") {
 				t.Fatal("should has table prefix for key")
 			}
@@ -276,8 +279,9 @@ func TestRockDBScanTableForSet(t *testing.T) {
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
-			k, m, err := sDecodeSetKey(it.Key())
+			tb, k, m, err := sDecodeSetKey(it.Key())
 			assert.Nil(t, err)
+			assert.Equal(t, "test2", string(tb))
 			if !strings.HasPrefix(string(k), "test2") {
 				t.Fatal("should has table prefix for key")
 			}
@@ -324,8 +328,9 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
-			k, m, s, err := zDecodeScoreKey(it.Key())
+			tb, k, m, s, err := zDecodeScoreKey(it.Key())
 			assert.Nil(t, err)
+			assert.Equal(t, "test", string(tb))
 			if !strings.HasPrefix(string(k), "test") {
 				t.Fatal("key should has table prefix " + string(k))
 			}
@@ -349,8 +354,9 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
-			k, m, s, err := zDecodeScoreKey(it.Key())
+			tb, k, m, s, err := zDecodeScoreKey(it.Key())
 			assert.Nil(t, err)
+			assert.Equal(t, "test2", string(tb))
 			if !strings.HasPrefix(string(k), "test2") {
 				t.Fatal("key should has table prefix " + string(k))
 			}

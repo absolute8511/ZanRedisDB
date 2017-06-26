@@ -98,7 +98,7 @@ func lEncodeListKey(table []byte, key []byte, seq int64) []byte {
 	return buf
 }
 
-func lDecodeListKey(ek []byte) (key []byte, seq int64, err error) {
+func lDecodeListKey(ek []byte) (table []byte, key []byte, seq int64, err error) {
 	pos := 0
 	if pos+1 > len(ek) || ek[pos] != ListType {
 		err = errListKey
@@ -118,7 +118,7 @@ func lDecodeListKey(ek []byte) (key []byte, seq int64, err error) {
 		err = errListKey
 		return
 	}
-	_ = ek[pos : pos+tableLen]
+	table = ek[pos : pos+tableLen]
 	pos += tableLen
 	if ek[pos] != tableStartSep {
 		err = errListKey

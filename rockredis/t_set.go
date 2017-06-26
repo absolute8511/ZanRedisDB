@@ -94,51 +94,51 @@ func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
 	return buf
 }
 
-func sDecodeSetKey(ek []byte) ([]byte, []byte, error) {
+func sDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
 	pos := 0
 
 	if pos+1 > len(ek) || ek[pos] != SetType {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 
 	pos++
 
 	if pos+2 > len(ek) {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 
 	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 	if tableLen+pos > len(ek) {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
-	_ = ek[pos : pos+tableLen]
+	table := ek[pos : pos+tableLen]
 	pos += tableLen
 	if ek[pos] != tableStartSep {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 	pos++
 	if pos+2 > len(ek) {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 
 	if keyLen+pos > len(ek) {
-		return nil, nil, errSetKey
+		return table, nil, nil, errSetKey
 	}
 
 	key := ek[pos : pos+keyLen]
 	pos += keyLen
 
 	if ek[pos] != hashStartSep {
-		return nil, nil, errSetKey
+		return table, nil, nil, errSetKey
 	}
 
 	pos++
 	member := ek[pos:]
-	return key, member, nil
+	return table, key, member, nil
 }
 
 func sEncodeStartKey(table []byte, key []byte) []byte {
@@ -325,7 +325,7 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 	}
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
-		_, m, err := sDecodeSetKey(it.Key())
+		_, _, m, err := sDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
 		}
