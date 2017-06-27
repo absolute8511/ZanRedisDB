@@ -67,7 +67,7 @@ func FillDefaultOptions(opts *RockOptions) {
 		if err != nil {
 			opts.BlockCache = 1024 * 1024 * 128
 		} else {
-			opts.BlockCache = int64(v.Total / 100 * 2)
+			opts.BlockCache = int64(v.Total / 100)
 			if opts.BlockCache < 1024*1024*64 {
 				opts.BlockCache = 1024 * 1024 * 64
 			} else if opts.BlockCache > 1024*1024*1024*8 {
@@ -111,16 +111,19 @@ func FillDefaultOptions(opts *RockOptions) {
 type RockConfig struct {
 	DataDir            string
 	EnableTableCounter bool
-	DefaultReadOpts    *gorocksdb.ReadOptions
-	DefaultWriteOpts   *gorocksdb.WriteOptions
+	// this will ignore all update and non-exist delete
+	EstimateTableCounter bool
+	DefaultReadOpts      *gorocksdb.ReadOptions
+	DefaultWriteOpts     *gorocksdb.WriteOptions
 	RockOptions
 }
 
 func NewRockConfig() *RockConfig {
 	c := &RockConfig{
-		DefaultReadOpts:    gorocksdb.NewDefaultReadOptions(),
-		DefaultWriteOpts:   gorocksdb.NewDefaultWriteOptions(),
-		EnableTableCounter: true,
+		DefaultReadOpts:      gorocksdb.NewDefaultReadOptions(),
+		DefaultWriteOpts:     gorocksdb.NewDefaultWriteOptions(),
+		EnableTableCounter:   true,
+		EstimateTableCounter: false,
 	}
 	c.DefaultReadOpts.SetVerifyChecksums(false)
 	FillDefaultOptions(&c.RockOptions)
