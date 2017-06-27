@@ -181,6 +181,7 @@ type RockDB struct {
 	engOpened        int32
 	ttlChecker       *TTLChecker
 	isBatching       int32
+	gc               *GC
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -247,6 +248,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		wb:               gorocksdb.NewWriteBatch(),
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
+		gc:               NewGC(),
 	}
 	eng, err := gorocksdb.OpenDb(opts, db.GetDataDir())
 	if err != nil {
@@ -258,12 +260,16 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
 	db.ttlChecker = NewTTLChecker(db)
+	db.gc.AddComponent(NewTTLRedundantDataCollector(db))
 
 	db.wg.Add(1)
 	go func() {
 		defer db.wg.Done()
 		db.backupLoop()
 	}()
+
+	db.gc.Start()
+
 	return db, nil
 }
 
@@ -338,6 +344,7 @@ func (r *RockDB) Close() {
 	}
 	close(r.quit)
 	r.StopTTLChecker()
+	r.gc.StopAll()
 	r.wg.Wait()
 	r.closeEng()
 	if r.defaultReadOpts != nil {

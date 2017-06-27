@@ -21,6 +21,8 @@ const (
 	expireCheckInterval = 1
 	logTimeFormatStr    = "2006-01-02 15:04:05"
 	batchedRedDataCount = 1024
+
+	ttlRedundantDataCollectInterval = 5 * 60
 )
 
 var errExpType = errors.New("invalid expire type")
@@ -160,11 +162,6 @@ func (db *RockDB) ttl(dataType byte, key []byte) (t int64, err error) {
 	}
 
 	return t, err
-}
-
-//TODO, 回收ttl的冗余数据
-func (db *RockDB) ttlRedundantDataCollect() {
-
 }
 
 func (db *RockDB) delExpire(dataType byte, key []byte, wb *gorocksdb.WriteBatch) error {
@@ -331,7 +328,7 @@ func (c *TTLChecker) check(stopChan chan struct{}) {
 				redundantTimeKey += 1
 			} else {
 				select {
-				case c.expiredChan <- &common.ExpiredData{DataType: rockDataType2CommonType(dt), Key: k}:
+				case c.expiredChan <- &common.ExpiredData{DataType: dataType2CommonType(dt), Key: k}:
 				case <-stopChan:
 					break
 				}
@@ -368,7 +365,7 @@ func (c *TTLChecker) check(stopChan chan struct{}) {
 	return
 }
 
-func rockDataType2CommonType(t byte) common.DataType {
+func dataType2CommonType(t byte) common.DataType {
 	switch t {
 	case KVType:
 		return common.KV
@@ -383,4 +380,160 @@ func rockDataType2CommonType(t byte) common.DataType {
 	default:
 		return common.NONE
 	}
+}
+
+type ttlRedundantDataCollector struct {
+	db    *RockDB
+	quitC chan struct{}
+	wb    *gorocksdb.WriteBatch
+	wg    sync.WaitGroup
+
+	sync.Mutex
+	stats map[string]int64
+}
+
+func NewTTLRedundantDataCollector(db *RockDB) *ttlRedundantDataCollector {
+	tc := &ttlRedundantDataCollector{
+		db:    db,
+		quitC: make(chan struct{}),
+		wb:    gorocksdb.NewWriteBatch(),
+		stats: make(map[string]int64),
+	}
+	tc.stats["gc-times"] = 0
+	tc.stats["cost"] = 0
+	tc.stats["scanned"] = 0
+	tc.stats["deleted"] = 0
+	return tc
+
+}
+
+func (tc *ttlRedundantDataCollector) Start() {
+	tc.wg.Add(1)
+	go func() {
+		defer tc.wg.Done()
+		ticker := time.NewTicker(ttlRedundantDataCollectInterval * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				tc.collect()
+			case <-tc.quitC:
+				return
+			}
+		}
+	}()
+}
+
+func (tc *ttlRedundantDataCollector) Stop() {
+	close(tc.quitC)
+	tc.wg.Wait()
+}
+
+func (tc *ttlRedundantDataCollector) Name() string {
+	return "ttl-gc-component"
+}
+
+func (tc *ttlRedundantDataCollector) Stats() (interface{}, error) {
+	cstats := make(map[string]int64)
+	tc.Lock()
+	for k, v := range tc.stats {
+		cstats[k] = v
+	}
+	tc.Unlock()
+	return cstats, nil
+}
+
+func (tc *ttlRedundantDataCollector) collect() {
+	defer func() {
+		if e := recover(); e != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			dbLog.Errorf("collect redundant data of ttl panic: %s:%v", buf, e)
+		}
+	}()
+
+	start := time.Now()
+	dbLog.Infof("gc of redundant data of ttl start at %s", start.Format(logTimeFormatStr))
+
+	minKey := expEncodeTimeKey(NoneType, nil, 0)
+	maxKey := expEncodeTimeKey(maxDataType, nil, start.Unix())
+
+	var scanned int64 = 0
+	var redundant int64 = 0
+
+	it, err := NewDBRangeLimitIterator(tc.db.eng, minKey, maxKey,
+		common.RangeROpen, 0, -1, false)
+	defer it.Close()
+
+	defer func() {
+		cost := time.Since(start)
+		tc.updateStats(scanned, redundant, cost)
+		dbLog.Infof("[%d/%d] redundant time keys have been deleted during gc, cost:%dus", redundant, scanned, cost.Nanoseconds()/1000)
+	}()
+
+	if err != nil {
+		dbLog.Infof("gc of redundant data of ttl, create db range iterator failed as:%s", err.Error())
+		return
+	} else if it == nil || !it.Valid() {
+		return
+	}
+
+	tc.wb.Clear()
+
+	for ; it.Valid(); it.Next() {
+		if scanned%100 == 0 {
+			select {
+			case <-tc.quitC:
+				break
+			default:
+			}
+		}
+		tk := it.Key()
+		mk := it.Value()
+
+		if tk == nil {
+			continue
+		}
+
+		scanned += 1
+		_, _, nt, err := expDecodeTimeKey(tk)
+		if err != nil {
+			dbLog.Warningf("encounter the damaged data of time key during gc")
+			continue
+		}
+
+		if exp, err := Int64(tc.db.eng.GetBytes(tc.db.defaultReadOpts, mk)); err == nil {
+			if exp != nt {
+				//it may happen if ttl of the key has been reset as we do not remove the
+				//pre-exists time-key when expire called
+				tc.wb.Delete(tk)
+				redundant += 1
+			}
+		}
+
+		if redundant%batchedRedDataCount == 0 {
+			if err := tc.db.eng.Write(tc.db.defaultWriteOpts, tc.wb); err != nil {
+				dbLog.Warningf("delete redundant time keys failed during gc, err:%s", err.Error())
+			}
+			tc.wb.Clear()
+		}
+
+	}
+
+	if err := tc.db.eng.Write(tc.db.defaultWriteOpts, tc.wb); err != nil {
+		dbLog.Warningf("delete redundant time keys failed during gc, err:%s", err.Error())
+	}
+
+	tc.wb.Clear()
+
+	return
+}
+
+func (tc *ttlRedundantDataCollector) updateStats(scanned int64, deleted int64, cost time.Duration) {
+	tc.Lock()
+	tc.stats["gc-times"] += 1
+	tc.stats["cost"] += cost.Nanoseconds() / 1000
+	tc.stats["scanned"] += scanned
+	tc.stats["deleted"] += deleted
+	tc.Unlock()
 }
