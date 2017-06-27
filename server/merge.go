@@ -144,10 +144,12 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 
 	switch dataType {
 	case common.KV:
-		conn.WriteArray(count * 2)
+		conn.WriteArray(count)
 		for _, res := range results {
 			realRes := res.(*common.FullScanResult)
+			//此处可以不用检查了
 			if realRes.Error == nil {
+				conn.WriteArray(2)
 				for _, r := range realRes.Results {
 					conn.WriteBulk(r.([][]byte)[0])
 					conn.WriteBulk(r.([][]byte)[1])
@@ -155,16 +157,18 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			}
 		}
 	case common.HASH:
-		conn.WriteArray(count * 3)
+		conn.WriteArray(count)
 		for _, res := range results {
 			realRes := res.(*common.FullScanResult)
 			if realRes.Error == nil {
 				for _, r := range realRes.Results {
+					conn.WriteArray(3)
 					realR := r.([][]byte)
 					length := len(realR)
-					conn.WriteArray(length)
-					for _, v := range realR {
-						conn.WriteBulk(v)
+					if length == 3 {
+						conn.WriteBulk(realR[0])
+						conn.WriteBulk(realR[1])
+						conn.WriteBulk(realR[2])
 					}
 				}
 			}

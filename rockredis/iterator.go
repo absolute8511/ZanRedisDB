@@ -2,7 +2,6 @@ package rockredis
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
@@ -162,7 +161,6 @@ type RangeLimitedIterator struct {
 
 func (it *RangeLimitedIterator) Valid() bool {
 	if !it.Iterator.Valid() {
-		fmt.Println("### 1")
 		return false
 	}
 	if it.l.Offset < 0 {

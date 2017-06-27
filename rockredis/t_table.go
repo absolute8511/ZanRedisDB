@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
@@ -49,6 +50,15 @@ func extractTableFromRedisKey(key []byte) ([]byte, []byte, error) {
 		return nil, nil, errTableName
 	}
 	return key[:index], key[index+1:], nil
+}
+
+func packRedisKey(table, key []byte) []byte {
+	var newKey []byte
+
+	newKey = append(newKey, table...)
+	newKey = append(newKey, tableStartSep)
+	newKey = append(newKey, key...)
+	return newKey
 }
 
 func encodeTableMetaKey(table []byte) []byte {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -420,61 +421,88 @@ func checkHashFullScanValues(t *testing.T, ay interface{}, values []interface{})
 		t.Fatal(err)
 	}
 
-	if len(a) != len(values)*2 {
-		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)*2))
+	if len(a) != len(values) {
+		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
 	}
-
+	fmt.Println(reflect.TypeOf(a))
 	var equalCount int
-	success := true
-	length := len(a)
-FATAL:
+
 	for _, val := range values {
-		for i := 0; i < length; i = i + 2 {
-			k := a[i].([]byte)
-			if val.(string) == string(k) {
-
+		for idx, _ := range a {
+			item := a[idx].([]interface{})
+			if len(item) != 3 {
+				t.Fatal("item length is not 3. len:", len(item))
+			}
+			key := item[0].([]byte)
+			field := item[1].([]byte)
+			value := item[2].([]byte)
+			if val.(string) == string(key) {
 				equalCount++
-				splits := bytes.SplitN(k, []byte(":"), 2)
-				if len(splits) != 2 {
-					success = false
-					break FATAL
+				splits := bytes.Split(value, []byte("_"))
+				if len(splits) != 3 {
+					t.Fatal("value format error. value:", string(value))
 				}
 
-				fieldcount, err := strconv.Atoi(string(splits[1]))
-				if err != nil {
-					t.Fatal(err)
+				if !bytes.Equal(key, splits[1]) || !bytes.Equal(field, splits[2]) {
+					t.Fatal("key:", string(key), "; field:", string(field), "; value:", string(value))
 				}
-				v := a[i+1].([]interface{})
-				for j := 0; j <= fieldcount*2; j = j + 2 {
-
-					hashkey := v[j].([]byte)
-					hashvalue := v[j+1].([]byte)
-
-					hashvalue_splits := bytes.SplitN(hashvalue, []byte("_"), 3)
-					if len(hashvalue_splits) != 3 {
-						t.Fatal("hash value formats error")
-						success = false
-						break FATAL
-					}
-
-					if string(hashkey) != string(hashvalue_splits[2]) {
-						t.Fatal("hash key error, hashkey:", hashkey, "; hashvalue_splits[2]:", hashvalue_splits[2])
-						success = false
-						break FATAL
-					}
-					if string(splits[1]) != string(hashvalue_splits[1]) {
-						t.Fatal("hash value error, key index:", splits[1], "; hashvalue_splits[1]:", hashvalue_splits[1])
-						success = false
-						break FATAL
-					}
-				}
-
 			}
 		}
 	}
-	if !success {
-		t.Fatal("failed")
-	}
+
+	/*
+	   	var equalCount int
+	   	success := true
+	   	length := len(a)
+	   FATAL:
+	   	for _, val := range values {
+	   		for i := 0; i < length; i = i + 2 {
+	   			k := a[i].([]byte)
+	   			if val.(string) == string(k) {
+
+	   				equalCount++
+	   				splits := bytes.SplitN(k, []byte(":"), 2)
+	   				if len(splits) != 2 {
+	   					success = false
+	   					break FATAL
+	   				}
+
+	   				fieldcount, err := strconv.Atoi(string(splits[1]))
+	   				if err != nil {
+	   					t.Fatal(err)
+	   				}
+	   				v := a[i+1].([]interface{})
+	   				for j := 0; j <= fieldcount*2; j = j + 2 {
+
+	   					hashkey := v[j].([]byte)
+	   					hashvalue := v[j+1].([]byte)
+
+	   					hashvalue_splits := bytes.SplitN(hashvalue, []byte("_"), 3)
+	   					if len(hashvalue_splits) != 3 {
+	   						t.Fatal("hash value formats error")
+	   						success = false
+	   						break FATAL
+	   					}
+
+	   					if string(hashkey) != string(hashvalue_splits[2]) {
+	   						t.Fatal("hash key error, hashkey:", hashkey, "; hashvalue_splits[2]:", hashvalue_splits[2])
+	   						success = false
+	   						break FATAL
+	   					}
+	   					if string(splits[1]) != string(hashvalue_splits[1]) {
+	   						t.Fatal("hash value error, key index:", splits[1], "; hashvalue_splits[1]:", hashvalue_splits[1])
+	   						success = false
+	   						break FATAL
+	   					}
+	   				}
+
+	   			}
+	   		}
+	   	}
+	   	if !success {
+	   		t.Fatal("failed")
+	   	}
+	*/
 	if equalCount != len(values) {
 		t.Fatal("equal count not equal")
 	}
@@ -603,18 +631,18 @@ func checkFullScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNXRaWEpuWlRveE1RPT07MTpkR1Z6ZEhOallXNXRaWEpuWlRveDsyOmRHVnpkSE5qWVc1dFpYSm5aVG93Ow==" &&
-		string(n) != "MDpkR1Z6ZEhOallXNXRaWEpuWlRveE1RPT07MjpkR1Z6ZEhOallXNXRaWEpuWlRvdzsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Ow==" &&
-		string(n) != "MTpkR1Z6ZEhOallXNXRaWEpuWlRveDswOmRHVnpkSE5qWVc1dFpYSm5aVG94TVE9PTsyOmRHVnpkSE5qWVc1dFpYSm5aVG93Ow==" &&
-		string(n) != "MTpkR1Z6ZEhOallXNXRaWEpuWlRveDsyOmRHVnpkSE5qWVc1dFpYSm5aVG93OzA6ZEdWemRITmpZVzV0WlhKblpUb3hNUT09Ow==" &&
-		string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRvdzswOmRHVnpkSE5qWVc1dFpYSm5aVG94TVE9PTsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Ow==" &&
-		string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRvdzsxOmRHVnpkSE5qWVc1dFpYSm5aVG94OzA6ZEdWemRITmpZVzV0WlhKblpUb3hNUT09Ow==" {
+	} else if n := ay[0].([]byte); string(n) != "MDpOUT09OzE6TVE9PTsyOk1BPT07" &&
+		string(n) != "MDpOUT09OzI6TUE9PTsxOk1RPT07" &&
+		string(n) != "MTpNUT09OzA6TlE9PTsyOk1BPT07" &&
+		string(n) != "MTpNUT09OzI6TUE9PTswOk5RPT07" &&
+		string(n) != "MjpNQT09OzA6TlE9PTsxOk1RPT07" &&
+		string(n) != "MjpNQT09OzE6TVE9PTswOk5RPT07" {
 		t.Fatal(string(n))
 	} else {
-		checkFullScanValues(t, ay[1], tp, "testscanmerge:1", "testscanmerge:11", "testscanmerge:0")
+		checkFullScanValues(t, ay[1], tp, "1", "1", "5")
 	}
 
-	if ay, err := goredis.Values(c.Do("FULLSCAN", "default:testscanmerge:MDpkR1Z6ZEhOallXNXRaWEpuWlRveE1RPT07MTpkR1Z6ZEhOallXNXRaWEpuWlRveDsyOmRHVnpkSE5qWVc1dFpYSm5aVG93Ow==", tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("FULLSCAN", "default:testscanmerge:MDpOUT09OzE6TVE9PTsyOk1BPT07", tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
