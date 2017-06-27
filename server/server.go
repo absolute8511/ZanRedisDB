@@ -69,7 +69,7 @@ func NewServer(conf ServerConfig) *Server {
 		conf.MaxScanJob = common.MAX_SCAN_JOB
 	}
 	if conf.ProfilePort == 0 {
-		conf.ProfilePort = 6666
+		conf.ProfilePort = 7666
 	}
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
