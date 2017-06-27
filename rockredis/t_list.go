@@ -98,7 +98,7 @@ func lEncodeListKey(table []byte, key []byte, seq int64) []byte {
 	return buf
 }
 
-func lDecodeListKey(ek []byte) (key []byte, seq int64, err error) {
+func lDecodeListKey(ek []byte) (table []byte, key []byte, seq int64, err error) {
 	pos := 0
 	if pos+1 > len(ek) || ek[pos] != ListType {
 		err = errListKey
@@ -118,7 +118,7 @@ func lDecodeListKey(ek []byte) (key []byte, seq int64, err error) {
 		err = errListKey
 		return
 	}
-	_ = ek[pos : pos+tableLen]
+	table = ek[pos : pos+tableLen]
 	pos += tableLen
 	if ek[pos] != tableStartSep {
 		err = errListKey
@@ -239,7 +239,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	}
 
 	itemKey := lEncodeListKey(table, rk, seq)
-	value, err = db.eng.GetBytes(db.defaultReadOpts, itemKey)
+	value, err = db.eng.GetBytesNoLock(db.defaultReadOpts, itemKey)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +419,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 		r.Start = startKey
 		r.Limit = stopKey
 		db.eng.DeleteFilesInRange(r)
-		db.eng.CompactRange(r)
+		//db.eng.CompactRange(r)
 	}
 
 	rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)

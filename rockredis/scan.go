@@ -316,7 +316,7 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 	defer it.Close()
 
 	for i := 0; it.Valid() && i < count; it.Next() {
-		_, m, err := sDecodeSetKey(it.Key())
+		_, _, m, err := sDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
 		} else if r != nil && !r.Match(string(m)) {
@@ -350,7 +350,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 	defer it.Close()
 
 	for i := 0; it.Valid() && i < count; it.Next() {
-		_, m, err := zDecodeSetKey(it.Key())
+		_, _, m, err := zDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
 		} else if r != nil && !r.Match(string(m)) {

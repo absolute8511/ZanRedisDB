@@ -65,11 +65,13 @@ func FillDefaultOptions(opts *RockOptions) {
 	if opts.BlockCache <= 0 {
 		v, err := mem.VirtualMemory()
 		if err != nil {
-			opts.BlockCache = 1024 * 1024 * 256
+			opts.BlockCache = 1024 * 1024 * 128
 		} else {
 			opts.BlockCache = int64(v.Total / 100 * 2)
-			if opts.BlockCache < 1024*1024*128 {
-				opts.BlockCache = 1024 * 1024 * 128
+			if opts.BlockCache < 1024*1024*64 {
+				opts.BlockCache = 1024 * 1024 * 64
+			} else if opts.BlockCache > 1024*1024*1024*8 {
+				opts.BlockCache = 1024 * 1024 * 1024 * 8
 			}
 		}
 	}

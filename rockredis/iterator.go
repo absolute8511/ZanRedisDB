@@ -12,6 +12,7 @@ type Iterator interface {
 	Prev()
 	Valid() bool
 	Seek([]byte)
+	SeekForPrev([]byte)
 	SeekToFirst()
 	SeekToLast()
 	Close()
@@ -160,15 +161,16 @@ type RangeLimitedIterator struct {
 }
 
 func (it *RangeLimitedIterator) Valid() bool {
-	if !it.Iterator.Valid() {
-		return false
-	}
 	if it.l.Offset < 0 {
 		return false
 	}
 	if it.l.Count >= 0 && it.step >= it.l.Count {
 		return false
 	}
+	if !it.Iterator.Valid() {
+		return false
+	}
+
 	if !it.reverse {
 		if it.r.Max != nil {
 			r := bytes.Compare(it.Iterator.RefKey(), it.r.Max)
@@ -238,12 +240,11 @@ func rangeLimitIterator(i Iterator, r *Range, l *Limit, reverse bool) *RangeLimi
 		if r.Max == nil {
 			it.Iterator.SeekToLast()
 		} else {
-			it.Iterator.Seek(r.Max)
+			it.Iterator.SeekForPrev(r.Max)
 			if !it.Iterator.Valid() {
 				it.Iterator.SeekToLast()
-			} else {
-				if !bytes.Equal(it.Iterator.RefKey(), r.Max) {
-					it.Iterator.Prev()
+				if it.Iterator.Valid() && bytes.Compare(it.Iterator.RefKey(), r.Max) == 1 {
+					dbLog.Infof("iterator seek to last key %v should not great than seek to max %v", it.Iterator.RefKey(), r.Max)
 				}
 			}
 			if r.Type&common.RangeROpen > 0 {

@@ -16,3 +16,4 @@ github.com/mreiferson/go-options
 github.com/BurntSushi/toml
 github.com/shirou/gopsutil
 golang.org/x/sys
+github.com/stretchr/testify/assert

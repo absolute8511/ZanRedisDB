@@ -94,51 +94,51 @@ func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
 	return buf
 }
 
-func sDecodeSetKey(ek []byte) ([]byte, []byte, error) {
+func sDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
 	pos := 0
 
 	if pos+1 > len(ek) || ek[pos] != SetType {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 
 	pos++
 
 	if pos+2 > len(ek) {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 
 	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 	if tableLen+pos > len(ek) {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
-	_ = ek[pos : pos+tableLen]
+	table := ek[pos : pos+tableLen]
 	pos += tableLen
 	if ek[pos] != tableStartSep {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 	pos++
 	if pos+2 > len(ek) {
-		return nil, nil, errSetKey
+		return nil, nil, nil, errSetKey
 	}
 
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 
 	if keyLen+pos > len(ek) {
-		return nil, nil, errSetKey
+		return table, nil, nil, errSetKey
 	}
 
 	key := ek[pos : pos+keyLen]
 	pos += keyLen
 
 	if ek[pos] != hashStartSep {
-		return nil, nil, errSetKey
+		return table, nil, nil, errSetKey
 	}
 
 	pos++
 	member := ek[pos:]
-	return key, member, nil
+	return table, key, member, nil
 }
 
 func sEncodeStartKey(table []byte, key []byte) []byte {
@@ -187,7 +187,7 @@ func (db *RockDB) sIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (
 
 	var err error
 	var size int64 = 0
-	if size, err = Int64(db.eng.GetBytes(db.defaultReadOpts, sk)); err != nil {
+	if size, err = Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk)); err != nil {
 		return 0, err
 	} else {
 		size += delta
@@ -214,7 +214,7 @@ func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) 
 	}
 
 	var n int64 = 1
-	if v, _ := db.eng.GetBytes(db.defaultReadOpts, ek); v != nil {
+	if v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); v != nil {
 		n = 0
 	} else {
 		if newNum, err := db.sIncrSize(key, 1, wb); err != nil {
@@ -250,7 +250,7 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 		ek = sEncodeSetKey(table, rk, args[i])
 
 		// TODO: how to tell not found and nil value (member value is also nil)
-		if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+		if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
 			return 0, err
 		} else if v == nil {
 			num++
@@ -325,7 +325,7 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 	}
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
-		_, m, err := sDecodeSetKey(it.Key())
+		_, _, m, err := sDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
 		}
@@ -355,7 +355,7 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 		}
 
 		ek = sEncodeSetKey(table, rk, args[i])
-		v, err = db.eng.GetBytes(db.defaultReadOpts, ek)
+		v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 		if v == nil {
 			continue
 		} else {

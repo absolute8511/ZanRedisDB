@@ -66,7 +66,7 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
+	v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 	created := false
 	n := int64(0)
 	if v == nil {
@@ -103,7 +103,7 @@ func (db *RockDB) KVDel(key []byte) error {
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 		if v != nil {
 			db.IncrTableKeyCount(table, -1, db.wb)
 		}
@@ -221,7 +221,7 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		value = value[:0]
 		value = append(value, args[i].Value...)
 		if db.cfg.EnableTableCounter {
-			v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 			if v == nil {
 				n := tableCnt[string(table)]
 				n++
@@ -250,7 +250,7 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 		if v == nil {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
@@ -274,7 +274,7 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		v, _ := db.eng.GetBytes(db.defaultReadOpts, key)
+		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 		if v == nil {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
@@ -304,7 +304,7 @@ func (db *RockDB) SetNX(ts int64, key []byte, value []byte) (int64, error) {
 	var v []byte
 	var n int64 = 1
 
-	if v, err = db.eng.GetBytes(db.defaultReadOpts, key); err != nil {
+	if v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, key); err != nil {
 		return 0, err
 	} else if v != nil {
 		n = 0
@@ -330,7 +330,7 @@ func (db *RockDB) SetRange(ts int64, key []byte, offset int, value []byte) (int6
 		return 0, errValueSize
 	}
 
-	oldValue, err := db.eng.GetBytes(db.defaultReadOpts, key)
+	oldValue, err := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 	if err != nil {
 		return 0, err
 	}
@@ -418,7 +418,7 @@ func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 		return 0, err
 	}
 
-	oldValue, err := db.eng.GetBytes(db.defaultReadOpts, key)
+	oldValue, err := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 	if err != nil {
 		return 0, err
 	}
