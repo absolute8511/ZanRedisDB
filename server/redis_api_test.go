@@ -1926,8 +1926,19 @@ func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
 	}
 	for i, v := range a {
-		if string(v) != fmt.Sprintf("%v", values[i]) {
-			t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+		vv := fmt.Sprintf("%v", values[i])
+		if string(v) != vv {
+			if len(v) == len(vv)+8 {
+				if string(v[:len(vv)]) != vv {
+					t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+				}
+			} else if len(v)+8 == len(vv) {
+				if string(v) != vv[:len(v)] {
+					t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+				}
+			} else {
+				t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+			}
 		}
 	}
 }
