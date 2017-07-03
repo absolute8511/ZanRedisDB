@@ -827,6 +827,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 									}
 									v, err := h(cmd, req.Header.Timestamp)
 									if err != nil {
+										self.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
 										self.w.Trigger(reqID, err)
 										continue
 									}
@@ -884,6 +885,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 								// write the future response or error
 								if err != nil {
+									self.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
 									self.w.Trigger(reqID, err)
 								} else {
 									self.w.Trigger(reqID, v)

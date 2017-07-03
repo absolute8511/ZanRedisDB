@@ -676,6 +676,9 @@ func (r *RockDB) MaybeCommitBatch() error {
 
 func (r *RockDB) CommitBatchWrite() error {
 	err := r.eng.Write(r.defaultWriteOpts, r.wb)
+	if err != nil {
+		dbLog.Infof("commit write error: %v", err)
+	}
 	atomic.StoreInt32(&r.isBatching, 0)
 	return err
 }
