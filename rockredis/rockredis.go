@@ -102,6 +102,7 @@ type RockConfig struct {
 	EnableTableCounter bool
 	DefaultReadOpts    *gorocksdb.ReadOptions
 	DefaultWriteOpts   *gorocksdb.WriteOptions
+	ExpirationPolicy   common.ExpirationPolicy
 	RockOptions
 }
 
@@ -168,6 +169,7 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string) {
 }
 
 type RockDB struct {
+	expiration
 	cfg              *RockConfig
 	eng              *gorocksdb.DB
 	dbOpts           *gorocksdb.Options
@@ -179,7 +181,6 @@ type RockDB struct {
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
 	engOpened        int32
-	ttlChecker       *TTLChecker
 	isBatching       int32
 	gc               *GC
 }
@@ -259,8 +260,18 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
 	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
-	db.ttlChecker = NewTTLChecker(db)
-	db.gc.AddComponent(NewTTLRedundantDataCollector(db))
+	switch cfg.ExpirationPolicy {
+	case common.ConsistencyDeletion:
+		db.expiration = newConsistencyExpiration(db)
+	case common.LocalDeletion:
+		db.expiration = newLocalExpiration(db)
+
+		//TODO
+		//case common.PeriodicalRotation:
+
+	default:
+		return nil, errors.New("unsupported ExpirationPolicy")
+	}
 
 	db.wg.Add(1)
 	go func() {
@@ -278,21 +289,11 @@ func GetBackupDir(base string) string {
 }
 
 func (r *RockDB) StartTTLChecker() {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		r.ttlChecker.Start()
-	}()
+	r.expiration.Start()
 }
 
 func (r *RockDB) StopTTLChecker() {
-	if r.ttlChecker != nil {
-		r.ttlChecker.Stop()
-	}
-}
-
-func (r *RockDB) GetExpiredDataChan() (chan struct{}, chan *common.ExpiredData) {
-	return r.ttlChecker.GetExpiredDataChan()
+	r.expiration.Stop()
 }
 
 func (r *RockDB) GetBackupBase() string {
@@ -343,7 +344,7 @@ func (r *RockDB) Close() {
 	default:
 	}
 	close(r.quit)
-	r.StopTTLChecker()
+	r.expiration.Stop()
 	r.gc.StopAll()
 	r.wg.Wait()
 	r.closeEng()

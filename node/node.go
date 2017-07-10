@@ -74,6 +74,7 @@ type KVNode struct {
 	committedIndex    uint64
 	clusterInfo       common.IClusterInfo
 	expireHandler     *ExpireHandler
+	expirationPolicy  common.ExpirationPolicy
 }
 
 type KVSnapInfo struct {
@@ -105,14 +106,15 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:   make(chan *internalReq, 200),
-		stopChan:      make(chan struct{}),
-		store:         store,
-		w:             wait.New(),
-		router:        common.NewCmdRouter(),
-		deleteCb:      deleteCb,
-		ns:            config.GroupName,
-		machineConfig: machineConfig,
+		reqProposeC:      make(chan *internalReq, 200),
+		stopChan:         make(chan struct{}),
+		store:            store,
+		w:                wait.New(),
+		router:           common.NewCmdRouter(),
+		deleteCb:         deleteCb,
+		ns:               config.GroupName,
+		machineConfig:    machineConfig,
+		expirationPolicy: kvopts.ExpirationPolicy,
 	}
 	s.clusterInfo = clusterInfo
 	s.expireHandler = NewExpireHandler(s)
@@ -146,11 +148,17 @@ func (self *KVNode) Start(standalone bool) error {
 		self.handleProposeReq()
 	}()
 
-	self.wg.Add(1)
-	go func() {
-		defer self.wg.Done()
-		self.expireHandler.Start()
-	}()
+	if self.expirationPolicy == common.ConsistencyDeletion {
+		self.wg.Add(1)
+		go func() {
+			defer self.wg.Done()
+			self.expireHandler.Start()
+		}()
+	}
+
+	if self.expirationPolicy != common.ConsistencyDeletion {
+		self.store.StartTTLChecker()
+	}
 
 	return nil
 }
@@ -165,7 +173,9 @@ func (self *KVNode) Stop() {
 	}
 	close(self.stopChan)
 	go self.deleteCb()
-	self.expireHandler.Stop()
+	if self.expireHandler.Running() {
+		self.expireHandler.Stop()
+	}
 	self.wg.Wait()
 	self.rn.StopNode()
 	self.store.Close()
@@ -247,8 +257,8 @@ func (self *KVNode) CleanData() error {
 		self.expireHandler.Reset()
 	}
 
-	//the ttlChecker should be reset after the store cleaned
-	if self.IsLead() {
+	//the ttlChecker should be restart after the store cleaned
+	if self.IsLead() || self.expirationPolicy != common.ConsistencyDeletion {
 		self.store.StartTTLChecker()
 	}
 	return nil
@@ -796,7 +806,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 								if !batching {
 									err := self.store.BeginBatchWrite()
 									if err != nil {
-										self.rn.Infof("bengin batch command %v failed: %v, %v", cmdName, cmd, err)
+										self.rn.Infof("begin batch command %v failed: %v, %v", cmdName, string(cmd.Raw), err)
 										self.w.Trigger(reqID, err)
 										continue
 									}
@@ -1213,10 +1223,13 @@ func (self *KVNode) ReportMeLeaderToCluster() {
 func (self *KVNode) OnRaftLeaderChanged() {
 	if self.rn.IsLead() {
 		go self.ReportMeLeaderToCluster()
-		//leader should start the TTLChecker to handle the expired data
-		self.store.StartTTLChecker()
+		if self.expirationPolicy == common.ConsistencyDeletion {
+			self.store.StartTTLChecker()
+		}
 	} else {
-		self.store.StopTTLChecker()
+		if self.expirationPolicy == common.ConsistencyDeletion {
+			self.store.StopTTLChecker()
+		}
 	}
 }
 

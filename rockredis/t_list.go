@@ -623,6 +623,7 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 			return 0, err
 		}
 		db.lDelete(key, db.wb)
+		db.delExpire(ListType, key, db.wb)
 	}
 	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	if err != nil {

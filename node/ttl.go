@@ -1,15 +1,25 @@
 package node
 
 import (
-	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
 )
+
+var (
+	expireCmds [common.ALL - common.NONE][]byte
+)
+
+func init() {
+	expireCmds[common.KV] = []byte("del")
+	expireCmds[common.HASH] = []byte("hmclear")
+	expireCmds[common.LIST] = []byte("lmclear")
+	expireCmds[common.SET] = []byte("smclear")
+	expireCmds[common.ZSET] = []byte("zmclear")
+}
 
 func (self *KVNode) setexCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
@@ -172,119 +182,19 @@ func (self *KVNode) zttlCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-type batchedExpire struct {
-	common.DataType
-	*KVNode
-	pendingArgs [][]byte
-	proposeC    chan []byte
-	commitC     chan struct{}
-}
-
-func newBatchedExpire(t common.DataType, node *KVNode) *batchedExpire {
-	var batchedCmd []byte
-
-	switch t {
-	case common.KV:
-		batchedCmd = []byte("del")
-	case common.HASH:
-		batchedCmd = []byte("hmclear")
-	case common.LIST:
-		batchedCmd = []byte("lmclear")
-	case common.SET:
-		batchedCmd = []byte("smclear")
-	case common.ZSET:
-		batchedCmd = []byte("zmclear")
-	}
-
-	batExp := &batchedExpire{
-		pendingArgs: make([][]byte, 1, 1000+1),
-		KVNode:      node,
-		DataType:    t,
-		proposeC:    make(chan []byte, 1000),
-		commitC:     make(chan struct{}),
-	}
-
-	batExp.pendingArgs[0] = batchedCmd
-
-	return batExp
-}
-
-func (self *batchedExpire) Start() {
-	//TODO, pick a appropriate check interval
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case k := <-self.proposeC:
-			self.pendingArgs = append(self.pendingArgs, k)
-			if len(self.pendingArgs) >= 1000 {
-				self.batchCommit()
-			}
-		case <-ticker.C:
-			self.batchCommit()
-		case _, ok := <-self.commitC:
-			self.batchCommit()
-			if !ok {
-				return
-			}
-		}
-	}
-}
-
-func (self *batchedExpire) Clear() {
-	self.pendingArgs = self.pendingArgs[0:1]
-}
-
-func (self *batchedExpire) Propose(k []byte) {
-	self.proposeC <- k
-}
-
-func (self *batchedExpire) batchCommit() (err error) {
-	if len(self.pendingArgs) <= 1 {
-		return
-	}
-
-	cmd := buildCommand(self.pendingArgs)
-	if _, err := self.KVNode.Propose(cmd.Raw); err != nil {
-		err = fmt.Errorf("failed to propose the command which handles expired data, type:%d,"+
-			"pending:%s, err:%s", self.DataType, len(self.pendingArgs), err.Error())
-	}
-	self.pendingArgs = self.pendingArgs[0:1]
-	return
-}
-
-func (self *batchedExpire) Commit() {
-	self.commitC <- struct{}{}
-}
-
-func (self *batchedExpire) Stop() {
-	close(self.commitC)
-}
-
 type ExpireHandler struct {
-	node           *KVNode
-	batchedExpires [common.ALL - common.NONE]*batchedExpire
-	resetC         chan struct{}
-	quitC          chan struct{}
-	wg             sync.WaitGroup
-	running        int32
+	node    *KVNode
+	resetC  chan struct{}
+	quitC   chan struct{}
+	wg      sync.WaitGroup
+	running int32
 }
 
-func NewExpireHandler(nd *KVNode) *ExpireHandler {
-	h := &ExpireHandler{
-		node:   nd,
+func NewExpireHandler(node *KVNode) *ExpireHandler {
+	return &ExpireHandler{
+		node:   node,
 		resetC: make(chan struct{}),
 	}
-
-	dataTypes := []common.DataType{
-		common.KV, common.LIST, common.HASH, common.SET, common.ZSET,
-	}
-
-	for _, t := range dataTypes {
-		h.batchedExpires[t] = newBatchedExpire(t, nd)
-	}
-
-	return h
 }
 
 func (self *ExpireHandler) Start() {
@@ -294,56 +204,33 @@ func (self *ExpireHandler) Start() {
 
 	self.quitC = make(chan struct{})
 
-	for _, t := range self.batchedExpires {
-		if t != nil {
-			self.wg.Add(1)
-			go func(t *batchedExpire) {
-				defer self.wg.Done()
-				t.Start()
-			}(t)
-		}
-	}
-
-	handleFunc := func(commitC chan struct{}, expiredDataC chan *common.ExpiredData) {
-		defer func() {
-			for _, t := range self.batchedExpires {
-				if t != nil {
-					t.Commit()
-				}
-			}
-		}()
-		for {
-			select {
-			case eData := <-expiredDataC:
-				self.batchedExpires[eData.DataType].Propose(eData.Key)
-			case <-commitC:
-				for _, t := range self.batchedExpires {
-					if t != nil {
-						t.Commit()
-					}
-				}
-			case <-self.quitC:
-				return
-			case <-self.resetC:
-				return
-			}
-		}
+	types := []common.DataType{
+		common.KV, common.LIST, common.SET, common.ZSET, common.HASH,
 	}
 
 	for {
-		commitC, expiredDataC := self.node.store.GetExpiredDataChan()
-		handleFunc(commitC, expiredDataC)
+		stopCh := make(chan struct{})
+		for _, t := range types {
+			self.wg.Add(1)
+
+			go func(t common.DataType, stopCh chan struct{}) {
+				defer self.wg.Done()
+				expiredCh := self.node.store.GetExpiredDataChan(t)
+
+				//apply expiration of different data types
+				applyExpiration(self.node, t, expiredCh, stopCh)
+			}(t, stopCh)
+		}
 
 		select {
+		case <-self.resetC:
+			//the underlying store has changed and the expired data channel should be reacquired
+			close(stopCh)
+			self.wg.Wait()
+
 		case <-self.quitC:
-			for _, t := range self.batchedExpires {
-				if t != nil {
-					t.Stop()
-				}
-			}
+			close(stopCh)
 			return
-		default:
-			continue
 		}
 	}
 
@@ -354,9 +241,7 @@ func (self *ExpireHandler) Reset() {
 }
 
 func (self *ExpireHandler) Stop() {
-	if !atomic.CompareAndSwapInt32(&self.running, 1, 0) {
-		return
-	} else {
+	if atomic.CompareAndSwapInt32(&self.running, 1, 0) {
 		close(self.quitC)
 		self.wg.Wait()
 	}
@@ -364,4 +249,43 @@ func (self *ExpireHandler) Stop() {
 
 func (self *ExpireHandler) Running() bool {
 	return atomic.LoadInt32(&self.running) == 1
+}
+
+func rawExpireCommand(dt common.DataType, keys [][]byte) []byte {
+	cmd := expireCmds[dt]
+	buf := make([]byte, 0, 128)
+
+	buf = append(buf, '*')
+	buf = append(buf, strconv.FormatInt(int64(len(keys)+1), 10)...)
+	buf = append(buf, '\r', '\n')
+
+	buf = append(buf, '$')
+	buf = append(buf, strconv.FormatInt(int64(len(cmd)), 10)...)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, cmd...)
+	buf = append(buf, '\r', '\n')
+
+	for _, key := range keys {
+		buf = append(buf, '$')
+		buf = append(buf, strconv.FormatInt(int64(len(key)), 10)...)
+		buf = append(buf, '\r', '\n')
+		buf = append(buf, key...)
+		buf = append(buf, '\r', '\n')
+	}
+	return buf
+}
+
+func applyExpiration(node *KVNode, dataType common.DataType, expiredCh chan *common.ExpiredData, stopCh chan struct{}) {
+	for {
+		select {
+		case v, ok := <-expiredCh:
+			if ok {
+				node.Propose(rawExpireCommand(dataType, v.Keys))
+			} else {
+				return
+			}
+		case <-stopCh:
+			return
+		}
+	}
 }
