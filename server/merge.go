@@ -120,10 +120,6 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 		realRes := res.(*common.FullScanResult)
 		if realRes.Error == nil {
 			dataType = realRes.Type
-			v := reflect.ValueOf(realRes.Results)
-			if v.Kind() != reflect.Slice {
-				continue
-			}
 
 			if len(realRes.NextCursor) > 0 {
 				nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
@@ -134,7 +130,8 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			}
 			count += len(realRes.Results)
 		} else {
-			//TODO: log sth
+			conn.WriteError(realRes.Error.Error() + " : Err handle command " + string(cmd.Args[0]))
+			return
 		}
 	}
 
@@ -149,8 +146,8 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			realRes := res.(*common.FullScanResult)
 			//此处可以不用检查了
 			if realRes.Error == nil {
-				conn.WriteArray(2)
 				for _, r := range realRes.Results {
+					conn.WriteArray(2)
 					conn.WriteBulk(r.([][]byte)[0])
 					conn.WriteBulk(r.([][]byte)[1])
 				}
@@ -173,39 +170,34 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 				}
 			}
 		}
+	case common.LIST, common.SET:
+		conn.WriteArray(count)
+		for _, res := range results {
+			realRes := res.(*common.FullScanResult)
+			if realRes.Error == nil {
+				for _, r := range realRes.Results {
+					realR := r.([][]byte)
+					length := len(realR)
+					conn.WriteArray(length)
+					for idx, _ := range realR {
+						conn.WriteBulk(realR[idx])
+					}
+				}
+			}
+		}
+
 		/*
-			case common.LIST, common.SET:
+			case common.ZSET:
 				conn.WriteArray(len(result) * 2)
 				for k, v := range result {
 					conn.WriteBulkString(k)
-					val := v.([][]byte)
-					conn.WriteArray(len(val))
-					for _, l := range val {
-						conn.WriteBulk(l)
+					val := v.([]common.ScorePair)
+					conn.WriteArray(len(val) * 2)
+					for _, s := range val {
+						conn.WriteBulk(s.Member)
+						conn.WriteBulkString(strconv.FormatInt(s.Score, 10))
 					}
 				}
-					case common.HASH:
-						conn.WriteArray(len(result) * 2)
-						for k, v := range result {
-							conn.WriteBulkString(k)
-							val := v.([]common.KVRecord)
-							conn.WriteArray(len(val) * 2)
-							for _, r := range val {
-								conn.WriteBulk(r.Key)
-								conn.WriteBulk(r.Value)
-							}
-						}
-					case common.ZSET:
-						conn.WriteArray(len(result) * 2)
-						for k, v := range result {
-							conn.WriteBulkString(k)
-							val := v.([]common.ScorePair)
-							conn.WriteArray(len(val) * 2)
-							for _, s := range val {
-								conn.WriteBulk(s.Member)
-								conn.WriteBulkString(strconv.FormatInt(s.Score, 10))
-							}
-						}
 		*/
 	}
 
@@ -281,8 +273,8 @@ func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Comm
 }
 
 //首次传入 namespace:table:,
-//返回 1:table:xxx1;2:table:xxx2;3:table:xxx3,
-//下次传入 namespace:table:1:table:xxx;2:table:xxx;3:table:xxx,
+//返回 1:xxx1;2:xxx2;3:xxx3,
+//下次传入 namespace:table:1:xxx;2:xxx;3:xxx,
 //解析出分区 1, 2, 3 及其对应的cursor,
 //1的namespace:table:xxx1和2的namespace:table:xxx2, 和3的namespace:table:xxx3,
 func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string, error) {
@@ -294,7 +286,7 @@ func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string,
 	nsMap := make(map[string]string)
 
 	if len(originCursor) == 2 {
-		table := string(originCursor[0])
+		table := originCursor[0]
 		encodedCursors := originCursor[1]
 		if len(table) > 0 {
 			if len(encodedCursors) == 0 {
@@ -312,21 +304,19 @@ func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string,
 							cursorEncoded := cursorinfo[1]
 							cursorDecoded, err := base64.StdEncoding.DecodeString(string(cursorEncoded))
 							if err == nil {
-								splits := bytes.SplitN(cursorDecoded, []byte(":"), 2)
-								tab := string(splits[0])
-								if table != tab {
-									return nil, common.ErrInvalidScanCursor
-								}
 								pid, err := strconv.Atoi(string(cursorinfo[0]))
 								if err != nil {
 									return nil, common.ErrInvalidScanCursor
 								}
 								ns := common.GetNsDesp(nsBaseName, pid)
-								nsMap[ns] = string(cursorDecoded)
+								var cursor []byte
+								cursor = append(cursor, table...)
+								cursor = append(cursor, common.SCAN_NODE_SEP...)
+								cursor = append(cursor, cursorDecoded...)
+								nsMap[ns] = string(cursor)
 							} else {
 								return nil, common.ErrInvalidScanCursor
 							}
-
 						} else {
 							return nil, common.ErrInvalidScanCursor
 						}
