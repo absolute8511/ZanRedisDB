@@ -997,9 +997,9 @@ func TestFullScan(t *testing.T) {
 	c := getMergeTestConn(t)
 	defer c.Close()
 
-	//testKVFullScan(t, c)
-	//testHashFullScan(t, c)
-	//testListFullScan(t, c)
+	testKVFullScan(t, c)
+	testHashFullScan(t, c)
+	testListFullScan(t, c)
 	testSetFullScan(t, c)
 	//		testZSetFullScan(t, c)
 }
