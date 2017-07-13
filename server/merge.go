@@ -138,10 +138,10 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 	nextCursor := base64.StdEncoding.EncodeToString(nextCursorBytes)
 	conn.WriteArray(2)
 	conn.WriteBulkString(nextCursor)
+	conn.WriteArray(count)
 
 	switch dataType {
 	case common.KV:
-		conn.WriteArray(count)
 		for _, res := range results {
 			realRes := res.(*common.FullScanResult)
 			//此处可以不用检查了
@@ -154,7 +154,6 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			}
 		}
 	case common.HASH:
-		conn.WriteArray(count)
 		for _, res := range results {
 			realRes := res.(*common.FullScanResult)
 			if realRes.Error == nil {
@@ -171,7 +170,6 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			}
 		}
 	case common.LIST, common.SET:
-		conn.WriteArray(count)
 		for _, res := range results {
 			realRes := res.(*common.FullScanResult)
 			if realRes.Error == nil {
@@ -185,22 +183,26 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 				}
 			}
 		}
-
-		/*
-			case common.ZSET:
-				conn.WriteArray(len(result) * 2)
-				for k, v := range result {
-					conn.WriteBulkString(k)
-					val := v.([]common.ScorePair)
-					conn.WriteArray(len(val) * 2)
-					for _, s := range val {
-						conn.WriteBulk(s.Member)
-						conn.WriteBulkString(strconv.FormatInt(s.Score, 10))
+	case common.ZSET:
+		for _, res := range results {
+			realRes := res.(*common.FullScanResult)
+			if realRes.Error == nil {
+				for _, r := range realRes.Results {
+					realR := r.([]interface{})
+					length := len(realR)
+					conn.WriteArray(length)
+					k := realR[0].([]byte)
+					conn.WriteBulk(k)
+					for i := 1; i < length; i++ {
+						v := realR[i].(common.ScorePair)
+						conn.WriteArray(2)
+						conn.WriteBulk(v.Member)
+						conn.WriteBulk([]byte(strconv.FormatInt(v.Score, 10)))
 					}
 				}
-		*/
+			}
+		}
 	}
-
 }
 
 func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
