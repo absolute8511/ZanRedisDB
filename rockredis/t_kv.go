@@ -103,8 +103,12 @@ func (db *RockDB) KVDel(key []byte) error {
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
-		if v != nil {
+		if !db.cfg.EstimateTableCounter {
+			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			if v != nil {
+				db.IncrTableKeyCount(table, -1, db.wb)
+			}
+		} else {
 			db.IncrTableKeyCount(table, -1, db.wb)
 		}
 	}
@@ -221,7 +225,10 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		value = value[:0]
 		value = append(value, args[i].Value...)
 		if db.cfg.EnableTableCounter {
-			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			var v []byte
+			if !db.cfg.EstimateTableCounter {
+				v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			}
 			if v == nil {
 				n := tableCnt[string(table)]
 				n++
@@ -250,7 +257,10 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+		var v []byte
+		if !db.cfg.EstimateTableCounter {
+			v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+		}
 		if v == nil {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
@@ -274,7 +284,10 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+		var v []byte
+		if !db.cfg.EstimateTableCounter {
+			v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+		}
 		if v == nil {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}

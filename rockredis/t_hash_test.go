@@ -39,13 +39,13 @@ func TestDBHash(t *testing.T) {
 
 	key := []byte("test:testdb_hash_a")
 
-	if n, err := db.HSet(key, []byte("a"), []byte("hello world 1")); err != nil {
+	if n, err := db.HSet(0, key, []byte("a"), []byte("hello world 1")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
 
-	if n, err := db.HSet(key, []byte("b"), []byte("hello world 2")); err != nil {
+	if n, err := db.HSet(0, key, []byte("b"), []byte("hello world 2")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -132,7 +132,7 @@ func TestHashKeyExists(t *testing.T) {
 		t.Fatal("invalid value ", v)
 	}
 
-	if _, err := db.HSet(key, []byte("hello"), []byte("world")); err != nil {
+	if _, err := db.HSet(0, key, []byte("hello"), []byte("world")); err != nil {
 		t.Fatal(err.Error())
 	}
 
@@ -143,7 +143,7 @@ func TestHashKeyExists(t *testing.T) {
 	if v != 1 {
 		t.Fatal("invalid value ", v)
 	}
-	if _, err := db.HSet(key, []byte("hello2"), []byte("world2")); err != nil {
+	if _, err := db.HSet(0, key, []byte("hello2"), []byte("world2")); err != nil {
 		t.Fatal(err.Error())
 	}
 	db.HDel(key, []byte("hello"))
@@ -169,15 +169,15 @@ func TestHashKeyIncrBy(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 	key := []byte("test:hkey_incr_test")
-	if _, err := db.HSet(key, []byte("hello"), []byte("0")); err != nil {
+	if _, err := db.HSet(0, key, []byte("hello"), []byte("0")); err != nil {
 		t.Fatal(err.Error())
 	}
 
-	r, _ := db.HIncrBy(key, []byte("hello"), 3)
+	r, _ := db.HIncrBy(0, key, []byte("hello"), 3)
 	if r != 3 {
 		t.Error(r)
 	}
-	r, _ = db.HIncrBy(key, []byte("hello"), -6)
+	r, _ = db.HIncrBy(0, key, []byte("hello"), -6)
 	if r != -3 {
 		t.Error(r)
 	}

@@ -65,7 +65,7 @@ func TestRockDB(t *testing.T) {
 	assert.Equal(t, string(value), string(v))
 
 	key = []byte("test:test_hash_key")
-	_, err = db.HSet(key, []byte("a"), value)
+	_, err = db.HSet(0, key, []byte("a"), value)
 	assert.Nil(t, err)
 
 	v, err = db.HGet(key, []byte("a"))
@@ -106,15 +106,15 @@ func TestRockDBScanTableForHash(t *testing.T) {
 		keyList2 = append(keyList2, []byte("test2:test2_hash_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
 	for _, key := range keyList1 {
-		_, err := db.HSet(key, []byte("a"), key)
+		_, err := db.HSet(0, key, []byte("a"), key)
 		assert.Nil(t, err)
-		_, err = db.HSet(key, []byte("b"), key)
+		_, err = db.HSet(0, key, []byte("b"), key)
 		assert.Nil(t, err)
 	}
 	for _, key := range keyList2 {
-		_, err := db.HSet(key, []byte("a"), key)
+		_, err := db.HSet(0, key, []byte("a"), key)
 		assert.Nil(t, err)
-		_, err = db.HSet(key, []byte("b"), key)
+		_, err = db.HSet(0, key, []byte("b"), key)
 		assert.Nil(t, err)
 	}
 
@@ -132,7 +132,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			if string(f) != "a" && string(f) != "b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
-			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
+			assert.Equal(t, string(table)+":"+string(k), string(it.Value()[:len(it.Value())-tsLen]))
 			cnt++
 		}
 		assert.Equal(t, len(keyList1)*2, cnt)
@@ -152,7 +152,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			if string(f) != "a" && string(f) != "b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
-			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
+			assert.Equal(t, string(table)+":"+string(k), string(it.Value()[:len(it.Value())-tsLen]))
 			cnt++
 		}
 		assert.Equal(t, len(keyList2)*2, cnt)
