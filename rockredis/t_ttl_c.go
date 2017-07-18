@@ -98,7 +98,7 @@ func (self *batchedExpire) commit() {
 	self.Mutex.Lock()
 	if len(self.keys) != 0 {
 		self.expiredC <- &common.ExpiredData{Keys: self.keys}
-		self.keys = self.keys[:0]
+		self.keys = make([][]byte, 0, consistBatchedBufSize)
 	}
 	self.Mutex.Unlock()
 }
@@ -108,7 +108,7 @@ func (self *batchedExpire) propose(key []byte) {
 	self.keys = append(self.keys, key)
 	if len(self.keys) >= consistBatchedBufSize {
 		self.expiredC <- &common.ExpiredData{Keys: self.keys}
-		self.keys = self.keys[:0]
+		self.keys = make([][]byte, 0, consistBatchedBufSize)
 	}
 	self.Mutex.Unlock()
 }
@@ -223,10 +223,19 @@ func (c *cTTLChecker) applyBatch(stopCh chan struct{}) {
 
 func (c *cTTLChecker) Stop() {
 	c.Lock()
-	if atomic.CompareAndSwapInt32(&c.checking, 1, 0) {
+	if atomic.LoadInt32(&c.checking) == 1 {
 		close(c.quitC)
+		c.Unlock()
+
+		//we should unlock the Mutex before Wait to avoid
+		//deadlock since the goroutine started requires the lock
+		//at running
 		c.wg.Wait()
+
+		atomic.StoreInt32(&c.checking, 0)
+		return
 	}
+
 	c.Unlock()
 }
 
@@ -278,14 +287,14 @@ func (c *cTTLChecker) check(stopChan chan struct{}) {
 
 	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
 		common.RangeROpen, 0, -1, false)
-	defer it.Close()
 	if err != nil {
 		c.setNextCheckTime(now+1, false)
 		return
-	} else if it == nil || !it.Valid() {
+	} else if it == nil {
 		c.setNextCheckTime(nc, false)
 		return
 	}
+	defer it.Close()
 
 	var redundantTimeKey int64 = 0
 	c.wb.Clear()
@@ -368,10 +377,11 @@ func (c *cTTLChecker) check(stopChan chan struct{}) {
 }
 
 type ttlRDataCollector struct {
-	db    *RockDB
-	quitC chan struct{}
-	wb    *gorocksdb.WriteBatch
-	wg    sync.WaitGroup
+	db      *RockDB
+	quitC   chan struct{}
+	wb      *gorocksdb.WriteBatch
+	wg      sync.WaitGroup
+	running int32
 
 	sync.Mutex
 	stats map[string]int64
@@ -380,7 +390,6 @@ type ttlRDataCollector struct {
 func newTTLRDataCollector(db *RockDB) *ttlRDataCollector {
 	tc := &ttlRDataCollector{
 		db:    db,
-		quitC: make(chan struct{}),
 		wb:    gorocksdb.NewWriteBatch(),
 		stats: make(map[string]int64),
 	}
@@ -393,24 +402,45 @@ func newTTLRDataCollector(db *RockDB) *ttlRDataCollector {
 }
 
 func (tc *ttlRDataCollector) Start() {
+	tc.Mutex.Lock()
+
+	if !atomic.CompareAndSwapInt32(&tc.running, 0, 1) {
+		tc.Mutex.Unlock()
+		return
+	}
+
+	tc.quitC = make(chan struct{})
+
 	tc.wg.Add(1)
-	go func() {
+	go func(stopCh chan struct{}) {
 		defer tc.wg.Done()
 		t := time.NewTicker(ttlRDataCollectInterval * time.Second)
+		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
 				tc.collect()
-			case <-tc.quitC:
+			case <-stopCh:
 				return
 			}
 		}
-	}()
+	}(tc.quitC)
+
+	tc.Mutex.Unlock()
 }
 
 func (tc *ttlRDataCollector) Stop() {
-	close(tc.quitC)
-	tc.wg.Wait()
+	tc.Mutex.Lock()
+
+	if atomic.CompareAndSwapInt32(&tc.running, 1, 0) {
+		close(tc.quitC)
+		tc.Mutex.Unlock()
+
+		tc.wg.Wait()
+		return
+	}
+
+	tc.Mutex.Unlock()
 }
 
 func (tc *ttlRDataCollector) Name() string {
@@ -457,7 +487,7 @@ func (tc *ttlRDataCollector) collect() {
 	if err != nil {
 		dbLog.Infof("gc of redundant data of ttl, create db range iterator failed as:%s", err.Error())
 		return
-	} else if it == nil || !it.Valid() {
+	} else if it == nil {
 		return
 	}
 	defer it.Close()

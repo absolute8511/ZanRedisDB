@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	localExpChkInterval        = 300
+	localExpCheckInterval      = 300
 	localBatchedBufSize        = 1000
 	localBatchedCommitInterval = 30
 )
@@ -202,7 +202,7 @@ func (c *lTTLChecker) Start() {
 	c.wg.Add(1)
 	go func(stopCh chan struct{}) {
 		dbLog.Infof("ttl checker of LocalDeletion started")
-		t := time.NewTicker(time.Second * localExpChkInterval)
+		t := time.NewTicker(time.Second * localExpCheckInterval)
 
 		defer func() {
 			t.Stop()
@@ -231,10 +231,18 @@ func (c *lTTLChecker) Start() {
 
 func (c *lTTLChecker) Stop() {
 	c.Lock()
-	if atomic.CompareAndSwapInt32(&c.checking, 1, 0) {
+	if atomic.LoadInt32(&c.checking) == 1 {
 		close(c.quitC)
+		c.Unlock()
+
+		//we should unlock the Mutex before Wait to avoid
+		//deadlock since the started goroutine requires the lock
+		//at running
+		c.wg.Wait()
+
+		atomic.StoreInt32(&c.checking, 0)
+		return
 	}
-	c.wg.Wait()
 	c.Unlock()
 }
 

@@ -13,10 +13,6 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
-const (
-	defaultExpirationPolicy = "local_deletion"
-)
-
 type node struct {
 	BroadcastAddress string `json:"broadcast_address"`
 	Hostname         string `json:"hostname"`
@@ -342,8 +338,9 @@ func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, 
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_REPLICATOR"}
 	}
 
+	expPolicy := reqParams.Get("expiration_policy")
 	if expPolicy == "" {
-		expPolicy = defaultExpirationPolicy
+		expPolicy = common.DefaultExpirationPolicy
 	} else if _, err := common.StringToExpirationPolicy(expPolicy); err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_EXPIRATION_POLICY"}
 	}

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 )
 
@@ -21,8 +22,9 @@ type NamespaceConfig struct {
 
 func NewNSConfig() *NamespaceConfig {
 	return &NamespaceConfig{
-		SnapCount:   300000,
-		SnapCatchup: 150000,
+		SnapCount:        300000,
+		SnapCatchup:      150000,
+		ExpirationPolicy: common.DefaultExpirationPolicy,
 	}
 }
 

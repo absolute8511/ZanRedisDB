@@ -94,6 +94,10 @@ const (
 	UnknownPolicy
 )
 
+const (
+	DefaultExpirationPolicy = "local_deletion"
+)
+
 func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
 	switch s {
 	case "local_deletion":
