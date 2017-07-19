@@ -38,7 +38,7 @@ var batchableCmds map[string]bool
 type RockOptions struct {
 	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
 	BlockSize                      int    `json:"block_size"`
-	BlockCache                     int    `json:"block_cache"`
+	BlockCache                     int64  `json:"block_cache"`
 	CacheIndexAndFilterBlocks      bool   `json:"cache_index_and_filter_blocks"`
 	WriteBufferSize                int    `json:"write_buffer_size"`
 	MaxWriteBufferNumber           int    `json:"max_write_buffer_number"`
@@ -262,12 +262,16 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 
 	switch cfg.ExpirationPolicy {
 	case common.ConsistencyDeletion:
-		db.expiration = newConsistencyExpiration(db)
+
+		exp := newConsistencyExpiration(db)
+		db.expiration = exp
+		db.gc.AddComponent(exp.GetRedundantDataCollector())
+
 	case common.LocalDeletion:
 		db.expiration = newLocalExpiration(db)
 
-		//TODO
-		//case common.PeriodicalRotation:
+	//TODO
+	//case common.PeriodicalRotation:
 
 	default:
 		return nil, errors.New("unsupported ExpirationPolicy")

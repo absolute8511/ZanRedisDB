@@ -84,12 +84,6 @@ func expDecodeTimeKey(tk []byte) (byte, []byte, int64, error) {
 	return tk[pos+9], tk[pos+10:], int64(binary.BigEndian.Uint64(tk[pos+1:])), nil
 }
 
-type interExpiredData struct {
-	dataType byte
-	key      []byte
-	UTC      int64
-}
-
 type expiration interface {
 	rawExpireAt(byte, []byte, int64, *gorocksdb.WriteBatch) error
 	expireAt(byte, []byte, int64) error

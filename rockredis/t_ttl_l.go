@@ -106,7 +106,7 @@ type localBatch struct {
 func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 	// create a db object contains the same storage engine and options as the passed 'db' argument but isolated 'wb'
 	// and 'isBatching' fields. The 'localDB' object will be used to delete the expired data independent of the passed
-	// 'db' object witch used by the logic layer.
+	// 'db' object which used by the logical layer.
 	localDB := &RockDB{
 		expiration:       &localExpiration{},
 		cfg:              db.cfg,
@@ -115,7 +115,6 @@ func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 		defaultWriteOpts: db.defaultWriteOpts,
 		defaultReadOpts:  db.defaultReadOpts,
 		wb:               gorocksdb.NewWriteBatch(),
-		lruCache:         db.lruCache,
 	}
 
 	batch := &localBatch{
@@ -165,7 +164,6 @@ type lTTLChecker struct {
 
 	checking int32
 	quitC    chan struct{}
-	expiredC chan *interExpiredData
 
 	wg      sync.WaitGroup
 	wb      *gorocksdb.WriteBatch
@@ -177,10 +175,9 @@ type lTTLChecker struct {
 
 func newlTTlChecker(db *RockDB) *lTTLChecker {
 	c := &lTTLChecker{
-		db:       db,
-		nc:       time.Now().Unix(),
-		wb:       gorocksdb.NewWriteBatch(),
-		expiredC: make(chan *interExpiredData, localBatchedBufSize*5),
+		db: db,
+		nc: time.Now().Unix(),
+		wb: gorocksdb.NewWriteBatch(),
 	}
 
 	for dt, _ := range c.batched {
@@ -256,13 +253,6 @@ func (c *lTTLChecker) applyBatch(stopCh chan struct{}) {
 
 	for {
 		select {
-		case d, ok := <-c.expiredC:
-			if !ok {
-				return
-			} else {
-				dt := dataType2CommonType(d.dataType)
-				c.batched[dt].propose(d.key)
-			}
 		case <-commitTicker.C:
 			c.commitAllBatched()
 		case <-stopCh:
@@ -368,11 +358,8 @@ func (c *lTTLChecker) check(stopChan chan struct{}) {
 			break
 		}
 
-		select {
-		case c.expiredC <- &interExpiredData{dataType: dt, key: k, UTC: nt}:
-		case <-stopChan:
-			nc = now + 1
-			break
+		if err := c.batched[dataType2CommonType(dt)].propose(k); err != nil {
+			dbLog.Warningf("propose to delete expired key [%s, %s] failed", TypeName[dt], string(k))
 		}
 
 		eCount += 1

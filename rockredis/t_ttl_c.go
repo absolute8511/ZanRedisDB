@@ -13,7 +13,7 @@ import (
 const (
 	ttlRDataCollectInterval = 5 * 60
 	batchedRedDataCount     = 1024
-	consistExpChkInterval   = 1
+	consistExpCheckInterval = 1
 	consistExpChanBufSize   = 256
 	consistBatchedBufSize   = 1000
 )
@@ -30,8 +30,11 @@ func newConsistencyExpiration(db *RockDB) *consistencyExpiration {
 		cTTLChecker: newCTTLChecker(db),
 		tc:          newTTLRDataCollector(db),
 	}
-	exp.db.gc.AddComponent(exp.tc)
 	return exp
+}
+
+func (exp *consistencyExpiration) GetRedundantDataCollector() *ttlRDataCollector {
+	return exp.tc
 }
 
 func (exp *consistencyExpiration) expireAt(dataType byte, key []byte, when int64) error {
@@ -87,34 +90,49 @@ func (exp *consistencyExpiration) delExpire(dataType byte, key []byte, wb *goroc
 	return nil
 }
 
-type batchedExpire struct {
-	//dataType byte
+type batchedBuffer struct {
 	sync.Mutex
+	stopCh   chan struct{}
 	expiredC chan *common.ExpiredData
 	keys     [][]byte
 }
 
-func (self *batchedExpire) commit() {
+func (self *batchedBuffer) commit() {
 	self.Mutex.Lock()
 	if len(self.keys) != 0 {
-		self.expiredC <- &common.ExpiredData{Keys: self.keys}
+		select {
+		case self.expiredC <- &common.ExpiredData{Keys: self.keys}:
+		case <-self.stopCh:
+		}
 		self.keys = make([][]byte, 0, consistBatchedBufSize)
 	}
 	self.Mutex.Unlock()
 }
 
-func (self *batchedExpire) propose(key []byte) {
+func (self *batchedBuffer) propose(key []byte) {
 	self.Mutex.Lock()
+
 	self.keys = append(self.keys, key)
+
 	if len(self.keys) >= consistBatchedBufSize {
-		self.expiredC <- &common.ExpiredData{Keys: self.keys}
+		select {
+		case self.expiredC <- &common.ExpiredData{Keys: self.keys}:
+		case <-self.stopCh:
+		}
 		self.keys = make([][]byte, 0, consistBatchedBufSize)
 	}
+
 	self.Mutex.Unlock()
 }
 
-func newBatchedExpire() *batchedExpire {
-	return &batchedExpire{
+func (self *batchedBuffer) setStopChan(stopCh chan struct{}) {
+	self.Mutex.Lock()
+	self.stopCh = stopCh
+	self.Mutex.Unlock()
+}
+
+func NewBatchedBuffer() *batchedBuffer {
+	return &batchedBuffer{
 		expiredC: make(chan *common.ExpiredData, consistExpChanBufSize),
 		keys:     make([][]byte, 0, consistBatchedBufSize),
 	}
@@ -129,9 +147,7 @@ type cTTLChecker struct {
 	wb       *gorocksdb.WriteBatch
 	wg       sync.WaitGroup
 
-	interExpiredC chan *interExpiredData
-
-	batched [common.ALL - common.NONE]*batchedExpire
+	batched [common.ALL - common.NONE]*batchedBuffer
 
 	//next check time
 	nc int64
@@ -139,14 +155,13 @@ type cTTLChecker struct {
 
 func newCTTLChecker(db *RockDB) *cTTLChecker {
 	c := &cTTLChecker{
-		db:            db,
-		nc:            time.Now().Unix(),
-		wb:            gorocksdb.NewWriteBatch(),
-		interExpiredC: make(chan *interExpiredData, 5*consistBatchedBufSize),
+		db: db,
+		nc: time.Now().Unix(),
+		wb: gorocksdb.NewWriteBatch(),
 	}
 
 	for dt, _ := range c.batched {
-		c.batched[dt] = newBatchedExpire()
+		c.batched[dt] = NewBatchedBuffer()
 	}
 
 	return c
@@ -165,15 +180,19 @@ func (c *cTTLChecker) Start() {
 
 	c.quitC = make(chan struct{})
 
+	for _, batch := range c.batched {
+		batch.setStopChan(c.quitC)
+	}
+
 	c.wg.Add(1)
 	go func(stopCh chan struct{}) {
-		dbLog.Infof("ttl checker of ConsistencyDeletion started")
-		t := time.NewTicker(time.Second * consistExpChkInterval)
+		dbLog.Infof("ttl checker of Consistencya-Deletion Policy started")
+		t := time.NewTicker(time.Second * consistExpCheckInterval)
 
 		defer func() {
 			t.Stop()
 			c.wg.Done()
-			dbLog.Infof("ttl checker of ConsistencyDeletion exit")
+			dbLog.Infof("ttl checker of Consistency-Deletion Policy exit")
 		}()
 
 		for {
@@ -205,13 +224,6 @@ func (c *cTTLChecker) applyBatch(stopCh chan struct{}) {
 
 	for {
 		select {
-		case d, ok := <-c.interExpiredC:
-			if !ok {
-				return
-			} else {
-				dt := dataType2CommonType(d.dataType)
-				c.batched[dt].propose(d.key)
-			}
 		case <-commitTicker.C:
 			c.commitAllBatched()
 		case <-stopCh:
@@ -335,19 +347,14 @@ func (c *cTTLChecker) check(stopChan chan struct{}) {
 			break
 		}
 
-		if exp, err := Int64(c.db.eng.GetBytes(c.db.defaultReadOpts, mk)); err == nil {
+		if exp, err := Int64(c.db.eng.GetBytesNoLock(c.db.defaultReadOpts, mk)); err == nil {
 			if exp != nt {
 				//this may happen if ttl of the key has been reset as we do not remove the
 				//pre-exists time-key when expire called
 				c.wb.Delete(tk)
 				redundantTimeKey += 1
 			} else {
-				select {
-				case c.interExpiredC <- &interExpiredData{UTC: nt, key: k, dataType: dt}:
-				case <-stopChan:
-					nc = now + 1
-					break
-				}
+				c.batched[dataType2CommonType(dt)].propose(k)
 				eCount += 1
 			}
 		}
@@ -515,7 +522,7 @@ func (tc *ttlRDataCollector) collect() {
 			continue
 		}
 
-		if exp, err := Int64(tc.db.eng.GetBytes(tc.db.defaultReadOpts, mk)); err == nil {
+		if exp, err := Int64(tc.db.eng.GetBytesNoLock(tc.db.defaultReadOpts, mk)); err == nil {
 			if exp != nt {
 				tc.wb.Delete(tk)
 				redundant += 1
