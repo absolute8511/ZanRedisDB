@@ -10,6 +10,9 @@ import (
 	"github.com/gobwas/glob"
 )
 
+type cursorFunc func(k []byte, item interface{}) []byte
+type itemFunc func(*RangeLimitedIterator, glob.Glob) ([]byte, []byte, interface{}, error)
+
 func getFullScanDataStoreType(dataType common.DataType) (byte, error) {
 	var storeDataType byte
 	// for list, hash, set, zset, we can scan all keys from meta ,
@@ -305,7 +308,89 @@ func (db *RockDB) setFullScan(key []byte, count int,
 func (db *RockDB) zsetFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
 
-	table, r, it, err := db.fullScanCommon(ZSetType, key, count, match)
+	/*
+		table, r, it, err := db.fullScanCommon(ZSetType, key, count, match)
+		if err != nil {
+			return &common.FullScanResult{
+				Results:    nil,
+				Type:       common.ZSET,
+				NextCursor: nil,
+				PartionId:  "",
+				Error:      err,
+			}
+		}
+
+		tmpResult := make(map[string][]interface{})
+		var t, k, m []byte
+		var s int64
+		for i := 0; it.Valid() && i < count; it.Next() {
+			if t, k, m, err = zDecodeSetKey(it.Key()); err != nil {
+				continue
+			} else if r != nil && !r.Match(string(k)) {
+				continue
+			} else {
+				s, err = Int64(it.Value(), nil)
+				if err != nil {
+					continue
+				}
+
+				if !bytes.Equal(t, table) {
+					break
+				}
+				v := common.ScorePair{Member: m, Score: s}
+				c := tmpResult[string(k)]
+				c = append(c, v)
+				tmpResult[string(k)] = c
+				i++
+			}
+		}
+
+		var result []interface{}
+		var length int
+		for k, v := range tmpResult {
+			length += len(v)
+			var item []interface{}
+			item = append(item, []byte(k))
+			item = append(item, v...)
+			result = append(result, item)
+		}
+
+		var nextCursor []byte
+
+		if length < count || (count == 0 && length == 0) {
+			nextCursor = []byte("")
+		} else {
+			nextCursor, _ = encodeFullScanCursor(k, m)
+		}
+
+	*/
+	result, cursor, err := db.fullScanCommon2(ZSetType, key, count, match,
+		func(it *RangeLimitedIterator, r glob.Glob) ([]byte, []byte, interface{}, error) {
+			var t, k, m []byte
+			var err error
+			var s int64
+			if t, k, m, err = zDecodeSetKey(it.Key()); err != nil {
+				return nil, nil, nil, err
+			} else if r != nil && !r.Match(string(k)) {
+				return nil, nil, nil, errors.New("not match")
+			} else {
+				s, err = Int64(it.Value(), nil)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+
+				v := common.ScorePair{Member: m, Score: s}
+				return t, k, v, nil
+			}
+		},
+		func(k []byte, item interface{}) []byte {
+
+			v := item.(common.ScorePair)
+			m := v.Member
+
+			cursor, _ := encodeFullScanCursor(k, m)
+			return cursor
+		})
 	if err != nil {
 		return &common.FullScanResult{
 			Results:    nil,
@@ -315,54 +400,10 @@ func (db *RockDB) zsetFullScan(key []byte, count int,
 			Error:      err,
 		}
 	}
-
-	tmpResult := make(map[string][]interface{})
-	var t, k, m []byte
-	var s int64
-	for i := 0; it.Valid() && i < count; it.Next() {
-		if t, k, m, err = zDecodeSetKey(it.Key()); err != nil {
-			continue
-		} else if r != nil && !r.Match(string(k)) {
-			continue
-		} else {
-			s, err = Int64(it.Value(), nil)
-			if err != nil {
-				continue
-			}
-
-			if !bytes.Equal(t, table) {
-				break
-			}
-			v := common.ScorePair{Member: m, Score: s}
-			c := tmpResult[string(k)]
-			c = append(c, v)
-			tmpResult[string(k)] = c
-			i++
-		}
-	}
-
-	var result []interface{}
-	var length int
-	for k, v := range tmpResult {
-		length += len(v)
-		var item []interface{}
-		item = append(item, []byte(k))
-		item = append(item, v...)
-		result = append(result, item)
-	}
-
-	var nextCursor []byte
-
-	if length < count || (count == 0 && length == 0) {
-		nextCursor = []byte("")
-	} else {
-		nextCursor, _ = encodeFullScanCursor(k, m)
-	}
-
 	return &common.FullScanResult{
 		Results:    result,
 		Type:       common.ZSET,
-		NextCursor: nextCursor,
+		NextCursor: cursor,
 		PartionId:  "",
 		Error:      nil,
 	}
@@ -388,53 +429,58 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string) (
 	return table, r, it, err
 }
 
-/*
 func (db *RockDB) fullScanCommon2(tp byte, key []byte, count int, match string,
-	f func()) ([]interface{}, []byte, error) {
+	f itemFunc, f1 cursorFunc) ([]interface{}, []byte, error) {
 	r, err := buildMatchRegexp(match)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	count = checkScanCount(count)
 	it, err := db.buildFullScanIterator(tp, table, rk, count)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var result []interface{}
+	tmpResult := make(map[string][]interface{})
+	var item interface{}
+	var t, k []byte
 	for i := 0; it.Valid() && i < count; it.Next() {
-		if t, k, c, err := decodeFullScanKey(tp, it.Key()); err != nil {
+		t, k, item, err = f(it, r)
+		if err != nil {
 			continue
-		} else if r != nil && !r.Match(string(k)) {
-			continue
-		} else {
-			if !bytes.Equal(t, table) {
-				break
-			}
-			item := f()
-			result = append(result, item)
-			i++
 		}
-
+		if !bytes.Equal(t, table) {
+			break
+		}
+		tmp := tmpResult[string(k)]
+		tmp = append(tmp, item)
+		tmpResult[string(k)] = tmp
+		i++
 	}
+
+	var result []interface{}
+	var length int
+	for k, v := range tmpResult {
+		length += len(v)
+		var item []interface{}
+		item = append(item, []byte(k))
+		item = append(item, v...)
+		result = append(result, item)
+	}
+
 	var nextCursor []byte
-	length := len(result)
 	if length < count || (count == 0 && length == 0) {
 		nextCursor = []byte("")
 	} else {
-		item := result[length-1].([][]byte)
-		k := item[0]
-		f := item[1]
-		nextCursor, _ = encodeFullScanCursor(k, f)
+		nextCursor = f1(k, item)
 	}
 	return result, nextCursor, err
 }
-*/
 
 func (db *RockDB) buildFullScanIterator(storeDataType byte, table,
 	key []byte, count int) (*RangeLimitedIterator, error) {
