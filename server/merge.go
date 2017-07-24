@@ -146,9 +146,13 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			realRes := res.(*common.FullScanResult)
 			if realRes.Error == nil {
 				for _, r := range realRes.Results {
-					conn.WriteArray(2)
-					conn.WriteBulk(r.([][]byte)[0])
-					conn.WriteBulk(r.([][]byte)[1])
+					realR := r.([]interface{})
+					length := len(realR)
+					conn.WriteArray(length)
+					for idx, _ := range realR {
+						v := realR[idx].([]byte)
+						conn.WriteBulk(v)
+					}
 				}
 			}
 		}

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
@@ -86,58 +85,6 @@ func (db *RockDB) fullScanGenericUseBuffer(storeDataType byte, key []byte, count
 
 func (db *RockDB) kvFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
-	/*
-		table, r, it, err := db.fullScanCommon(KVType, key, count, match)
-		if err != nil {
-			return &common.FullScanResult{
-				Results:    nil,
-				Type:       common.ZSET,
-				NextCursor: nil,
-				PartionId:  "",
-				Error:      err,
-			}
-		}
-
-		var result []interface{}
-		for i := 0; it.Valid() && i < count; it.Next() {
-			if t, k, _, err := decodeFullScanKey(KVType, it.Key()); err != nil {
-				continue
-			} else if r != nil && !r.Match(string(k)) {
-				continue
-			} else {
-				if !bytes.Equal(t, table) {
-					break
-				}
-				v := it.Value()
-				if len(v) >= tsLen {
-					v = v[:len(v)-tsLen]
-				}
-				var item [][]byte
-				item = append(item, k)
-				item = append(item, v)
-				result = append(result, item)
-				i++
-			}
-
-		}
-		var nextCursor []byte
-		length := len(result)
-		if length < count || (count == 0 && length == 0) {
-			nextCursor = []byte("")
-		} else {
-			item := result[length-1].([][]byte)
-			k := item[0]
-			nextCursor, _ = encodeFullScanCursor(k, nil)
-		}
-
-		return &common.FullScanResult{
-			Results:    result,
-			Type:       common.KV,
-			NextCursor: nextCursor,
-			PartionId:  "",
-			Error:      nil,
-		}
-	*/
 
 	result, cursor, err := db.fullScanCommon(KVType, key, count, match,
 		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
@@ -147,7 +94,7 @@ func (db *RockDB) kvFullScan(key []byte, count int,
 				return nil, errNotMatch
 			} else {
 				v := it.Value()
-				return ItemContainer{t, k, v, nil}, nil
+				return &ItemContainer{t, k, v, nil}, nil
 			}
 		})
 	if err != nil {
@@ -171,57 +118,6 @@ func (db *RockDB) kvFullScan(key []byte, count int,
 func (db *RockDB) hashFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
 
-	/*
-		table, r, it, err := db.fullScanCommon(HashType, key, count, match)
-		if err != nil {
-			return &common.FullScanResult{
-				Results:    nil,
-				Type:       common.ZSET,
-				NextCursor: nil,
-				PartionId:  "",
-				Error:      err,
-			}
-		}
-
-		var result []interface{}
-		for i := 0; it.Valid() && i < count; it.Next() {
-			if t, k, f, err := decodeFullScanKey(HashType, it.Key()); err != nil {
-				continue
-			} else if r != nil && !r.Match(string(k)) {
-				continue
-			} else {
-				if !bytes.Equal(t, table) {
-					break
-				}
-				v := it.Value()
-				item := make([][]byte, 0, 3)
-				item = append(item, k)
-				item = append(item, f)
-				item = append(item, v)
-				result = append(result, item)
-				i++
-			}
-
-		}
-		var nextCursor []byte
-		length := len(result)
-		if length < count || (count == 0 && length == 0) {
-			nextCursor = []byte("")
-		} else {
-			item := result[length-1].([][]byte)
-			k := item[0]
-			f := item[1]
-			nextCursor, _ = encodeFullScanCursor(k, f)
-		}
-
-		return &common.FullScanResult{
-			Results:    result,
-			Type:       common.HASH,
-			NextCursor: nextCursor,
-			PartionId:  "",
-			Error:      nil,
-		}
-	*/
 	result, cursor, err := db.fullScanCommon(HashType, key, count, match,
 		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
 			var t, k, f []byte
@@ -248,7 +144,6 @@ func (db *RockDB) hashFullScan(key []byte, count int,
 			Error:      err,
 		}
 	}
-	fmt.Println("#####", result)
 
 	return &common.FullScanResult{
 		Results:    result,
@@ -460,6 +355,7 @@ func (db *RockDB) buildFullScanIterator(storeDataType byte, table,
 	if err != nil {
 		return nil, err
 	}
+	it.NoTimestamp(storeDataType)
 	return it, nil
 }
 

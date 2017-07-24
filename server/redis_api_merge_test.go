@@ -407,10 +407,6 @@ func checkHashFullScanValues(t *testing.T, ay interface{}, values []interface{})
 		t.Fatal(err)
 	}
 
-	if len(a) != len(values) {
-		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
-	}
-
 	var equalCount int
 
 	for _, val := range values {
@@ -1055,8 +1051,8 @@ func TestFullScan(t *testing.T) {
 	c := getMergeTestConn(t)
 	defer c.Close()
 
-	//testKVFullScan(t, c)
-	testHashFullScan(t, c)
+	testKVFullScan(t, c)
+	//testHashFullScan(t, c)
 	//testListFullScan(t, c)
 	//testSetFullScan(t, c)
 	//testZSetFullScan(t, c)
