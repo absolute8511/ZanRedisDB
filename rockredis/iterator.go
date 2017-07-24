@@ -20,6 +20,7 @@ type Iterator interface {
 	Key() []byte
 	RefValue() []byte
 	Value() []byte
+	NoTimestamp(vt byte)
 }
 
 type Range struct {
@@ -35,9 +36,10 @@ type Limit struct {
 
 type DBIterator struct {
 	*gorocksdb.Iterator
-	snap *gorocksdb.Snapshot
-	ro   *gorocksdb.ReadOptions
-	db   *gorocksdb.DB
+	snap         *gorocksdb.Snapshot
+	ro           *gorocksdb.ReadOptions
+	db           *gorocksdb.DB
+	removeTsType byte
 }
 
 func NewDBIterator(db *gorocksdb.DB, withSnap bool) (*DBIterator, error) {
@@ -75,11 +77,23 @@ func (it *DBIterator) Key() []byte {
 }
 
 func (it *DBIterator) RefValue() []byte {
-	return it.Iterator.Value().Data()
+	v := it.Iterator.Value().Data()
+	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {
+		v = v[:len(v)-tsLen]
+	}
+	return v
 }
 
 func (it *DBIterator) Value() []byte {
-	return it.Iterator.Value().Bytes()
+	v := it.Iterator.Value().Bytes()
+	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {
+		v = v[:len(v)-tsLen]
+	}
+	return v
+}
+
+func (it *DBIterator) NoTimestamp(vt byte) {
+	it.removeTsType = vt
 }
 
 func (it *DBIterator) Close() {

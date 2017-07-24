@@ -473,6 +473,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
+	it.NoTimestamp(HashType)
 
 	valCh := make(chan common.KVRecordRet, 16)
 	length, err := db.HLen(key)
@@ -489,9 +490,6 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 		for ; it.Valid(); it.Next() {
 			_, _, f, err := hDecodeHashKey(it.Key())
 			v := it.Value()
-			if len(v) >= tsLen {
-				v = v[:len(v)-tsLen]
-			}
 			select {
 			case valCh <- common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: v},
@@ -582,15 +580,12 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 			close(valCh)
 			return
 		}
+		it.NoTimestamp(HashType)
 
 		defer it.Close()
 		defer close(valCh)
 		for ; it.Valid(); it.Next() {
 			va := it.Value()
-			if len(va) >= tsLen {
-				va = va[:len(va)-tsLen]
-			}
-
 			valCh <- common.KVRecordRet{
 				Rec: common.KVRecord{Key: nil, Value: va},
 				Err: nil,
