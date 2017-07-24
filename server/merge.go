@@ -159,12 +159,15 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			if realRes.Error == nil {
 				for _, r := range realRes.Results {
 					conn.WriteArray(3)
-					realR := r.([][]byte)
+					realR := r.([]interface{})
 					length := len(realR)
 					if length == 3 {
-						conn.WriteBulk(realR[0])
-						conn.WriteBulk(realR[1])
-						conn.WriteBulk(realR[2])
+						k := realR[0].([]byte)
+						f := realR[0].([]byte)
+						v := realR[0].([]byte)
+						conn.WriteBulk(k)
+						conn.WriteBulk(f)
+						conn.WriteBulk(v)
 					}
 				}
 			}
@@ -174,11 +177,12 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			realRes := res.(*common.FullScanResult)
 			if realRes.Error == nil {
 				for _, r := range realRes.Results {
-					realR := r.([][]byte)
+					realR := r.([]interface{})
 					length := len(realR)
 					conn.WriteArray(length)
 					for idx, _ := range realR {
-						conn.WriteBulk(realR[idx])
+						v := realR[idx].([]byte)
+						conn.WriteBulk(v)
 					}
 				}
 			}
