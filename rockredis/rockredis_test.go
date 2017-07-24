@@ -122,6 +122,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 	maxKey := encodeDataTableEnd(HashType, []byte("test"))
 	it, err := db.buildScanIterator(minKey, maxKey)
 	assert.Nil(t, err)
+	it.NoTimestamp(HashType)
 	func() {
 		defer it.Close()
 		cnt := 0
@@ -132,7 +133,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			if string(f) != "a" && string(f) != "b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
-			assert.Equal(t, string(table)+":"+string(k), string(it.Value()[:len(it.Value())-tsLen]))
+			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
 			cnt++
 		}
 		assert.Equal(t, len(keyList1)*2, cnt)
@@ -142,6 +143,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 	maxKey = encodeDataTableEnd(HashType, []byte("test2"))
 	it, err = db.buildScanIterator(minKey, maxKey)
 	assert.Nil(t, err)
+	it.NoTimestamp(HashType)
 	func() {
 		defer it.Close()
 		cnt := 0
@@ -152,7 +154,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			if string(f) != "a" && string(f) != "b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
-			assert.Equal(t, string(table)+":"+string(k), string(it.Value()[:len(it.Value())-tsLen]))
+			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
 			cnt++
 		}
 		assert.Equal(t, len(keyList2)*2, cnt)
