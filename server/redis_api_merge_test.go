@@ -1055,9 +1055,9 @@ func TestFullScan(t *testing.T) {
 
 	//testKVFullScan(t, c)
 	//testHashFullScan(t, c)
-	//testListFullScan(t, c)
+	testListFullScan(t, c)
 	testSetFullScan(t, c)
-	//testZSetFullScan(t, c)
+	testZSetFullScan(t, c)
 }
 
 func testKVFullScan(t *testing.T, c *goredis.PoolConn) {
