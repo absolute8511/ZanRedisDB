@@ -275,3 +275,8 @@ type FullScanResult struct {
 	PartionId  string
 	Error      error
 }
+
+type FieldPair struct {
+	Field []byte
+	Value []byte
+}

@@ -144,7 +144,6 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 	case common.KV:
 		for _, res := range results {
 			realRes := res.(*common.FullScanResult)
-			//此处可以不用检查了
 			if realRes.Error == nil {
 				for _, r := range realRes.Results {
 					conn.WriteArray(2)
@@ -158,16 +157,16 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 			realRes := res.(*common.FullScanResult)
 			if realRes.Error == nil {
 				for _, r := range realRes.Results {
-					conn.WriteArray(3)
 					realR := r.([]interface{})
 					length := len(realR)
-					if length == 3 {
-						k := realR[0].([]byte)
-						f := realR[0].([]byte)
-						v := realR[0].([]byte)
-						conn.WriteBulk(k)
-						conn.WriteBulk(f)
-						conn.WriteBulk(v)
+					conn.WriteArray(length)
+					k := realR[0].([]byte)
+					conn.WriteBulk(k)
+					for i := 1; i < length; i++ {
+						v := realR[i].(common.FieldPair)
+						conn.WriteArray(2)
+						conn.WriteBulk(v.Field)
+						conn.WriteBulk(v.Value)
 					}
 				}
 			}

@@ -416,23 +416,25 @@ func checkHashFullScanValues(t *testing.T, ay interface{}, values []interface{})
 	for _, val := range values {
 		for idx, _ := range a {
 			item := a[idx].([]interface{})
-			if len(item) != 3 {
-				t.Fatal("item length is not 3. len:", len(item))
-			}
+			length := len(item)
 			key := item[0].([]byte)
-			field := item[1].([]byte)
-			value := item[2].([]byte)
-			if val.(string) == string(key) {
-				equalCount++
-				splits := bytes.Split(value, []byte("_"))
-				if len(splits) != 3 {
-					t.Fatal("value format error. value:", string(value))
+			for i := 1; i < length; i++ {
+				fv := item[i].([]interface{})
+				field := fv[0].([]byte)
+				value := fv[1].([]byte)
+				if val.(string) == string(key) {
+					equalCount++
+					splits := bytes.Split(value, []byte("_"))
+					if len(splits) != 3 {
+						t.Fatal("value format error. value:", string(value))
+					}
+
+					if !bytes.Equal(key, splits[1]) || !bytes.Equal(field, splits[2]) {
+						t.Fatal("key:", string(key), "; field:", string(field), "; value:", string(value))
+					}
+					break
 				}
 
-				if !bytes.Equal(key, splits[1]) || !bytes.Equal(field, splits[2]) {
-					t.Fatal("key:", string(key), "; field:", string(field), "; value:", string(value))
-				}
-				break
 			}
 		}
 	}
@@ -1054,10 +1056,10 @@ func TestFullScan(t *testing.T) {
 	defer c.Close()
 
 	//testKVFullScan(t, c)
-	//testHashFullScan(t, c)
-	testListFullScan(t, c)
-	testSetFullScan(t, c)
-	testZSetFullScan(t, c)
+	testHashFullScan(t, c)
+	//testListFullScan(t, c)
+	//testSetFullScan(t, c)
+	//testZSetFullScan(t, c)
 }
 
 func testKVFullScan(t *testing.T, c *goredis.PoolConn) {
