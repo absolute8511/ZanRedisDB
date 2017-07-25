@@ -1,9 +1,12 @@
 package rockredis
 
 import (
-	"github.com/absolute8511/ZanRedisDB/common"
+	"encoding/binary"
+	"fmt"
 	"os"
 	"testing"
+
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 func TestHashCodec(t *testing.T) {
@@ -178,4 +181,43 @@ func TestHashKeyIncrBy(t *testing.T) {
 	if r != -3 {
 		t.Error(r)
 	}
+}
+
+func TestHashScan(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test:hkey_incr_test")
+	if _, err := db.HSet(key, []byte("hello"), []byte("0")); err != nil {
+		t.Fatal(err.Error())
+	}
+
+	prefix := []byte("test")
+
+	minKey := make([]byte, len(prefix)+1+1+2)
+
+	pos := 0
+	minKey[pos] = HashType
+	pos++
+
+	binary.BigEndian.PutUint16(minKey[pos:], uint16(len(prefix)))
+	pos += 2
+
+	copy(minKey[pos:], prefix)
+	pos += len(prefix)
+
+	maxKey := make([]byte, 1+2)
+
+	pos = 0
+	maxKey[pos] = HashType + 1
+	pos++
+
+	binary.BigEndian.PutUint16(maxKey[pos:], uint16(0))
+	pos += 2
+	fmt.Println(minKey, maxKey)
+	it, err := NewDBRangeIterator(db.eng, minKey, maxKey, common.RangeOpen, false)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(it.Valid())
 }

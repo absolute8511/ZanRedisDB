@@ -30,22 +30,25 @@ func (s *Server) doMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 	cmdName := qcmdlower(cmd.Args[0])
 
 	if common.IsMergeScanCommand(cmdName) {
-		s.doMergeScan(conn, cmd)
+		if common.IsFullScanCommand(cmdName) {
+			s.doMergeFullScan(conn, cmd)
+		} else {
+			s.doMergeScan(conn, cmd)
+		}
 	}
 
 }
 
-func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, error) {
 	if scanJobCount >= s.maxScanJob {
-		conn.WriteError(errMaxScanJob.Error() + " : Err handle command " + string(cmd.Args[0]))
-		return
+		return nil, errMaxScanJob
 	}
 	atomic.AddInt32(&scanJobCount, 1)
 	scanStart := time.Now()
 	defer func(start time.Time) {
 		scanCost := time.Since(scanStart)
 		if scanCost >= 5*time.Second {
-			sLog.Infof("slow write command: %v, cost: %v", string(cmd.Raw), scanCost)
+			sLog.Infof("slow merge command: %v, cost: %v", string(cmd.Raw), scanCost)
 		}
 		s.scanStats.UpdateScanStats(scanCost.Nanoseconds() / 1000)
 		atomic.AddInt32(&scanJobCount, -1)
@@ -59,22 +62,19 @@ func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
 
 		_, _, err = common.ExtractNamesapce(rawKey)
 		if err != nil {
-			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
-			return
+			return nil, err
 		}
 
 		for i := 0; i < len(cmd.Args); i++ {
 			if strings.ToLower(string(cmd.Args[i])) == "count" {
 				if i+1 >= len(cmd.Args) {
-					conn.WriteError(common.ErrInvalidArgs.Error() + " : Err handle command " + string(cmd.Args[0]))
-					return
+					return nil, common.ErrInvalidArgs
 				}
 				countIndex = i + 1
 
 				count, err = strconv.Atoi(string(cmd.Args[i+1]))
 				if err != nil {
-					conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
-					return
+					return nil, err
 				}
 				break
 			}
@@ -83,7 +83,6 @@ func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
 		var wg sync.WaitGroup
 		var results []interface{}
 		handlers, cmds, err := s.GetMergeHandlers(cmd)
-
 		if err == nil {
 			length := len(handlers)
 			everyCount := count / length
@@ -92,61 +91,169 @@ func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
 				wg.Add(1)
 				cmds[i].Args[countIndex] = []byte(strconv.Itoa(everyCount))
 				go func(index int, handle common.MergeCommandFunc) {
-					defer wg.Add(-1)
+					defer wg.Done()
 					results[index], _ = handle(cmds[index])
 				}(i, h)
 			}
 		} else {
-			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
-			return
+			return nil, err
 		}
 		wg.Wait()
 
-		if len(results) <= 0 {
-			conn.WriteArray(2)
-			conn.WriteBulkString("")
+		return results, nil
+	} else {
+		return nil, common.ErrInvalidArgs
+	}
+}
 
-			conn.WriteArray(0)
+func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
+	results, err := s.doScanCommon(cmd)
+	if err != nil {
+		conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
+		return
+	}
+
+	nextCursorBytes := []byte("")
+	var dataType common.DataType
+	var count int
+	for _, res := range results {
+		realRes := res.(*common.FullScanResult)
+		if realRes.Error == nil {
+			dataType = realRes.Type
+
+			if len(realRes.NextCursor) > 0 {
+				nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
+				nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
+
+				nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
+				nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
+			}
+			count += len(realRes.Results)
+		} else {
+			conn.WriteError(realRes.Error.Error() + " : Err handle command " + string(cmd.Args[0]))
 			return
 		}
+	}
 
-		nextCursorBytes := []byte("")
-		result := make([]interface{}, 0)
+	nextCursor := base64.StdEncoding.EncodeToString(nextCursorBytes)
+	conn.WriteArray(2)
+	conn.WriteBulkString(nextCursor)
+	conn.WriteArray(count)
+
+	switch dataType {
+	case common.KV:
 		for _, res := range results {
-			realRes := res.(common.ScanResult)
+			realRes := res.(*common.FullScanResult)
 			if realRes.Error == nil {
-				v := reflect.ValueOf(realRes.Result)
-				if v.Kind() != reflect.Slice {
-					continue
+				for _, r := range realRes.Results {
+					realR := r.([]interface{})
+					length := len(realR)
+					conn.WriteArray(length)
+					for idx, _ := range realR {
+						v := realR[idx].([]byte)
+						conn.WriteBulk(v)
+					}
 				}
-
-				if len(realRes.NextCursor) > 0 {
-					nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
-					nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
-
-					nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
-					nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
-				}
-				cnt := v.Len()
-				for i := 0; i < cnt; i++ {
-					result = append(result, v.Index(i).Interface())
-				}
-			} else {
-				//TODO: log sth
 			}
 		}
-		nextCursor := base64.StdEncoding.EncodeToString(nextCursorBytes)
-		conn.WriteArray(2)
-		conn.WriteBulkString(nextCursor)
-
-		conn.WriteArray(len(result))
-		for _, v := range result {
-			conn.WriteBulk(v.([]byte))
+	case common.HASH:
+		for _, res := range results {
+			realRes := res.(*common.FullScanResult)
+			if realRes.Error == nil {
+				for _, r := range realRes.Results {
+					realR := r.([]interface{})
+					length := len(realR)
+					conn.WriteArray(length)
+					k := realR[0].([]byte)
+					conn.WriteBulk(k)
+					for i := 1; i < length; i++ {
+						v := realR[i].(common.FieldPair)
+						conn.WriteArray(2)
+						conn.WriteBulk(v.Field)
+						conn.WriteBulk(v.Value)
+					}
+				}
+			}
 		}
-
-	} else {
-		conn.WriteError(common.ErrInvalidArgs.Error() + " : Err handle command " + string(cmd.Args[0]))
+	case common.LIST, common.SET:
+		for _, res := range results {
+			realRes := res.(*common.FullScanResult)
+			if realRes.Error == nil {
+				for _, r := range realRes.Results {
+					realR := r.([]interface{})
+					length := len(realR)
+					conn.WriteArray(length)
+					for idx, _ := range realR {
+						v := realR[idx].([]byte)
+						conn.WriteBulk(v)
+					}
+				}
+			}
+		}
+	case common.ZSET:
+		for _, res := range results {
+			realRes := res.(*common.FullScanResult)
+			if realRes.Error == nil {
+				for _, r := range realRes.Results {
+					realR := r.([]interface{})
+					length := len(realR)
+					conn.WriteArray(length)
+					k := realR[0].([]byte)
+					conn.WriteBulk(k)
+					for i := 1; i < length; i++ {
+						v := realR[i].(common.ScorePair)
+						conn.WriteArray(2)
+						conn.WriteBulk(v.Member)
+						conn.WriteBulk([]byte(strconv.FormatInt(v.Score, 10)))
+					}
+				}
+			}
+		}
 	}
+}
+
+func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
+	results, err := s.doScanCommon(cmd)
+	if err != nil {
+		conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
+		return
+	}
+
+	nextCursorBytes := []byte("")
+	result := make([]interface{}, 0)
+	for _, res := range results {
+		realRes := res.(*common.ScanResult)
+		if realRes.Error == nil {
+			v := reflect.ValueOf(realRes.Keys)
+			if v.Kind() != reflect.Slice {
+				continue
+			}
+
+			if len(realRes.NextCursor) > 0 {
+				nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
+				nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
+
+				nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
+				nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
+			}
+			cnt := v.Len()
+			for i := 0; i < cnt; i++ {
+				result = append(result, v.Index(i).Interface())
+			}
+		} else {
+			//TODO: log sth
+		}
+	}
+
+	nextCursor := base64.StdEncoding.EncodeToString(nextCursorBytes)
+	conn.WriteArray(2)
+	conn.WriteBulkString(nextCursor)
+
+	conn.WriteArray(len(result))
+	for _, v := range result {
+		conn.WriteBulk(v.([]byte))
+	}
+
 }
 
 func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Command, nodes map[string]*node.NamespaceNode) (map[string]redcon.Command, error) {
@@ -175,8 +282,8 @@ func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Comm
 }
 
 //首次传入 namespace:table:,
-//返回 1:table:xxx1;2:table:xxx2;3:table:xxx3,
-//下次传入 namespace:table:1:table:xxx;2:table:xxx;3:table:xxx,
+//返回 1:xxx1;2:xxx2;3:xxx3,
+//下次传入 namespace:table:1:xxx;2:xxx;3:xxx,
 //解析出分区 1, 2, 3 及其对应的cursor,
 //1的namespace:table:xxx1和2的namespace:table:xxx2, 和3的namespace:table:xxx3,
 func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string, error) {
@@ -188,7 +295,7 @@ func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string,
 	nsMap := make(map[string]string)
 
 	if len(originCursor) == 2 {
-		table := string(originCursor[0])
+		table := originCursor[0]
 		encodedCursors := originCursor[1]
 		if len(table) > 0 {
 			if len(encodedCursors) == 0 {
@@ -206,21 +313,19 @@ func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string,
 							cursorEncoded := cursorinfo[1]
 							cursorDecoded, err := base64.StdEncoding.DecodeString(string(cursorEncoded))
 							if err == nil {
-								splits := bytes.SplitN(cursorDecoded, []byte(":"), 2)
-								tab := string(splits[0])
-								if table != tab {
-									return nil, common.ErrInvalidScanCursor
-								}
 								pid, err := strconv.Atoi(string(cursorinfo[0]))
 								if err != nil {
 									return nil, common.ErrInvalidScanCursor
 								}
 								ns := common.GetNsDesp(nsBaseName, pid)
-								nsMap[ns] = string(cursorDecoded)
+								var cursor []byte
+								cursor = append(cursor, table...)
+								cursor = append(cursor, common.SCAN_NODE_SEP...)
+								cursor = append(cursor, cursorDecoded...)
+								nsMap[ns] = string(cursor)
 							} else {
 								return nil, common.ErrInvalidScanCursor
 							}
-
 						} else {
 							return nil, common.ErrInvalidScanCursor
 						}

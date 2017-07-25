@@ -366,6 +366,7 @@ func (self *KVNode) registerHandler() {
 	//for cross mutil partion
 	self.router.RegisterMerge("scan", wrapMergeCommand(self.scanCommand))
 	self.router.RegisterMerge("advscan", self.advanceScanCommand)
+	self.router.RegisterMerge("fullscan", self.fullScanCommand)
 
 	// only write command need to be registered as internal
 	// kv

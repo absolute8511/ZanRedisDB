@@ -58,19 +58,19 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	cursor, match, count, err := parseScanArgs(args)
 
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	splits := bytes.SplitN(cursor, []byte(":"), 2)
 	if len(splits) != 2 {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
 	}
 
 	table := splits[0]
 
 	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	var nextCursor []byte
@@ -100,7 +100,7 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 	}
 
 	_, pid := common.GetNamespaceAndPartition(self.ns)
-	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
+	return &common.ScanResult{Keys: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
 }
 
 // ADVSCAN cursor type [MATCH match] [COUNT count]
@@ -109,7 +109,7 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 // (note: it is not the "0" as the redis scan to indicate the end of scan)
 func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 3 {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
 	}
 
 	var dataType common.DataType
@@ -125,23 +125,23 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	case "ZSET":
 		dataType = common.ZSET
 	default:
-		return common.ScanResult{Result: nil, NextCursor: nil, Error: common.ErrInvalidScanType}, common.ErrInvalidScanType
+		return &common.ScanResult{Keys: nil, NextCursor: nil, Error: common.ErrInvalidScanType}, common.ErrInvalidScanType
 	}
 	_, key, err := common.ExtractNamesapce(cmd.Args[1])
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 	cmd.Args[1] = key
 	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
 
 	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	splits := bytes.SplitN(cursor, []byte(":"), 2)
 	if len(splits) != 2 {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
 	}
 
 	table := splits[0]
@@ -151,7 +151,7 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	ay, err = self.store.Scan(dataType, cursor, count, match)
 
 	if err != nil {
-		return common.ScanResult{Result: nil, NextCursor: nil, PartionId: "", Error: err}, err
+		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
 	var nextCursor []byte
@@ -181,7 +181,7 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 		}
 	}
 	_, pid := common.GetNamespaceAndPartition(self.ns)
-	return common.ScanResult{Result: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
+	return &common.ScanResult{Keys: ay, NextCursor: nextCursor, PartionId: strconv.Itoa(pid), Error: nil}, nil
 }
 
 // HSCAN key cursor [MATCH match] [COUNT count]
@@ -311,4 +311,78 @@ func (self *KVNode) zscanCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteBulk([]byte(strconv.FormatInt(v.Score, 10)))
 	}
 	return
+}
+
+// fullScan cursor type [MATCH match] [COUNT count]
+// here cursor is the scan key for start, (table:key)
+// and the response will return the next start key for next scan,
+// (note: it is not the "0" as the redis scan to indicate the end of scan)
+func (self *KVNode) fullScanCommand(cmd redcon.Command) (interface{}, error) {
+	if len(cmd.Args) < 3 {
+		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
+	}
+
+	var dataType common.DataType
+	switch strings.ToUpper(string(cmd.Args[2])) {
+	case "KV":
+		dataType = common.KV
+	case "HASH":
+		dataType = common.HASH
+	case "LIST":
+		dataType = common.LIST
+	case "SET":
+		dataType = common.SET
+	case "ZSET":
+		dataType = common.ZSET
+	default:
+		return &common.FullScanResult{Results: nil, Error: common.ErrInvalidScanType}, common.ErrInvalidScanType
+	}
+	_, key, err := common.ExtractNamesapce(cmd.Args[1])
+	if err != nil {
+		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: err}, err
+	}
+	cmd.Args[1] = key
+	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
+
+	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
+	if err != nil {
+		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: err}, err
+	}
+
+	splits := bytes.SplitN(cursor, []byte(":"), 2)
+	if len(splits) != 2 {
+		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+	}
+
+	//	table := splits[0]
+
+	result := self.store.FullScan(dataType, cursor, count, match)
+	result.Type = dataType
+
+	if result.Error != nil {
+		return result, result.Error
+	}
+
+	//	length := len(result.Results)
+	//	if length < count || (count == 0 && length == 0) {
+	//		result.NextCursor = []byte("")
+	//	} else {
+	//		result.NextCursor = result.Results[length-1].([][]byte)[0]
+	//	}
+	//	if length > 0 {
+	//		item := result.Results[length-1].([][]byte)[0]
+	//		tab, _, err := common.ExtraTable(item)
+	//		if err == nil && !bytes.Equal(tab, table) {
+	//			result.NextCursor = []byte("")
+	//			for i, v := range result.Results {
+	//				tab, _, err := common.ExtraTable(v.([]interface{})[0].([]byte))
+	//				if err != nil || !bytes.Equal(tab, table) {
+	//					result.Results = result.Results[:i]
+	//				}
+	//			}
+	//		}
+	//	}
+	_, pid := common.GetNamespaceAndPartition(self.ns)
+	result.PartionId = strconv.Itoa(pid)
+	return result, nil
 }
