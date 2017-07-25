@@ -26,8 +26,8 @@ var (
 )
 
 const (
-	waitMigrateInterval          = time.Minute * 8
-	waitEmergencyMigrateInterval = time.Second * 20
+	waitMigrateInterval          = time.Minute * 16
+	waitEmergencyMigrateInterval = time.Second * 60
 )
 
 type PDCoordinator struct {
