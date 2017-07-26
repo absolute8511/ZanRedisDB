@@ -83,13 +83,13 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 
 	if length > 0 {
 		item := ay[length-1]
-		tab, _, err := common.ExtraTable(item)
+		tab, _, err := common.ExtractTable(item)
 		if err == nil && !bytes.Equal(tab, table) {
 
 			nextCursor = []byte("")
 			for idx, v := range ay {
 
-				tab, _, err := common.ExtraTable(v)
+				tab, _, err := common.ExtractTable(v)
 				if err != nil || !bytes.Equal(tab, table) {
 					nextCursor = []byte("")
 					ay = ay[:idx]
@@ -160,20 +160,24 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 	if length < count || (count == 0 && length == 0) {
 		nextCursor = []byte("")
 	} else {
-		nextCursor = ay[len(ay)-1]
+		item := ay[len(ay)-1]
+		_, rk, err := common.ExtractTable(item)
+		if err != nil {
+			nextCursor = []byte("")
+		} else {
+			nextCursor = rk
+		}
 	}
 
 	if length > 0 {
 		item := ay[length-1]
-		tab, _, err := common.ExtraTable(item)
+		tab, _, err := common.ExtractTable(item)
 		if err == nil && !bytes.Equal(tab, table) {
-
 			nextCursor = []byte("")
 			for idx, v := range ay {
 
-				tab, _, err := common.ExtraTable(v)
+				tab, _, err := common.ExtractTable(v)
 				if err != nil || !bytes.Equal(tab, table) {
-					nextCursor = []byte("")
 					ay = ay[:idx]
 					break
 				}

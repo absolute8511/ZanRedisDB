@@ -1,7 +1,6 @@
 package rockredis
 
 import (
-	"bytes"
 	"errors"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -128,7 +127,7 @@ func encodeScanKey(storeDataType byte, key []byte) ([]byte, error) {
 	}
 }
 
-func decodeScanKey(storeDataType byte, ek []byte) (table, key []byte, err error) {
+func decodeScanKey(storeDataType byte, ek []byte) (key []byte, err error) {
 	switch storeDataType {
 	case KVType:
 		key, err = decodeKVKey(ek)
@@ -143,7 +142,6 @@ func decodeScanKey(storeDataType byte, ek []byte) (table, key []byte, err error)
 	default:
 		err = errDataType
 	}
-	table, key, err = common.ExtraTable(key)
 	return
 }
 
@@ -160,11 +158,6 @@ func checkScanCount(count int) int {
 func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int,
 	match string, inputBuffer [][]byte) ([][]byte, error) {
 	r, err := buildMatchRegexp(match)
-	if err != nil {
-		return nil, err
-	}
-
-	table, _, err := extractTableFromRedisKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -188,14 +181,11 @@ func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int
 	}
 
 	for i := 0; it.Valid() && i < count; it.Next() {
-		if t, k, err := decodeScanKey(storeDataType, it.Key()); err != nil {
+		if k, err := decodeScanKey(storeDataType, it.Key()); err != nil {
 			continue
 		} else if r != nil && !r.Match(string(k)) {
 			continue
 		} else {
-			if !bytes.Equal(t, table) {
-				break
-			}
 			v = append(v, k)
 			i++
 		}

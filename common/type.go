@@ -115,7 +115,7 @@ func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
 	return namespace, realKey, nil
 }
 
-func ExtraTable(rawKey []byte) ([]byte, []byte, error) {
+func ExtractTable(rawKey []byte) ([]byte, []byte, error) {
 	pos := bytes.IndexByte(rawKey, KEYSEP)
 	if pos == -1 {
 		return nil, nil, ErrInvalidPrefix

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
-	"errors"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
@@ -231,9 +230,6 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 				}
 			}
 		}
-		if !bytes.Equal(container.table, table) {
-			break
-		}
 		tmp := tmpResult[string(container.key)]
 		tmp = append(tmp, container.item)
 		tmpResult[string(container.key)] = tmp
@@ -254,7 +250,33 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	if length < count || (count == 0 && length == 0) {
 		nextCursor = []byte("")
 	} else {
-		nextCursor, _ = encodeFullScanCursor(container.key, container.cursor)
+		if tp == KVType {
+			//cross table
+			//filter the cross table data
+			resLen := len(result)
+			if resLen > 0 {
+				item := result[resLen-1].([]interface{})
+				tab, _, err := common.ExtractTable(item[0].([]byte))
+				if err == nil && !bytes.Equal(tab, table) {
+					nextCursor, _ = encodeFullScanCursor([]byte(""), container.cursor)
+					for idx, v := range result {
+						tab, _, err := common.ExtractTable(v.([]interface{})[0].([]byte))
+						if err != nil || !bytes.Equal(tab, table) {
+							result = result[:idx]
+							break
+						}
+					}
+				}
+			}
+			_, rk, err := common.ExtractTable(container.key)
+			if err != nil {
+				nextCursor, _ = encodeFullScanCursor(container.key, container.cursor)
+			} else {
+				nextCursor, _ = encodeFullScanCursor(rk, container.cursor)
+			}
+		} else {
+			nextCursor, _ = encodeFullScanCursor(container.key, container.cursor)
+		}
 	}
 	return &common.FullScanResult{
 		Results:    result,
@@ -348,14 +370,7 @@ func decodeFullScanKey(storeDataType byte, ek []byte) (table, key, cursor []byte
 	switch storeDataType {
 	case KVType:
 		key, err = decodeKVKey(ek)
-		splits := bytes.SplitN(key, []byte(":"), 2)
-		if len(splits) <= 0 {
-			return nil, nil, nil, errors.New("Invalid key")
-		} else if len(splits) == 1 {
-			return nil, key, nil, nil
-		} else {
-			return splits[0], splits[1], nil, nil
-		}
+		return nil, key, nil, err
 	case ListType:
 		var seq int64
 		table, key, seq, err = lDecodeListKey(ek)
