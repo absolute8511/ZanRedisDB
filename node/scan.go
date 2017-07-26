@@ -363,25 +363,6 @@ func (self *KVNode) fullScanCommand(cmd redcon.Command) (interface{}, error) {
 		return result, result.Error
 	}
 
-	//	length := len(result.Results)
-	//	if length < count || (count == 0 && length == 0) {
-	//		result.NextCursor = []byte("")
-	//	} else {
-	//		result.NextCursor = result.Results[length-1].([][]byte)[0]
-	//	}
-	//	if length > 0 {
-	//		item := result.Results[length-1].([][]byte)[0]
-	//		tab, _, err := common.ExtraTable(item)
-	//		if err == nil && !bytes.Equal(tab, table) {
-	//			result.NextCursor = []byte("")
-	//			for i, v := range result.Results {
-	//				tab, _, err := common.ExtraTable(v.([]interface{})[0].([]byte))
-	//				if err != nil || !bytes.Equal(tab, table) {
-	//					result.Results = result.Results[:i]
-	//				}
-	//			}
-	//		}
-	//	}
 	_, pid := common.GetNamespaceAndPartition(self.ns)
 	result.PartionId = strconv.Itoa(pid)
 	return result, nil

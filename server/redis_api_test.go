@@ -1948,20 +1948,21 @@ func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNDZOQT09Ow==" {
+		//} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNDZOQT09Ow==" {
+	} else if n := ay[0].([]byte); string(n) != "MDpOQT09Ow==" {
 		t.Fatal(string(n))
 	} else {
-		checkScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:2", "testscan:3", "testscan:4")
+		checkScanValues(t, ay[1], "0", "1", "2", "3", "4")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZOQT09Ow==", tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpOQT09Ow==", tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
 	} else if n := ay[0].([]byte); string(n) != "" {
 		t.Fatal(string(n))
 	} else {
-		checkScanValues(t, ay[1], "testscan:5", "testscan:6", "testscan:7", "testscan:8", "testscan:9")
+		checkScanValues(t, ay[1], "5", "6", "7", "8", "9")
 	}
 
 	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZPUT09Ow==", tp, "count", 0)); err != nil {
