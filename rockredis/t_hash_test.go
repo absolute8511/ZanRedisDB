@@ -188,7 +188,7 @@ func TestHashScan(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 	key := []byte("test:hkey_incr_test")
-	if _, err := db.HSet(key, []byte("hello"), []byte("0")); err != nil {
+	if _, err := db.HSet(0, key, []byte("hello"), []byte("0")); err != nil {
 		t.Fatal(err.Error())
 	}
 
