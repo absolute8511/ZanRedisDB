@@ -50,7 +50,9 @@ func (db *RockDB) FullScan(dataType common.DataType, cursor []byte, count int, m
 			Error:      err,
 		}
 	}
-	return db.fullScanGeneric(storeDataType, cursor, count, match)
+	result := db.fullScanGeneric(storeDataType, cursor, count, match)
+	result.Type = dataType
+	return result
 }
 
 func (db *RockDB) fullScanGeneric(storeDataType byte, key []byte, count int,
@@ -184,7 +186,7 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	if err != nil {
 		return &common.FullScanResult{
 			Results:    nil,
-			Type:       common.ZSET,
+			Type:       common.NONE,
 			NextCursor: nil,
 			PartionId:  "",
 			Error:      err,
@@ -195,7 +197,7 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	if err != nil {
 		return &common.FullScanResult{
 			Results:    nil,
-			Type:       common.ZSET,
+			Type:       common.NONE,
 			NextCursor: nil,
 			PartionId:  "",
 			Error:      err,
@@ -207,7 +209,7 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	if err != nil {
 		return &common.FullScanResult{
 			Results:    nil,
-			Type:       common.ZSET,
+			Type:       common.NONE,
 			NextCursor: nil,
 			PartionId:  "",
 			Error:      err,
@@ -223,7 +225,7 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 			} else {
 				return &common.FullScanResult{
 					Results:    nil,
-					Type:       common.ZSET,
+					Type:       common.NONE,
 					NextCursor: nil,
 					PartionId:  "",
 					Error:      err,
@@ -251,6 +253,12 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 		nextCursor = []byte("")
 	} else {
 		if tp == KVType {
+			_, rk, err := common.ExtractTable(container.key)
+			if err != nil {
+				nextCursor, _ = encodeFullScanCursor(container.key, container.cursor)
+			} else {
+				nextCursor, _ = encodeFullScanCursor(rk, container.cursor)
+			}
 			//cross table
 			//filter the cross table data
 			resLen := len(result)
@@ -268,19 +276,13 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 					}
 				}
 			}
-			_, rk, err := common.ExtractTable(container.key)
-			if err != nil {
-				nextCursor, _ = encodeFullScanCursor(container.key, container.cursor)
-			} else {
-				nextCursor, _ = encodeFullScanCursor(rk, container.cursor)
-			}
 		} else {
 			nextCursor, _ = encodeFullScanCursor(container.key, container.cursor)
 		}
 	}
 	return &common.FullScanResult{
 		Results:    result,
-		Type:       common.ZSET,
+		Type:       common.NONE,
 		NextCursor: nextCursor,
 		PartionId:  "",
 		Error:      nil,
