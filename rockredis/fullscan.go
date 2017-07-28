@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"sync"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
@@ -15,6 +16,8 @@ type ItemContainer struct {
 	item   interface{}
 	cursor []byte
 }
+
+var lock sync.Mutex
 
 type itemFunc func(*RangeLimitedIterator, glob.Glob) (*ItemContainer, error)
 
@@ -77,6 +80,8 @@ func (db *RockDB) fullScanGenericUseBuffer(dataType common.DataType, key []byte,
 		result = db.setFullScan(key, count, match, inputBuffer)
 	case ZSetType:
 		result = db.zsetFullScan(key, count, match, inputBuffer)
+	default:
+		result = buildErrFullScanResult(errUnsuportType, dataType)
 	}
 	result.Type = dataType
 	return result
@@ -195,9 +200,17 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	if err != nil {
 		return buildErrFullScanResult(err, common.NONE)
 	}
-	tmpResult := make(map[string][]interface{})
+	lock.Lock()
+	defer lock.Unlock()
+
+	var result []interface{}
+	var item []interface{}
+
 	var container *ItemContainer
-	for i := 0; it.Valid() && i < count; it.Next() {
+	var prevKey []byte
+	var length int
+	first := true
+	for length = 0; it.Valid() && length < count; it.Next() {
 		container, err = f(it, r)
 		if err != nil {
 			if err == errNotMatch {
@@ -206,19 +219,24 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 				return buildErrFullScanResult(err, common.NONE)
 			}
 		}
-		tmp := tmpResult[string(container.key)]
-		tmp = append(tmp, container.item)
-		tmpResult[string(container.key)] = tmp
-		i++
-	}
 
-	var result []interface{}
-	var length int
-	for k, v := range tmpResult {
-		length += len(v)
-		var item []interface{}
-		item = append(item, []byte(k))
-		item = append(item, v...)
+		if !bytes.Equal(prevKey, container.key) {
+			if !first {
+				if len(item) > 0 {
+					result = append(result, item)
+				}
+			} else {
+				first = false
+			}
+			item = nil
+			item = append(item, container.key)
+			prevKey = container.key
+		}
+		//fmt.Println("#### key:", string(container.key), string(container.item.(common.FieldPair).Field), string(container.item.(common.FieldPair).Value))
+		item = append(item, container.item)
+		length++
+	}
+	if len(item) > 0 {
 		result = append(result, item)
 	}
 

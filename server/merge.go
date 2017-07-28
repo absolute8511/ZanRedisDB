@@ -159,13 +159,6 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 					v := realR[1].([]byte)
 					conn.WriteBulk(k[tabLen+1:])
 					conn.WriteBulk(v)
-					/*
-						for idx, _ := range realR {
-							v := realR[idx].([]byte)
-							fmt.Println("####", string(v), " |", tabLen)
-							conn.WriteBulk(v[tabLen+1:])
-						}
-					*/
 				}
 			}
 		}
