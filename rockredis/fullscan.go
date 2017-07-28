@@ -18,6 +18,16 @@ type ItemContainer struct {
 
 type itemFunc func(*RangeLimitedIterator, glob.Glob) (*ItemContainer, error)
 
+func buildErrFullScanResult(err error, dataType common.DataType) *common.FullScanResult {
+	return &common.FullScanResult{
+		Results:    nil,
+		Type:       dataType,
+		NextCursor: nil,
+		PartionId:  "",
+		Error:      err,
+	}
+}
+
 func getFullScanDataStoreType(dataType common.DataType) (byte, error) {
 	var storeDataType byte
 	// for list, hash, set, zset, we can scan all keys from meta ,
@@ -40,48 +50,36 @@ func getFullScanDataStoreType(dataType common.DataType) (byte, error) {
 }
 
 func (db *RockDB) FullScan(dataType common.DataType, cursor []byte, count int, match string) *common.FullScanResult {
+	return db.fullScanGeneric(dataType, cursor, count, match)
+}
+
+func (db *RockDB) fullScanGeneric(dataType common.DataType, key []byte, count int,
+	match string) *common.FullScanResult {
+	return db.fullScanGenericUseBuffer(dataType, key, count, match, nil)
+}
+
+func (db *RockDB) fullScanGenericUseBuffer(dataType common.DataType, key []byte, count int,
+	match string, inputBuffer []interface{}) *common.FullScanResult {
 	storeDataType, err := getFullScanDataStoreType(dataType)
 	if err != nil {
-		return &common.FullScanResult{
-			Results:    nil,
-			Type:       dataType,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
+		return buildErrFullScanResult(err, dataType)
 	}
-	result := db.fullScanGeneric(storeDataType, cursor, count, match)
-	result.Type = dataType
-	return result
-}
 
-func (db *RockDB) fullScanGeneric(storeDataType byte, key []byte, count int,
-	match string) *common.FullScanResult {
-
-	return db.fullScanGenericUseBuffer(storeDataType, key, count, match, nil)
-}
-
-func (db *RockDB) fullScanGenericUseBuffer(storeDataType byte, key []byte, count int,
-	match string, inputBuffer []interface{}) *common.FullScanResult {
+	var result *common.FullScanResult
 	switch storeDataType {
 	case KVType:
-		return db.kvFullScan(key, count, match, inputBuffer)
+		result = db.kvFullScan(key, count, match, inputBuffer)
 	case HashType:
-		return db.hashFullScan(key, count, match, inputBuffer)
+		result = db.hashFullScan(key, count, match, inputBuffer)
 	case ListType:
-		return db.listFullScan(key, count, match, inputBuffer)
+		result = db.listFullScan(key, count, match, inputBuffer)
 	case SetType:
-		return db.setFullScan(key, count, match, inputBuffer)
+		result = db.setFullScan(key, count, match, inputBuffer)
 	case ZSetType:
-		return db.zsetFullScan(key, count, match, inputBuffer)
+		result = db.zsetFullScan(key, count, match, inputBuffer)
 	}
-	return &common.FullScanResult{
-		Results:    nil,
-		Type:       common.NONE,
-		NextCursor: nil,
-		PartionId:  "",
-		Error:      nil,
-	}
+	result.Type = dataType
+	return result
 }
 
 func (db *RockDB) kvFullScan(key []byte, count int,
@@ -184,36 +182,18 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	f itemFunc) *common.FullScanResult {
 	r, err := buildMatchRegexp(match)
 	if err != nil {
-		return &common.FullScanResult{
-			Results:    nil,
-			Type:       common.NONE,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
+		return buildErrFullScanResult(err, common.NONE)
 	}
 
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
-		return &common.FullScanResult{
-			Results:    nil,
-			Type:       common.NONE,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
+		return buildErrFullScanResult(err, common.NONE)
 	}
 
 	count = checkScanCount(count)
 	it, err := db.buildFullScanIterator(tp, table, rk, count)
 	if err != nil {
-		return &common.FullScanResult{
-			Results:    nil,
-			Type:       common.NONE,
-			NextCursor: nil,
-			PartionId:  "",
-			Error:      err,
-		}
+		return buildErrFullScanResult(err, common.NONE)
 	}
 	tmpResult := make(map[string][]interface{})
 	var container *ItemContainer
@@ -223,13 +203,7 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 			if err == errNotMatch {
 				continue
 			} else {
-				return &common.FullScanResult{
-					Results:    nil,
-					Type:       common.NONE,
-					NextCursor: nil,
-					PartionId:  "",
-					Error:      err,
-				}
+				return buildErrFullScanResult(err, common.NONE)
 			}
 		}
 		tmp := tmpResult[string(container.key)]
