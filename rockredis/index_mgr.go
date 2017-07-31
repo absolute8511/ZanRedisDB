@@ -35,6 +35,17 @@ func NewIndexContainer() *TableIndexContainer {
 	}
 }
 
+func (self *TableIndexContainer) GetHIndexNoLock(field string) *HsetIndex {
+	index, ok := self.hsetIndexes[field]
+	if !ok {
+		return nil
+	}
+	if index.State == InitIndex {
+		return nil
+	}
+	return index
+}
+
 func (self *TableIndexContainer) marshalHsetIndexes() ([]byte, error) {
 	var indexList HsetIndexList
 	for _, v := range self.hsetIndexes {
@@ -226,6 +237,7 @@ func (self *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
 		delete(indexes.hsetIndexes, string(hindex.IndexField))
 		return err
 	}
+	dbLog.Infof("table %v add hash index %v", string(hindex.Table), hindex.String())
 	return err
 }
 
@@ -262,6 +274,7 @@ func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field strin
 		index.State = oldState
 		return err
 	}
+	dbLog.Infof("table %v hash index %v state updated from %v to %v", table, field, oldState, state)
 	if index.State == DeletedIndex {
 		self.wg.Add(1)
 		go func() {
@@ -311,6 +324,16 @@ func (self *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) er
 		return err
 	}
 	return nil
+}
+
+func (self *IndexMgr) GetTableIndexes(table string) *TableIndexContainer {
+	self.RLock()
+	indexes, ok := self.tableIndexes[table]
+	self.RUnlock()
+	if !ok {
+		return nil
+	}
+	return indexes
 }
 
 func (self *IndexMgr) GetHsetIndex(table string, field string) (*HsetIndex, error) {

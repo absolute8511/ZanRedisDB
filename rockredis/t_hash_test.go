@@ -4,6 +4,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/stretchr/testify/assert"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -695,4 +696,164 @@ func TestHashIndexInt64V(t *testing.T) {
 	for i := 0; i < len(inputPKList)-1; i++ {
 		assert.Equal(t, inputPKList[i+1], pkList[i])
 	}
+}
+
+func TestHashUpdateWithIndex(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	var hindex HsetIndex
+	hindex.Table = []byte("test")
+	hindex.Name = []byte("index1")
+	hindex.IndexField = []byte("index_test_int64field")
+	hindex.Unique = 0
+	hindex.ValueType = Int64V
+
+	intIndex := hindex
+	err := db.indexMgr.AddHsetIndex(db, &intIndex)
+	assert.Nil(t, err)
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex.Table), string(hindex.IndexField), ReadyIndex)
+	assert.Nil(t, err)
+
+	hindex.Table = []byte("test")
+	hindex.Name = []byte("index2")
+	hindex.IndexField = []byte("index_test_stringfield")
+	hindex.Unique = 0
+	hindex.ValueType = StringV
+
+	stringIndex := hindex
+	err = db.indexMgr.AddHsetIndex(db, &stringIndex)
+	assert.Nil(t, err)
+	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex.Table), string(hindex.IndexField), ReadyIndex)
+	assert.Nil(t, err)
+
+	inputPKList := make([][]byte, 0, 3)
+	inputPKList = append(inputPKList, []byte("test:testhindex_key1"))
+	inputPKList = append(inputPKList, []byte("test:testhindex_key2"))
+	inputPKList = append(inputPKList, []byte("test:testhindex_key3"))
+
+	for i, key := range inputPKList {
+		v := strconv.Itoa(i + 1)
+		db.HSet(0, key, intIndex.IndexField, []byte(v))
+	}
+
+	condAll := &IndexCondition{
+		StartKey:     nil,
+		IncludeStart: true,
+		EndKey:       nil,
+		IncludeEnd:   true,
+		Offset:       0,
+		Limit:        -1,
+	}
+	cnt, _, err := db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList), int(cnt))
+
+	condEqual2 := &IndexCondition{
+		StartKey:     []byte("2"),
+		IncludeStart: true,
+		EndKey:       []byte("2"),
+		IncludeEnd:   true,
+		Offset:       0,
+		Limit:        -1,
+	}
+
+	cnt, pkList, err := db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual2, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, int(cnt))
+	assert.Equal(t, 1, len(pkList))
+	assert.Equal(t, inputPKList[1], pkList[0])
+	// update field to new and check index update
+	db.HSet(0, inputPKList[1], intIndex.IndexField, []byte("5"))
+
+	cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual2, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, int(cnt))
+	condEqual5 := &IndexCondition{
+		StartKey:     []byte("5"),
+		IncludeStart: true,
+		EndKey:       []byte("5"),
+		IncludeEnd:   true,
+		Offset:       0,
+		Limit:        -1,
+	}
+	cnt, pkList5, err := db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual5, false)
+	assert.Equal(t, 1, int(cnt))
+	assert.Equal(t, 1, len(pkList5))
+	assert.Equal(t, pkList[0], pkList5[0])
+
+	cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList), int(cnt))
+
+	// hincrby
+	db.HIncrBy(0, inputPKList[1], intIndex.IndexField, 1)
+	cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual5, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, int(cnt))
+	condEqual6 := &IndexCondition{
+		StartKey:     []byte("6"),
+		IncludeStart: true,
+		EndKey:       []byte("6"),
+		IncludeEnd:   true,
+		Offset:       0,
+		Limit:        -1,
+	}
+	cnt, pkList6, err := db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual6, false)
+	assert.Equal(t, 1, int(cnt))
+	assert.Equal(t, 1, len(pkList6))
+	assert.Equal(t, pkList[0], pkList6[0])
+
+	// hmset test
+	// hdel
+	// hclear
+
+	inputFVList := make([][]byte, 0, 3)
+	inputFVList = append(inputFVList, []byte("fv1"))
+	inputFVList = append(inputFVList, []byte("fv2"))
+	inputFVList = append(inputFVList, []byte("fv3"))
+	db.wb.Clear()
+	for i, pk := range inputPKList {
+		err = db.HMset(0, pk, common.KVRecord{stringIndex.IndexField, inputFVList[i]})
+		assert.Nil(t, err)
+	}
+
+	cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList), int(cnt))
+
+	condEqual0 := &IndexCondition{
+		StartKey:     inputFVList[0],
+		IncludeStart: true,
+		EndKey:       inputFVList[0],
+		IncludeEnd:   true,
+		Offset:       0,
+		Limit:        -1,
+	}
+
+	cnt, pkList, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condEqual0, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, int(cnt))
+	assert.Equal(t, 1, len(pkList))
+	assert.Equal(t, inputPKList[0], pkList[0])
+
+	db.HDel(inputPKList[0], stringIndex.IndexField)
+	cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condEqual0, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, int(cnt))
+
+	cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList)-1, int(cnt))
+
+	db.HClear(inputPKList[1])
+
+	cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList)-1, int(cnt))
+
+	cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condAll, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList)-2, int(cnt))
 }

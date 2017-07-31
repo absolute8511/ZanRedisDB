@@ -10,6 +10,9 @@ import (
 // this will only be handled on leader of raft group
 func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode,
 	indexSchemas map[string]*common.IndexSchema) {
+
+	CoordLog().Debugf("namespace %v checking schema sync",
+		localNamespace.FullName())
 	for table, tindexes := range indexSchemas {
 		localIndexSchema, err := localNamespace.Node.GetIndexSchema(table)
 		schemaMap := make(map[string]*common.HsetIndexSchema)
@@ -36,8 +39,9 @@ func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode
 					continue
 				}
 				if hindex.State != common.InitIndex {
-					CoordLog().Warningf("namespace %v index state invalid: %v, local has no such index",
+					CoordLog().Warningf("namespace %v update index state invalid: %v, local index not init",
 						localNamespace.FullName(), hindex)
+					continue
 				}
 				CoordLog().Infof("namespace %v init new index : %v, table: %v",
 					localNamespace.FullName(), hindex, table)
@@ -47,6 +51,8 @@ func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode
 				switch hindex.State {
 				case common.BuildingIndex:
 					if localHIndex.State == common.InitIndex {
+						CoordLog().Infof("namespace %v index start to build : %v, %v",
+							localNamespace.FullName(), hindex, table)
 						sc.Type = node.SchemaChangeUpdateHsetIndex
 						localNamespace.Node.ProposeChangeTableSchema(table, sc)
 					}

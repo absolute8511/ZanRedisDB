@@ -658,6 +658,26 @@ func (r *RockDB) GetAllIndexSchema() (map[string]*common.IndexSchema, error) {
 	return r.indexMgr.GetAllIndexSchemaInfo(r)
 }
 
+func (r *RockDB) AddHsetIndex(table string, hindex *common.HsetIndexSchema) error {
+	indexInfo := HsetIndexInfo{
+		Name:       []byte(hindex.Name),
+		IndexField: []byte(hindex.IndexField),
+		PrefixLen:  hindex.PrefixLen,
+		Unique:     hindex.Unique,
+		ValueType:  IndexPropertyDType(hindex.ValueType),
+		State:      IndexState(hindex.State),
+	}
+	index := &HsetIndex{
+		Table:         []byte(table),
+		HsetIndexInfo: indexInfo,
+	}
+	return r.indexMgr.AddHsetIndex(r, index)
+}
+
+func (r *RockDB) UpdateHsetIndexState(table string, hindex *common.HsetIndexSchema) error {
+	return r.indexMgr.UpdateHsetIndexState(r, table, hindex.IndexField, IndexState(hindex.State))
+}
+
 func (r *RockDB) RegisterKVExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterKVExpired(f)
 }
@@ -717,13 +737,8 @@ func IsBatchableWrite(cmd string) bool {
 func init() {
 	batchableCmds = make(map[string]bool)
 	// command need response value (not just error or ok) can not be batched
-	//batchableCmds["incr"] = true
 	batchableCmds["set"] = true
 	batchableCmds["mset"] = true
-	//batchableCmds["setnx"] = true
 	batchableCmds["setex"] = true
-	//batchableCmds["setrange"] = true
-	//batchableCmds["append"] = true
-	//batchableCmds["persist"] = true
 	batchableCmds["del"] = true
 }

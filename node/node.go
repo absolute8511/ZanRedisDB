@@ -239,19 +239,6 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 	return ns
 }
 
-func (self *KVNode) GetIndexSchema(table string) (map[string]*common.IndexSchema, error) {
-	if len(table) == 0 {
-		return self.store.GetAllIndexSchema()
-	}
-	schema, err := self.store.GetIndexSchema(table)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]*common.IndexSchema{
-		table: schema,
-	}, nil
-}
-
 func (self *KVNode) destroy() error {
 	self.Stop()
 	self.store.Destroy()
@@ -964,8 +951,15 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 							}
 						} else if req.Header.DataType == int32(SchemaChangeReq) {
 							self.rn.Infof("handle schema change: %v", string(req.Data))
-							// TODO:
-							self.w.Trigger(reqID, nil)
+							var sc SchemaChange
+							err := json.Unmarshal(req.Data, &sc)
+							if err != nil {
+								self.rn.Infof("schema data error: %v, %v", string(req.Data), err)
+								self.w.Trigger(reqID, err)
+							} else {
+								err = self.handleSchemaUpdate(sc)
+								self.w.Trigger(reqID, err)
+							}
 						} else {
 							self.w.Trigger(reqID, errUnknownData)
 						}
