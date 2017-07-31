@@ -249,11 +249,11 @@ func TestHashIndexBuildAndClean(t *testing.T) {
 	hindex.ValueType = StringV
 
 	key := []byte(string(hindex.Table) + ":testdb_hash_a")
-	db.HSet(key, hindex.IndexField, []byte("1"))
+	db.HSet(0, key, hindex.IndexField, []byte("1"))
 	key = []byte(string(hindex.Table) + ":testdb_hash_b")
-	db.HSet(key, hindex.IndexField, []byte("2"))
+	db.HSet(0, key, hindex.IndexField, []byte("2"))
 	key = []byte(string(hindex.Table) + ":testdb_hash_c")
-	db.HSet(key, hindex.IndexField, []byte("2"))
+	db.HSet(0, key, hindex.IndexField, []byte("2"))
 
 	err := db.indexMgr.AddHsetIndex(db, &hindex)
 	assert.Nil(t, err)
@@ -305,20 +305,20 @@ func TestHashIndexBuildAndClean(t *testing.T) {
 	assert.Nil(t, err)
 
 	key = []byte(string(hindex2.Table) + ":testdb_hash_a")
-	db.HSet(key, hindex2.IndexField, []byte("1"))
+	db.HSet(0, key, hindex2.IndexField, []byte("1"))
 	key = []byte(string(hindex2.Table) + ":testdb_hash_b")
-	db.HSet(key, hindex2.IndexField, []byte("2"))
+	db.HSet(0, key, hindex2.IndexField, []byte("2"))
 	key = []byte(string(hindex2.Table) + ":testdb_hash_c")
-	db.HSet(key, hindex2.IndexField, []byte("2"))
+	db.HSet(0, key, hindex2.IndexField, []byte("2"))
 
 	key = []byte(string(hindex3.Table) + ":testdb_hash_a")
-	db.HSet(key, hindex3.IndexField, []byte("1"))
+	db.HSet(0, key, hindex3.IndexField, []byte("1"))
 	key = []byte(string(hindex3.Table) + ":testdb_hash_b")
-	db.HSet(key, hindex3.IndexField, []byte("2"))
+	db.HSet(0, key, hindex3.IndexField, []byte("2"))
 	key = []byte(string(hindex3.Table) + ":testdb_hash_c")
-	db.HSet(key, hindex3.IndexField, []byte("2"))
+	db.HSet(0, key, hindex3.IndexField, []byte("2"))
 	key = []byte(string(hindex3.Table) + ":testdb_hash_d")
-	db.HSet(key, hindex3.IndexField, []byte("3"))
+	db.HSet(0, key, hindex3.IndexField, []byte("3"))
 
 	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex2.Table), string(hindex2.IndexField), BuildingIndex)
 	assert.Nil(t, err)

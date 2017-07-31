@@ -249,7 +249,7 @@ func hsetIndexRemoveStringRec(table []byte, indexName []byte, indexValue []byte,
 }
 
 func (db *RockDB) hsetIndexAddFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb *gorocksdb.WriteBatch) error {
-	table := extractTableFromRedisKey(pk)
+	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
 	}
@@ -271,7 +271,7 @@ func (db *RockDB) hsetIndexAddFieldRecs(pk []byte, fieldList [][]byte, valueList
 }
 
 func (db *RockDB) hsetIndexUpdateFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb *gorocksdb.WriteBatch) error {
-	table := extractTableFromRedisKey(pk)
+	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
 	}
@@ -297,7 +297,7 @@ func (db *RockDB) hsetIndexUpdateFieldRecs(pk []byte, fieldList [][]byte, valueL
 }
 
 func (db *RockDB) hsetIndexAddRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
-	table := extractTableFromRedisKey(pk)
+	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
 	}
@@ -311,7 +311,7 @@ func (db *RockDB) hsetIndexAddRec(pk []byte, field []byte, value []byte, wb *gor
 }
 
 func (db *RockDB) hsetIndexUpdateRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
-	table := extractTableFromRedisKey(pk)
+	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
 	}
@@ -330,7 +330,7 @@ func (db *RockDB) hsetIndexUpdateRec(pk []byte, field []byte, value []byte, wb *
 }
 
 func (self *RockDB) hsetIndexRemoveRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
-	table := extractTableFromRedisKey(pk)
+	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
 	}

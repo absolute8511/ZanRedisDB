@@ -530,13 +530,13 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 		return 0, nil, err
 	}
 
-	v := make(chan common.KVRecordRet, 16)
+	valCh := make(chan common.KVRecordRet, 16)
 	doScan := func() {
 		defer it.Close()
-		defer close(v)
+		defer close(valCh)
 		for ; it.Valid(); it.Next() {
 			_, _, f, err := hDecodeHashKey(it.Key())
-			v <- common.KVRecordRet{
+			valCh <- common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: nil},
 				Err: err,
 			}
@@ -547,7 +547,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 	} else {
 		go doScan()
 	}
-	return length, v, nil
+	return length, valCh, nil
 }
 
 func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
@@ -557,7 +557,7 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
-		return length, nil, err
+		return 0, nil, err
 	}
 
 	length, err := db.HLen(key)
