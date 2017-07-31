@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
-	"sync"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
@@ -16,8 +15,6 @@ type ItemContainer struct {
 	item   interface{}
 	cursor []byte
 }
-
-var lock sync.Mutex
 
 type itemFunc func(*RangeLimitedIterator, glob.Glob) (*ItemContainer, error)
 
@@ -200,8 +197,6 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	if err != nil {
 		return buildErrFullScanResult(err, common.NONE)
 	}
-	lock.Lock()
-	defer lock.Unlock()
 
 	var result []interface{}
 	var item []interface{}
@@ -209,7 +204,6 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	var container *ItemContainer
 	var prevKey []byte
 	var length int
-	first := true
 	for length = 0; it.Valid() && length < count; it.Next() {
 		container, err = f(it, r)
 		if err != nil {
@@ -221,18 +215,13 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 		}
 
 		if !bytes.Equal(prevKey, container.key) {
-			if !first {
-				if len(item) > 0 {
-					result = append(result, item)
-				}
-			} else {
-				first = false
+			if len(item) > 0 {
+				result = append(result, item)
 			}
 			item = nil
 			item = append(item, container.key)
 			prevKey = container.key
 		}
-		//fmt.Println("#### key:", string(container.key), string(container.item.(common.FieldPair).Field), string(container.item.(common.FieldPair).Value))
 		item = append(item, container.item)
 		length++
 	}
