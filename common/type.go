@@ -302,5 +302,6 @@ type ScanResult struct {
 }
 
 type ExpiredData struct {
-	Keys [][]byte
+	DataType
+	Key []byte
 }

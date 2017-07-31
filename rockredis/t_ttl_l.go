@@ -1,9 +1,8 @@
 package rockredis
 
 import (
-	"runtime"
+	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -11,21 +10,32 @@ import (
 )
 
 const (
-	localExpCheckInterval      = 300
-	localBatchedBufSize        = 1000
-	localBatchedCommitInterval = 30
+	localExpCheckInterval = 300
+	localBatchedBufSize   = 16 * 1024
 )
 
 type localExpiration struct {
-	*lTTLChecker
-	db *RockDB
+	*TTLChecker
+	db      *RockDB
+	wb      *gorocksdb.WriteBatch
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
+	buffer  []*expiredMeta
+	batched [common.ALL - common.NONE]*localBatch
 }
 
 func newLocalExpiration(db *RockDB) *localExpiration {
-	return &localExpiration{
-		db:          db,
-		lTTLChecker: newlTTlChecker(db),
+	exp := &localExpiration{
+		db:         db,
+		wb:         gorocksdb.NewWriteBatch(),
+		TTLChecker: newTTLChecker(db, localExpCheckInterval),
+		stopCh:     make(chan struct{}),
 	}
+
+	for dt, _ := range exp.batched {
+		exp.batched[dt] = newLocalBatch(db, common.DataType(dt))
+	}
+	return exp
 }
 
 func (exp *localExpiration) expireAt(dataType byte, key []byte, when int64) error {
@@ -33,8 +43,9 @@ func (exp *localExpiration) expireAt(dataType byte, key []byte, when int64) erro
 	wb.Clear()
 
 	tk := expEncodeTimeKey(dataType, key, when)
+	mk := expEncodeMetaKey(dataType, key)
 
-	wb.Put(tk, PutInt64(when))
+	wb.Put(tk, mk)
 
 	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
 		return err
@@ -46,7 +57,8 @@ func (exp *localExpiration) expireAt(dataType byte, key []byte, when int64) erro
 
 func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch) error {
 	tk := expEncodeTimeKey(dataType, key, when)
-	wb.Put(tk, PutInt64(when))
+	mk := expEncodeMetaKey(dataType, key)
+	wb.Put(tk, mk)
 	return nil
 }
 
@@ -56,6 +68,135 @@ func (exp *localExpiration) ttl(byte, []byte) (int64, error) {
 
 func (exp *localExpiration) delExpire(byte, []byte, *gorocksdb.WriteBatch) error {
 	return nil
+}
+
+func (exp *localExpiration) WatchExpired(receiver chan *common.ExpiredData, stopCh chan struct{}) error {
+	return errors.New("can not watch expired through local expiration policy")
+}
+
+func (exp *localExpiration) Start() {
+	exp.wg.Add(1)
+	go func() {
+		defer exp.wg.Done()
+		exp.applyExpiration(exp.stopCh)
+	}()
+}
+
+func (exp *localExpiration) applyExpiration(stop chan struct{}) {
+	exp.buffer = make([]*expiredMeta, 0, localBatchedBufSize)
+
+	t := time.NewTicker(time.Second * localExpCheckInterval)
+	defer t.Stop()
+
+	dbLog.Infof("start to apply-expiration using Local-Deletion policy")
+	defer dbLog.Infof("apply-expiration using Local-Deletion policy exit")
+
+	checker := exp.TTLChecker
+
+	for _ = range t.C {
+		receiver := make(chan *expiredMeta, 1024)
+		watchStop := make(chan struct{})
+
+		exp.wg.Add(1)
+		go func(watchStop chan struct{}) {
+			defer exp.wg.Done()
+			select {
+			case <-stop:
+				//close the watchStop channel to stop watch expired data
+				//if the channel has not been closed
+				select {
+				case <-watchStop:
+				default:
+					close(watchStop)
+				}
+			case <-watchStop:
+			}
+			return
+		}(watchStop)
+
+		exp.wg.Add(1)
+		go func() {
+			defer exp.wg.Done()
+			checker.watchExpiredOnce(receiver, watchStop)
+		}()
+
+		for meta := range receiver {
+			exp.buffer = append(exp.buffer, meta)
+
+			if len(exp.buffer) >= localBatchedBufSize {
+				// close the watchStop channel to stop watch expired data when the
+				// buffer is full if the channel has not been closed
+				close(watchStop)
+
+				// receive all the pending data from the 'receiver'
+				for meta := range receiver {
+					exp.buffer = append(exp.buffer, meta)
+				}
+				break
+			}
+		}
+
+		select {
+		case <-watchStop:
+		default:
+			close(watchStop)
+		}
+
+		select {
+		case <-stop:
+			return
+		default:
+			exp.commitBuffered()
+		}
+	}
+}
+
+func (exp *localExpiration) commitBuffered() {
+	if len(exp.buffer) == 0 {
+		return
+	}
+
+	exp.wb.Clear()
+
+	for i, v := range exp.buffer {
+		dt, key, _, err := expDecodeTimeKey(v.timeKey)
+		if err != nil {
+			dbLog.Errorf("decode time-key failed, bad data encounter, err:%s", err.Error())
+			continue
+		}
+
+		if err := exp.batched[dataType2CommonType(dt)].propose(key); err != nil {
+			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", TypeName[dt], err.Error())
+		}
+
+		exp.wb.Delete(v.timeKey)
+		exp.wb.Delete(v.metaKey)
+
+		if i%1024 == 0 {
+			if err := exp.db.eng.Write(exp.db.defaultWriteOpts, exp.wb); err != nil {
+				dbLog.Errorf("delete meta data about expired data failed, err:%s", err.Error())
+			}
+			exp.wb.Clear()
+		}
+	}
+
+	exp.buffer = exp.buffer[:0]
+
+	for _, batch := range exp.batched {
+		if err := batch.commit(); err != nil {
+			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", batch.dt.String(), err.Error())
+		}
+	}
+
+	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, exp.wb); err != nil {
+		dbLog.Errorf("delete meta data about expired data failed, %s", err.Error())
+	}
+	exp.wb.Clear()
+}
+
+func (exp *localExpiration) Stop() {
+	close(exp.stopCh)
+	exp.wg.Wait()
 }
 
 func createLocalDelFunc(dt common.DataType, db *RockDB) func(keys [][]byte) error {
@@ -93,10 +234,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB) func(keys [][]byte) erro
 	}
 }
 
-// TODO, may use two buffers to store the keys and do 'copy-on-write' to reduce the
-// critical section
 type localBatch struct {
-	sync.Mutex
 	keys       [][]byte
 	db         *RockDB
 	dt         common.DataType
@@ -120,18 +258,14 @@ func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 	batch := &localBatch{
 		dt:   dt,
 		db:   localDB,
-		keys: make([][]byte, 0, localBatchedBufSize),
+		keys: make([][]byte, 0, 1024),
 	}
-
 	batch.localDelFn = createLocalDelFunc(dt, localDB)
 
 	return batch
 }
 
 func (batch *localBatch) commit() error {
-	defer batch.Unlock()
-	batch.Lock()
-
 	if len(batch.keys) == 0 {
 		return nil
 	}
@@ -144,247 +278,12 @@ func (batch *localBatch) commit() error {
 }
 
 func (batch *localBatch) propose(key []byte) error {
-	defer batch.Unlock()
-	batch.Lock()
-
 	batch.keys = append(batch.keys, key)
-
-	if len(batch.keys) >= localBatchedBufSize {
+	if len(batch.keys) >= 1024 {
 		if err := batch.localDelFn(batch.keys); err != nil {
 			return err
 		}
 		batch.keys = batch.keys[:0]
 	}
 	return nil
-}
-
-type lTTLChecker struct {
-	sync.Mutex
-	db *RockDB
-
-	checking int32
-	quitC    chan struct{}
-
-	wg      sync.WaitGroup
-	wb      *gorocksdb.WriteBatch
-	batched [common.ALL - common.NONE]*localBatch
-
-	//next check time
-	nc int64
-}
-
-func newlTTlChecker(db *RockDB) *lTTLChecker {
-	c := &lTTLChecker{
-		db: db,
-		nc: time.Now().Unix(),
-		wb: gorocksdb.NewWriteBatch(),
-	}
-
-	for dt, _ := range c.batched {
-		c.batched[dt] = newLocalBatch(db, common.DataType(dt))
-	}
-
-	return c
-}
-
-func (c *lTTLChecker) Start() {
-	c.Lock()
-	if !atomic.CompareAndSwapInt32(&c.checking, 0, 1) {
-		c.Unlock()
-		return
-	}
-
-	c.quitC = make(chan struct{})
-
-	c.wg.Add(1)
-	go func(stopCh chan struct{}) {
-		dbLog.Infof("ttl checker of LocalDeletion started")
-		t := time.NewTicker(time.Second * localExpCheckInterval)
-
-		defer func() {
-			t.Stop()
-			c.wg.Done()
-			dbLog.Infof("ttl checker of LocalDeletion exit")
-		}()
-
-		for {
-			select {
-			case <-t.C:
-				c.check(stopCh)
-			case <-stopCh:
-				return
-			}
-		}
-	}(c.quitC)
-
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		c.applyBatch(c.quitC)
-	}()
-
-	c.Unlock()
-}
-
-func (c *lTTLChecker) Stop() {
-	c.Lock()
-	if atomic.LoadInt32(&c.checking) == 1 {
-		close(c.quitC)
-		c.Unlock()
-
-		//we should unlock the Mutex before Wait to avoid
-		//deadlock since the started goroutine requires the lock
-		//at running
-		c.wg.Wait()
-
-		atomic.StoreInt32(&c.checking, 0)
-		return
-	}
-	c.Unlock()
-}
-
-func (c *lTTLChecker) applyBatch(stopCh chan struct{}) {
-	commitTicker := time.NewTicker(time.Second * localBatchedCommitInterval)
-
-	defer func() {
-		commitTicker.Stop()
-		c.commitAllBatched()
-	}()
-
-	for {
-		select {
-		case <-commitTicker.C:
-			c.commitAllBatched()
-		case <-stopCh:
-			return
-		}
-	}
-}
-
-func (c *lTTLChecker) commitAllBatched() {
-	for _, bat := range c.batched {
-		bat.commit()
-	}
-}
-
-func (c *lTTLChecker) setNextCheckTime(when int64, force bool) {
-	c.Lock()
-	if force {
-		c.nc = when
-	} else if c.nc > when {
-		c.nc = when
-	}
-	c.Unlock()
-}
-
-func (c *lTTLChecker) GetExpiredDataChan(common.DataType) chan *common.ExpiredData {
-	return nil
-}
-
-func (c *lTTLChecker) check(stopChan chan struct{}) {
-	defer func() {
-		if e := recover(); e != nil {
-			buf := make([]byte, 4096)
-			n := runtime.Stack(buf, false)
-			buf = buf[0:n]
-			dbLog.Errorf("local deletion ttl check panic: %s:%v", buf, e)
-		}
-		c.commitAllBatched()
-	}()
-
-	now := time.Now().Unix()
-
-	c.Lock()
-	nc := c.nc
-	c.Unlock()
-
-	if now < nc {
-		return
-	}
-
-	nc = now + 3600
-
-	minKey := expEncodeTimeKey(NoneType, nil, 0)
-	maxKey := expEncodeTimeKey(maxDataType, nil, nc)
-
-	var eCount int64 = 0
-	var scanned int64 = 0
-	checkStart := time.Now()
-	c.wb.Clear()
-
-	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
-		common.RangeROpen, 0, -1, false)
-	defer it.Close()
-	if err != nil {
-		c.setNextCheckTime(now+1, false)
-		return
-	} else if it == nil || !it.Valid() {
-		c.setNextCheckTime(nc, false)
-		return
-	}
-
-	for ; it.Valid(); it.Next() {
-		if scanned%100 == 0 {
-			select {
-			case <-stopChan:
-				nc = now + 1
-				break
-			default:
-			}
-		}
-		tk := it.Key()
-		//when := Uint64(it.Value())
-
-		if tk == nil {
-			continue
-		}
-
-		dt, k, nt, err := expDecodeTimeKey(tk)
-		if err != nil {
-			continue
-		}
-
-		scanned += 1
-		if scanned == 1 { //log the first scanned key
-			dbLog.Infof("ttl check start at key:[%s] of type:%s whose expire time is: %s", string(k),
-				TypeName[dt], time.Unix(nt, 0).Format(logTimeFormatStr))
-		}
-
-		if nt > now {
-			//the next ttl check time is nt!
-			nc = nt
-			dbLog.Infof("ttl check end at key:[%s] of type:%s whose expire time is: %s", string(k),
-				TypeName[dt], time.Unix(nt, 0).Format(logTimeFormatStr))
-			break
-		}
-
-		if err := c.batched[dataType2CommonType(dt)].propose(k); err != nil {
-			dbLog.Warningf("propose to delete expired key [%s, %s] failed", TypeName[dt], string(k))
-		}
-
-		eCount += 1
-		c.wb.Delete(tk)
-		mk := expEncodeMetaKey(dt, k)
-		c.wb.Delete(mk)
-
-		if eCount%1024 == 0 {
-			if err := c.db.eng.Write(c.db.defaultWriteOpts, c.wb); err != nil {
-				dbLog.Warningf("delete expired time keys failed during ttl checking, err:%s", err.Error())
-			}
-			c.wb.Clear()
-		}
-	}
-
-	c.setNextCheckTime(nc, false)
-
-	if err := c.db.eng.Write(c.db.defaultWriteOpts, c.wb); err != nil {
-		dbLog.Warningf("delete expired time keys failed during ttl checking, err:%s", err.Error())
-	}
-	c.wb.Clear()
-
-	checkCost := time.Since(checkStart).Nanoseconds() / 1000
-	dbLog.Infof("[%d/%d] keys have expired have been deleted during ttl checking, cost:%d us, the next checking will start at: %s",
-		eCount, scanned, checkCost, time.Unix(nc, 0).Format(logTimeFormatStr))
-
-	return
 }

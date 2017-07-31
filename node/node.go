@@ -148,17 +148,11 @@ func (self *KVNode) Start(standalone bool) error {
 		self.handleProposeReq()
 	}()
 
-	if self.expirationPolicy == common.ConsistencyDeletion {
-		self.wg.Add(1)
-		go func() {
-			defer self.wg.Done()
-			self.expireHandler.Start()
-		}()
-	}
-
-	if self.expirationPolicy != common.ConsistencyDeletion {
-		self.store.StartTTLChecker()
-	}
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.expireHandler.Start()
+	}()
 
 	return nil
 }
@@ -173,9 +167,7 @@ func (self *KVNode) Stop() {
 	}
 	close(self.stopChan)
 	go self.deleteCb()
-	if self.expireHandler.Running() {
-		self.expireHandler.Stop()
-	}
+	self.expireHandler.Stop()
 	self.wg.Wait()
 	self.rn.StopNode()
 	self.store.Close()
@@ -251,15 +243,6 @@ func (self *KVNode) destroy() error {
 func (self *KVNode) CleanData() error {
 	if err := self.store.CleanData(); err != nil {
 		return err
-	}
-
-	if self.expireHandler.Running() {
-		self.expireHandler.Reset()
-	}
-
-	//the ttlChecker should be restart after the store cleaned
-	if self.IsLead() || self.expirationPolicy != common.ConsistencyDeletion {
-		self.store.StartTTLChecker()
 	}
 	return nil
 }
@@ -1221,15 +1204,10 @@ func (self *KVNode) ReportMeLeaderToCluster() {
 
 // should not block long in this
 func (self *KVNode) OnRaftLeaderChanged() {
+	self.expireHandler.LeaderChanged()
+
 	if self.rn.IsLead() {
 		go self.ReportMeLeaderToCluster()
-		if self.expirationPolicy == common.ConsistencyDeletion {
-			self.store.StartTTLChecker()
-		}
-	} else {
-		if self.expirationPolicy == common.ConsistencyDeletion {
-			self.store.StopTTLChecker()
-		}
 	}
 }
 

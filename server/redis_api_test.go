@@ -63,7 +63,6 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 
 	kv.Start()
 	time.Sleep(time.Second)
-	nsNode.StartTTLChecker()
 	return kv, redisport, tmpDir
 }
 

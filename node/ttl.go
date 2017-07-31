@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/redcon"
@@ -11,6 +12,11 @@ import (
 
 var (
 	expireCmds [common.ALL - common.NONE][]byte
+)
+
+const (
+	expiredBuffedCommitInterval = 1
+	raftBatchBufferSize         = 1024
 )
 
 func init() {
@@ -183,75 +189,103 @@ func (self *KVNode) zttlCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 type ExpireHandler struct {
-	node    *KVNode
-	resetC  chan struct{}
-	quitC   chan struct{}
-	wg      sync.WaitGroup
-	running int32
+	node            *KVNode
+	quitC           chan struct{}
+	leaderChangedCh chan struct{}
+	wg              sync.WaitGroup
+	running         int32
+
+	//prevent 'applyExpiration' start more than one time at the same time
+	applyLock sync.Mutex
+
+	batchBuffer [common.ALL - common.NONE]*raftBatchBuffer
 }
 
 func NewExpireHandler(node *KVNode) *ExpireHandler {
-	return &ExpireHandler{
-		node:   node,
-		resetC: make(chan struct{}),
+	handler := &ExpireHandler{
+		node:            node,
+		leaderChangedCh: make(chan struct{}, 8),
+		quitC:           make(chan struct{}),
 	}
+
+	for t, _ := range handler.batchBuffer {
+		handler.batchBuffer[t] = newRaftBatchBuffer(node, common.DataType(t))
+	}
+	return handler
 }
 
 func (self *ExpireHandler) Start() {
 	if !atomic.CompareAndSwapInt32(&self.running, 0, 1) {
 		return
 	}
+	self.node.store.StartTTLChecker()
 
-	self.quitC = make(chan struct{})
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.watchLeaderChanged()
+	}()
 
-	types := []common.DataType{
-		common.KV, common.LIST, common.SET, common.ZSET, common.HASH,
+	switch self.node.expirationPolicy {
+	case common.LocalDeletion:
+
+	case common.ConsistencyDeletion:
+		// the leader should watch the expired data and
+		// delete them through RAFT
+
+	case common.PeriodicalRotation:
 	}
 
-	for {
-		stopCh := make(chan struct{})
-		for _, t := range types {
-			self.wg.Add(1)
-
-			go func(t common.DataType, stopCh chan struct{}) {
-				defer self.wg.Done()
-				expiredCh := self.node.store.GetExpiredDataChan(t)
-
-				//apply expiration of different data types
-				applyExpiration(self.node, t, expiredCh, stopCh)
-			}(t, stopCh)
-		}
-
-		select {
-		case <-self.resetC:
-			//the underlying store has changed and the expired data channel should be reacquired
-			close(stopCh)
-			self.wg.Wait()
-
-		case <-self.quitC:
-			close(stopCh)
-			return
-		}
-	}
-
-}
-
-func (self *ExpireHandler) Reset() {
-	self.resetC <- struct{}{}
 }
 
 func (self *ExpireHandler) Stop() {
 	if atomic.CompareAndSwapInt32(&self.running, 1, 0) {
 		close(self.quitC)
+		self.node.store.StopTTLChecker()
 		self.wg.Wait()
 	}
 }
 
-func (self *ExpireHandler) Running() bool {
-	return atomic.LoadInt32(&self.running) == 1
+func (self *ExpireHandler) LeaderChanged() {
+	self.leaderChangedCh <- struct{}{}
 }
 
-func rawExpireCommand(dt common.DataType, keys [][]byte) []byte {
+func (self *ExpireHandler) watchLeaderChanged() {
+	var stop chan struct{}
+	applying := false
+
+	for {
+		select {
+		case <-self.leaderChangedCh:
+			if self.node.expirationPolicy == common.ConsistencyDeletion {
+				if self.node.IsLead() && !applying {
+					stop = make(chan struct{})
+
+					self.wg.Add(1)
+					go func(stop chan struct{}) {
+						defer self.wg.Done()
+						if err := self.applyExpiration(stop); err != nil {
+							nodeLog.Errorf("apply expiration failed as: %s", err.Error())
+						}
+					}(stop)
+
+					applying = true
+				} else if !self.node.IsLead() && applying {
+					close(stop)
+					applying = false
+				}
+			}
+		case <-self.quitC:
+			if applying {
+				close(stop)
+				applying = false
+			}
+			return
+		}
+	}
+}
+
+func buildRawExpireCommand(dt common.DataType, keys [][]byte) []byte {
 	cmd := expireCmds[dt]
 	buf := make([]byte, 0, 128)
 
@@ -275,17 +309,80 @@ func rawExpireCommand(dt common.DataType, keys [][]byte) []byte {
 	return buf
 }
 
-func applyExpiration(node *KVNode, dataType common.DataType, expiredCh chan *common.ExpiredData, stopCh chan struct{}) {
-	for {
-		select {
-		case v, ok := <-expiredCh:
-			if ok {
-				node.Propose(rawExpireCommand(dataType, v.Keys))
-			} else {
+func (self *ExpireHandler) applyExpiration(stop chan struct{}) error {
+	defer func() {
+		for _, batch := range self.batchBuffer {
+			batch.clear()
+		}
+		self.applyLock.Unlock()
+	}()
+
+	self.applyLock.Lock()
+	receiver := make(chan *common.ExpiredData, 4*raftBatchBufferSize)
+
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		t := time.NewTicker(time.Second)
+		for {
+			select {
+			case <-t.C:
+				for _, batch := range self.batchBuffer {
+					batch.commit()
+				}
+			case <-stop:
 				return
 			}
-		case <-stopCh:
-			return
 		}
+	}()
+
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		for v := range receiver {
+			self.batchBuffer[v.DataType].propose(v.Key)
+		}
+	}()
+
+	return self.node.store.WatchExpired(receiver, stop)
+}
+
+type raftBatchBuffer struct {
+	sync.Mutex
+	dataType common.DataType
+	keys     [][]byte
+	node     *KVNode
+}
+
+func newRaftBatchBuffer(nd *KVNode, dt common.DataType) *raftBatchBuffer {
+	return &raftBatchBuffer{
+		node:     nd,
+		keys:     make([][]byte, 0, raftBatchBufferSize),
+		dataType: dt,
 	}
+}
+
+func (rb *raftBatchBuffer) propose(key []byte) {
+	rb.Lock()
+	rb.keys = append(rb.keys, key)
+	if len(rb.keys) >= raftBatchBufferSize {
+		rb.node.Propose(buildRawExpireCommand(rb.dataType, rb.keys))
+		rb.keys = rb.keys[:0]
+	}
+	rb.Unlock()
+}
+
+func (rb *raftBatchBuffer) commit() {
+	rb.Lock()
+	if len(rb.keys) > 0 {
+		rb.node.Propose(buildRawExpireCommand(rb.dataType, rb.keys))
+		rb.keys = rb.keys[:0]
+	}
+	rb.Unlock()
+}
+
+func (rb *raftBatchBuffer) clear() {
+	rb.Lock()
+	rb.keys = rb.keys[:0]
+	rb.Unlock()
 }

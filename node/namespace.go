@@ -508,8 +508,6 @@ func (self *NamespaceMgr) checkNamespaceRaftLeader() {
 			if v.IsReady() {
 				if v.Node.IsLead() {
 					leaderNodes = append(leaderNodes, v)
-				} else {
-					v.Node.store.StopTTLChecker()
 				}
 			}
 		}

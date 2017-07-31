@@ -182,7 +182,6 @@ type RockDB struct {
 	backupC          chan *BackupInfo
 	engOpened        int32
 	isBatching       int32
-	gc               *GC
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -249,7 +248,6 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		wb:               gorocksdb.NewWriteBatch(),
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
-		gc:               NewGC(),
 	}
 	eng, err := gorocksdb.OpenDb(opts, db.GetDataDir())
 	if err != nil {
@@ -262,10 +260,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 
 	switch cfg.ExpirationPolicy {
 	case common.ConsistencyDeletion:
-
-		exp := newConsistencyExpiration(db)
-		db.expiration = exp
-		db.gc.AddComponent(exp.GetRedundantDataCollector())
+		db.expiration = newConsistencyExpiration(db)
 
 	case common.LocalDeletion:
 		db.expiration = newLocalExpiration(db)
@@ -282,8 +277,6 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		defer db.wg.Done()
 		db.backupLoop()
 	}()
-
-	db.gc.Start()
 
 	return db, nil
 }
@@ -349,7 +342,6 @@ func (r *RockDB) Close() {
 	}
 	close(r.quit)
 	r.expiration.Stop()
-	r.gc.StopAll()
 	r.wg.Wait()
 	r.closeEng()
 	if r.defaultReadOpts != nil {
