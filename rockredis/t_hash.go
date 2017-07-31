@@ -91,7 +91,6 @@ func hEncodeHashKey(table []byte, key []byte, field []byte) []byte {
 	buf[pos] = hashStartSep
 	pos++
 	copy(buf[pos:], field)
-
 	return buf
 }
 
@@ -177,7 +176,7 @@ func (db *RockDB) hSetField(ts int64, hkey []byte, field []byte, value []byte, w
 			db.IncrTableKeyCount(table, 1, wb)
 		}
 	}
-
+	//	fmt.Println("###", ek)
 	wb.Put(ek, value)
 	return created, nil
 }

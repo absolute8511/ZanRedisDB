@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
 )
@@ -46,6 +47,24 @@ func getDataStoreType(dataType common.DataType) (byte, error) {
 	return storeDataType, nil
 }
 
+func getCommonDataType(dataType byte) (common.DataType, error) {
+	var commonDataType common.DataType
+	switch dataType {
+	case KVType:
+		commonDataType = common.KV
+	case LMetaType:
+		commonDataType = common.LIST
+	case HSizeType:
+		commonDataType = common.HASH
+	case SSizeType:
+		commonDataType = common.SET
+	case ZSizeType:
+		commonDataType = common.ZSET
+	default:
+		return 0, errDataType
+	}
+	return commonDataType, nil
+}
 func buildMatchRegexp(match string) (glob.Glob, error) {
 	var err error
 	var r glob.Glob = nil

@@ -1,9 +1,10 @@
 package rockredis
 
 import (
-	"github.com/absolute8511/ZanRedisDB/common"
 	"os"
 	"testing"
+
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 func TestHashCodec(t *testing.T) {

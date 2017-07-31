@@ -131,58 +131,58 @@ func checkMergeAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNXRaWEpuWlRveE1RPT07MTpkR1Z6ZEhOallXNXRaWEpuWlRveDsyOmRHVnpkSE5qWVc1dFpYSm5aVG93Ow==" &&
-		string(n) != "MDpkR1Z6ZEhOallXNXRaWEpuWlRveE1RPT07MjpkR1Z6ZEhOallXNXRaWEpuWlRvdzsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Ow==" &&
-		string(n) != "MTpkR1Z6ZEhOallXNXRaWEpuWlRveDswOmRHVnpkSE5qWVc1dFpYSm5aVG94TVE9PTsyOmRHVnpkSE5qWVc1dFpYSm5aVG93Ow==" &&
-		string(n) != "MTpkR1Z6ZEhOallXNXRaWEpuWlRveDsyOmRHVnpkSE5qWVc1dFpYSm5aVG93OzA6ZEdWemRITmpZVzV0WlhKblpUb3hNUT09Ow==" &&
-		string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRvdzswOmRHVnpkSE5qWVc1dFpYSm5aVG94TVE9PTsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Ow==" &&
-		string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRvdzsxOmRHVnpkSE5qWVc1dFpYSm5aVG94OzA6ZEdWemRITmpZVzV0WlhKblpUb3hNUT09Ow==" {
+	} else if n := ay[0].([]byte); string(n) != "MDpNVEU9OzE6TVE9PTsyOk1BPT07" &&
+		string(n) != "MDpNVEU9OzI6TUE9PTsxOk1RPT07" &&
+		string(n) != "MTpNUT09OzA6TVRFPTsyOk1BPT07" &&
+		string(n) != "MTpNUT09OzI6TUE9PTswOk1URT07" &&
+		string(n) != "MjpNQT09OzA6TVRFPTsxOk1RPT07" &&
+		string(n) != "MjpNQT09OzE6TVE9PTswOk1URT07" {
 		t.Fatal(string(n))
 	} else {
-		checkMergeScanValues(t, ay[1], "testscanmerge:0", "testscanmerge:1", "testscanmerge:11")
+		checkMergeScanValues(t, ay[1], "0", "1", "11")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MDpkR1Z6ZEhOallXNXRaWEpuWlRveE1RPT07MTpkR1Z6ZEhOallXNXRaWEpuWlRveDsyOmRHVnpkSE5qWVc1dFpYSm5aVG93Ow==", tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MDpNVEU9OzE6TVE9PTsyOk1BPT07", tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNXRaWEpuWlRvMTsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Tnc9PTsyOmRHVnpkSE5qWVc1dFpYSm5aVG94TWc9PTs=" &&
-		string(n) != "MDpkR1Z6ZEhOallXNXRaWEpuWlRvMTsyOmRHVnpkSE5qWVc1dFpYSm5aVG94TWc9PTsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Tnc9PTs=" &&
-		string(n) != "MTpkR1Z6ZEhOallXNXRaWEpuWlRveE53PT07MDpkR1Z6ZEhOallXNXRaWEpuWlRvMTsyOmRHVnpkSE5qWVc1dFpYSm5aVG94TWc9PTs=" &&
-		string(n) != "MTpkR1Z6ZEhOallXNXRaWEpuWlRveE53PT07MjpkR1Z6ZEhOallXNXRaWEpuWlRveE1nPT07MDpkR1Z6ZEhOallXNXRaWEpuWlRvMTs=" &&
-		string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRveE1nPT07MDpkR1Z6ZEhOallXNXRaWEpuWlRvMTsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Tnc9PTs=" &&
-		string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRveE1nPT07MTpkR1Z6ZEhOallXNXRaWEpuWlRveE53PT07MDpkR1Z6ZEhOallXNXRaWEpuWlRvMTs=" {
+	} else if n := ay[0].([]byte); string(n) != "MDpOUT09OzE6TVRjPTsyOk1UST07" &&
+		string(n) != "MDpOUT09OzI6TVRJPTsxOk1UYz07" &&
+		string(n) != "MTpNVGM9OzA6TlE9PTsyOk1UST07" &&
+		string(n) != "MTpNVGM9OzI6TVRJPTswOk5RPT07" &&
+		string(n) != "MjpNVEk9OzA6TlE9PTsxOk1UYz07" &&
+		string(n) != "MjpNVEk9OzE6TVRjPTswOk5RPT07" {
 		t.Fatal(string(n))
 	} else {
-		checkMergeScanValues(t, ay[1], "testscanmerge:5", "testscanmerge:16", "testscanmerge:17", "testscanmerge:10", "testscanmerge:12", "testscanmerge:18")
+		checkMergeScanValues(t, ay[1], "5", "16", "17", "10", "12", "18")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MDpkR1Z6ZEhOallXNXRaWEpuWlRvMTsxOmRHVnpkSE5qWVc1dFpYSm5aVG94Tnc9PTsyOmRHVnpkSE5qWVc1dFpYSm5aVG94TWc9PTs=", tp, "count", 8)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MDpOUT09OzE6TVRjPTsyOk1UST07", tp, "count", 8)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "MTpkR1Z6ZEhOallXNXRaWEpuWlRvNTsyOmRHVnpkSE5qWVc1dFpYSm5aVG94TkE9PTs=" &&
-		string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRveE5BPT07MTpkR1Z6ZEhOallXNXRaWEpuWlRvNTs=" {
+	} else if n := ay[0].([]byte); string(n) != "MTpPUT09OzI6TVRRPTs=" &&
+		string(n) != "MjpNVFE9OzE6T1E9PTs=" {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkMergeScanValues(t, ay[1], "testscanmerge:3", "testscanmerge:9", "testscanmerge:13", "testscanmerge:14")
+			checkMergeScanValues(t, ay[1], "3", "9", "13", "14")
 		}
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MTpkR1Z6ZEhOallXNXRaWEpuWlRvNTsyOmRHVnpkSE5qWVc1dFpYSm5aVG94TkE9PTs=", tp, "count", 5)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MTpPUT09OzI6TVRRPTs=", tp, "count", 5)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "MjpkR1Z6ZEhOallXNXRaWEpuWlRveE9RPT07" {
+	} else if n := ay[0].([]byte); string(n) != "MjpNVGs9Ow==" {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkMergeScanValues(t, ay[1], "testscanmerge:15", "testscanmerge:19")
+			checkMergeScanValues(t, ay[1], "15", "19")
 		}
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MjpkR1Z6ZEhOallXNXRaWEpuWlRveE9RPT07", tp, "count", 8)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscanmerge:MjpNVGs9Ow==", tp, "count", 8)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -191,7 +191,7 @@ func checkMergeAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {
-			checkMergeScanValues(t, ay[1], "testscanmerge:2", "testscanmerge:4", "testscanmerge:6", "testscanmerge:7", "testscanmerge:8")
+			checkMergeScanValues(t, ay[1], "2", "4", "6", "7", "8")
 		}
 	}
 
@@ -199,7 +199,8 @@ func checkMergeAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal("want err, get nil ")
 	}
 
-	if _, err := goredis.Values(c.Do("ADVSCAN", "default:testscan1:MDpkR1Z6ZEhOallXNDZOQT09OzI6ZEdWemRITmpZVzQ2T1E9PTs=", tp, "count", 8)); err == nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan1:MDpkR1Z6ZEhOallDZOQT09OzI6ZEdWemRITmpZVzQ2T1E9PTs=", tp, "count", 8)); err == nil {
+		fmt.Println(string(ay[0].([]byte)))
 		t.Fatal("want err, get nil ")
 	}
 
@@ -212,21 +213,23 @@ func TestMergeScan(t *testing.T) {
 	c := getMergeTestConn(t)
 	defer c.Close()
 
-	testMergekvsMergecan(t, c)
+	testMergekvsMergeScan(t, c)
 	testMergeHashKeyScan(t, c)
 	testMergeListKeyScan(t, c)
 	testMergeZSetKeyScan(t, c)
 	testMergeSetKeyScan(t, c)
 }
 
-func testMergekvsMergecan(t *testing.T, c *goredis.PoolConn) {
+func testMergekvsMergeScan(t *testing.T, c *goredis.PoolConn) {
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("set", "default:testscanmerge:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+		value := fmt.Sprintf("value_%d", i)
+		if _, err := c.Do("set", "default:testscanmerge:"+fmt.Sprintf("%d", i), []byte(value)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for i := 0; i < 20; i++ {
-		if _, err := c.Do("set", "default:testscanmerge1:"+fmt.Sprintf("%d", i), []byte("value")); err != nil {
+		value := fmt.Sprintf("value_%d", i)
+		if _, err := c.Do("set", "default:testscanmerge1:"+fmt.Sprintf("%d", i), []byte(value)); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -115,6 +115,32 @@ func IsMergeScanCommand(cmd string) bool {
 			(cmd[6] == 'n' || cmd[6] == 'N') {
 			return true
 		}
+	case 8:
+		if (cmd[0] == 'f' || cmd[0] == 'F') &&
+			(cmd[1] == 'u' || cmd[1] == 'U') &&
+			(cmd[2] == 'l' || cmd[2] == 'L') &&
+			(cmd[3] == 'l' || cmd[3] == 'L') &&
+			(cmd[4] == 's' || cmd[4] == 'S') &&
+			(cmd[5] == 'c' || cmd[5] == 'C') &&
+			(cmd[6] == 'a' || cmd[6] == 'A') &&
+			(cmd[7] == 'n' || cmd[7] == 'N') {
+			return true
+		}
+	}
+
+	return false
+}
+
+func IsFullScanCommand(cmd string) bool {
+	if (cmd[0] == 'f' || cmd[0] == 'F') &&
+		(cmd[1] == 'u' || cmd[1] == 'U') &&
+		(cmd[2] == 'l' || cmd[2] == 'L') &&
+		(cmd[3] == 'l' || cmd[3] == 'L') &&
+		(cmd[4] == 's' || cmd[4] == 'S') &&
+		(cmd[5] == 'c' || cmd[5] == 'C') &&
+		(cmd[6] == 'a' || cmd[6] == 'A') &&
+		(cmd[7] == 'n' || cmd[7] == 'N') {
+		return true
 	}
 	return false
 }
