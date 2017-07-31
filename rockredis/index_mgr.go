@@ -347,11 +347,13 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 	self.Lock()
 	for table, v := range self.tableIndexes {
 		tmpHsetIndexes := make([]*HsetIndex, 0)
+		v.RLock()
 		for _, hindex := range v.hsetIndexes {
 			if hindex.State == BuildingIndex {
 				tmpHsetIndexes = append(tmpHsetIndexes, hindex)
 			}
 		}
+		v.RUnlock()
 		if len(tmpHsetIndexes) == 0 {
 			continue
 		}
