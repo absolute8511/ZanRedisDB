@@ -20,7 +20,7 @@ type NamespaceConfig struct {
 
 func NewNSConfig() *NamespaceConfig {
 	return &NamespaceConfig{
-		SnapCount:   500000,
+		SnapCount:   400000,
 		SnapCatchup: 100000,
 	}
 }

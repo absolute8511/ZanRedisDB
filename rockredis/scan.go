@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
 )
@@ -46,6 +47,24 @@ func getDataStoreType(dataType common.DataType) (byte, error) {
 	return storeDataType, nil
 }
 
+func getCommonDataType(dataType byte) (common.DataType, error) {
+	var commonDataType common.DataType
+	switch dataType {
+	case KVType:
+		commonDataType = common.KV
+	case LMetaType:
+		commonDataType = common.LIST
+	case HSizeType:
+		commonDataType = common.HASH
+	case SSizeType:
+		commonDataType = common.SET
+	case ZSizeType:
+		commonDataType = common.ZSET
+	default:
+		return 0, errDataType
+	}
+	return commonDataType, nil
+}
 func buildMatchRegexp(match string) (glob.Glob, error) {
 	var err error
 	var r glob.Glob = nil
@@ -212,13 +231,18 @@ func encodeSpecificDataScanMaxKey(storeDataType byte, key []byte, cursor []byte)
 }
 
 func encodeSpecificDataScanKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+
 	switch storeDataType {
 	case HashType:
-		return hEncodeHashKey(key, cursor), nil
+		return hEncodeHashKey(table, rk, cursor), nil
 	case ZSetType:
-		return zEncodeSetKey(key, cursor), nil
+		return zEncodeSetKey(table, rk, cursor), nil
 	case SetType:
-		return sEncodeSetKey(key, cursor), nil
+		return sEncodeSetKey(table, rk, cursor), nil
 	default:
 		return nil, errDataType
 	}
@@ -261,7 +285,7 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 	defer it.Close()
 
 	for i := 0; it.Valid() && i < count; it.Next() {
-		_, f, err := hDecodeHashKey(it.Key())
+		_, _, f, err := hDecodeHashKey(it.Key())
 		if err != nil {
 			return nil, err
 		} else if r != nil && !r.Match(string(f)) {
@@ -292,7 +316,7 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 	defer it.Close()
 
 	for i := 0; it.Valid() && i < count; it.Next() {
-		_, m, err := sDecodeSetKey(it.Key())
+		_, _, m, err := sDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
 		} else if r != nil && !r.Match(string(m)) {
@@ -326,7 +350,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 	defer it.Close()
 
 	for i := 0; it.Valid() && i < count; it.Next() {
-		_, m, err := zDecodeSetKey(it.Key())
+		_, _, m, err := zDecodeSetKey(it.Key())
 		if err != nil {
 			return nil, err
 		} else if r != nil && !r.Match(string(m)) {

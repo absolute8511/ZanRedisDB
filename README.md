@@ -77,7 +77,7 @@ based on this golang sdk if you want use the redis client in other language.
   - [x] Set
   - [x] Sorted Set
   - [ ] Geo
-  - [ ] Expires
+  - [x] Expires
   - [ ] HyperLogLog
   - [ ] Json
 * Distributed system
@@ -86,16 +86,16 @@ based on this golang sdk if you want use the redis client in other language.
   - [x] Auto balance and migrate
   - [x] Support namespace
   - [x] High available
-  - [ ] Distributed scan on table
+  - [x] Distributed scan on table
 * Searchable and Indexing
   - [ ] Secondary index support on Hash fields
   - [ ] Secondary index support for json kv
   - [ ] Full text search support
 * Operation
-  - [ ] Backup and restore for cluster
+  - [x] Backup and restore for cluster
   - [ ] More stats for read/write performance and errors.
 * Client 
-  - [ ] High available for redis commands (Retry on fail)
+  - [x] High available for redis commands (Retry on fail)
   - [ ] Extand redis commands to support index and search
   - [ ] Extand redis commands for advance scan
 * Others (maybe)

@@ -3,7 +3,7 @@ package node
 import (
 	"strconv"
 
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 )
 
 func (self *KVNode) setexCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {

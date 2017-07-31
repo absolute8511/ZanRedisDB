@@ -2,7 +2,7 @@ package node
 
 import (
 	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 	"strconv"
 )
 
@@ -105,7 +105,7 @@ func (self *KVNode) hclearCommand(conn redcon.Conn, cmd redcon.Command, v interf
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
 func (self *KVNode) localHSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := self.store.HSet(cmd.Args[1], cmd.Args[2], cmd.Args[3])
+	v, err := self.store.HSet(ts, cmd.Args[1], cmd.Args[2], cmd.Args[3])
 	return v, err
 }
 
@@ -118,17 +118,19 @@ func (self *KVNode) localHMsetCommand(cmd redcon.Command, ts int64) (interface{}
 	for i := 0; i < len(args); i += 2 {
 		fvs = append(fvs, common.KVRecord{Key: args[i], Value: args[i+1]})
 	}
-	err := self.store.HMset(cmd.Args[1], fvs...)
+	err := self.store.HMset(ts, cmd.Args[1], fvs...)
 	return nil, err
 }
 
 func (self *KVNode) localHIncrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	v, _ := strconv.Atoi(string(cmd.Args[3]))
-	ret, err := self.store.HIncrBy(cmd.Args[1], cmd.Args[2], int64(v))
+	ret, err := self.store.HIncrBy(ts, cmd.Args[1], cmd.Args[2], int64(v))
 	return ret, err
 }
 
 func (self *KVNode) localHDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	// TODO: delete should only handled on the old value, if the value is newer than the timestamp proposal
+	// we should ignore delete
 	n, err := self.store.HDel(cmd.Args[1], cmd.Args[2:]...)
 	if err != nil {
 		// leader write need response

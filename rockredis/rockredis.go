@@ -16,6 +16,7 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
+	"github.com/shirou/gopsutil/mem"
 )
 
 const (
@@ -33,10 +34,12 @@ func GetCheckpointDir(term uint64, index uint64) string {
 	return fmt.Sprintf("%016x-%016x", term, index)
 }
 
+var batchableCmds map[string]bool
+
 type RockOptions struct {
 	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
 	BlockSize                      int    `json:"block_size"`
-	BlockCache                     int    `json:"block_cache"`
+	BlockCache                     int64  `json:"block_cache"`
 	CacheIndexAndFilterBlocks      bool   `json:"cache_index_and_filter_blocks"`
 	WriteBufferSize                int    `json:"write_buffer_size"`
 	MaxWriteBufferNumber           int    `json:"max_write_buffer_number"`
@@ -48,6 +51,7 @@ type RockOptions struct {
 	MaxBackgroundCompactions       int    `json:"max_background_compactions"`
 	MinLevelToCompress             int    `json:"min_level_to_compress"`
 	MaxMainifestFileSize           uint64 `json:"max_mainifest_file_size"`
+	RateBytesPerSec                int64  `json:"rate_bytes_per_sec"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -59,7 +63,17 @@ func FillDefaultOptions(opts *RockOptions) {
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
 	if opts.BlockCache <= 0 {
-		opts.BlockCache = 1024 * 1024 * 256
+		v, err := mem.VirtualMemory()
+		if err != nil {
+			opts.BlockCache = 1024 * 1024 * 128
+		} else {
+			opts.BlockCache = int64(v.Total / 100)
+			if opts.BlockCache < 1024*1024*64 {
+				opts.BlockCache = 1024 * 1024 * 64
+			} else if opts.BlockCache > 1024*1024*1024*8 {
+				opts.BlockCache = 1024 * 1024 * 1024 * 8
+			}
+		}
 	}
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
 	if opts.WriteBufferSize <= 0 {
@@ -97,16 +111,19 @@ func FillDefaultOptions(opts *RockOptions) {
 type RockConfig struct {
 	DataDir            string
 	EnableTableCounter bool
-	DefaultReadOpts    *gorocksdb.ReadOptions
-	DefaultWriteOpts   *gorocksdb.WriteOptions
+	// this will ignore all update and non-exist delete
+	EstimateTableCounter bool
+	DefaultReadOpts      *gorocksdb.ReadOptions
+	DefaultWriteOpts     *gorocksdb.WriteOptions
 	RockOptions
 }
 
 func NewRockConfig() *RockConfig {
 	c := &RockConfig{
-		DefaultReadOpts:    gorocksdb.NewDefaultReadOptions(),
-		DefaultWriteOpts:   gorocksdb.NewDefaultWriteOptions(),
-		EnableTableCounter: true,
+		DefaultReadOpts:      gorocksdb.NewDefaultReadOptions(),
+		DefaultWriteOpts:     gorocksdb.NewDefaultWriteOptions(),
+		EnableTableCounter:   true,
+		EstimateTableCounter: false,
 	}
 	c.DefaultReadOpts.SetVerifyChecksums(false)
 	FillDefaultOptions(&c.RockOptions)
@@ -171,12 +188,14 @@ type RockDB struct {
 	defaultWriteOpts *gorocksdb.WriteOptions
 	defaultReadOpts  *gorocksdb.ReadOptions
 	wb               *gorocksdb.WriteBatch
+	lruCache         *gorocksdb.Cache
 	quit             chan struct{}
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
 	engOpened        int32
 	indexMgr         *IndexMgr
 	ttlChecker       *TTLChecker
+	isBatching       int32
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -193,7 +212,8 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto.SetBlockSize(cfg.BlockSize)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(cfg.BlockCache))
+	lru := gorocksdb.NewLRUCache(cfg.BlockCache)
+	bbto.SetBlockCache(lru)
 	// cache index and filter blocks can save some memory,
 	// if not cache, the index and filter will be pre-loaded in memory
 	bbto.SetCacheIndexAndFilterBlocks(cfg.CacheIndexAndFilterBlocks)
@@ -204,6 +224,12 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	// optimize filter for hit, use less memory since last level will has no bloom filter
 	// opts.OptimizeFilterForHits(true)
 	opts.SetBlockBasedTableFactory(bbto)
+
+	if cfg.RateBytesPerSec > 0 {
+		rateLimiter := gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec)
+		opts.SetRateLimiter(rateLimiter)
+	}
+
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
@@ -230,6 +256,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	db := &RockDB{
 		cfg:              cfg,
 		dbOpts:           opts,
+		lruCache:         lru,
 		defaultReadOpts:  cfg.DefaultReadOpts,
 		defaultWriteOpts: cfg.DefaultWriteOpts,
 		wb:               gorocksdb.NewWriteBatch(),
@@ -340,12 +367,21 @@ func (r *RockDB) Close() {
 	r.closeEng()
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
+		r.defaultReadOpts = nil
 	}
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
 	}
 	if r.wb != nil {
 		r.wb.Destroy()
+	}
+	if r.dbOpts != nil {
+		r.dbOpts.Destroy()
+		r.dbOpts = nil
+	}
+	if r.lruCache != nil {
+		r.lruCache.Destroy()
+		r.lruCache = nil
 	}
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
@@ -640,4 +676,54 @@ func (r *RockDB) RegisterZSetExpired(f OnExpiredFunc) {
 
 func (r *RockDB) RegisterHashExpired(f OnExpiredFunc) {
 	r.ttlChecker.RegisterHashExpired(f)
+}
+
+func (r *RockDB) BeginBatchWrite() error {
+	if atomic.CompareAndSwapInt32(&r.isBatching, 0, 1) {
+		r.wb.Clear()
+		return nil
+	}
+	return errors.New("another batching is waiting")
+}
+
+func (r *RockDB) MaybeClearBatch() {
+	if atomic.LoadInt32(&r.isBatching) == 1 {
+		return
+	}
+	r.wb.Clear()
+}
+
+func (r *RockDB) MaybeCommitBatch() error {
+	if atomic.LoadInt32(&r.isBatching) == 1 {
+		return nil
+	}
+	return r.eng.Write(r.defaultWriteOpts, r.wb)
+}
+
+func (r *RockDB) CommitBatchWrite() error {
+	err := r.eng.Write(r.defaultWriteOpts, r.wb)
+	if err != nil {
+		dbLog.Infof("commit write error: %v", err)
+	}
+	atomic.StoreInt32(&r.isBatching, 0)
+	return err
+}
+
+func IsBatchableWrite(cmd string) bool {
+	_, ok := batchableCmds[cmd]
+	return ok
+}
+
+func init() {
+	batchableCmds = make(map[string]bool)
+	// command need response value (not just error or ok) can not be batched
+	//batchableCmds["incr"] = true
+	batchableCmds["set"] = true
+	batchableCmds["mset"] = true
+	//batchableCmds["setnx"] = true
+	batchableCmds["setex"] = true
+	//batchableCmds["setrange"] = true
+	//batchableCmds["append"] = true
+	//batchableCmds["persist"] = true
+	batchableCmds["del"] = true
 }

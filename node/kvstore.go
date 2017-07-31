@@ -93,3 +93,27 @@ func (s *KVStore) LocalPut(ts int64, key []byte, value []byte) error {
 func (s *KVStore) LocalWriteBatch(cmd ...common.WriteCmd) error {
 	return nil
 }
+
+func (s *KVStore) IsBatchableWrite(cmdName string) bool {
+	if s.opts.EngType == rockredis.EngType {
+		return rockredis.IsBatchableWrite(cmdName)
+	} else {
+		return false
+	}
+}
+
+func (s *KVStore) BeginBatchWrite() error {
+	if s.opts.EngType == rockredis.EngType {
+		return s.RockDB.BeginBatchWrite()
+	} else {
+		return nil
+	}
+}
+
+func (s *KVStore) CommitBatchWrite() error {
+	if s.opts.EngType == rockredis.EngType {
+		return s.RockDB.CommitBatchWrite()
+	} else {
+		return nil
+	}
+}

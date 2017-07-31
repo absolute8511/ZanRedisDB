@@ -25,8 +25,8 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/absolute8511/redcon"
 	"github.com/coreos/etcd/pkg/wait"
-	"github.com/tidwall/redcon"
 )
 
 var (
@@ -42,6 +42,11 @@ const (
 	HTTPReq         int8 = 1
 	SchemaChangeReq int8 = 2
 	proposeTimeout       = time.Second * 10
+	maxBatchCmdNum       = 500
+)
+
+const (
+	HttpProposeOp_Backup int = 1
 )
 
 type nodeProgress struct {
@@ -53,6 +58,11 @@ type nodeProgress struct {
 type internalReq struct {
 	reqData InternalRaftRequest
 	done    chan struct{}
+}
+
+type httpProposeData struct {
+	ProposeOp  int
+	NeedBackup bool
 }
 
 // a key-value node backed by raft
@@ -165,6 +175,14 @@ func (self *KVNode) Stop() {
 
 func (self *KVNode) OptimizeDB() {
 	self.store.CompactRange()
+	// since we can not know whether leader or follower is done on optimize
+	// we backup anyway after optimize
+	p := &httpProposeData{
+		ProposeOp:  HttpProposeOp_Backup,
+		NeedBackup: true,
+	}
+	d, _ := json.Marshal(p)
+	self.HTTPPropose(d)
 }
 
 func (self *KVNode) IsLead() bool {
@@ -362,6 +380,7 @@ func (self *KVNode) registerHandler() {
 	//for cross mutil partion
 	self.router.RegisterMerge("scan", wrapMergeCommand(self.scanCommand))
 	self.router.RegisterMerge("advscan", self.advanceScanCommand)
+	self.router.RegisterMerge("fullscan", self.fullScanCommand)
 
 	// only write command need to be registered as internal
 	// kv
@@ -453,6 +472,8 @@ func (self *KVNode) handleProposeReq() {
 			}
 			reqList.ReqNum = int32(len(reqList.Reqs))
 			buffer, err := reqList.Marshal()
+			// buffer will be reused by raft?
+			// TODO:buffer, err := reqList.MarshalTo()
 			if err != nil {
 				self.rn.Infof("failed to marshal request: %v", err)
 				for _, r := range reqList.Reqs {
@@ -465,7 +486,7 @@ func (self *KVNode) handleProposeReq() {
 			//self.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
-			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout*2)
 			self.rn.node.Propose(ctx, buffer)
 			select {
 			case <-lastReq.done:
@@ -507,7 +528,7 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		case self.reqProposeC <- req:
 		case <-self.stopChan:
 			self.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
-		case <-time.After(proposeTimeout):
+		case <-time.After(proposeTimeout / 2):
 			self.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
 		}
 	}
@@ -750,7 +771,8 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	np.appliedi = applyEvent.snapshot.Metadata.Index
 }
 
-func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
+// return if configure changed and whether need force backup
+func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	var lastCommittedIndex uint64
 	if len(applyEvent.ents) > 0 {
 		lastCommittedIndex = applyEvent.ents[len(applyEvent.ents)-1].Index
@@ -763,7 +785,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 	}
 	self.applySnapshot(np, applyEvent)
 	if len(applyEvent.ents) == 0 {
-		return false
+		return false, false
 	}
 	firsti := applyEvent.ents[0].Index
 	if firsti > np.appliedi+1 {
@@ -774,10 +796,11 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 		ents = applyEvent.ents[np.appliedi+1-firsti:]
 	}
 	if len(ents) == 0 {
-		return false
+		return false, false
 	}
 	var shouldStop bool
 	var confChanged bool
+	forceBackup := false
 	for i := range ents {
 		evnt := ents[i]
 		switch evnt.Type {
@@ -796,11 +819,11 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 					self.rn.Infof("request check failed %v, real len:%v",
 						reqList, len(reqList.Reqs))
 				}
-				var batchSet [][]byte
-				if len(reqList.Reqs) > 1 {
-					batchSet = append(batchSet, []byte("mset"))
-				}
+				batching := false
 				var batchReqIDList []uint64
+				var batchReqRspList []interface{}
+				var batchStart time.Time
+				dupCheckMap := make(map[string]bool, len(reqList.Reqs))
 				for reqIndex, req := range reqList.Reqs {
 					reqID := req.Header.ID
 					if req.Header.DataType == 0 {
@@ -808,42 +831,85 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 						if err != nil {
 							self.w.Trigger(reqID, err)
 						} else {
+							cmdStart := time.Now()
 							cmdName := strings.ToLower(string(cmd.Args[0]))
-							if batchSet != nil {
-								if cmdName == "set" {
-									batchSet = append(batchSet, cmd.Args[1:]...)
-									batchReqIDList = append(batchReqIDList, reqID)
-								}
-								if cmdName == "set" && reqIndex < len(reqList.Reqs)-1 {
-									continue
-								}
-								if len(batchSet) > 1 {
-									h, _ := self.router.GetInternalCmdHandler(string(batchSet[0]))
-									cmdStart := time.Now()
-									_, err := h(redcon.Command{Raw: nil, Args: batchSet}, req.Header.Timestamp)
-									cmdCost := time.Since(cmdStart)
-									self.dbWriteStats.UpdateWriteStats(int64(len(batchSet[2]))*int64(len(batchReqIDList)), cmdCost.Nanoseconds()/1000)
-									// write the future response or error
-									for _, rid := range batchReqIDList {
-										if err != nil {
-											self.w.Trigger(rid, err)
-										} else {
-											self.w.Trigger(rid, nil)
-										}
+							_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
+							_, ok := dupCheckMap[string(pk)]
+							handled := false
+							if self.store.IsBatchableWrite(cmdName) &&
+								len(batchReqIDList) < maxBatchCmdNum &&
+								!ok {
+								if !batching {
+									err := self.store.BeginBatchWrite()
+									if err != nil {
+										self.rn.Infof("bengin batch command %v failed: %v, %v", cmdName, cmd, err)
+										self.w.Trigger(reqID, err)
+										continue
 									}
-									batchSet = nil
-									batchReqIDList = nil
+									batchStart = time.Now()
+									batching = true
 								}
-								if cmdName == "set" {
+								handled = true
+								h, ok := self.router.GetInternalCmdHandler(cmdName)
+								if !ok {
+									self.rn.Infof("unsupported redis command: %v", cmdName)
+									self.w.Trigger(reqID, common.ErrInvalidCommand)
+								} else {
+									if pk != nil {
+										dupCheckMap[string(pk)] = true
+									}
+									v, err := h(cmd, req.Header.Timestamp)
+									if err != nil {
+										self.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
+										self.w.Trigger(reqID, err)
+										continue
+									}
+									batchReqIDList = append(batchReqIDList, reqID)
+									batchReqRspList = append(batchReqRspList, v)
+									self.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
+								}
+								if nodeLog.Level() > common.LOG_DETAIL {
+									self.rn.Infof("batching redis command: %v", cmdName)
+								}
+								if reqIndex < len(reqList.Reqs)-1 {
 									continue
 								}
 							}
+							if batching {
+								err := self.store.CommitBatchWrite()
+								dupCheckMap = make(map[string]bool, len(reqList.Reqs))
+								batching = false
+								batchCost := time.Since(batchStart)
+								if nodeLog.Level() >= common.LOG_DETAIL {
+									self.rn.Infof("batching command number: %v", len(batchReqIDList))
+								}
+								// write the future response or error
+								for idx, rid := range batchReqIDList {
+									if err != nil {
+										self.w.Trigger(rid, err)
+									} else {
+										self.w.Trigger(rid, batchReqRspList[idx])
+									}
+								}
+								if batchCost >= time.Second {
+									self.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
+										cmdName, len(batchReqIDList), batchCost)
+								}
+								if len(batchReqIDList) > 0 {
+									self.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+								}
+								batchReqIDList = batchReqIDList[:0]
+								batchReqRspList = batchReqRspList[:0]
+							}
+							if handled {
+								continue
+							}
+
 							h, ok := self.router.GetInternalCmdHandler(cmdName)
 							if !ok {
 								self.rn.Infof("unsupported redis command: %v", cmd)
 								self.w.Trigger(reqID, common.ErrInvalidCommand)
 							} else {
-								cmdStart := time.Now()
 								v, err := h(cmd, req.Header.Timestamp)
 								cmdCost := time.Since(cmdStart)
 								if cmdCost >= time.Second {
@@ -852,19 +918,57 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 								// write the future response or error
 								if err != nil {
+									self.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
 									self.w.Trigger(reqID, err)
 								} else {
 									self.w.Trigger(reqID, v)
 								}
 							}
 						}
-					} else if req.Header.DataType == int32(HTTPReq) {
-						//TODO: try other protocol command
-						self.w.Trigger(reqID, errUnknownData)
-					} else if req.Header.DataType == int32(SchemaChangeReq) {
-						self.rn.Infof("handle schema change: %v", string(req.Data))
-						// TODO:
-						self.w.Trigger(reqID, nil)
+					} else {
+						if batching {
+							err := self.store.CommitBatchWrite()
+							dupCheckMap = make(map[string]bool, len(reqList.Reqs))
+							batching = false
+							batchCost := time.Since(batchStart)
+							// write the future response or error
+							for _, rid := range batchReqIDList {
+								if err != nil {
+									self.w.Trigger(rid, err)
+								} else {
+									self.w.Trigger(rid, nil)
+								}
+							}
+							if batchCost >= time.Second {
+								self.rn.Infof("slow batch write command batch: %v, cost: %v",
+									len(batchReqIDList), batchCost)
+							}
+							if len(batchReqIDList) > 0 {
+								self.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+							}
+							batchReqIDList = batchReqIDList[:0]
+						}
+						if req.Header.DataType == int32(HTTPReq) {
+							var p httpProposeData
+							err := json.Unmarshal(req.Data, &p)
+							if err != nil {
+								self.rn.Infof("failed to unmarshal http propose: %v", req.String())
+								self.w.Trigger(reqID, err)
+							}
+							if p.ProposeOp == HttpProposeOp_Backup {
+								self.rn.Infof("got force backup request")
+								forceBackup = true
+								self.w.Trigger(reqID, nil)
+							} else {
+								self.w.Trigger(reqID, errUnknownData)
+							}
+						} else if req.Header.DataType == int32(SchemaChangeReq) {
+							self.rn.Infof("handle schema change: %v", string(req.Data))
+							// TODO:
+							self.w.Trigger(reqID, nil)
+						} else {
+							self.w.Trigger(reqID, errUnknownData)
+						}
 					}
 				}
 				cost := time.Since(start)
@@ -894,9 +998,9 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) bool {
 				self.Stop()
 			}
 		}()
-		return false
+		return false, false
 	}
-	return confChanged
+	return confChanged, forceBackup
 }
 
 func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
@@ -929,9 +1033,9 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 			if ent.raftDone == nil {
 				nodeLog.Panicf("wrong events : %v", ent)
 			}
-			confChanged := self.applyAll(&np, &ent)
+			confChanged, forceBackup := self.applyAll(&np, &ent)
 			<-ent.raftDone
-			self.maybeTriggerSnapshot(&np, confChanged)
+			self.maybeTriggerSnapshot(&np, confChanged, forceBackup)
 			self.rn.handleSendSnapshot(&np)
 			if ent.applyWaitDone != nil {
 				close(ent.applyWaitDone)
@@ -942,19 +1046,25 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 	}
 }
 
-func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool) {
+func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, forceBackup bool) {
 	if np.appliedi-np.snapi <= 0 {
-		return
-	}
-	if !confChanged && np.appliedi-np.snapi <= uint64(self.rn.config.SnapCount) {
 		return
 	}
 	if np.appliedi <= self.rn.lastIndex {
 		// replaying local log
+		if forceBackup {
+			self.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, self.rn.lastIndex)
+		}
 		return
 	}
 	if self.rn.Lead() == raft.None {
 		return
+	}
+
+	if !forceBackup {
+		if !confChanged && np.appliedi-np.snapi <= uint64(self.rn.config.SnapCount) {
+			return
+		}
 	}
 
 	self.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
@@ -997,7 +1107,7 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 		hasBackup, _ := self.checkLocalBackup(raftSnapshot)
 		if !hasBackup {
 			self.rn.Infof("local no backup for snapshot, copy from remote\n")
-			syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot)
+			syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot, retry)
 			if syncAddr == "" && syncDir == "" {
 				return errors.New("no backup available from others")
 			}
@@ -1078,7 +1188,7 @@ func newDeadlineTransport(timeout time.Duration) *http.Transport {
 	return transport
 }
 
-func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, string) {
+func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot, retry int) (string, string) {
 	// we need find the right backup data match with the raftsnapshot
 	// for each cluster member, it need check the term+index and the backup meta to
 	// make sure the data is valid
@@ -1086,11 +1196,11 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	syncDir := ""
 	h := self.machineConfig.BroadcastAddr
 
-	retry := 0
+	innerRetry := 0
 	var snapSyncInfoList []common.SnapshotSyncInfo
 	var err error
-	for retry < 3 {
-		retry++
+	for innerRetry < 3 {
+		innerRetry++
 		snapSyncInfoList, err = self.clusterInfo.GetSnapshotSyncInfo(self.ns)
 		if err != nil {
 			self.rn.Infof("get snapshot info failed: %v", err)
@@ -1105,6 +1215,8 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 	}
 
 	self.rn.Infof("current cluster raft nodes info: %v", snapSyncInfoList)
+	syncAddrList := make([]string, 0)
+	syncDirList := make([]string, 0)
 	for _, ssi := range snapSyncInfoList {
 		if ssi.ReplicaID == uint64(self.rn.config.ID) {
 			continue
@@ -1115,8 +1227,8 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 		req, _ := http.NewRequest("GET", "http://"+ssi.RemoteAddr+":"+
 			ssi.HttpAPIPort+common.APICheckBackup+"/"+self.ns, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
-		if err != nil {
-			self.rn.Infof("request error: %v", err)
+		if err != nil || rsp.StatusCode != http.StatusOK {
+			self.rn.Infof("request error: %v, %v", err, rsp)
 			continue
 		}
 		rsp.Body.Close()
@@ -1127,14 +1239,17 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot) (string, st
 				continue
 			}
 			// local node with different directory
-			syncAddr = ""
-			syncDir = path.Join(ssi.DataRoot, self.ns)
+			syncAddrList = append(syncAddrList, "")
+			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, self.ns))
 		} else {
 			// for remote snapshot, we do rsync from remote module
-			syncAddr = ssi.RemoteAddr
-			syncDir = path.Join(ssi.RsyncModule, self.ns)
+			syncAddrList = append(syncAddrList, ssi.RemoteAddr)
+			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, self.ns))
 		}
-		break
+	}
+	if len(syncAddrList) > 0 {
+		syncAddr = syncAddrList[retry%len(syncAddrList)]
+		syncDir = syncDirList[retry%len(syncDirList)]
 	}
 	self.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
 	return syncAddr, syncDir
@@ -1144,7 +1259,7 @@ func (self *KVNode) GetLastLeaderChangedTime() int64 {
 	return self.rn.getLastLeaderChangedTime()
 }
 
-func (self *KVNode) OnRaftLeaderChanged() {
+func (self *KVNode) ReportMeLeaderToCluster() {
 	if self.clusterInfo == nil {
 		return
 	}
@@ -1158,15 +1273,21 @@ func (self *KVNode) OnRaftLeaderChanged() {
 		if self.rn.config.nodeConfig.NodeID == nid {
 			return
 		}
-		//leader should start the TTLChecker to handle the expired data
-		self.store.StartTTLChecker()
-
 		_, err = self.clusterInfo.UpdateMeForNamespaceLeader(self.ns, epoch)
 		if err != nil {
 			self.rn.Infof("update raft leader to me failed: %v", err)
 		} else {
 			self.rn.Infof("update %v raft leader to me : %v", self.ns, self.rn.config.ID)
 		}
+	}
+}
+
+// should not block long in this
+func (self *KVNode) OnRaftLeaderChanged() {
+	if self.rn.IsLead() {
+		go self.ReportMeLeaderToCluster()
+		//leader should start the TTLChecker to handle the expired data
+		self.store.StartTTLChecker()
 	} else {
 		self.store.StopTTLChecker()
 	}

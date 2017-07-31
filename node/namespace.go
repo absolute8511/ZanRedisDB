@@ -156,7 +156,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 		nsMetas:       make(map[string]NamespaceMeta),
 		raftTransport: transport,
 		machineConf:   conf,
-		newLeaderChan: make(chan string, 2046),
+		newLeaderChan: make(chan string, 2048),
 		stopC:         make(chan struct{}),
 	}
 	regID, err := ns.LoadMachineRegID()
@@ -276,6 +276,8 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 
 	d, _ := json.MarshalIndent(&conf, "", " ")
 	nodeLog.Infof("namespace load config: %v", string(d))
+	d, _ = json.MarshalIndent(&kvOpts, "", " ")
+	nodeLog.Infof("namespace kv config: %v", string(d))
 	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, clusterNodes)
 	raftConf := &RaftConfig{
 		GroupID:        conf.RaftGroupConf.GroupID,
@@ -497,19 +499,22 @@ func (self *NamespaceMgr) checkNamespaceRaftLeader() {
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	leaderNodes := make([]*NamespaceNode, 0)
-	// while close or remove raft node, we need check if any remote transport peer
-	// should be closed.
+	// report to leader may failed, so we need retry and check period
 	doCheck := func() {
 		leaderNodes = leaderNodes[:0]
 		self.mutex.RLock()
 		for _, v := range self.kvNodes {
 			if v.IsReady() {
-				leaderNodes = append(leaderNodes, v)
+				if v.Node.IsLead() {
+					leaderNodes = append(leaderNodes, v)
+				} else {
+					v.Node.store.StopTTLChecker()
+				}
 			}
 		}
 		self.mutex.RUnlock()
 		for _, v := range leaderNodes {
-			v.Node.OnRaftLeaderChanged()
+			v.Node.ReportMeLeaderToCluster()
 		}
 	}
 

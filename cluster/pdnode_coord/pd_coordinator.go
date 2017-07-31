@@ -26,8 +26,8 @@ var (
 )
 
 const (
-	waitMigrateInterval          = time.Minute * 8
-	waitEmergencyMigrateInterval = time.Second * 20
+	waitMigrateInterval          = time.Minute * 16
+	waitEmergencyMigrateInterval = time.Second * 60
 )
 
 type PDCoordinator struct {
@@ -49,6 +49,7 @@ type PDCoordinator struct {
 	dpm                    *DataPlacement
 	doChecking             int32
 	autoBalance            bool
+	stableNodeNum          int32
 }
 
 func NewPDCoordinator(cluster string, n *NodeInfo, opts *Options) *PDCoordinator {
@@ -296,6 +297,11 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster b
 			if check {
 				atomic.AddInt64(&self.nodesEpoch, 1)
 			}
+			if int32(len(self.dataNodes)) > atomic.LoadInt32(&self.stableNodeNum) {
+				oldNum := atomic.LoadInt32(&self.stableNodeNum)
+				atomic.StoreInt32(&self.stableNodeNum, int32(len(self.dataNodes)))
+				CoordLog().Warningf("stable cluster node number changed from %v to: %v", oldNum, atomic.LoadInt32(&self.stableNodeNum))
+			}
 			self.nodesMutex.Unlock()
 
 			if self.register == nil {
@@ -524,6 +530,12 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		}
 		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
 			CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
+			atomic.StoreInt32(&self.isClusterUnstable, 1)
+			return
+		}
+		if len(currentNodes) < 3 || int32(len(currentNodes)) <= atomic.LoadInt32(&self.stableNodeNum)/2 {
+			checkOK = false
+			CoordLog().Infof("nodes not enough while checking: %v, stable need: %v", currentNodes, atomic.LoadInt32(&self.stableNodeNum))
 			atomic.StoreInt32(&self.isClusterUnstable, 1)
 			return
 		}

@@ -134,7 +134,7 @@ func TestHashTTL(t *testing.T) {
 		common.KVRecord{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
-	if err := db.HMset(hash_key, hash_val...); err != nil {
+	if err := db.HMset(0, hash_key, hash_val...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -373,7 +373,7 @@ func TestRockDBTTLChecker(t *testing.T) {
 
 	db.StartTTLChecker()
 	defer db.StopTTLChecker()
-	for i := 0; i < 10000*3+rand.Intn(10000); i++ {
+	for i := 0; i < 1000*3+rand.Intn(1000); i++ {
 		key := "test:ttl_checker:" + strconv.Itoa(i)
 		dataType := dataTypes[rand.Int()%len(dataTypes)]
 		lock.Lock()

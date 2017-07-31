@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 )
 
 const (
@@ -29,6 +29,7 @@ var (
 	ErrInvalidScanCursor = errors.New("invalid scan cursor")
 	ErrScanCursorNoTable = errors.New("scan cursor must has table")
 	ErrUnexpectError     = errors.New("unexpected error")
+	ErrInvalidPrefix     = errors.New("invalid prefix")
 )
 
 // for out use
@@ -50,6 +51,10 @@ const (
 	HashName = "HASH"
 	SetName  = "SET"
 	ZSetName = "ZSET"
+)
+
+const (
+	KEYSEP = byte(':')
 )
 
 func (d DataType) String() string {
@@ -98,6 +103,27 @@ const (
 	RangeROpen uint8 = 0x10
 	RangeOpen  uint8 = 0x11
 )
+
+func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
+	index := bytes.IndexByte(rawKey, ':')
+	if index <= 0 {
+		return "", nil, ErrInvalidRedisKey
+	}
+	namespace := string(rawKey[:index])
+	realKey := rawKey[index+1:]
+	return namespace, realKey, nil
+}
+
+func ExtractTable(rawKey []byte) ([]byte, []byte, error) {
+	pos := bytes.IndexByte(rawKey, KEYSEP)
+	if pos == -1 {
+		return nil, nil, ErrInvalidPrefix
+	}
+
+	table := rawKey[:pos]
+	other := rawKey[pos+1:]
+	return table, other, nil
+}
 
 type ScorePair struct {
 	Score  int64
@@ -235,7 +261,7 @@ type IClusterInfo interface {
 }
 
 type ScanResult struct {
-	Result     interface{}
+	Keys       [][]byte
 	NextCursor []byte
 	PartionId  string
 	Error      error
@@ -275,4 +301,17 @@ type JsonIndexSchema struct {
 type IndexSchema struct {
 	HsetIndexes []*HsetIndexSchema `json:"hset_indexes"`
 	JsonIndexes []*JsonIndexSchema `json:"json_indexes"`
+}
+
+type FullScanResult struct {
+	Results    []interface{}
+	Type       DataType
+	NextCursor []byte
+	PartionId  string
+	Error      error
+}
+
+type FieldPair struct {
+	Field []byte
+	Value []byte
 }
