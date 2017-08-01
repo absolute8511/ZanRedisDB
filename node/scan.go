@@ -61,12 +61,10 @@ func (self *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
-	splits := bytes.SplitN(cursor, []byte(":"), 2)
-	if len(splits) != 2 {
-		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+	table, _, err := common.ExtractTable(cursor)
+	if err != nil {
+		return nil, common.ErrInvalidScanCursor
 	}
-
-	table := splits[0]
 
 	ay, err := self.store.Scan(common.KV, cursor, count, match)
 	if err != nil {
@@ -139,12 +137,10 @@ func (self *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) 
 		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
 
-	splits := bytes.SplitN(cursor, []byte(":"), 2)
-	if len(splits) != 2 {
-		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+	table, _, err := common.ExtractTable(cursor)
+	if err != nil {
+		return nil, common.ErrInvalidScanCursor
 	}
-
-	table := splits[0]
 
 	var ay [][]byte
 
@@ -323,7 +319,7 @@ func (self *KVNode) zscanCommand(conn redcon.Conn, cmd redcon.Command) {
 // (note: it is not the "0" as the redis scan to indicate the end of scan)
 func (self *KVNode) fullScanCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 3 {
-		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 
 	var dataType common.DataType
@@ -339,26 +335,24 @@ func (self *KVNode) fullScanCommand(cmd redcon.Command) (interface{}, error) {
 	case "ZSET":
 		dataType = common.ZSET
 	default:
-		return &common.FullScanResult{Results: nil, Error: common.ErrInvalidScanType}, common.ErrInvalidScanType
+		return nil, common.ErrInvalidScanType
 	}
 	_, key, err := common.ExtractNamesapce(cmd.Args[1])
 	if err != nil {
-		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: err}, err
+		return nil, err
 	}
 	cmd.Args[1] = key
 	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
 
 	cursor, match, count, err := parseScanArgs(cmd.Args[2:])
 	if err != nil {
-		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: err}, err
+		return nil, err
 	}
 
-	splits := bytes.SplitN(cursor, []byte(":"), 2)
-	if len(splits) != 2 {
-		return &common.FullScanResult{Results: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidScanCursor}, common.ErrInvalidScanCursor
+	pos := bytes.IndexByte(cursor, common.KEYSEP)
+	if pos == -1 {
+		return nil, common.ErrInvalidScanCursor
 	}
-
-	//	table := splits[0]
 
 	result := self.store.FullScan(dataType, cursor, count, match)
 	result.Type = dataType

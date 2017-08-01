@@ -161,10 +161,17 @@ func IsFullScanCommand(cmd string) bool {
 	return false
 }
 
+func IsMergeIndexSearchCommand(cmd string) bool {
+	return strings.ToLower(cmd) == "hidx.from"
+}
+
 func IsMergeCommand(cmd string) bool {
 	if IsMergeScanCommand(cmd) {
 		return true
 	}
 
+	if IsMergeIndexSearchCommand(cmd) {
+		return true
+	}
 	return false
 }

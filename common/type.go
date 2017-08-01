@@ -31,6 +31,7 @@ var (
 	ErrScanCursorNoTable = errors.New("scan cursor must has table")
 	ErrUnexpectError     = errors.New("unexpected error")
 	ErrInvalidPrefix     = errors.New("invalid prefix")
+	ErrNotSupport        = errors.New("not supported")
 )
 
 // for out use

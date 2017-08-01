@@ -279,7 +279,7 @@ func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandF
 	cmdName := strings.ToLower(string(cmd.Args[0]))
 	var cmds map[string]redcon.Command
 	//do nodes filter
-	if common.IsMergeCommand(cmdName) {
+	if common.IsMergeScanCommand(cmdName) {
 		cmds, err = self.doScanNodesFilter(realKey, namespace, cmd, nodes)
 		if err != nil {
 			return nil, nil, err

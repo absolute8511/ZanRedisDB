@@ -35,8 +35,11 @@ func (s *Server) doMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 		} else {
 			s.doMergeScan(conn, cmd)
 		}
+	} else if common.IsMergeIndexSearchCommand(cmdName) {
+		s.doMergeIndexSearch(conn, cmd)
+	} else {
+		conn.WriteError("not supported merge command " + string(cmdName))
 	}
-
 }
 
 func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, []byte, error) {
@@ -96,7 +99,11 @@ func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, []byte, error)
 				cmds[i].Args[countIndex] = []byte(strconv.Itoa(everyCount))
 				go func(index int, handle common.MergeCommandFunc) {
 					defer wg.Done()
-					results[index], _ = handle(cmds[index])
+					var err error
+					results[index], err = handle(cmds[index])
+					if err != nil {
+						results[index] = err
+					}
 				}(i, h)
 			}
 		} else {
@@ -121,22 +128,27 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 	var dataType common.DataType
 	var count int
 	for _, res := range results {
-		realRes := res.(*common.FullScanResult)
-		if realRes.Error == nil {
-			dataType = realRes.Type
-
-			if len(realRes.NextCursor) > 0 {
-				nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
-				nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
-
-				nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
-				nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
-			}
-			count += len(realRes.Results)
-		} else {
+		if err, ok := res.(error); ok {
+			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
+			return
+		}
+		realRes, ok := res.(*common.FullScanResult)
+		if !ok {
+			conn.WriteError("response type invalid : Err handle command " + string(cmd.Args[0]))
+			return
+		} else if realRes.Error != nil {
 			conn.WriteError(realRes.Error.Error() + " : Err handle command " + string(cmd.Args[0]))
 			return
 		}
+		dataType = realRes.Type
+		if len(realRes.NextCursor) > 0 {
+			nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
+			nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
+
+			nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
+			nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
+		}
+		count += len(realRes.Results)
 	}
 
 	nextCursor := base64.StdEncoding.EncodeToString(nextCursorBytes)
@@ -228,26 +240,34 @@ func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
 	nextCursorBytes := []byte("")
 	result := make([]interface{}, 0, len(results))
 	for _, res := range results {
-		realRes := res.(*common.ScanResult)
-		if realRes.Error == nil {
-			v := reflect.ValueOf(realRes.Keys)
-			if v.Kind() != reflect.Slice {
-				continue
-			}
+		if err, ok := res.(error); ok {
+			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
+			return
+		}
+		realRes, ok := res.(*common.ScanResult)
+		if !ok {
+			conn.WriteError("response type invalid : Err handle command " + string(cmd.Args[0]))
+			return
+		} else if realRes.Error != nil {
+			conn.WriteError(realRes.Error.Error() + " : Err handle command " + string(cmd.Args[0]))
+			return
+		}
 
-			if len(realRes.NextCursor) > 0 {
-				nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
-				nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
+		v := reflect.ValueOf(realRes.Keys)
+		if v.Kind() != reflect.Slice {
+			continue
+		}
 
-				nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
-				nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
-			}
-			cnt := v.Len()
-			for i := 0; i < cnt; i++ {
-				result = append(result, v.Index(i).Interface())
-			}
-		} else {
-			//TODO: log sth
+		if len(realRes.NextCursor) > 0 {
+			nextCursorBytes = append(nextCursorBytes, []byte(realRes.PartionId)...)
+			nextCursorBytes = append(nextCursorBytes, common.SCAN_NODE_SEP...)
+
+			nextCursorBytes = append(nextCursorBytes, []byte(base64.StdEncoding.EncodeToString(realRes.NextCursor))...)
+			nextCursorBytes = append(nextCursorBytes, common.SCAN_CURSOR_SEP...)
+		}
+		cnt := v.Len()
+		for i := 0; i < cnt; i++ {
+			result = append(result, v.Index(i).Interface())
 		}
 	}
 
@@ -265,7 +285,7 @@ func (s *Server) doMergeScan(conn redcon.Conn, cmd redcon.Command) {
 
 func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Command, nodes map[string]*node.NamespaceNode) (map[string]redcon.Command, error) {
 	cmds := make(map[string]redcon.Command)
-	nsMap, err := s.decodeCursor(key, namespace)
+	nsMap, err := s.decodeScanCursor(key, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +313,7 @@ func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Comm
 //下次传入 namespace:table:1:xxx;2:xxx;3:xxx,
 //解析出分区 1, 2, 3 及其对应的cursor,
 //1的namespace:table:xxx1和2的namespace:table:xxx2, 和3的namespace:table:xxx3,
-func (s *Server) decodeCursor(key []byte, nsBaseName string) (map[string]string, error) {
+func (s *Server) decodeScanCursor(key []byte, nsBaseName string) (map[string]string, error) {
 
 	//key = table:cursor
 	originCursor := bytes.Split(key, common.SCAN_NODE_SEP)
