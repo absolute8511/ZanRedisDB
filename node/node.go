@@ -368,6 +368,7 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterMerge("scan", wrapMergeCommand(self.scanCommand))
 	self.router.RegisterMerge("advscan", self.advanceScanCommand)
 	self.router.RegisterMerge("fullscan", self.fullScanCommand)
+	self.router.RegisterMerge("hidx.from", self.hindexSearchCommand)
 
 	// only write command need to be registered as internal
 	// kv
@@ -952,7 +953,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 						} else if req.Header.DataType == int32(SchemaChangeReq) {
 							self.rn.Infof("handle schema change: %v", string(req.Data))
 							var sc SchemaChange
-							err := json.Unmarshal(req.Data, &sc)
+							err := sc.Unmarshal(req.Data)
 							if err != nil {
 								self.rn.Infof("schema data error: %v, %v", string(req.Data), err)
 								self.w.Trigger(reqID, err)

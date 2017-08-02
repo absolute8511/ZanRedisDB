@@ -127,7 +127,7 @@ func (self *IndexMgr) GetIndexSchemaInfo(db *RockDB, table string) (*common.Inde
 	var schema common.IndexSchema
 	t, ok := self.tableIndexes[table]
 	if !ok {
-		return nil, ErrIndexNotExist
+		return nil, ErrIndexTableNotExist
 	}
 	t.RLock()
 	for _, v := range t.hsetIndexes {
@@ -247,7 +247,7 @@ func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field strin
 	indexes, ok := self.tableIndexes[table]
 	self.RUnlock()
 	if !ok {
-		return ErrIndexNotExist
+		return ErrIndexTableNotExist
 	}
 	if isClosed {
 		return ErrIndexClosed
@@ -302,7 +302,7 @@ func (self *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) er
 	indexes, ok := self.tableIndexes[table]
 	self.Unlock()
 	if !ok {
-		return ErrIndexNotExist
+		return ErrIndexTableNotExist
 	}
 
 	indexes.Lock()
@@ -341,7 +341,8 @@ func (self *IndexMgr) GetHsetIndex(table string, field string) (*HsetIndex, erro
 	indexes, ok := self.tableIndexes[table]
 	self.RUnlock()
 	if !ok {
-		return nil, ErrIndexNotExist
+		dbLog.Infof("current index %v", self.tableIndexes)
+		return nil, ErrIndexTableNotExist
 	}
 
 	indexes.Lock()

@@ -91,6 +91,16 @@ type KVRecordRet struct {
 	Err error
 }
 
+type KVals struct {
+	PK   []byte
+	Vals [][]byte
+}
+
+type KFVals struct {
+	PK   []byte
+	Vals []KVRecordRet
+}
+
 const (
 	MAX_BATCH_NUM       = 5000
 	MinScore      int64 = -1<<63 + 1

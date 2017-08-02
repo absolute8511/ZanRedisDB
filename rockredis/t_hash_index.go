@@ -14,6 +14,7 @@ const (
 
 var (
 	ErrIndexExist          = errors.New("index already exist")
+	ErrIndexTableNotExist  = errors.New("index table not exist")
 	ErrIndexNotExist       = errors.New("index not exist")
 	ErrIndexDeleted        = errors.New("index is deleted")
 	ErrIndexValueNotNumber = errors.New("invalid value for number")
@@ -345,7 +346,7 @@ func (self *RockDB) hsetIndexRemoveRec(pk []byte, field []byte, value []byte, wb
 
 // search return the hash keys for matching field value
 func (db *RockDB) HsetIndexSearch(table []byte, field []byte, cond *IndexCondition, countOnly bool) (int64, [][]byte, error) {
-	hindex, err := db.indexMgr.GetHsetIndex(string(table), string(field))
+	hindex, err := db.getIndexer().GetHsetIndex(string(table), string(field))
 	if err != nil {
 		return 0, nil, err
 	}

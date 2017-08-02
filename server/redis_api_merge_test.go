@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"path"
@@ -13,11 +14,13 @@ import (
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 )
 
 var testOnceMerge sync.Once
 var kvsMerge *Server
 var redisportMerge int
+var testNamespaces = make(map[string]*node.NamespaceNode)
 
 func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
@@ -65,10 +68,11 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	nsConf1.Replicator = 1
 	nsConf1.RaftGroupConf.GroupID = 1000
 	nsConf1.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	_, err = kv.InitKVNamespace(1, nsConf1, false)
+	n1, err := kv.InitKVNamespace(1, nsConf1, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
+	testNamespaces[nsConf1.Name] = n1
 
 	nsConf2 := node.NewNSConfig()
 	nsConf2.Name = "default-2"
@@ -78,10 +82,11 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	nsConf2.Replicator = 1
 	nsConf2.RaftGroupConf.GroupID = 1000
 	nsConf2.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	_, err = kv.InitKVNamespace(1, nsConf2, false)
+	n2, err := kv.InitKVNamespace(1, nsConf2, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
+	testNamespaces[nsConf2.Name] = n2
 
 	kv.Start()
 	time.Sleep(time.Second)
@@ -325,4 +330,53 @@ func TestKVMergeScanCrossTable(t *testing.T) {
 			t.Fatal("want 20 get ", len(a))
 		}
 	}
+}
+
+func TestHindexMergeSearch(t *testing.T) {
+	c := getMergeTestConn(t)
+	defer c.Close()
+
+	ns := "default"
+	table := "test_hashindex"
+	sc := &node.SchemaChange{
+		Type:       node.SchemaChangeAddHsetIndex,
+		Table:      table,
+		SchemaData: nil,
+	}
+	hindex := &common.HsetIndexSchema{
+		Name:       "hindex_test",
+		IndexField: "test_f",
+		ValueType:  common.Int32V,
+		State:      common.InitIndex,
+	}
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+	time.Sleep(time.Second)
+
+	sc.Type = node.SchemaChangeUpdateHsetIndex
+	hindex.State = common.BuildingIndex
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+
+	time.Sleep(time.Second)
+
+	hindex.State = common.ReadyIndex
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+
+	time.Sleep(time.Second)
+
+	for i := 0; i < 20; i++ {
+		_, err := c.Do("hset", ns+":"+table+":"+fmt.Sprintf("%d", i), "test_f", []byte(fmt.Sprintf("%d", i)))
+		assert.Nil(t, err)
+	}
+	rsp, err := c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hgetall", "$")
+	assert.Nil(t, err)
+	t.Log(rsp)
 }
