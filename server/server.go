@@ -19,8 +19,8 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/absolute8511/redcon"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/tidwall/redcon"
 	"golang.org/x/net/context"
 )
 
@@ -69,7 +69,7 @@ func NewServer(conf ServerConfig) *Server {
 		conf.MaxScanJob = common.MAX_SCAN_JOB
 	}
 	if conf.ProfilePort == 0 {
-		conf.ProfilePort = 6666
+		conf.ProfilePort = 7666
 	}
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
@@ -279,7 +279,7 @@ func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandF
 	cmdName := strings.ToLower(string(cmd.Args[0]))
 	var cmds map[string]redcon.Command
 	//do nodes filter
-	if common.IsMergeScanCommand(cmdName) {
+	if common.IsMergeCommand(cmdName) {
 		cmds, err = self.doScanNodesFilter(realKey, namespace, cmd, nodes)
 		if err != nil {
 			return nil, nil, err

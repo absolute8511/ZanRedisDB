@@ -16,6 +16,7 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
+	"github.com/shirou/gopsutil/mem"
 )
 
 const (
@@ -62,7 +63,17 @@ func FillDefaultOptions(opts *RockOptions) {
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
 	if opts.BlockCache <= 0 {
-		opts.BlockCache = 1024 * 1024 * 256
+		v, err := mem.VirtualMemory()
+		if err != nil {
+			opts.BlockCache = 1024 * 1024 * 128
+		} else {
+			opts.BlockCache = int64(v.Total / 100)
+			if opts.BlockCache < 1024*1024*64 {
+				opts.BlockCache = 1024 * 1024 * 64
+			} else if opts.BlockCache > 1024*1024*1024*8 {
+				opts.BlockCache = 1024 * 1024 * 1024 * 8
+			}
+		}
 	}
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
 	if opts.WriteBufferSize <= 0 {
@@ -100,17 +111,20 @@ func FillDefaultOptions(opts *RockOptions) {
 type RockConfig struct {
 	DataDir            string
 	EnableTableCounter bool
-	DefaultReadOpts    *gorocksdb.ReadOptions
-	DefaultWriteOpts   *gorocksdb.WriteOptions
-	ExpirationPolicy   common.ExpirationPolicy
+	// this will ignore all update and non-exist delete
+	EstimateTableCounter bool
+	ExpirationPolicy     common.ExpirationPolicy
+	DefaultReadOpts      *gorocksdb.ReadOptions
+	DefaultWriteOpts     *gorocksdb.WriteOptions
 	RockOptions
 }
 
 func NewRockConfig() *RockConfig {
 	c := &RockConfig{
-		DefaultReadOpts:    gorocksdb.NewDefaultReadOptions(),
-		DefaultWriteOpts:   gorocksdb.NewDefaultWriteOptions(),
-		EnableTableCounter: true,
+		DefaultReadOpts:      gorocksdb.NewDefaultReadOptions(),
+		DefaultWriteOpts:     gorocksdb.NewDefaultWriteOptions(),
+		EnableTableCounter:   true,
+		EstimateTableCounter: false,
 	}
 	c.DefaultReadOpts.SetVerifyChecksums(false)
 	FillDefaultOptions(&c.RockOptions)
@@ -650,6 +664,9 @@ func (r *RockDB) MaybeCommitBatch() error {
 
 func (r *RockDB) CommitBatchWrite() error {
 	err := r.eng.Write(r.defaultWriteOpts, r.wb)
+	if err != nil {
+		dbLog.Infof("commit write error: %v", err)
+	}
 	atomic.StoreInt32(&r.isBatching, 0)
 	return err
 }

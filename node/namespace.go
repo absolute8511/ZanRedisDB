@@ -275,6 +275,8 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 
 	d, _ := json.MarshalIndent(&conf, "", " ")
 	nodeLog.Infof("namespace load config: %v", string(d))
+	d, _ = json.MarshalIndent(&kvOpts, "", " ")
+	nodeLog.Infof("namespace kv config: %v", string(d))
 	nodeLog.Infof("local namespace node %v start with raft cluster: %v", raftID, clusterNodes)
 	raftConf := &RaftConfig{
 		GroupID:        conf.RaftGroupConf.GroupID,

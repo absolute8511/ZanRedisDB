@@ -66,10 +66,44 @@ func zDecodeSizeKey(ek []byte) ([]byte, error) {
 	return ek[pos:], nil
 }
 
-func zEncodeSetKey(key []byte, member []byte) []byte {
-	buf := make([]byte, len(key)+len(member)+4)
+func convertRedisKeyToDBZSetKey(key []byte, member []byte) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkZSetKMSize(rk, member); err != nil {
+		return nil, err
+	}
+	return zEncodeSetKey(table, rk, member), nil
+}
+
+func convertRedisKeyToDBZScoreKey(key []byte, member []byte, score int64) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkZSetKMSize(rk, member); err != nil {
+		return nil, err
+	}
+	if score <= MinScore || score >= MaxScore {
+		return nil, errScoreOverflow
+	}
+	return zEncodeScoreKey(table, rk, member, score), nil
+}
+
+func zEncodeSetKey(table []byte, key []byte, member []byte) []byte {
+	buf := make([]byte, len(table)+2+1+len(key)+len(member)+4)
 	pos := 0
 	buf[pos] = ZSetType
+	pos++
+
+	// in order to make sure all the table data are in the same range
+	// we need make sure we has the same table prefix
+	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
+	pos += 2
+	copy(buf[pos:], table)
+	pos += len(table)
+	buf[pos] = tableStartSep
 	pos++
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
@@ -85,50 +119,75 @@ func zEncodeSetKey(key []byte, member []byte) []byte {
 	return buf
 }
 
-func zDecodeSetKey(ek []byte) ([]byte, []byte, error) {
+func zDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
 	pos := 0
 	if pos+1 > len(ek) || ek[pos] != ZSetType {
-		return nil, nil, errZSetKey
+		return nil, nil, nil, errZSetKey
 	}
 
 	pos++
 	if pos+2 > len(ek) {
-		return nil, nil, errZSetKey
+		return nil, nil, nil, errZSetKey
+	}
+
+	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
+	pos += 2
+	if tableLen+pos > len(ek) {
+		return nil, nil, nil, errZSetKey
+	}
+	table := ek[pos : pos+tableLen]
+	pos += tableLen
+	if ek[pos] != tableStartSep {
+		return nil, nil, nil, errZSetKey
+	}
+	pos++
+
+	if pos+2 > len(ek) {
+		return table, nil, nil, errZSetKey
 	}
 
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	if keyLen+pos > len(ek) {
-		return nil, nil, errZSetKey
+		return table, nil, nil, errZSetKey
 	}
 
 	pos += 2
 	key := ek[pos : pos+keyLen]
 
 	if ek[pos+keyLen] != zsetStartMemSep {
-		return nil, nil, errZSetKey
+		return table, nil, nil, errZSetKey
 	}
 	pos++
 
 	member := ek[pos+keyLen:]
-	return key, member, nil
+	return table, key, member, nil
 }
 
-func zEncodeStartSetKey(key []byte) []byte {
-	k := zEncodeSetKey(key, nil)
+func zEncodeStartSetKey(table []byte, key []byte) []byte {
+	k := zEncodeSetKey(table, key, nil)
 	return k
 }
 
-func zEncodeStopSetKey(key []byte) []byte {
-	k := zEncodeSetKey(key, nil)
+func zEncodeStopSetKey(table []byte, key []byte) []byte {
+	k := zEncodeSetKey(table, key, nil)
 	k[len(k)-1] = k[len(k)-1] + 1
 	return k
 }
 
-func zEncodeScoreKey(key []byte, member []byte, score int64) []byte {
-	buf := make([]byte, len(key)+len(member)+13)
+func zEncodeScoreKey(table []byte, key []byte, member []byte, score int64) []byte {
+	buf := make([]byte, len(table)+2+1+len(key)+len(member)+13)
 	pos := 0
 
 	buf[pos] = ZScoreType
+	pos++
+
+	// in order to make sure all the table data are in the same range
+	// we need make sure we has the same table prefix
+	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
+	pos += 2
+	copy(buf[pos:], table)
+	pos += len(table)
+	buf[pos] = tableStartSep
 	pos++
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
@@ -154,17 +213,17 @@ func zEncodeScoreKey(key []byte, member []byte, score int64) []byte {
 	return buf
 }
 
-func zEncodeStartScoreKey(key []byte, score int64) []byte {
-	return zEncodeScoreKey(key, nil, score)
+func zEncodeStartScoreKey(table []byte, key []byte, score int64) []byte {
+	return zEncodeScoreKey(table, key, nil, score)
 }
 
-func zEncodeStopScoreKey(key []byte, score int64) []byte {
-	k := zEncodeScoreKey(key, nil, score)
+func zEncodeStopScoreKey(table []byte, key []byte, score int64) []byte {
+	k := zEncodeScoreKey(table, key, nil, score)
 	k[len(k)-1] = k[len(k)-1] + 1
 	return k
 }
 
-func zDecodeScoreKey(ek []byte) (key []byte, member []byte, score int64, err error) {
+func zDecodeScoreKey(ek []byte) (table []byte, key []byte, member []byte, score int64, err error) {
 	pos := 0
 	if pos+1 > len(ek) || ek[pos] != ZScoreType {
 		err = errZScoreKey
@@ -176,6 +235,26 @@ func zDecodeScoreKey(ek []byte) (key []byte, member []byte, score int64, err err
 		err = errZScoreKey
 		return
 	}
+
+	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
+	pos += 2
+	if tableLen+pos > len(ek) {
+		err = errZScoreKey
+		return
+	}
+	table = ek[pos : pos+tableLen]
+	pos += tableLen
+	if ek[pos] != tableStartSep {
+		err = errZScoreKey
+		return
+	}
+	pos++
+
+	if pos+2 > len(ek) {
+		err = errZScoreKey
+		return
+	}
+
 	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
 	pos += 2
 
@@ -217,31 +296,43 @@ func (db *RockDB) zSetItem(key []byte, score int64, member []byte, wb *gorocksdb
 		return 0, errScoreOverflow
 	}
 	var exists int64 = 0
-	ek := zEncodeSetKey(key, member)
+	ek, err := convertRedisKeyToDBZSetKey(key, member)
+	if err != nil {
+		return 0, err
+	}
 
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+	if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
 		return 0, err
 	} else if v != nil {
 		exists = 1
 		if s, err := Int64(v, err); err != nil {
 			return 0, err
 		} else {
-			sk := zEncodeScoreKey(key, member, s)
+			sk, err := convertRedisKeyToDBZScoreKey(key, member, s)
+			if err != nil {
+				return 0, err
+			}
 			wb.Delete(sk)
 		}
 	}
 
 	wb.Put(ek, PutInt64(score))
 
-	sk := zEncodeScoreKey(key, member, score)
+	sk, err := convertRedisKeyToDBZScoreKey(key, member, score)
+	if err != nil {
+		return 0, err
+	}
 	wb.Put(sk, []byte{})
 	return exists, nil
 }
 
 func (db *RockDB) zDelItem(key []byte, member []byte,
 	wb *gorocksdb.WriteBatch) (int64, error) {
-	ek := zEncodeSetKey(key, member)
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+	ek, err := convertRedisKeyToDBZSetKey(key, member)
+	if err != nil {
+		return 0, err
+	}
+	if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
 		return 0, err
 	} else if v == nil {
 		//not exists
@@ -252,7 +343,10 @@ func (db *RockDB) zDelItem(key []byte, member []byte,
 		if s, err := Int64(v, err); err != nil {
 			return 0, err
 		} else {
-			sk := zEncodeScoreKey(key, member, s)
+			sk, err := convertRedisKeyToDBZScoreKey(key, member, s)
+			if err != nil {
+				return 0, err
+			}
 			wb.Delete(sk)
 		}
 	}
@@ -273,9 +367,9 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
+	table, _, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
 	}
 
 	wb := db.wb
@@ -303,19 +397,14 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
 
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
 }
 
 func (db *RockDB) zIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
-	}
-
 	sk := zEncodeSizeKey(key)
 
-	size, err := Int64(db.eng.GetBytes(db.defaultReadOpts, sk))
+	size, err := Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk))
 	if err != nil {
 		return 0, err
 	} else {
@@ -340,13 +429,12 @@ func (db *RockDB) ZCard(key []byte) (int64, error) {
 }
 
 func (db *RockDB) ZScore(key []byte, member []byte) (int64, error) {
-	if err := checkZSetKMSize(key, member); err != nil {
-		return InvalidScore, err
-	}
-
 	var score int64 = InvalidScore
 
-	k := zEncodeSetKey(key, member)
+	k, err := convertRedisKeyToDBZSetKey(key, member)
+	if err != nil {
+		return InvalidScore, err
+	}
 	if v, err := db.eng.GetBytes(db.defaultReadOpts, k); err != nil {
 		return InvalidScore, err
 	} else if v == nil {
@@ -366,9 +454,9 @@ func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 	if len(members) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
+	table, _, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
 	}
 
 	wb := db.wb
@@ -393,7 +481,7 @@ func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 		db.delExpire(ZSetType, key, wb)
 	}
 
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
 }
 
@@ -401,18 +489,18 @@ func (db *RockDB) ZIncrBy(key []byte, delta int64, member []byte) (int64, error)
 	if err := checkZSetKMSize(key, member); err != nil {
 		return InvalidScore, err
 	}
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
 	}
 
 	wb := db.wb
 	wb.Clear()
 
-	ek := zEncodeSetKey(key, member)
+	ek := zEncodeSetKey(table, rk, member)
 
 	var oldScore int64 = 0
-	v, err := db.eng.GetBytes(db.defaultReadOpts, ek)
+	v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 	if err != nil {
 		return InvalidScore, err
 	} else if v == nil {
@@ -433,13 +521,13 @@ func (db *RockDB) ZIncrBy(key []byte, delta int64, member []byte) (int64, error)
 		return InvalidScore, errScoreOverflow
 	}
 
-	sk := zEncodeScoreKey(key, member, newScore)
+	sk := zEncodeScoreKey(table, rk, member, newScore)
 	wb.Put(sk, []byte{})
 	wb.Put(ek, PutInt64(newScore))
 
 	if v != nil {
 		// so as to update score, we must delete the old one
-		oldSk := zEncodeScoreKey(key, member, oldScore)
+		oldSk := zEncodeScoreKey(table, rk, member, oldScore)
 		wb.Delete(oldSk)
 	}
 
@@ -451,8 +539,12 @@ func (db *RockDB) ZCount(key []byte, min int64, max int64) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	minKey := zEncodeStartScoreKey(key, min)
-	maxKey := zEncodeStopScoreKey(key, max)
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+	minKey := zEncodeStartScoreKey(table, rk, min)
+	maxKey := zEncodeStopScoreKey(table, rk, max)
 	it, err := NewDBRangeIterator(db.eng, minKey, maxKey, common.RangeClose, false)
 	if err != nil {
 		return 0, err
@@ -472,7 +564,11 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 		return 0, err
 	}
 
-	k := zEncodeSetKey(key, member)
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+	k := zEncodeSetKey(table, rk, member)
 
 	v, _ := db.eng.GetBytes(db.defaultReadOpts, k)
 	if v == nil {
@@ -481,16 +577,16 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 		if s, err := Int64(v, nil); err != nil {
 			return 0, err
 		} else {
-			sk := zEncodeScoreKey(key, member, s)
+			sk := zEncodeScoreKey(table, rk, member, s)
 			var rit *RangeLimitedIterator
 			if !reverse {
-				minKey := zEncodeStartScoreKey(key, MinScore)
+				minKey := zEncodeStartScoreKey(table, rk, MinScore)
 				rit, err = NewDBRangeIterator(db.eng, minKey, sk, common.RangeClose, reverse)
 				if err != nil {
 					return 0, err
 				}
 			} else {
-				maxKey := zEncodeStopScoreKey(key, MaxScore)
+				maxKey := zEncodeStopScoreKey(table, rk, MaxScore)
 				rit, err = NewDBRangeIterator(db.eng, sk, maxKey, common.RangeClose, reverse)
 				if err != nil {
 					return 0, err
@@ -508,7 +604,7 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 				lastKey = append(lastKey, rawk...)
 			}
 
-			if _, m, _, err := zDecodeScoreKey(lastKey); err == nil && bytes.Equal(m, member) {
+			if _, _, m, _, err := zDecodeScoreKey(lastKey); err == nil && bytes.Equal(m, member) {
 				n--
 				return n, nil
 			} else {
@@ -528,13 +624,13 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 	if count >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
 	}
 
-	minKey := zEncodeStartScoreKey(key, min)
-	maxKey := zEncodeStopScoreKey(key, max)
+	minKey := zEncodeStartScoreKey(table, rk, min)
+	maxKey := zEncodeStopScoreKey(table, rk, max)
 	it, err := NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
 	if err != nil {
 		return 0, err
@@ -542,7 +638,7 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 	num := int64(0)
 	for ; it.Valid(); it.Next() {
 		sk := it.RefKey()
-		_, m, _, err := zDecodeScoreKey(sk)
+		_, _, m, _, err := zDecodeScoreKey(sk)
 		if err != nil {
 			continue
 		}
@@ -585,10 +681,13 @@ func (db *RockDB) zRange(key []byte, min int64, max int64, offset int, count int
 
 	v := make([]common.ScorePair, 0, nv)
 
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
 	var it *RangeLimitedIterator
-	var err error
-	minKey := zEncodeStartScoreKey(key, min)
-	maxKey := zEncodeStopScoreKey(key, max)
+	minKey := zEncodeStartScoreKey(table, rk, min)
+	maxKey := zEncodeStopScoreKey(table, rk, max)
 	//if reverse and offset is 0, count < 0, we may use forward iterator then reverse
 	//because store iterator prev is slower than next
 	if !reverse || (offset == 0 && count < 0) {
@@ -601,7 +700,7 @@ func (db *RockDB) zRange(key []byte, min int64, max int64, offset int, count int
 	}
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()
-		_, m, s, err := zDecodeScoreKey(rawk)
+		_, _, m, s, err := zDecodeScoreKey(rawk)
 		if err != nil {
 			continue
 		}
@@ -779,15 +878,20 @@ func getAggregateFunc(aggregate byte) func(int64, int64) int64 {
 }
 
 func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint8, offset int, count int) ([][]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+
 	if min == nil {
-		min = zEncodeStartSetKey(key)
+		min = zEncodeStartSetKey(table, rk)
 	} else {
-		min = zEncodeSetKey(key, min)
+		min = zEncodeSetKey(table, rk, min)
 	}
 	if max == nil {
-		max = zEncodeStopSetKey(key)
+		max = zEncodeStopSetKey(table, rk)
 	} else {
-		max = zEncodeSetKey(key, max)
+		max = zEncodeSetKey(table, rk, max)
 	}
 	if count >= MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
@@ -802,7 +906,7 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	ay := make([][]byte, 0, 16)
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()
-		if _, m, err := zDecodeSetKey(rawk); err == nil {
+		if _, _, m, err := zDecodeSetKey(rawk); err == nil {
 			ay = append(ay, m)
 		}
 		// TODO: err for iterator step would match the final count?
@@ -814,19 +918,20 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 }
 
 func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType uint8) (int64, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+
 	if min == nil {
-		min = zEncodeStartSetKey(key)
+		min = zEncodeStartSetKey(table, rk)
 	} else {
-		min = zEncodeSetKey(key, min)
+		min = zEncodeSetKey(table, rk, min)
 	}
 	if max == nil {
-		max = zEncodeStopSetKey(key)
+		max = zEncodeStopSetKey(table, rk)
 	} else {
-		max = zEncodeSetKey(key, max)
-	}
-	table := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
+		max = zEncodeSetKey(table, rk, max)
 	}
 
 	wb := db.wb
@@ -839,7 +944,7 @@ func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType u
 	var num int64 = 0
 	for ; it.Valid(); it.Next() {
 		sk := it.RefKey()
-		_, m, err := zDecodeSetKey(sk)
+		_, _, m, err := zDecodeSetKey(sk)
 		if err != nil {
 			continue
 		}
@@ -865,15 +970,20 @@ func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType u
 }
 
 func (db *RockDB) ZLexCount(key []byte, min []byte, max []byte, rangeType uint8) (int64, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+
 	if min == nil {
-		min = zEncodeStartSetKey(key)
+		min = zEncodeStartSetKey(table, rk)
 	} else {
-		min = zEncodeSetKey(key, min)
+		min = zEncodeSetKey(table, rk, min)
 	}
 	if max == nil {
-		max = zEncodeStopSetKey(key)
+		max = zEncodeStopSetKey(table, rk)
 	} else {
-		max = zEncodeSetKey(key, max)
+		max = zEncodeSetKey(table, rk, max)
 	}
 
 	it, err := NewDBRangeIterator(db.eng, min, max, rangeType, false)

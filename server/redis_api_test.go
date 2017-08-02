@@ -14,6 +14,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 )
 
 var testOnce sync.Once
@@ -23,9 +24,7 @@ var OK = "OK"
 
 func startTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.Nil(t, err)
 	t.Logf("dir:%v\n", tmpDir)
 	ioutil.WriteFile(
 		path.Join(tmpDir, "myid"),
@@ -410,54 +409,41 @@ func TestKVErrorParams(t *testing.T) {
 	key1 := "default:test:kv_erra"
 	key2 := "default:test:kv_errb"
 	key3 := "default:test:kv_errc"
-	if _, err := c.Do("get", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err := c.Do("get", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("set", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("set", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("getset", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("getset", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("setnx", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("setnx", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("exists", key1, key2); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("exists", key1, key2)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("incr", key1, key2); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("incr", key1, key2)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("incrby", key1); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("incrby", key1)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("decrby", key1); err == nil {
-		t.Fatalf("invalid err %v", err)
-	}
+	_, err = c.Do("decrby", key1)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("del"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
+	_, err = c.Do("del")
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("mset"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
+	_, err = c.Do("mset")
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("mset", key1, key2, key3); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
+	_, err = c.Do("mset", key1, key2, key3)
+	assert.NotNil(t, err)
 
-	if _, err := c.Do("mget"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
-
+	_, err = c.Do("mget")
+	assert.NotNil(t, err)
 }
 
 func TestHash(t *testing.T) {
@@ -1470,6 +1456,31 @@ func TestZSetRank(t *testing.T) {
 	if _, err := goredis.Int(c.Do("zrevrank", key, "e")); err != goredis.ErrNil {
 		t.Fatal(err)
 	}
+
+	key2 := "default:test:myzset2"
+	if _, err := goredis.Int(c.Do("zadd", key2, 0, "val0", 1, "val1", 2, "val2", 3, "val3")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goredis.Int(c.Do("zadd", key2, 4, "val4", 5, "val5", 6, "val6")); err != nil {
+		t.Fatal(err)
+	}
+	// this is used to test the case for iterator seek to max may cause seek to the next last data
+	keyExpire := "default:test:myexpkey"
+	keyExpire2 := "default:test:myexpkey2"
+	c.Do("setex", keyExpire, 10, "v1")
+	c.Do("setex", keyExpire2, 10, "v1")
+
+	if n, err := goredis.Int(c.Do("zrank", key2, "val3")); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zrevrank", key2, "val3")); err != nil {
+		t.Fatalf("cmd error: %v", err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
 }
 
 func testZSetRange(ay []interface{}, checkValues ...interface{}) error {
@@ -1914,8 +1925,19 @@ func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
 	}
 	for i, v := range a {
-		if string(v) != fmt.Sprintf("%v", values[i]) {
-			t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+		vv := fmt.Sprintf("%v", values[i])
+		if string(v) != vv {
+			if len(v) == len(vv)+8 {
+				if string(v[:len(vv)]) != vv {
+					t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+				}
+			} else if len(v)+8 == len(vv) {
+				if string(v) != vv[:len(v)] {
+					t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+				}
+			} else {
+				t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+			}
 		}
 	}
 }
@@ -1925,20 +1947,21 @@ func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNDZOQT09Ow==" {
+		//} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNDZOQT09Ow==" {
+	} else if n := ay[0].([]byte); string(n) != "MDpOQT09Ow==" {
 		t.Fatal(string(n))
 	} else {
-		checkScanValues(t, ay[1], "testscan:0", "testscan:1", "testscan:2", "testscan:3", "testscan:4")
+		checkScanValues(t, ay[1], "0", "1", "2", "3", "4")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZOQT09Ow==", tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpOQT09Ow==", tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
 	} else if n := ay[0].([]byte); string(n) != "" {
 		t.Fatal(string(n))
 	} else {
-		checkScanValues(t, ay[1], "testscan:5", "testscan:6", "testscan:7", "testscan:8", "testscan:9")
+		checkScanValues(t, ay[1], "5", "6", "7", "8", "9")
 	}
 
 	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZPUT09Ow==", tp, "count", 0)); err != nil {

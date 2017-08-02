@@ -683,7 +683,7 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.ExpirationPolicy = nsInfo.ExpirationPolicy
 	if nsInfo.SnapCount > 100 {
 		nsConf.SnapCount = nsInfo.SnapCount
-		nsConf.SnapCatchup = nsInfo.SnapCount / 2
+		nsConf.SnapCatchup = nsInfo.SnapCount / 4
 	}
 	nsConf.RaftGroupConf.GroupID = uint64(nsInfo.MinGID) + uint64(nsInfo.Partition)
 	nsConf.RaftGroupConf.SeedNodes = make([]node.ReplicaInfo, 0)

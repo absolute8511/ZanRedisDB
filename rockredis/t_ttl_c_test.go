@@ -110,7 +110,7 @@ func TestHashTTL_C(t *testing.T) {
 		common.KVRecord{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
-	if err := db.HMset(hash_key, hash_val...); err != nil {
+	if err := db.HMset(0, hash_key, hash_val...); err != nil {
 		t.Fatal(err)
 	}
 

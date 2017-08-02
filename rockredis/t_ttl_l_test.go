@@ -80,7 +80,7 @@ func TestHashTTL_L(t *testing.T) {
 		common.KVRecord{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
-	if err := db.HMset(hash_key, hash_val...); err != nil {
+	if err := db.HMset(0, hash_key, hash_val...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -253,7 +253,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 				common.KVRecord{Key: []byte("field1"), Value: []byte("value1")},
 				common.KVRecord{Key: []byte("field2"), Value: []byte("value2")},
 			}
-			db.HMset(t_hash_key, t_hash_val...)
+			db.HMset(0, t_hash_key, t_hash_val...)
 
 		case SetType:
 			t_set_key := []byte("test_checker_local_set_key")

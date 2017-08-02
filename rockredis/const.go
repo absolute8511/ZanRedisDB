@@ -76,6 +76,8 @@ var (
 	errValueSize        = errors.New("invalid value size")
 	errZSetMemberSize   = errors.New("invalid zset member size")
 	errTooMuchBatchSize = errors.New("the batch size exceed the limit")
+	errNotMatch         = errors.New("not match")
+	errUnsuportType     = errors.New("unsupport type")
 )
 
 const (

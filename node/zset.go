@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 )
 
 var (

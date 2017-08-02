@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"bytes"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
 )
@@ -11,6 +12,7 @@ type Iterator interface {
 	Prev()
 	Valid() bool
 	Seek([]byte)
+	SeekForPrev([]byte)
 	SeekToFirst()
 	SeekToLast()
 	Close()
@@ -18,6 +20,7 @@ type Iterator interface {
 	Key() []byte
 	RefValue() []byte
 	Value() []byte
+	NoTimestamp(vt byte)
 }
 
 type Range struct {
@@ -33,9 +36,10 @@ type Limit struct {
 
 type DBIterator struct {
 	*gorocksdb.Iterator
-	snap *gorocksdb.Snapshot
-	ro   *gorocksdb.ReadOptions
-	db   *gorocksdb.DB
+	snap         *gorocksdb.Snapshot
+	ro           *gorocksdb.ReadOptions
+	db           *gorocksdb.DB
+	removeTsType byte
 }
 
 func NewDBIterator(db *gorocksdb.DB, withSnap bool) (*DBIterator, error) {
@@ -73,11 +77,23 @@ func (it *DBIterator) Key() []byte {
 }
 
 func (it *DBIterator) RefValue() []byte {
-	return it.Iterator.Value().Data()
+	v := it.Iterator.Value().Data()
+	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {
+		v = v[:len(v)-tsLen]
+	}
+	return v
 }
 
 func (it *DBIterator) Value() []byte {
-	return it.Iterator.Value().Bytes()
+	v := it.Iterator.Value().Bytes()
+	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {
+		v = v[:len(v)-tsLen]
+	}
+	return v
+}
+
+func (it *DBIterator) NoTimestamp(vt byte) {
+	it.removeTsType = vt
 }
 
 func (it *DBIterator) Close() {
@@ -159,15 +175,16 @@ type RangeLimitedIterator struct {
 }
 
 func (it *RangeLimitedIterator) Valid() bool {
-	if !it.Iterator.Valid() {
-		return false
-	}
 	if it.l.Offset < 0 {
 		return false
 	}
 	if it.l.Count >= 0 && it.step >= it.l.Count {
 		return false
 	}
+	if !it.Iterator.Valid() {
+		return false
+	}
+
 	if !it.reverse {
 		if it.r.Max != nil {
 			r := bytes.Compare(it.Iterator.RefKey(), it.r.Max)
@@ -237,12 +254,11 @@ func rangeLimitIterator(i Iterator, r *Range, l *Limit, reverse bool) *RangeLimi
 		if r.Max == nil {
 			it.Iterator.SeekToLast()
 		} else {
-			it.Iterator.Seek(r.Max)
+			it.Iterator.SeekForPrev(r.Max)
 			if !it.Iterator.Valid() {
 				it.Iterator.SeekToLast()
-			} else {
-				if !bytes.Equal(it.Iterator.RefKey(), r.Max) {
-					it.Iterator.Prev()
+				if it.Iterator.Valid() && bytes.Compare(it.Iterator.RefKey(), r.Max) == 1 {
+					dbLog.Infof("iterator seek to last key %v should not great than seek to max %v", it.Iterator.RefKey(), r.Max)
 				}
 			}
 			if r.Type&common.RangeROpen > 0 {

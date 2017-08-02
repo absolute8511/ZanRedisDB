@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/tidwall/redcon"
+	"github.com/absolute8511/redcon"
 )
 
 const (
@@ -149,11 +149,12 @@ func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
 	return namespace, realKey, nil
 }
 
-func ExtraTable(rawKey []byte) ([]byte, []byte, error) {
+func ExtractTable(rawKey []byte) ([]byte, []byte, error) {
 	pos := bytes.IndexByte(rawKey, KEYSEP)
 	if pos == -1 {
 		return nil, nil, ErrInvalidPrefix
 	}
+
 	table := rawKey[:pos]
 	other := rawKey[pos+1:]
 	return table, other, nil
@@ -295,7 +296,7 @@ type IClusterInfo interface {
 }
 
 type ScanResult struct {
-	Result     interface{}
+	Keys       [][]byte
 	NextCursor []byte
 	PartionId  string
 	Error      error
@@ -304,4 +305,17 @@ type ScanResult struct {
 type ExpiredDataBuffer interface {
 	Write(DataType, []byte) error
 	Full() bool
+}
+
+type FullScanResult struct {
+	Results    []interface{}
+	Type       DataType
+	NextCursor []byte
+	PartionId  string
+	Error      error
+}
+
+type FieldPair struct {
+	Field []byte
+	Value []byte
 }

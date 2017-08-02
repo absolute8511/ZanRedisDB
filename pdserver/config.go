@@ -32,7 +32,7 @@ func NewServerConfig() *ServerConfig {
 		HTTPAddress:        "0.0.0.0:18001",
 		BroadcastAddr:      hostname,
 		BroadcastInterface: "eth0",
-		ProfilePort:        "6667",
+		ProfilePort:        "7667",
 
 		ClusterLeadershipAddresses: "",
 		ClusterID:                  "",
