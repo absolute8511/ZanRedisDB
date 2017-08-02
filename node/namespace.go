@@ -99,10 +99,6 @@ func (self *NamespaceNode) GetMembers() []*common.MemberInfo {
 	return self.Node.GetMembers()
 }
 
-func (self *NamespaceNode) StartTTLChecker() {
-	self.Node.store.StartTTLChecker()
-}
-
 func (self *NamespaceNode) Start(forceStandaloneCluster bool) error {
 	if err := self.Node.Start(forceStandaloneCluster); err != nil {
 		return err

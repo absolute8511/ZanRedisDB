@@ -192,33 +192,26 @@ type ExpireHandler struct {
 	node            *KVNode
 	quitC           chan struct{}
 	leaderChangedCh chan struct{}
-	wg              sync.WaitGroup
-	running         int32
+	applyLock       sync.Mutex
+	batchBuffer     *raftExpiredBuffer
 
-	//prevent 'applyExpiration' start more than one time at the same time
-	applyLock sync.Mutex
-
-	batchBuffer [common.ALL - common.NONE]*raftBatchBuffer
+	running int32
+	wg      sync.WaitGroup
 }
 
 func NewExpireHandler(node *KVNode) *ExpireHandler {
-	handler := &ExpireHandler{
+	return &ExpireHandler{
 		node:            node,
 		leaderChangedCh: make(chan struct{}, 8),
 		quitC:           make(chan struct{}),
+		batchBuffer:     newRaftExpiredBuffer(node),
 	}
-
-	for t, _ := range handler.batchBuffer {
-		handler.batchBuffer[t] = newRaftBatchBuffer(node, common.DataType(t))
-	}
-	return handler
 }
 
 func (self *ExpireHandler) Start() {
 	if !atomic.CompareAndSwapInt32(&self.running, 0, 1) {
 		return
 	}
-	self.node.store.StartTTLChecker()
 
 	self.wg.Add(1)
 	go func() {
@@ -226,22 +219,11 @@ func (self *ExpireHandler) Start() {
 		self.watchLeaderChanged()
 	}()
 
-	switch self.node.expirationPolicy {
-	case common.LocalDeletion:
-
-	case common.ConsistencyDeletion:
-		// the leader should watch the expired data and
-		// delete them through RAFT
-
-	case common.PeriodicalRotation:
-	}
-
 }
 
 func (self *ExpireHandler) Stop() {
 	if atomic.CompareAndSwapInt32(&self.running, 1, 0) {
 		close(self.quitC)
-		self.node.store.StopTTLChecker()
 		self.wg.Wait()
 	}
 }
@@ -253,27 +235,24 @@ func (self *ExpireHandler) LeaderChanged() {
 func (self *ExpireHandler) watchLeaderChanged() {
 	var stop chan struct{}
 	applying := false
-
 	for {
 		select {
 		case <-self.leaderChangedCh:
-			if self.node.expirationPolicy == common.ConsistencyDeletion {
-				if self.node.IsLead() && !applying {
-					stop = make(chan struct{})
+			if self.node.expirationPolicy != common.ConsistencyDeletion {
+				continue
+			}
+			if self.node.IsLead() && !applying {
+				stop = make(chan struct{})
+				self.wg.Add(1)
+				go func(stop chan struct{}) {
+					defer self.wg.Done()
+					self.applyExpiration(stop)
+				}(stop)
+				applying = true
 
-					self.wg.Add(1)
-					go func(stop chan struct{}) {
-						defer self.wg.Done()
-						if err := self.applyExpiration(stop); err != nil {
-							nodeLog.Errorf("apply expiration failed as: %s", err.Error())
-						}
-					}(stop)
-
-					applying = true
-				} else if !self.node.IsLead() && applying {
-					close(stop)
-					applying = false
-				}
+			} else if !self.node.IsLead() && applying {
+				close(stop)
+				applying = false
 			}
 		case <-self.quitC:
 			if applying {
@@ -309,42 +288,88 @@ func buildRawExpireCommand(dt common.DataType, keys [][]byte) []byte {
 	return buf
 }
 
-func (self *ExpireHandler) applyExpiration(stop chan struct{}) error {
+func (self *ExpireHandler) applyExpiration(stop chan struct{}) {
+	nodeLog.Infof("begin to apply expiration")
+	self.applyLock.Lock()
+	checkTicker := time.NewTicker(time.Second)
+
 	defer func() {
-		for _, batch := range self.batchBuffer {
-			batch.clear()
-		}
+		checkTicker.Stop()
+		self.batchBuffer.Reset()
 		self.applyLock.Unlock()
+		nodeLog.Infof("apply expiration has been stopped")
 	}()
 
-	self.applyLock.Lock()
-	receiver := make(chan *common.ExpiredData, 4*raftBatchBufferSize)
-
 	self.wg.Add(1)
-	go func() {
+	go func(buffer *raftExpiredBuffer, stop chan struct{}) {
 		defer self.wg.Done()
 		t := time.NewTicker(time.Second)
+		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				for _, batch := range self.batchBuffer {
-					batch.commit()
-				}
+				buffer.CommitAll()
 			case <-stop:
 				return
 			}
 		}
-	}()
+	}(self.batchBuffer, stop)
 
-	self.wg.Add(1)
-	go func() {
-		defer self.wg.Done()
-		for v := range receiver {
-			self.batchBuffer[v.DataType].propose(v.Key)
+	for {
+		select {
+		case <-checkTicker.C:
+			if err := self.node.store.CheckExpiredData(self.batchBuffer, stop); err != nil {
+				nodeLog.Errorf("check expired data by the underlying storage system failed, err:%s", err.Error())
+			}
+			self.batchBuffer.CommitAll()
+		case <-stop:
+			return
 		}
-	}()
+	}
+}
 
-	return self.node.store.WatchExpired(receiver, stop)
+type raftExpiredBuffer struct {
+	internalBuf [common.ALL - common.NONE]*raftBatchBuffer
+}
+
+func newRaftExpiredBuffer(nd *KVNode) *raftExpiredBuffer {
+	raftBuff := &raftExpiredBuffer{}
+
+	types := []common.DataType{common.KV, common.LIST, common.HASH,
+		common.SET, common.ZSET}
+
+	for _, t := range types {
+		raftBuff.internalBuf[t] = newRaftBatchBuffer(nd, t)
+	}
+
+	return raftBuff
+}
+
+func (raftBuffer *raftExpiredBuffer) Write(dt common.DataType, key []byte) error {
+	raftBuffer.internalBuf[dt].propose(key)
+	return nil
+}
+
+// always return false as the expired data stored at the internal buffers would
+// be handled automatically when the buffer is full
+func (raftBuffer *raftExpiredBuffer) Full() bool {
+	return false
+}
+
+func (raftBuffer *raftExpiredBuffer) CommitAll() {
+	for _, buff := range raftBuffer.internalBuf {
+		if buff != nil {
+			buff.commit()
+		}
+	}
+}
+
+func (raftBuffer *raftExpiredBuffer) Reset() {
+	for _, buff := range raftBuffer.internalBuf {
+		if buff != nil {
+			buff.clear()
+		}
+	}
 }
 
 type raftBatchBuffer struct {

@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -16,25 +17,22 @@ const (
 
 type localExpiration struct {
 	*TTLChecker
-	db      *RockDB
-	wb      *gorocksdb.WriteBatch
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
-	buffer  []*expiredMeta
-	batched [common.ALL - common.NONE]*localBatch
+	db          *RockDB
+	wb          *gorocksdb.WriteBatch
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+	localBuffer *localBatchedBuffer
 }
 
 func newLocalExpiration(db *RockDB) *localExpiration {
 	exp := &localExpiration{
-		db:         db,
-		wb:         gorocksdb.NewWriteBatch(),
-		TTLChecker: newTTLChecker(db, localExpCheckInterval),
-		stopCh:     make(chan struct{}),
+		db:          db,
+		wb:          gorocksdb.NewWriteBatch(),
+		TTLChecker:  newTTLChecker(db),
+		stopCh:      make(chan struct{}),
+		localBuffer: newLocalBatchedBuffer(db, localBatchedBufSize),
 	}
 
-	for dt, _ := range exp.batched {
-		exp.batched[dt] = newLocalBatch(db, common.DataType(dt))
-	}
 	return exp
 }
 
@@ -70,8 +68,8 @@ func (exp *localExpiration) delExpire(byte, []byte, *gorocksdb.WriteBatch) error
 	return nil
 }
 
-func (exp *localExpiration) WatchExpired(receiver chan *common.ExpiredData, stopCh chan struct{}) error {
-	return errors.New("can not watch expired through local expiration policy")
+func (exp *localExpiration) check(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
+	return errors.New("can not check expired data through local expiration policy")
 }
 
 func (exp *localExpiration) Start() {
@@ -83,115 +81,114 @@ func (exp *localExpiration) Start() {
 }
 
 func (exp *localExpiration) applyExpiration(stop chan struct{}) {
-	exp.buffer = make([]*expiredMeta, 0, localBatchedBufSize)
+	dbLog.Infof("start to apply-expiration using Local-Deletion policy")
+	defer dbLog.Infof("apply-expiration using Local-Deletion policy exit")
 
 	t := time.NewTicker(time.Second * localExpCheckInterval)
 	defer t.Stop()
 
-	dbLog.Infof("start to apply-expiration using Local-Deletion policy")
-	defer dbLog.Infof("apply-expiration using Local-Deletion policy exit")
-
 	checker := exp.TTLChecker
 
-	for _ = range t.C {
-		receiver := make(chan *expiredMeta, 1024)
-		watchStop := make(chan struct{})
+	for {
+		select {
+		case <-t.C:
+			if err := checker.check(exp.localBuffer, stop); err != nil {
+				dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
+			}
 
-		exp.wg.Add(1)
-		go func(watchStop chan struct{}) {
-			defer exp.wg.Done()
 			select {
 			case <-stop:
-				//close the watchStop channel to stop watch expired data
-				//if the channel has not been closed
-				select {
-				case <-watchStop:
-				default:
-					close(watchStop)
-				}
-			case <-watchStop:
+				return
+			default:
+				exp.localBuffer.commit()
 			}
-			return
-		}(watchStop)
-
-		exp.wg.Add(1)
-		go func() {
-			defer exp.wg.Done()
-			checker.watchExpiredOnce(receiver, watchStop)
-		}()
-
-		for meta := range receiver {
-			exp.buffer = append(exp.buffer, meta)
-
-			if len(exp.buffer) >= localBatchedBufSize {
-				// close the watchStop channel to stop watch expired data when the
-				// buffer is full if the channel has not been closed
-				close(watchStop)
-
-				// receive all the pending data from the 'receiver'
-				for meta := range receiver {
-					exp.buffer = append(exp.buffer, meta)
-				}
-				break
-			}
-		}
-
-		select {
-		case <-watchStop:
-		default:
-			close(watchStop)
-		}
-
-		select {
 		case <-stop:
 			return
-		default:
-			exp.commitBuffered()
 		}
 	}
 }
 
-func (exp *localExpiration) commitBuffered() {
-	if len(exp.buffer) == 0 {
+type localBatchedBuffer struct {
+	db      *RockDB
+	wb      *gorocksdb.WriteBatch
+	buff    []*expiredMeta
+	batched [common.ALL - common.NONE]*localBatch
+	cap     int
+}
+
+func newLocalBatchedBuffer(db *RockDB, cap int) *localBatchedBuffer {
+	batchedBuff := &localBatchedBuffer{
+		buff: make([]*expiredMeta, 0, cap),
+		wb:   gorocksdb.NewWriteBatch(),
+		db:   db,
+		cap:  cap,
+	}
+
+	types := []common.DataType{common.KV, common.LIST, common.HASH,
+		common.SET, common.ZSET}
+
+	for _, t := range types {
+		batchedBuff.batched[t] = newLocalBatch(db, t)
+	}
+
+	return batchedBuff
+}
+
+func (self *localBatchedBuffer) Write(meta *expiredMeta) error {
+	if len(self.buff) >= self.cap {
+		return fmt.Errorf("the local batched buffer is full, capacity:%d", self.cap)
+	}
+	self.buff = append(self.buff, meta)
+	return nil
+}
+
+func (self *localBatchedBuffer) Full() bool {
+	return len(self.buff) >= self.cap
+}
+
+func (self *localBatchedBuffer) commit() {
+	if len(self.buff) == 0 {
 		return
 	}
 
-	exp.wb.Clear()
+	db := self.db
+	wb := self.wb
+	wb.Clear()
 
-	for i, v := range exp.buffer {
+	for i, v := range self.buff {
 		dt, key, _, err := expDecodeTimeKey(v.timeKey)
 		if err != nil {
 			dbLog.Errorf("decode time-key failed, bad data encounter, err:%s", err.Error())
 			continue
 		}
 
-		if err := exp.batched[dataType2CommonType(dt)].propose(key); err != nil {
+		if err := self.batched[dataType2CommonType(dt)].propose(key); err != nil {
 			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", TypeName[dt], err.Error())
 		}
 
-		exp.wb.Delete(v.timeKey)
-		exp.wb.Delete(v.metaKey)
+		wb.Delete(v.timeKey)
+		wb.Delete(v.metaKey)
 
 		if i%1024 == 0 {
-			if err := exp.db.eng.Write(exp.db.defaultWriteOpts, exp.wb); err != nil {
+			if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
 				dbLog.Errorf("delete meta data about expired data failed, err:%s", err.Error())
 			}
-			exp.wb.Clear()
+			wb.Clear()
 		}
 	}
 
-	exp.buffer = exp.buffer[:0]
+	self.buff = self.buff[:0]
 
-	for _, batch := range exp.batched {
-		if err := batch.commit(); err != nil {
-			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", batch.dt.String(), err.Error())
+	for t := common.KV; t < common.ALL; t++ {
+		if err := self.batched[t].commit(); err != nil {
+			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", common.DataType(t).String(), err.Error())
 		}
 	}
 
-	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, exp.wb); err != nil {
+	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
 		dbLog.Errorf("delete meta data about expired data failed, %s", err.Error())
 	}
-	exp.wb.Clear()
+	wb.Clear()
 }
 
 func (exp *localExpiration) Stop() {

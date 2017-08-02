@@ -5,7 +5,6 @@ import (
 	"errors"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -93,12 +92,17 @@ type expiredMeta struct {
 	UTC     int64
 }
 
+type expiredMetaBuffer interface {
+	Write(*expiredMeta) error
+	Full() bool
+}
+
 type expiration interface {
 	rawExpireAt(byte, []byte, int64, *gorocksdb.WriteBatch) error
 	expireAt(byte, []byte, int64) error
 	ttl(byte, []byte) (int64, error)
 	delExpire(byte, []byte, *gorocksdb.WriteBatch) error
-	WatchExpired(chan *common.ExpiredData, chan struct{}) error
+	check(common.ExpiredDataBuffer, chan struct{}) error
 	Start()
 	Stop()
 }
@@ -134,18 +138,14 @@ type TTLChecker struct {
 	watching int32
 	wg       sync.WaitGroup
 
-	//the check interval
-	interval int64
-
 	//next check time
 	nc int64
 }
 
-func newTTLChecker(db *RockDB, interval int64) *TTLChecker {
+func newTTLChecker(db *RockDB) *TTLChecker {
 	c := &TTLChecker{
-		db:       db,
-		nc:       time.Now().Unix(),
-		interval: interval,
+		db: db,
+		nc: time.Now().Unix(),
 	}
 	return c
 }
@@ -160,7 +160,7 @@ func (c *TTLChecker) setNextCheckTime(when int64, force bool) {
 	c.Unlock()
 }
 
-func (c *TTLChecker) check(receiver chan *expiredMeta, stop chan struct{}) {
+func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -177,7 +177,7 @@ func (c *TTLChecker) check(receiver chan *expiredMeta, stop chan struct{}) {
 	c.Unlock()
 
 	if now < nc {
-		return
+		return nil
 	}
 
 	nc = now + 3600
@@ -193,10 +193,10 @@ func (c *TTLChecker) check(receiver chan *expiredMeta, stop chan struct{}) {
 		common.RangeROpen, 0, -1, false)
 	if err != nil {
 		c.setNextCheckTime(now+1, false)
-		return
+		return err
 	} else if it == nil {
-		c.setNextCheckTime(nc, false)
-		return
+		c.setNextCheckTime(nc, true)
+		return nil
 	}
 	defer it.Close()
 
@@ -216,8 +216,8 @@ func (c *TTLChecker) check(receiver chan *expiredMeta, stop chan struct{}) {
 			continue
 		}
 
-		dt, k, nt, err := expDecodeTimeKey(tk)
-		if err != nil {
+		dt, k, nt, dErr := expDecodeTimeKey(tk)
+		if dErr != nil {
 			continue
 		}
 
@@ -237,54 +237,18 @@ func (c *TTLChecker) check(receiver chan *expiredMeta, stop chan struct{}) {
 		}
 
 		eCount += 1
-		select {
-		case receiver <- &expiredMeta{timeKey: tk, metaKey: mk, UTC: nt}:
-		case <-stop:
+
+		err = expiredBuf.Write(&expiredMeta{timeKey: tk, metaKey: mk, UTC: nt})
+		if err != nil || expiredBuf.Full() {
 			nc = now + 1
 			break
 		}
 	}
 
-	c.setNextCheckTime(nc, false)
+	c.setNextCheckTime(nc, true)
 
 	checkCost := time.Since(checkStart).Nanoseconds() / 1000
 	dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us", eCount, scanned, checkCost)
-}
 
-func (c *TTLChecker) watchExpired(receiver chan *expiredMeta, stop chan struct{}) error {
-	defer close(receiver)
-
-	if !atomic.CompareAndSwapInt32(&c.watching, 0, 1) {
-		return errors.New("another watching has already start")
-	}
-
-	t := time.NewTicker(time.Second * time.Duration(c.interval))
-
-	defer func() {
-		t.Stop()
-		atomic.StoreInt32(&c.watching, 0)
-	}()
-
-	for {
-		select {
-		case <-t.C:
-			c.check(receiver, stop)
-		case <-stop:
-			return nil
-		}
-	}
-}
-
-func (c *TTLChecker) watchExpiredOnce(receiver chan *expiredMeta, stop chan struct{}) error {
-	if !atomic.CompareAndSwapInt32(&c.watching, 0, 1) {
-		return errors.New("another watching has already start")
-	}
-
-	defer func() {
-		close(receiver)
-		atomic.StoreInt32(&c.watching, 0)
-	}()
-
-	c.check(receiver, stop)
-	return nil
+	return err
 }

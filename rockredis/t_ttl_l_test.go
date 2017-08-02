@@ -277,9 +277,6 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 		}
 	}
 
-	db.StartTTLChecker()
-	defer db.StopTTLChecker()
-
 	time.Sleep((localExpCheckInterval + 1) * time.Second)
 
 	for k, v := range kTypeMap {

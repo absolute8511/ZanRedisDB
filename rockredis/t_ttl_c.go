@@ -7,10 +7,6 @@ import (
 	"github.com/absolute8511/gorocksdb"
 )
 
-const (
-	consistExpCheckInterval = 1
-)
-
 type consistencyExpiration struct {
 	*TTLChecker
 	db *RockDB
@@ -19,7 +15,7 @@ type consistencyExpiration struct {
 func newConsistencyExpiration(db *RockDB) *consistencyExpiration {
 	exp := &consistencyExpiration{
 		db:         db,
-		TTLChecker: newTTLChecker(db, consistExpCheckInterval),
+		TTLChecker: newTTLChecker(db),
 	}
 	return exp
 }
@@ -106,17 +102,23 @@ func (exp *consistencyExpiration) delExpire(dataType byte, key []byte, wb *goroc
 	}
 }
 
-func (exp *consistencyExpiration) WatchExpired(receiver chan *common.ExpiredData, stop chan struct{}) error {
-	defer close(receiver)
+type expiredBufferWrapper struct {
+	internal common.ExpiredDataBuffer
+}
 
-	metaReceiver := make(chan *expiredMeta, len(receiver))
+func (wrapper *expiredBufferWrapper) Full() bool {
+	return wrapper.internal.Full()
+}
 
-	go func() {
-		for meta := range metaReceiver {
-			dt, key, _, _ := expDecodeTimeKey(meta.timeKey)
-			receiver <- &common.ExpiredData{DataType: dataType2CommonType(dt), Key: key}
-		}
-	}()
+func (wrapper *expiredBufferWrapper) Write(meta *expiredMeta) error {
+	if dt, key, _, err := expDecodeTimeKey(meta.timeKey); err != nil {
+		return err
+	} else {
+		return wrapper.internal.Write(dataType2CommonType(dt), key)
+	}
+}
 
-	return exp.TTLChecker.watchExpired(metaReceiver, stop)
+func (exp *consistencyExpiration) check(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
+	wrapper := &expiredBufferWrapper{internal: buffer}
+	return exp.TTLChecker.check(wrapper, stop)
 }

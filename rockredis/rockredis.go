@@ -267,10 +267,11 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 
 	//TODO
 	//case common.PeriodicalRotation:
-
 	default:
 		return nil, errors.New("unsupported ExpirationPolicy")
 	}
+
+	db.expiration.Start()
 
 	db.wg.Add(1)
 	go func() {
@@ -285,12 +286,11 @@ func GetBackupDir(base string) string {
 	return path.Join(base, "rocksdb_backup")
 }
 
-func (r *RockDB) StartTTLChecker() {
-	r.expiration.Start()
-}
-
-func (r *RockDB) StopTTLChecker() {
-	r.expiration.Stop()
+func (r *RockDB) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
+	if r.cfg.ExpirationPolicy != common.ConsistencyDeletion {
+		return fmt.Errorf("can not check expired data at the expiration-policy:%d", r.cfg.ExpirationPolicy)
+	}
+	return r.expiration.check(buffer, stop)
 }
 
 func (r *RockDB) GetBackupBase() string {

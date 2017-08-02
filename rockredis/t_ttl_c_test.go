@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -314,79 +313,73 @@ func TestZSetTTL_C(t *testing.T) {
 	}
 }
 
+type TExpiredDataBuffer struct {
+	db           *RockDB
+	wb           *gorocksdb.WriteBatch
+	kTypeMap     map[string]byte
+	expiredCount int
+	t            *testing.T
+}
+
+func (buff *TExpiredDataBuffer) Write(dt common.DataType, key []byte) error {
+	buff.expiredCount += 1
+	if kt, ok := buff.kTypeMap[string(key)]; !ok {
+		buff.t.Fatal("unknown expired key", string(key))
+	} else if dataType2CommonType(kt) != dt {
+		buff.t.Fatal("mismatched key-type, %s - %d, should be [%s - %d]", string(key), dt, string(key), dataType2CommonType(kt))
+	} else {
+		buff.wb.Clear()
+		buff.db.delExpire(kt, key, buff.wb)
+		buff.db.eng.Write(buff.db.defaultWriteOpts, buff.wb)
+		delete(buff.kTypeMap, string(key))
+	}
+	return nil
+}
+
+func (buff *TExpiredDataBuffer) Full() bool {
+	return false
+}
+
 func TestConsistencyTTLChecker(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
 	kTypeMap := make(map[string]byte)
-	expiredMap := make(map[string]int)
-
 	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType}
-
-	var lock sync.Mutex
 
 	for i := 0; i < 10000*3+rand.Intn(10000); i++ {
 		key := "test:ttl_checker_consistency:" + strconv.Itoa(i)
 		dataType := dataTypes[rand.Int()%len(dataTypes)]
-		lock.Lock()
 		kTypeMap[key] = dataType
-		lock.Unlock()
 		if err := db.expire(dataType, []byte(key), 2); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	expiredHandler := func(dt byte, DB *RockDB, wb *gorocksdb.WriteBatch) {
-		expiredCh := DB.GetExpiredDataChan(dataType2CommonType(dt))
-		for {
-			select {
-			case v, ok := <-expiredCh:
-				if !ok {
-					return
-				}
-				for _, k := range v.Keys {
-					lock.Lock()
-					if kt, ok := kTypeMap[string(k)]; !ok {
-						t.Fatal("unknown expired key", string(k))
-					} else if kt != dt {
-						t.Fatal("mismatched key-type, %s - %d, should be [%s - %d]", string(k), kt, string(k), dt)
-					} else {
-						expiredMap[string(k)] += 1
-						lock.Unlock()
-						wb.Clear()
-						DB.delExpire(dt, k, wb)
-						DB.eng.Write(db.defaultWriteOpts, wb)
-					}
-				}
-			}
-		}
-	}
-
-	for _, dt := range dataTypes {
-		wb := gorocksdb.NewWriteBatch()
-		go expiredHandler(dt, db, wb)
-	}
-
-	db.StartTTLChecker()
-	defer db.StopTTLChecker()
-
 	time.Sleep(3 * time.Second)
-	start := time.Now()
-
-	for {
-		lock.Lock()
-		if len(expiredMap) == len(kTypeMap) {
-			lock.Unlock()
-			break
-		}
-		lock.Unlock()
-
-		if time.Since(start) > time.Second*10 {
-			t.Fatalf("not all key has expired")
-		} else {
-			time.Sleep(time.Second)
-		}
+	buffer := &TExpiredDataBuffer{
+		t:        t,
+		db:       db,
+		wb:       gorocksdb.NewWriteBatch(),
+		kTypeMap: kTypeMap,
 	}
 
+	if err := db.CheckExpiredData(buffer, make(chan struct{})); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(kTypeMap) != 0 {
+		t.Fatal("not all keys has expired")
+	}
+
+	buffer.expiredCount = 0
+
+	if err := db.CheckExpiredData(buffer, make(chan struct{})); err != nil {
+		t.Fatal(err)
+	}
+
+	if buffer.expiredCount != 0 {
+		t.Fatal("find some keys expired after all the keys stored has expired and deleted")
+	}
 }
