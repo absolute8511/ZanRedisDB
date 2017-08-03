@@ -103,6 +103,12 @@ func (self *LevelLogger) Infof(f string, args ...interface{}) {
 	}
 }
 
+func (self *LevelLogger) DebugDepth(d int, l string) {
+	if self.Logger != nil && self.Level() >= LOG_DEBUG {
+		self.Logger.Output(2+d, l)
+	}
+}
+
 func (self *LevelLogger) Debugf(f string, args ...interface{}) {
 	if self.Logger != nil && self.Level() >= LOG_DEBUG {
 		self.Logger.Output(2, fmt.Sprintf(f, args...))

@@ -386,7 +386,7 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 	if cond.EndKey == nil {
 		max = encodeHsetIndexStopKey(self.Table, self.Name)
 	}
-	if self.ValueType == Int64V {
+	if self.ValueType == Int64V || self.ValueType == Int32V {
 		if cond.StartKey != nil {
 			sn, err := strconv.ParseInt(string(cond.StartKey), 10, 64)
 			if err != nil {
@@ -445,7 +445,7 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 		if self.Unique == 1 {
 			pk = it.Value()
 		} else {
-			if self.ValueType == Int64V {
+			if self.ValueType == Int64V || self.ValueType == Int32V {
 				_, _, _, pk, err = decodeHsetIndexNumberKey(it.Key())
 			} else if self.ValueType == StringV {
 				_, _, _, pk, err = decodeHsetIndexStringKey(it.Key())
@@ -475,7 +475,7 @@ func (self *HsetIndex) UpdateRec(oldvalue []byte, value []byte, pk []byte, wb *g
 	if oldvalue != nil {
 		self.RemoveRec(oldvalue, pkkey, wb)
 	}
-	if self.ValueType == Int64V {
+	if self.ValueType == Int64V || self.ValueType == Int32V {
 		n, err := strconv.ParseInt(string(value), 10, 64)
 		if err != nil {
 			return err
@@ -497,7 +497,7 @@ func (self *HsetIndex) RemoveRec(value []byte, pk []byte, wb *gorocksdb.WriteBat
 	if self.Unique == 1 {
 		pk = nil
 	}
-	if self.ValueType == Int64V {
+	if self.ValueType == Int64V || self.ValueType == Int32V {
 		n, err := strconv.ParseInt(string(value), 10, 64)
 		if err != nil {
 			return

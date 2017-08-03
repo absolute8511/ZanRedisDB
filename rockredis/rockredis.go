@@ -196,7 +196,6 @@ type RockDB struct {
 	indexMgr         *IndexMgr
 	ttlChecker       *TTLChecker
 	isBatching       int32
-	dbMutex          sync.Mutex
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -325,10 +324,8 @@ func (r *RockDB) GetDataDir() string {
 
 func (r *RockDB) reOpenEng() error {
 	var err error
-	r.dbMutex.Lock()
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	r.indexMgr = NewIndexMgr()
-	r.dbMutex.Unlock()
 	if err == nil {
 		err = r.indexMgr.LoadIndexes(r)
 		if err != nil {
@@ -343,16 +340,12 @@ func (r *RockDB) reOpenEng() error {
 }
 
 func (r *RockDB) getDBEng() *gorocksdb.DB {
-	r.dbMutex.Lock()
 	e := r.eng
-	r.dbMutex.Unlock()
 	return e
 }
 
 func (r *RockDB) getIndexer() *IndexMgr {
-	r.dbMutex.Lock()
 	e := r.indexMgr
-	r.dbMutex.Unlock()
 	return e
 }
 

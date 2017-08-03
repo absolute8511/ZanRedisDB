@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+var (
+	ErrInvalidSchema = errors.New("invalid schema info")
+)
+
 func getIndexSchemasFromDataNode(remoteNode string, ns string, table string) (map[string]*common.IndexSchema, error) {
 	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
 	rsp := make(map[string]*common.IndexSchema)
@@ -126,6 +130,9 @@ func (self *PDCoordinator) doSchemaCheck() {
 }
 
 func (self *PDCoordinator) addHIndexSchema(ns string, table string, hindex *common.HsetIndexSchema) error {
+	if !hindex.IsValidNewSchema() {
+		return ErrInvalidSchema
+	}
 	var indexes common.IndexSchema
 	var newSchema SchemaInfo
 

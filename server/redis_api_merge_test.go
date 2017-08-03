@@ -56,7 +56,7 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
 	kv := NewServer(kvOpts)
-	_, err = kv.InitKVNamespace(1, nsConf, false)
+	n, err := kv.InitKVNamespace(1, nsConf, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
@@ -72,7 +72,6 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
-	testNamespaces[nsConf1.Name] = n1
 
 	nsConf2 := node.NewNSConfig()
 	nsConf2.Name = "default-2"
@@ -86,10 +85,12 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
-	testNamespaces[nsConf2.Name] = n2
 
 	kv.Start()
 	time.Sleep(time.Second)
+	testNamespaces[nsConf.Name] = n
+	testNamespaces[nsConf1.Name] = n1
+	testNamespaces[nsConf2.Name] = n2
 	return kv, redisportMerge, tmpDir
 }
 
@@ -338,6 +339,7 @@ func TestHindexMergeSearch(t *testing.T) {
 
 	ns := "default"
 	table := "test_hashindex"
+	indexField := "test_f"
 	sc := &node.SchemaChange{
 		Type:       node.SchemaChangeAddHsetIndex,
 		Table:      table,
@@ -345,7 +347,7 @@ func TestHindexMergeSearch(t *testing.T) {
 	}
 	hindex := &common.HsetIndexSchema{
 		Name:       "hindex_test",
-		IndexField: "test_f",
+		IndexField: indexField,
 		ValueType:  common.Int32V,
 		State:      common.InitIndex,
 	}
@@ -371,12 +373,62 @@ func TestHindexMergeSearch(t *testing.T) {
 	}
 
 	time.Sleep(time.Second)
-
 	for i := 0; i < 20; i++ {
 		_, err := c.Do("hset", ns+":"+table+":"+fmt.Sprintf("%d", i), "test_f", []byte(fmt.Sprintf("%d", i)))
 		assert.Nil(t, err)
+		_, err = c.Do("hset", ns+":"+table+":"+fmt.Sprintf("%d", i), "test_f2", []byte(fmt.Sprintf("%d", i+20)))
+		assert.Nil(t, err)
 	}
-	rsp, err := c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hgetall", "$")
+
+	ay, err := goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\""))
 	assert.Nil(t, err)
-	t.Log(rsp)
+	t.Log(ay)
+	assert.Equal(t, 1, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hgetall", "$"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 1, len(ay))
+	kfv, err := goredis.Values(ay[0], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(kfv))
+	assert.Equal(t, []byte("1"), kfv[0].([]byte))
+	fvs, err := goredis.Values(kfv[1], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(fvs))
+
+	fv, err := goredis.Strings(fvs[0], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(fv))
+	assert.Equal(t, "test_f", fv[0])
+	assert.Equal(t, "1", fv[1])
+	fv, err = goredis.Strings(fvs[1], nil)
+	assert.Equal(t, 2, len(fv))
+	assert.Equal(t, "test_f2", fv[0])
+	assert.Equal(t, "21", fv[1])
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hget", "$", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 1, len(ay))
+	kv, err := goredis.Values(ay[0], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(kv))
+	assert.Equal(t, []byte("1"), kv[0].([]byte))
+	assert.Equal(t, []byte("21"), kv[1].([]byte))
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hmget", "$", "test_f", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 1, len(ay))
+	kvv, err := goredis.Values(ay[0], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(kvv))
+	assert.Equal(t, []byte("1"), kvv[0].([]byte))
+	vv, err := goredis.Strings(kvv[1], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(vv))
+	assert.Equal(t, "1", vv[0])
+	assert.Equal(t, "21", vv[1])
 }

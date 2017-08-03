@@ -987,6 +987,11 @@ func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 	}
 }
 
+func (rc *raftNode) Debugf(f string, args ...interface{}) {
+	msg := fmt.Sprintf(f, args...)
+	nodeLog.DebugDepth(1, fmt.Sprintf("%v: %s", rc.Descrp(), msg))
+}
+
 func (rc *raftNode) Infof(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
 	nodeLog.InfoDepth(1, fmt.Sprintf("%v: %s", rc.Descrp(), msg))

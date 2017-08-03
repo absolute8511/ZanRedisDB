@@ -2,6 +2,7 @@ package server
 
 import (
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/redcon"
 )
 
@@ -30,13 +31,27 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 	// TODO: maybe sort search results by field from all partitions
 	postCmdResults := make([]interface{}, 0)
 	pkResults := make([][]byte, 0)
+	var table string
 	for _, res := range result {
 		if err, ok := res.(error); ok {
 			conn.WriteError(err.Error() + " : Err handle command " + string(cmd.Args[0]))
 			return
 		}
+		realRes, ok := res.(*node.HindexSearchResults)
+		if !ok {
+			sLog.Infof("invalid response for search : %v, cmd: %v", res, string(cmd.Raw))
+			conn.WriteError("Invalid response type : Err handle command " + string(cmd.Args[0]))
+			return
+		}
+		if table == "" {
+			table = realRes.Table
+		} else if table != realRes.Table {
+			sLog.Infof("search response invalid for across table : %v, %v", table, realRes.Table)
+			conn.WriteError("Invalid response table : Err handle command " + string(cmd.Args[0]))
+			return
+		}
 		if postCmd == "" {
-			pkList, ok := res.([][]byte)
+			pkList, ok := realRes.Rets.([][]byte)
 			if !ok {
 				sLog.Infof("invalid response for search : %v, cmd: %v", res, string(cmd.Raw))
 				conn.WriteError("Invalid response type : Err handle command " + string(cmd.Args[0]))
@@ -45,7 +60,7 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 			// only return hash keys
 			pkResults = append(pkResults, pkList...)
 		} else {
-			realList, ok := res.([]interface{})
+			realList, ok := realRes.Rets.([]interface{})
 			if !ok {
 				sLog.Infof("invalid response for search : %v, cmd: %v", res, string(cmd.Raw))
 				conn.WriteError("Invalid response type : Err handle command " + string(cmd.Args[0]))
@@ -63,7 +78,11 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 				conn.WriteNull()
 			} else {
 				conn.WriteArray(2)
-				conn.WriteBulk(realRes.Key)
+				if len(realRes.Key) > len(table) {
+					conn.WriteBulk(realRes.Key[len(table)+1:])
+				} else {
+					conn.WriteBulk(realRes.Key)
+				}
 				conn.WriteBulk(realRes.Value)
 			}
 		}
@@ -75,7 +94,11 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 				conn.WriteNull()
 			} else {
 				conn.WriteArray(2)
-				conn.WriteBulk(realRes.PK)
+				if len(realRes.PK) > len(table) {
+					conn.WriteBulk(realRes.PK[len(table)+1:])
+				} else {
+					conn.WriteBulk(realRes.PK)
+				}
 				conn.WriteArray(len(realRes.Vals))
 				for _, v := range realRes.Vals {
 					conn.WriteBulk(v)
@@ -90,7 +113,12 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 				conn.WriteNull()
 			} else {
 				conn.WriteArray(2)
-				conn.WriteBulk(realRes.PK)
+				if len(realRes.PK) > len(table) {
+					conn.WriteBulk(realRes.PK[len(table)+1:])
+				} else {
+					conn.WriteBulk(realRes.PK)
+				}
+
 				conn.WriteArray(len(realRes.Vals))
 				for _, v := range realRes.Vals {
 					if v.Err != nil {
@@ -106,7 +134,11 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 	case "":
 		conn.WriteArray(len(pkResults))
 		for _, v := range pkResults {
-			conn.WriteBulk(v)
+			if len(v) > len(table) {
+				conn.WriteBulk(v[len(table)+1:])
+			} else {
+				conn.WriteBulk(v)
+			}
 		}
 	default:
 		conn.WriteError(common.ErrInvalidArgs.Error())

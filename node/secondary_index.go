@@ -5,7 +5,14 @@ import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/redcon"
+	"strconv"
+	"strings"
 )
+
+type HindexSearchResults struct {
+	Table string
+	Rets  interface{}
+}
 
 func parseSingleCond(condData []byte, indexCond *rockredis.IndexCondition) ([]byte, error) {
 	condData = bytes.TrimSpace(condData)
@@ -47,7 +54,10 @@ func parseIndexQueryWhere(whereData []byte) ([]byte, *rockredis.IndexCondition, 
 	if len(andConds) != 1 && len(andConds) != 2 {
 		return nil, nil, common.ErrInvalidArgs
 	}
-	indexCond := &rockredis.IndexCondition{}
+	indexCond := &rockredis.IndexCondition{
+		Offset: 0,
+		Limit:  -1,
+	}
 	field, err := parseSingleCond(andConds[0], indexCond)
 	if err != nil {
 		return nil, nil, err
@@ -64,9 +74,25 @@ func parseIndexQueryWhere(whereData []byte) ([]byte, *rockredis.IndexCondition, 
 	return field, indexCond, nil
 }
 
-// HIDX.FROM ns:table where "field1 > 1 and field1 < 2" HGET $ field2
-// HIDX.FROM ns:table where "field1 > 1 and field1 < 2" HGETALL $
-// HIDX.FROM {namespace:table} WHERE {WHERE clause} {ANY REDIS COMMAND}
+func parseIndexQueryLimit(args [][]byte) (int, int, error) {
+	if len(args) < 3 || strings.ToLower(string(args[0])) != "limit" {
+		return 0, 0, common.ErrInvalidArgs
+	}
+	var offset int
+	var count int
+	var err error
+	if offset, err = strconv.Atoi(string(args[1])); err != nil {
+		return 0, 0, common.ErrInvalidArgs
+	}
+	if count, err = strconv.Atoi(string(args[2])); err != nil {
+		return 0, 0, common.ErrInvalidArgs
+	}
+	return offset, count, nil
+}
+
+// HIDX.FROM ns:table where "field1 > 1 and field1 < 2" [LIMIT offset num] [HGET $ field2]
+// HIDX.FROM ns:table where "field1 > 1 and field1 < 2" [LIMIT offset num] HGETALL $
+// HIDX.FROM {namespace:table} WHERE {WHERE clause} [LIMIT offset num] [ANY HASH REDIS COMMAND]
 func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 4 {
 		return nil, common.ErrInvalidArgs
@@ -77,19 +103,30 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 	}
 	cmd.Args[1] = table
 
-	self.rn.Infof("parsing where condition: %v", string(cmd.Args[3]))
+	self.rn.Debugf("parsing where condition: %v", string(cmd.Args[3]))
 	field, cond, err := parseIndexQueryWhere(cmd.Args[3])
 	if err != nil {
 		return nil, err
 	}
-	self.rn.Infof("parsing where condition result: %v, field: %v", cond, string(field))
+	args := cmd.Args[4:]
+	if len(args) >= 3 && bytes.Equal(bytes.ToLower(args[0]), []byte("limit")) {
+		offset, count, err := parseIndexQueryLimit(args)
+		if err != nil {
+			return nil, err
+		}
+		cond.Offset = offset
+		cond.Limit = count
+		args = args[3:]
+	}
+	self.rn.Debugf("table %v parsing where condition result: %v, field: %v", string(table), cond, string(field))
 	_, pkList, err := self.store.HsetIndexSearch(table, field, cond, false)
 	if err != nil {
 		self.rn.Infof("search %v, %v error: %v", string(table), string(field), err)
 		return nil, err
 	}
-	if len(cmd.Args) >= 5 {
-		postCmdArgs := cmd.Args[4:]
+	self.rn.Debugf("search result count: %v", len(pkList))
+	if len(args) > 0 {
+		postCmdArgs := args
 		if len(postCmdArgs) < 2 {
 			return nil, common.ErrInvalidArgs
 		}
@@ -133,8 +170,8 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 		default:
 			return nil, common.ErrNotSupport
 		}
-		return rets, nil
+		return &HindexSearchResults{Table: string(table), Rets: rets}, nil
 	} else {
-		return pkList, nil
+		return &HindexSearchResults{Table: string(table), Rets: pkList}, nil
 	}
 }

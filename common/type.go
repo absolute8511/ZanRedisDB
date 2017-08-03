@@ -277,6 +277,7 @@ const (
 	BuildDoneIndex IndexState = 2
 	ReadyIndex     IndexState = 3
 	DeletedIndex   IndexState = 4
+	MaxIndexState  IndexState = 5
 )
 
 type IndexPropertyDType int32
@@ -285,6 +286,7 @@ const (
 	Int64V  IndexPropertyDType = 0
 	Int32V  IndexPropertyDType = 1
 	StringV IndexPropertyDType = 2
+	MaxVT   IndexPropertyDType = 3
 )
 
 type HsetIndexSchema struct {
@@ -294,6 +296,10 @@ type HsetIndexSchema struct {
 	Unique     int32              `json:"unique"`
 	ValueType  IndexPropertyDType `json:"value_type"`
 	State      IndexState         `json:"state"`
+}
+
+func (s *HsetIndexSchema) IsValidNewSchema() bool {
+	return s.Name != "" && s.IndexField != "" && s.ValueType < MaxVT && s.State < MaxIndexState
 }
 
 type JsonIndexSchema struct {
