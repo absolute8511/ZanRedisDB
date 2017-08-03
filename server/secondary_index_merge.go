@@ -71,13 +71,13 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 	}
 	switch postCmd {
 	case "hget":
-		conn.WriteArray(len(postCmdResults))
+		conn.WriteArray(len(postCmdResults) * 2)
 		for _, res := range postCmdResults {
 			realRes, ok := res.(common.KVRecord)
 			if !ok {
 				conn.WriteNull()
+				conn.WriteNull()
 			} else {
-				conn.WriteArray(2)
 				if len(realRes.Key) > len(table) {
 					conn.WriteBulk(realRes.Key[len(table)+1:])
 				} else {
@@ -87,13 +87,13 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 			}
 		}
 	case "hmget":
-		conn.WriteArray(len(postCmdResults))
+		conn.WriteArray(len(postCmdResults) * 2)
 		for _, res := range postCmdResults {
 			realRes, ok := res.(common.KVals)
 			if !ok {
 				conn.WriteNull()
+				conn.WriteNull()
 			} else {
-				conn.WriteArray(2)
 				if len(realRes.PK) > len(table) {
 					conn.WriteBulk(realRes.PK[len(table)+1:])
 				} else {
@@ -106,25 +106,24 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 			}
 		}
 	case "hgetall":
-		conn.WriteArray(len(postCmdResults))
+		conn.WriteArray(len(postCmdResults) * 2)
 		for _, res := range postCmdResults {
 			realRes, ok := res.(common.KFVals)
 			if !ok {
 				conn.WriteNull()
+				conn.WriteNull()
 			} else {
-				conn.WriteArray(2)
 				if len(realRes.PK) > len(table) {
 					conn.WriteBulk(realRes.PK[len(table)+1:])
 				} else {
 					conn.WriteBulk(realRes.PK)
 				}
 
-				conn.WriteArray(len(realRes.Vals))
+				conn.WriteArray(len(realRes.Vals) * 2)
 				for _, v := range realRes.Vals {
 					if v.Err != nil {
 						conn.WriteNull()
 					} else {
-						conn.WriteArray(2)
 						conn.WriteBulk(v.Rec.Key)
 						conn.WriteBulk(v.Rec.Value)
 					}

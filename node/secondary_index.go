@@ -93,6 +93,8 @@ func parseIndexQueryLimit(args [][]byte) (int, int, error) {
 // HIDX.FROM ns:table where "field1 > 1 and field1 < 2" [LIMIT offset num] [HGET $ field2]
 // HIDX.FROM ns:table where "field1 > 1 and field1 < 2" [LIMIT offset num] HGETALL $
 // HIDX.FROM {namespace:table} WHERE {WHERE clause} [LIMIT offset num] [ANY HASH REDIS COMMAND]
+// handle (xx and xx) or (xx and xx), get the min and max range and iterator in the possible range,
+// match all the conditions to decide whether the cursor should be returned
 func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 4 {
 		return nil, common.ErrInvalidArgs
@@ -103,6 +105,9 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 	}
 	cmd.Args[1] = table
 
+	if strings.ToLower(string(cmd.Args[2])) != "where" {
+		return nil, common.ErrInvalidArgs
+	}
 	self.rn.Debugf("parsing where condition: %v", string(cmd.Args[3]))
 	field, cond, err := parseIndexQueryWhere(cmd.Args[3])
 	if err != nil {
