@@ -323,6 +323,18 @@ func (r *RockDB) GetDataDir() string {
 	return path.Join(r.cfg.DataDir, "rocksdb")
 }
 
+func (r *RockDB) TheSameDBWithOtherWriteBatch(wb *gorocksdb.WriteBatch) *RockDB {
+	return &RockDB{
+		expiration:       r.expiration,
+		cfg:              r.cfg,
+		eng:              r.eng,
+		dbOpts:           r.dbOpts,
+		defaultWriteOpts: r.defaultWriteOpts,
+		defaultReadOpts:  r.defaultReadOpts,
+		wb:               wb,
+	}
+}
+
 func (r *RockDB) reOpenEng() error {
 	var err error
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())

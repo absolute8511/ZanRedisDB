@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -11,12 +12,13 @@ import (
 )
 
 var (
-	expireCmds [common.ALL - common.NONE][]byte
+	expireCmds                [common.ALL - common.NONE][]byte
+	ErrExpiredBatchedBuffFull = errors.New("the expired data batched buffer is full now")
 )
 
 const (
 	expiredBuffedCommitInterval = 1
-	raftBatchBufferSize         = 1024
+	raftBatchBufferSize         = 1024 * 4
 )
 
 func init() {
@@ -229,7 +231,11 @@ func (self *ExpireHandler) Stop() {
 }
 
 func (self *ExpireHandler) LeaderChanged() {
-	self.leaderChangedCh <- struct{}{}
+	select {
+	case self.leaderChangedCh <- struct{}{}:
+	case <-self.quitC:
+		return
+	}
 }
 
 func (self *ExpireHandler) watchLeaderChanged() {
@@ -300,28 +306,28 @@ func (self *ExpireHandler) applyExpiration(stop chan struct{}) {
 		nodeLog.Infof("apply expiration has been stopped")
 	}()
 
-	self.wg.Add(1)
-	go func(buffer *raftExpiredBuffer, stop chan struct{}) {
-		defer self.wg.Done()
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				buffer.CommitAll()
-			case <-stop:
-				return
-			}
-		}
-	}(self.batchBuffer, stop)
-
 	for {
 		select {
 		case <-checkTicker.C:
-			if err := self.node.store.CheckExpiredData(self.batchBuffer, stop); err != nil {
-				nodeLog.Errorf("check expired data by the underlying storage system failed, err:%s", err.Error())
+			for {
+				err := self.node.store.CheckExpiredData(self.batchBuffer, stop)
+				select {
+				case <-stop:
+					return
+				default:
+					self.batchBuffer.CommitAll()
+				}
+
+				//start the next check immediately if the check stopped because of the buffer is full
+				if err == ErrExpiredBatchedBuffFull {
+					continue
+				}
+
+				if err != nil {
+					nodeLog.Errorf("check expired data by the underlying storage system failed, err:%s", err.Error())
+				}
+				break
 			}
-			self.batchBuffer.CommitAll()
 		case <-stop:
 			return
 		}
@@ -346,14 +352,7 @@ func newRaftExpiredBuffer(nd *KVNode) *raftExpiredBuffer {
 }
 
 func (raftBuffer *raftExpiredBuffer) Write(dt common.DataType, key []byte) error {
-	raftBuffer.internalBuf[dt].propose(key)
-	return nil
-}
-
-// always return false as the expired data stored at the internal buffers would
-// be handled automatically when the buffer is full
-func (raftBuffer *raftExpiredBuffer) Full() bool {
-	return false
+	return raftBuffer.internalBuf[dt].propose(key)
 }
 
 func (raftBuffer *raftExpiredBuffer) CommitAll() {
@@ -387,14 +386,16 @@ func newRaftBatchBuffer(nd *KVNode, dt common.DataType) *raftBatchBuffer {
 	}
 }
 
-func (rb *raftBatchBuffer) propose(key []byte) {
+func (rb *raftBatchBuffer) propose(key []byte) error {
+	defer rb.Unlock()
 	rb.Lock()
-	rb.keys = append(rb.keys, key)
+
 	if len(rb.keys) >= raftBatchBufferSize {
-		rb.node.Propose(buildRawExpireCommand(rb.dataType, rb.keys))
-		rb.keys = rb.keys[:0]
+		return ErrExpiredBatchedBuffFull
+	} else {
+		rb.keys = append(rb.keys, key)
 	}
-	rb.Unlock()
+	return nil
 }
 
 func (rb *raftBatchBuffer) commit() {

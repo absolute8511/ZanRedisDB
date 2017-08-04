@@ -106,10 +106,6 @@ type expiredBufferWrapper struct {
 	internal common.ExpiredDataBuffer
 }
 
-func (wrapper *expiredBufferWrapper) Full() bool {
-	return wrapper.internal.Full()
-}
-
 func (wrapper *expiredBufferWrapper) Write(meta *expiredMeta) error {
 	if dt, key, _, err := expDecodeTimeKey(meta.timeKey); err != nil {
 		return err

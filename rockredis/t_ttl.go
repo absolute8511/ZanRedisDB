@@ -94,7 +94,6 @@ type expiredMeta struct {
 
 type expiredMetaBuffer interface {
 	Write(*expiredMeta) error
-	Full() bool
 }
 
 type expiration interface {
@@ -192,7 +191,7 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
 		common.RangeROpen, 0, -1, false)
 	if err != nil {
-		c.setNextCheckTime(now+1, false)
+		c.setNextCheckTime(now, false)
 		return err
 	} else if it == nil {
 		c.setNextCheckTime(nc, true)
@@ -204,7 +203,7 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 		if scanned%100 == 0 {
 			select {
 			case <-stop:
-				nc = now + 1
+				nc = now
 				break
 			default:
 			}
@@ -239,8 +238,8 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 		eCount += 1
 
 		err = expiredBuf.Write(&expiredMeta{timeKey: tk, metaKey: mk, UTC: nt})
-		if err != nil || expiredBuf.Full() {
-			nc = now + 1
+		if err != nil {
+			nc = now
 			break
 		}
 	}

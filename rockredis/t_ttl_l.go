@@ -2,7 +2,6 @@ package rockredis
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -13,6 +12,11 @@ import (
 const (
 	localExpCheckInterval = 300
 	localBatchedBufSize   = 16 * 1024
+)
+
+var (
+	ErrLocalBatchFullToCommit = errors.New("batched is fully filled and should commit right now")
+	ErrLocalBatchedBuffFull   = errors.New("the local batched buffer is fully filled")
 )
 
 type localExpiration struct {
@@ -92,16 +96,17 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 	for {
 		select {
 		case <-t.C:
-			if err := checker.check(exp.localBuffer, stop); err != nil {
+			err := checker.check(exp.localBuffer, stop)
+			if err != nil && err != ErrLocalBatchedBuffFull {
 				dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
 			}
-
 			select {
 			case <-stop:
 				return
 			default:
 				exp.localBuffer.commit()
 			}
+
 		case <-stop:
 			return
 		}
@@ -136,14 +141,11 @@ func newLocalBatchedBuffer(db *RockDB, cap int) *localBatchedBuffer {
 
 func (self *localBatchedBuffer) Write(meta *expiredMeta) error {
 	if len(self.buff) >= self.cap {
-		return fmt.Errorf("the local batched buffer is full, capacity:%d", self.cap)
+		return ErrLocalBatchedBuffFull
+	} else {
+		self.buff = append(self.buff, meta)
+		return nil
 	}
-	self.buff = append(self.buff, meta)
-	return nil
-}
-
-func (self *localBatchedBuffer) Full() bool {
-	return len(self.buff) >= self.cap
 }
 
 func (self *localBatchedBuffer) commit() {
@@ -151,44 +153,35 @@ func (self *localBatchedBuffer) commit() {
 		return
 	}
 
-	db := self.db
-	wb := self.wb
-	wb.Clear()
-
-	for i, v := range self.buff {
+	for _, v := range self.buff {
 		dt, key, _, err := expDecodeTimeKey(v.timeKey)
-		if err != nil {
+		if err != nil || dataType2CommonType(dt) == common.NONE {
 			dbLog.Errorf("decode time-key failed, bad data encounter, err:%s", err.Error())
 			continue
 		}
 
-		if err := self.batched[dataType2CommonType(dt)].propose(key); err != nil {
-			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", TypeName[dt], err.Error())
+		batched := self.batched[dataType2CommonType(dt)]
+
+		err = batched.propose(v.timeKey, v.metaKey, key)
+		if err == ErrLocalBatchFullToCommit {
+			err = batched.commit()
+
+			//propose the expired-data again as the
+			//last propose has failed as the buffer is full
+			batched.propose(v.timeKey, v.metaKey, key)
 		}
-
-		wb.Delete(v.timeKey)
-		wb.Delete(v.metaKey)
-
-		if i%1024 == 0 {
-			if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
-				dbLog.Errorf("delete meta data about expired data failed, err:%s", err.Error())
-			}
-			wb.Clear()
+		if err != nil {
+			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", TypeName[dt], err.Error())
 		}
 	}
 
+	//clean the buffer
 	self.buff = self.buff[:0]
-
 	for t := common.KV; t < common.ALL; t++ {
 		if err := self.batched[t].commit(); err != nil {
 			dbLog.Errorf("batch delete expired data of type:%s failed, err:%s", common.DataType(t).String(), err.Error())
 		}
 	}
-
-	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
-		dbLog.Errorf("delete meta data about expired data failed, %s", err.Error())
-	}
-	wb.Clear()
 }
 
 func (exp *localExpiration) Stop() {
@@ -196,11 +189,13 @@ func (exp *localExpiration) Stop() {
 	exp.wg.Wait()
 }
 
-func createLocalDelFunc(dt common.DataType, db *RockDB) func(keys [][]byte) error {
+func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch) func(keys [][]byte) error {
 	switch dt {
 	case common.KV:
 		return func(keys [][]byte) error {
-			if err := db.BeginBatchWrite(); err != nil {
+			defer wb.Clear()
+			localDB := db.TheSameDBWithOtherWriteBatch(wb)
+			if err := localDB.BeginBatchWrite(); err != nil {
 				return err
 			}
 			db.DelKeys(keys...)
@@ -208,23 +203,37 @@ func createLocalDelFunc(dt common.DataType, db *RockDB) func(keys [][]byte) erro
 		}
 	case common.HASH:
 		return func(keys [][]byte) error {
-			db.HMclear(keys...)
-			return nil
+			defer wb.Clear()
+			for _, hkey := range keys {
+				if err := db.hClearWithBatch(hkey, wb); err != nil {
+					return err
+				}
+			}
+			return db.eng.Write(db.defaultWriteOpts, wb)
 		}
 	case common.LIST:
 		return func(keys [][]byte) error {
-			_, err := db.LMclear(keys...)
-			return err
+			defer wb.Clear()
+			if err := db.lMclearWithBatch(wb, keys...); err != nil {
+				return err
+			}
+			return db.eng.Write(db.defaultWriteOpts, wb)
 		}
 	case common.SET:
 		return func(keys [][]byte) error {
-			_, err := db.SMclear(keys...)
-			return err
+			defer wb.Clear()
+			if err := db.sMclearWithBatch(wb, keys...); err != nil {
+				return err
+			}
+			return db.eng.Write(db.defaultWriteOpts, wb)
 		}
 	case common.ZSET:
 		return func(keys [][]byte) error {
-			_, err := db.ZMclear(keys...)
-			return err
+			defer wb.Clear()
+			if err := db.zMclearWithBatch(wb, keys...); err != nil {
+				return err
+			}
+			return db.eng.Write(db.defaultWriteOpts, wb)
 		}
 	default:
 		return nil
@@ -233,32 +242,18 @@ func createLocalDelFunc(dt common.DataType, db *RockDB) func(keys [][]byte) erro
 
 type localBatch struct {
 	keys       [][]byte
-	db         *RockDB
 	dt         common.DataType
+	wb         *gorocksdb.WriteBatch
 	localDelFn func([][]byte) error
 }
 
 func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
-	// create a db object contains the same storage engine and options as the passed 'db' argument but isolated 'wb'
-	// and 'isBatching' fields. The 'localDB' object will be used to delete the expired data independent of the passed
-	// 'db' object which used by the logical layer.
-	localDB := &RockDB{
-		expiration:       &localExpiration{},
-		cfg:              db.cfg,
-		eng:              db.eng,
-		dbOpts:           db.dbOpts,
-		defaultWriteOpts: db.defaultWriteOpts,
-		defaultReadOpts:  db.defaultReadOpts,
-		wb:               gorocksdb.NewWriteBatch(),
-	}
-
 	batch := &localBatch{
 		dt:   dt,
-		db:   localDB,
+		wb:   gorocksdb.NewWriteBatch(),
 		keys: make([][]byte, 0, 1024),
 	}
-	batch.localDelFn = createLocalDelFunc(dt, localDB)
-
+	batch.localDelFn = createLocalDelFunc(dt, db, batch.wb)
 	return batch
 }
 
@@ -266,21 +261,18 @@ func (batch *localBatch) commit() error {
 	if len(batch.keys) == 0 {
 		return nil
 	}
-	if err := batch.localDelFn(batch.keys); err != nil {
-		return err
-	} else {
-		batch.keys = batch.keys[:0]
-		return nil
-	}
+	err := batch.localDelFn(batch.keys)
+	batch.keys = batch.keys[:0]
+	return err
 }
 
-func (batch *localBatch) propose(key []byte) error {
-	batch.keys = append(batch.keys, key)
+func (batch *localBatch) propose(tk []byte, mk []byte, key []byte) error {
 	if len(batch.keys) >= 1024 {
-		if err := batch.localDelFn(batch.keys); err != nil {
-			return err
-		}
-		batch.keys = batch.keys[:0]
+		return ErrLocalBatchFullToCommit
+	} else {
+		batch.wb.Delete(tk)
+		batch.wb.Delete(mk)
+		batch.keys = append(batch.keys, key)
+		return nil
 	}
-	return nil
 }

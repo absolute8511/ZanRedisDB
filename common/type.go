@@ -304,7 +304,6 @@ type ScanResult struct {
 
 type ExpiredDataBuffer interface {
 	Write(DataType, []byte) error
-	Full() bool
 }
 
 type FullScanResult struct {

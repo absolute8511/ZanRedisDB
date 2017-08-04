@@ -779,6 +779,19 @@ func (db *RockDB) ZMclear(keys ...[]byte) (int64, error) {
 	return int64(len(keys)), err
 }
 
+func (db *RockDB) zMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
+	if len(keys) > MAX_BATCH_NUM {
+		return errTooMuchBatchSize
+	}
+	for _, key := range keys {
+		if _, err := db.zRemRange(key, MinScore, MaxScore, 0, -1, wb); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *RockDB) ZRange(key []byte, start int, stop int) ([]common.ScorePair, error) {
 	return db.ZRangeGeneric(key, start, stop, false)
 }
