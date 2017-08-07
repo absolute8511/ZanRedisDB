@@ -5,7 +5,6 @@ import (
 	"errors"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -17,11 +16,8 @@ var (
 	errExpTimeKey = errors.New("invalid expire time key")
 )
 
-type OnExpiredFunc func([]byte) error
-
 const (
-	expireCheckInterval = 1
-	logTimeFormatStr    = "2006-01-02 15:04:05"
+	logTimeFormatStr = "2006-01-02 15:04:05"
 )
 
 var errExpType = errors.New("invalid expire type")
@@ -90,39 +86,28 @@ func expDecodeTimeKey(tk []byte) (byte, []byte, int64, error) {
 	return tk[pos+9], tk[pos+10:], int64(binary.BigEndian.Uint64(tk[pos+1:])), nil
 }
 
+type expiredMeta struct {
+	timeKey []byte
+	metaKey []byte
+	UTC     int64
+}
+
+type expiredMetaBuffer interface {
+	Write(*expiredMeta) error
+}
+
+type expiration interface {
+	rawExpireAt(byte, []byte, int64, *gorocksdb.WriteBatch) error
+	expireAt(byte, []byte, int64) error
+	ttl(byte, []byte) (int64, error)
+	delExpire(byte, []byte, *gorocksdb.WriteBatch) error
+	check(common.ExpiredDataBuffer, chan struct{}) error
+	Start()
+	Stop()
+}
+
 func (db *RockDB) expire(dataType byte, key []byte, duration int64) error {
-	return db.expireAt(dataType, key, time.Now().Unix()+duration)
-}
-
-func (db *RockDB) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch) error {
-	mk := expEncodeMetaKey(dataType, key)
-	tk := expEncodeTimeKey(dataType, key, when)
-
-	wb.Put(tk, mk)
-	wb.Put(mk, PutInt64(when))
-
-	db.ttlChecker.setNextCheckTime(when, false)
-
-	return nil
-}
-
-func (db *RockDB) expireAt(dataType byte, key []byte, when int64) error {
-	mk := expEncodeMetaKey(dataType, key)
-
-	wb := db.wb
-	wb.Clear()
-
-	tk := expEncodeTimeKey(dataType, key, when)
-
-	wb.Put(tk, mk)
-	wb.Put(mk, PutInt64(when))
-
-	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
-		return err
-	} else {
-		db.ttlChecker.setNextCheckTime(when, false)
-		return nil
-	}
+	return db.expiration.expireAt(dataType, key, time.Now().Unix()+duration)
 }
 
 func (db *RockDB) KVTtl(key []byte) (t int64, err error) {
@@ -145,108 +130,23 @@ func (db *RockDB) ZSetTtl(key []byte) (t int64, err error) {
 	return db.ttl(ZSetType, key)
 }
 
-func (db *RockDB) ttl(dataType byte, key []byte) (t int64, err error) {
-	mk := expEncodeMetaKey(dataType, key)
-
-	if t, err = Int64(db.eng.GetBytes(db.defaultReadOpts, mk)); err != nil || t == 0 {
-		t = -1
-	} else {
-		t -= time.Now().Unix()
-		if t <= 0 {
-			t = -1
-		}
-
-		//TODO, if the key has expired, remove it right now
-		// if t == -1 : to remove ????
-	}
-
-	return t, err
-}
-
-func (db *RockDB) delExpire(dataType byte, key []byte, wb *gorocksdb.WriteBatch) error {
-	mk := expEncodeMetaKey(dataType, key)
-
-	wb.Delete(mk)
-	return nil
-}
-
 type TTLChecker struct {
 	sync.Mutex
-	db *RockDB
 
-	cbs      map[byte]OnExpiredFunc
-	quitC    chan struct{}
-	checking int32
+	db       *RockDB
+	watching int32
+	wg       sync.WaitGroup
 
 	//next check time
 	nc int64
 }
 
-func NewTTLChecker(db *RockDB) *TTLChecker {
+func newTTLChecker(db *RockDB) *TTLChecker {
 	c := &TTLChecker{
-		db:  db,
-		cbs: make(map[byte]OnExpiredFunc),
-		nc:  time.Now().Unix(),
+		db: db,
+		nc: time.Now().Unix(),
 	}
-
 	return c
-}
-
-func (c *TTLChecker) Start() {
-	c.Lock()
-	if atomic.CompareAndSwapInt32(&c.checking, 0, 1) {
-		dbLog.Infof("ttl checker started")
-		defer dbLog.Infof("ttl checker exit")
-		c.quitC = make(chan struct{})
-
-		c.Unlock()
-
-		cTicker := time.NewTicker(time.Second * expireCheckInterval)
-		defer cTicker.Stop()
-
-		for {
-			select {
-			case <-cTicker.C:
-				c.check(c.quitC)
-			case <-c.quitC:
-				return
-			}
-		}
-	} else {
-		c.Unlock()
-	}
-}
-
-func (c *TTLChecker) Stop() {
-	c.Lock()
-	if atomic.CompareAndSwapInt32(&c.checking, 1, 0) {
-		close(c.quitC)
-	}
-	c.Unlock()
-}
-
-func (c *TTLChecker) RegisterKVExpired(f OnExpiredFunc) {
-	c.register(KVType, f)
-}
-
-func (c *TTLChecker) RegisterListExpired(f OnExpiredFunc) {
-	c.register(ListType, f)
-}
-
-func (c *TTLChecker) RegisterSetExpired(f OnExpiredFunc) {
-	c.register(SetType, f)
-}
-
-func (c *TTLChecker) RegisterZSetExpired(f OnExpiredFunc) {
-	c.register(ZSetType, f)
-}
-
-func (c *TTLChecker) RegisterHashExpired(f OnExpiredFunc) {
-	c.register(HashType, f)
-}
-
-func (c *TTLChecker) register(dataType byte, f OnExpiredFunc) {
-	c.cbs[dataType] = f
 }
 
 func (c *TTLChecker) setNextCheckTime(when int64, force bool) {
@@ -259,7 +159,7 @@ func (c *TTLChecker) setNextCheckTime(when int64, force bool) {
 	c.Unlock()
 }
 
-func (c *TTLChecker) check(stopChan chan struct{}) {
+func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -276,7 +176,7 @@ func (c *TTLChecker) check(stopChan chan struct{}) {
 	c.Unlock()
 
 	if now < nc {
-		return
+		return nil
 	}
 
 	nc = now + 3600
@@ -291,21 +191,19 @@ func (c *TTLChecker) check(stopChan chan struct{}) {
 	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
 		common.RangeROpen, 0, -1, false)
 	if err != nil {
-		return
+		c.setNextCheckTime(now, false)
+		return err
+	} else if it == nil {
+		c.setNextCheckTime(nc, true)
+		return nil
 	}
 	defer it.Close()
-	if err != nil {
-		nc = now + 1
-		return
-	} else if it == nil || !it.Valid() {
-		return
-	}
 
 	for ; it.Valid(); it.Next() {
-
 		if scanned%100 == 0 {
 			select {
-			case <-stopChan:
+			case <-stop:
+				nc = now
 				break
 			default:
 			}
@@ -313,46 +211,43 @@ func (c *TTLChecker) check(stopChan chan struct{}) {
 		tk := it.Key()
 		mk := it.Value()
 
-		dt, k, nt, err := expDecodeTimeKey(tk)
-		if err != nil {
+		if tk == nil {
 			continue
 		}
-		scanned += 1
 
+		dt, k, nt, dErr := expDecodeTimeKey(tk)
+		if dErr != nil {
+			continue
+		}
+
+		scanned += 1
 		if scanned == 1 {
 			//log the first scanned key
-			dbLog.Infof("ttl check start at key:[%s] of type:%d whose expire time is: %s", string(k),
-				dt, time.Unix(nt, 0).Format(logTimeFormatStr))
+			dbLog.Infof("ttl check start at key:[%s] of type:%s whose expire time is: %s", string(k),
+				TypeName[dt], time.Unix(nt, 0).Format(logTimeFormatStr))
 		}
 
 		if nt > now {
 			//the next ttl check time is nt!
 			nc = nt
-			dbLog.Infof("ttl check end at key:[%s] of type:%d whose expire time is: %s", string(k),
-				dt, time.Unix(nt, 0).Format(logTimeFormatStr))
+			dbLog.Infof("ttl check end at key:[%s] of type:%s whose expire time is: %s", string(k),
+				TypeName[dt], time.Unix(nt, 0).Format(logTimeFormatStr))
 			break
 		}
 
-		cb := c.cbs[dt]
-		if tk == nil || cb == nil {
-			continue
-		}
+		eCount += 1
 
-		// never use read lock in iterator since it may cause deadlock
-		if exp, err := Int64(c.db.eng.GetBytesNoLock(c.db.defaultReadOpts, mk)); err == nil {
-			// check expire again
-			if exp <= now {
-				cb(k)
-				eCount += 1
-			}
+		err = expiredBuf.Write(&expiredMeta{timeKey: tk, metaKey: mk, UTC: nt})
+		if err != nil {
+			nc = now
+			break
 		}
 	}
 
 	c.setNextCheckTime(nc, true)
 
 	checkCost := time.Since(checkStart).Nanoseconds() / 1000
-	dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us, the next checking will start at: %s",
-		eCount, scanned, checkCost, time.Unix(nc, 0).Format(logTimeFormatStr))
+	dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us", eCount, scanned, checkCost)
 
-	return
+	return err
 }

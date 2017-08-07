@@ -82,6 +82,8 @@ type KVNode struct {
 	commitC           <-chan applyInfo
 	committedIndex    uint64
 	clusterInfo       common.IClusterInfo
+	expireHandler     *ExpireHandler
+	expirationPolicy  common.ExpirationPolicy
 }
 
 type KVSnapInfo struct {
@@ -113,19 +115,20 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:   make(chan *internalReq, 200),
-		stopChan:      make(chan struct{}),
-		store:         store,
-		w:             wait.New(),
-		router:        common.NewCmdRouter(),
-		deleteCb:      deleteCb,
-		ns:            config.GroupName,
-		machineConfig: machineConfig,
+		reqProposeC:      make(chan *internalReq, 200),
+		stopChan:         make(chan struct{}),
+		store:            store,
+		w:                wait.New(),
+		router:           common.NewCmdRouter(),
+		deleteCb:         deleteCb,
+		ns:               config.GroupName,
+		machineConfig:    machineConfig,
+		expirationPolicy: kvopts.ExpirationPolicy,
 	}
 	s.clusterInfo = clusterInfo
+	s.expireHandler = NewExpireHandler(s)
 
 	s.registerHandler()
-	s.registerExpiredCallBack()
 
 	commitC, raftNode, err := newRaftNode(config, transport,
 		join, s, newLeaderChan)
@@ -153,6 +156,13 @@ func (self *KVNode) Start(standalone bool) error {
 		defer self.wg.Done()
 		self.handleProposeReq()
 	}()
+
+	self.wg.Add(1)
+	go func() {
+		defer self.wg.Done()
+		self.expireHandler.Start()
+	}()
+
 	return nil
 }
 
@@ -166,6 +176,7 @@ func (self *KVNode) Stop() {
 	}
 	close(self.stopChan)
 	go self.deleteCb()
+	self.expireHandler.Stop()
 	self.wg.Wait()
 	self.rn.StopNode()
 	self.store.Close()
@@ -250,13 +261,6 @@ func (self *KVNode) CleanData() error {
 	if err := self.store.CleanData(); err != nil {
 		return err
 	}
-
-	//the ttlChecker should be reset after the store cleaned
-	self.registerExpiredCallBack()
-
-	if self.IsLead() {
-		self.store.StartTTLChecker()
-	}
 	return nil
 }
 
@@ -266,14 +270,6 @@ func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
 
 func (self *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool) {
 	return self.router.GetMergeCmdHandler(cmd)
-}
-
-func (self *KVNode) registerExpiredCallBack() {
-	self.store.RegisterKVExpired(self.createOnExpiredFunc("del"))
-	self.store.RegisterListExpired(self.createOnExpiredFunc("lclear"))
-	self.store.RegisterHashExpired(self.createOnExpiredFunc("hclear"))
-	self.store.RegisterSetExpired(self.createOnExpiredFunc("sclear"))
-	self.store.RegisterZSetExpired(self.createOnExpiredFunc("zclear"))
 }
 
 func (self *KVNode) registerHandler() {
@@ -382,6 +378,7 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterInternal("hdel", self.localHDelCommand)
 	self.router.RegisterInternal("hincrby", self.localHIncrbyCommand)
 	self.router.RegisterInternal("hclear", self.localHclearCommand)
+	self.router.RegisterInternal("hmclear", self.localHMClearCommand)
 	// list
 	self.router.RegisterInternal("lpop", self.localLpopCommand)
 	self.router.RegisterInternal("lpush", self.localLpushCommand)
@@ -390,6 +387,7 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterInternal("rpop", self.localRpopCommand)
 	self.router.RegisterInternal("rpush", self.localRpushCommand)
 	self.router.RegisterInternal("lclear", self.localLclearCommand)
+	self.router.RegisterInternal("lmclear", self.localLMClearCommand)
 	// zset
 	self.router.RegisterInternal("zadd", self.localZaddCommand)
 	self.router.RegisterInternal("zincrby", self.localZincrbyCommand)
@@ -398,6 +396,7 @@ func (self *KVNode) registerHandler() {
 	self.router.RegisterInternal("zremrangebyscore", self.localZremrangebyscoreCommand)
 	self.router.RegisterInternal("zremrangebylex", self.localZremrangebylexCommand)
 	self.router.RegisterInternal("zclear", self.localZclearCommand)
+	self.router.RegisterInternal("zmclear", self.localZMClearCommand)
 	// set
 	self.router.RegisterInternal("sadd", self.localSadd)
 	self.router.RegisterInternal("srem", self.localSrem)
@@ -810,7 +809,7 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 								if !batching {
 									err := self.store.BeginBatchWrite()
 									if err != nil {
-										self.rn.Infof("bengin batch command %v failed: %v, %v", cmdName, cmd, err)
+										self.rn.Infof("begin batch command %v failed: %v, %v", cmdName, string(cmd.Raw), err)
 										self.w.Trigger(reqID, err)
 										continue
 									}
@@ -1249,12 +1248,10 @@ func (self *KVNode) ReportMeLeaderToCluster() {
 
 // should not block long in this
 func (self *KVNode) OnRaftLeaderChanged() {
+	self.expireHandler.LeaderChanged()
+
 	if self.rn.IsLead() {
 		go self.ReportMeLeaderToCluster()
-		//leader should start the TTLChecker to handle the expired data
-		self.store.StartTTLChecker()
-	} else {
-		self.store.StopTTLChecker()
 	}
 }
 

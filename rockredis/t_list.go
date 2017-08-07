@@ -670,6 +670,7 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 			return 0, err
 		}
 		db.lDelete(key, db.wb)
+		db.delExpire(ListType, key, db.wb)
 	}
 	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	if err != nil {
@@ -677,6 +678,21 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 	}
 
 	return int64(len(keys)), err
+}
+
+func (db *RockDB) lMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
+	if len(keys) >= MAX_BATCH_NUM {
+		return errTooMuchBatchSize
+	}
+
+	for _, key := range keys {
+		if err := checkKeySize(key); err != nil {
+			return err
+		}
+		db.lDelete(key, wb)
+		db.delExpire(ListType, key, wb)
+	}
+	return nil
 }
 
 func (db *RockDB) LKeyExists(key []byte) (int64, error) {

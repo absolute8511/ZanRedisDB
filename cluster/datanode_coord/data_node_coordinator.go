@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	. "github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	node "github.com/absolute8511/ZanRedisDB/node"
 	"net"
 	"path/filepath"
 	"sort"
@@ -14,6 +11,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	. "github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/common"
+	node "github.com/absolute8511/ZanRedisDB/node"
 )
 
 var (
@@ -679,6 +680,7 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.PartitionNum = nsInfo.PartitionNum
 	nsConf.Replicator = nsInfo.Replica
 	nsConf.OptimizedFsync = nsInfo.OptimizedFsync
+	nsConf.ExpirationPolicy = nsInfo.ExpirationPolicy
 	if nsInfo.SnapCount > 100 {
 		nsConf.SnapCount = nsInfo.SnapCount
 		nsConf.SnapCatchup = nsInfo.SnapCount / 4

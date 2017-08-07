@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"strconv"
+
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 var errIntNumber = errors.New("invalid integer")
@@ -241,5 +243,22 @@ func MaxInt64(a int64, b int64) int64 {
 		return a
 	} else {
 		return b
+	}
+}
+
+func dataType2CommonType(t byte) common.DataType {
+	switch t {
+	case KVType:
+		return common.KV
+	case HashType:
+		return common.HASH
+	case ListType:
+		return common.LIST
+	case SetType:
+		return common.SET
+	case ZSetType:
+		return common.ZSET
+	default:
+		return common.NONE
 	}
 }

@@ -99,10 +99,6 @@ func (self *NamespaceNode) GetMembers() []*common.MemberInfo {
 	return self.Node.GetMembers()
 }
 
-func (self *NamespaceNode) StartTTLChecker() {
-	self.Node.store.StartTTLChecker()
-}
-
 func (self *NamespaceNode) Start(forceStandaloneCluster bool) error {
 	if err := self.Node.Start(forceStandaloneCluster); err != nil {
 		return err
@@ -242,6 +238,12 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 	if atomic.LoadInt32(&self.stopping) == 1 {
 		return nil, errStopping
 	}
+
+	expPolicy, err := common.StringToExpirationPolicy(conf.ExpirationPolicy)
+	if err != nil {
+		return nil, err
+	}
+
 	self.mutex.Lock()
 	defer self.mutex.Unlock()
 	if n, ok := self.kvNodes[conf.Name]; ok {
@@ -249,9 +251,10 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 	}
 
 	kvOpts := &KVOptions{
-		DataDir:  path.Join(self.machineConf.DataRootDir, conf.Name),
-		EngType:  conf.EngType,
-		RockOpts: self.machineConf.RocksDBOpts,
+		DataDir:          path.Join(self.machineConf.DataRootDir, conf.Name),
+		EngType:          conf.EngType,
+		RockOpts:         self.machineConf.RocksDBOpts,
+		ExpirationPolicy: expPolicy,
 	}
 	rockredis.FillDefaultOptions(&kvOpts.RockOpts)
 
@@ -503,8 +506,6 @@ func (self *NamespaceMgr) checkNamespaceRaftLeader() {
 			if v.IsReady() {
 				if v.Node.IsLead() {
 					leaderNodes = append(leaderNodes, v)
-				} else {
-					v.Node.store.StopTTLChecker()
 				}
 			}
 		}

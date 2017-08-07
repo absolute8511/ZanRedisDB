@@ -1,6 +1,7 @@
 package node
 
 import (
+	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 )
 
@@ -8,20 +9,22 @@ type NamespaceConfig struct {
 	// namespace full name with partition
 	Name string `json:"name"`
 	// namespace name without partition
-	BaseName       string          `json:"base_name"`
-	EngType        string          `json:"eng_type"`
-	PartitionNum   int             `json:"partition_num"`
-	SnapCount      int             `json:"snap_count"`
-	SnapCatchup    int             `json:"snap_catchup"`
-	Replicator     int             `json:"replicator"`
-	OptimizedFsync bool            `json:"optimized_fsync"`
-	RaftGroupConf  RaftGroupConfig `json:"raft_group_conf"`
+	BaseName         string          `json:"base_name"`
+	EngType          string          `json:"eng_type"`
+	PartitionNum     int             `json:"partition_num"`
+	SnapCount        int             `json:"snap_count"`
+	SnapCatchup      int             `json:"snap_catchup"`
+	Replicator       int             `json:"replicator"`
+	OptimizedFsync   bool            `json:"optimized_fsync"`
+	RaftGroupConf    RaftGroupConfig `json:"raft_group_conf"`
+	ExpirationPolicy string          `json:"expiration_policy"`
 }
 
 func NewNSConfig() *NamespaceConfig {
 	return &NamespaceConfig{
-		SnapCount:   400000,
-		SnapCatchup: 100000,
+		SnapCount:        400000,
+		SnapCatchup:      100000,
+		ExpirationPolicy: common.DefaultExpirationPolicy,
 	}
 }
 

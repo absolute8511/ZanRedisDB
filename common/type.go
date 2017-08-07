@@ -75,6 +75,40 @@ func (d DataType) String() string {
 	}
 }
 
+type ExpirationPolicy byte
+
+const (
+	// LocalDeletion indicates the expired data would be deleted by the underlying storage system automatically and the logical layer
+	// do not need to care about the data expiration. Every node in the cluster should start the 'TTLChecker' of the storage system
+	// with this policy.
+	LocalDeletion ExpirationPolicy = iota
+
+	// ConsistencyDeletion indicates all the expired data should be deleted through Raft, the underlying storage system should
+	// not delete any data and all the expired keys should be sent to the expired channel. Only the leader should starts
+	// the 'TTLChecker' with this policy.
+	ConsistencyDeletion
+
+	//
+	PeriodicalRotation
+
+	UnknownPolicy
+)
+
+const (
+	DefaultExpirationPolicy = "local_deletion"
+)
+
+func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
+	switch s {
+	case "local_deletion":
+		return LocalDeletion, nil
+	case "consistency_deletion":
+		return ConsistencyDeletion, nil
+	default:
+		return UnknownPolicy, errors.New("unknown policy")
+	}
+}
+
 type WriteCmd struct {
 	Operation string
 	Args      [][]byte
@@ -266,6 +300,10 @@ type ScanResult struct {
 	NextCursor []byte
 	PartionId  string
 	Error      error
+}
+
+type ExpiredDataBuffer interface {
+	Write(DataType, []byte) error
 }
 
 type FullScanResult struct {

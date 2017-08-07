@@ -1,8 +1,9 @@
 package node
 
 import (
-	"github.com/absolute8511/redcon"
 	"strconv"
+
+	"github.com/absolute8511/redcon"
 )
 
 func (self *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -190,4 +191,16 @@ func (self *KVNode) localRpushCommand(cmd redcon.Command, ts int64) (interface{}
 
 func (self *KVNode) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return self.store.LClear(cmd.Args[1])
+}
+
+func (self *KVNode) localLMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	var count int64 = 0
+	for _, lkey := range cmd.Args[1:] {
+		if _, err := self.store.LClear(lkey); err != nil {
+			return count, err
+		} else {
+			count++
+		}
+	}
+	return count, nil
 }
