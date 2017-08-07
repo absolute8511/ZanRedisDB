@@ -99,7 +99,7 @@ func checkParameter() {
 	}
 }
 
-type writeFunc func(item []interface{}) error
+type writeFunc func(key []byte, item []interface{}, length int, file *os.File) error
 
 func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 	n, err := file.Write(tp)
@@ -118,7 +118,32 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 		for i := 0; i < length; i++ {
 			time.Sleep(tm)
 			item := v[i].([]interface{})
-			err := f(item)
+			lenBuf := make([]byte, 4)
+			key := item[0].([]byte)
+			keyLen := len(key)
+			binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
+			n, err := file.Write(lenBuf)
+			if err != nil {
+				fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
+				return
+			}
+
+			if n != 4 {
+				fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
+				return
+			}
+
+			n, err = file.Write(key)
+			if err != nil {
+				fmt.Printf("write key error. [ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
+				return
+			}
+			if n != keyLen {
+				fmt.Printf("write key length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
+				return
+			}
+			length := len(item)
+			err = f(key, item[1:length], length, file)
 			if err != nil {
 				break
 			}
@@ -128,35 +153,12 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 
 func kvbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{0}
-	backupCommon(tp, ch, file, func(item []interface{}) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		key := item[0].([]byte)
-		keyLen := len(key)
-		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
-		n, err := file.Write(lenBuf)
-		if err != nil {
-			fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-
-		if n != 4 {
-			fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-
-		n, err = file.Write(key)
-		if err != nil {
-			fmt.Printf("write key error. [ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-		if n != keyLen {
-			fmt.Printf("write key length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-		value := item[1].([]byte)
+		value := item[0].([]byte)
 		valLen := len(value)
 		binary.BigEndian.PutUint32(lenBuf, uint32(valLen))
-		n, err = file.Write(lenBuf)
+		n, err := file.Write(lenBuf)
 		if err != nil {
 			fmt.Printf("write val's len error. [ns=%s, table=%s, key=%s, val=%v, err=%v]\n", *ns, *table, string(key), value, err)
 			return err
@@ -181,34 +183,10 @@ func kvbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func hbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{1}
-	backupCommon(tp, ch, file, func(item []interface{}) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		key := item[0].([]byte)
-		keyLen := len(key)
-		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
+		binary.BigEndian.PutUint32(lenBuf, uint32(length))
 		n, err := file.Write(lenBuf)
-		if err != nil {
-			fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-
-		if n != 4 {
-			fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-
-		n, err = file.Write(key)
-		if err != nil {
-			fmt.Printf("write key error. [ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-		if n != keyLen {
-			fmt.Printf("write key length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-		length := len(item)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length-1))
-		n, err = file.Write(lenBuf)
 
 		if err != nil {
 			fmt.Printf("write field-value count  error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
@@ -220,7 +198,7 @@ func hbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 			return errWriteLen
 		}
 
-		for i := 1; i < length; i++ {
+		for i := 0; i < length; i++ {
 			fv := item[i].([]interface{})
 			field := fv[0].([]byte)
 			fieldLen := len(field)
@@ -276,34 +254,10 @@ func hbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func lbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{2}
-	backupCommon(tp, ch, file, func(item []interface{}) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		key := item[0].([]byte)
-		keyLen := len(key)
-		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
+		binary.BigEndian.PutUint32(lenBuf, uint32(length))
 		n, err := file.Write(lenBuf)
-		if err != nil {
-			fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-
-		if n != 4 {
-			fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-
-		n, err = file.Write(key)
-		if err != nil {
-			fmt.Printf("write key error. [ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-		if n != keyLen {
-			fmt.Printf("write key length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-		length := len(item)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length-1))
-		n, err = file.Write(lenBuf)
 
 		if err != nil {
 			fmt.Printf("write list count  error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
@@ -315,7 +269,7 @@ func lbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 			return errWriteLen
 		}
 
-		for i := 1; i < length; i++ {
+		for i := 0; i < length; i++ {
 			value := item[i].([]byte)
 			valLen := len(value)
 			binary.BigEndian.PutUint32(lenBuf, uint32(valLen))
@@ -347,34 +301,10 @@ func lbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func sbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{3}
-	backupCommon(tp, ch, file, func(item []interface{}) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		key := item[0].([]byte)
-		keyLen := len(key)
-		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
+		binary.BigEndian.PutUint32(lenBuf, uint32(length))
 		n, err := file.Write(lenBuf)
-		if err != nil {
-			fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-
-		if n != 4 {
-			fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-
-		n, err = file.Write(key)
-		if err != nil {
-			fmt.Printf("write key error. [ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-		if n != keyLen {
-			fmt.Printf("write key length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-		length := len(item)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length-1))
-		n, err = file.Write(lenBuf)
 
 		if err != nil {
 			fmt.Printf("write member count  error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
@@ -386,7 +316,7 @@ func sbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 			return errWriteLen
 		}
 
-		for i := 1; i < length; i++ {
+		for i := 0; i < length; i++ {
 			member := item[i].([]byte)
 			memberLen := len(member)
 			binary.BigEndian.PutUint32(lenBuf, uint32(memberLen))
@@ -418,34 +348,10 @@ func sbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func zbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{4}
-	backupCommon(tp, ch, file, func(item []interface{}) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		key := item[0].([]byte)
-		keyLen := len(key)
-		binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
+		binary.BigEndian.PutUint32(lenBuf, uint32(length))
 		n, err := file.Write(lenBuf)
-		if err != nil {
-			fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-
-		if n != 4 {
-			fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-
-		n, err = file.Write(key)
-		if err != nil {
-			fmt.Printf("write key error. [ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-			return err
-		}
-		if n != keyLen {
-			fmt.Printf("write key length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-			return errWriteLen
-		}
-		length := len(item)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length-1))
-		n, err = file.Write(lenBuf)
 
 		if err != nil {
 			fmt.Printf("write member-score count  error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
@@ -457,7 +363,7 @@ func zbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 			return errWriteLen
 		}
 
-		for i := 1; i < length; i++ {
+		for i := 0; i < length; i++ {
 			ms := item[i].([]interface{})
 			member := ms[0].([]byte)
 			memberLen := len(member)
