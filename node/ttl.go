@@ -1,7 +1,9 @@
 package node
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -306,27 +308,24 @@ func (self *ExpireHandler) applyExpiration(stop chan struct{}) {
 		nodeLog.Infof("apply expiration has been stopped")
 	}()
 
+	var buffFullTimes int = 0
 	for {
 		select {
 		case <-checkTicker.C:
-			for {
-				err := self.node.store.CheckExpiredData(self.batchBuffer, stop)
-				select {
-				case <-stop:
-					return
-				default:
-					self.batchBuffer.CommitAll()
+			if err := self.node.store.CheckExpiredData(self.batchBuffer, stop); err == ErrExpiredBatchedBuffFull {
+				if buffFullTimes += 1; buffFullTimes >= 3 {
+					nodeLog.Warningf("expired data buffer is filled three times in succession, stats:%s", self.batchBuffer.GetStats())
+					buffFullTimes = 0
 				}
+			} else if err != nil {
+				nodeLog.Errorf("check expired data by the underlying storage system failed, err:%s", err.Error())
+			}
 
-				//start the next check immediately if the check stopped because of the buffer is full
-				if err == ErrExpiredBatchedBuffFull {
-					continue
-				}
-
-				if err != nil {
-					nodeLog.Errorf("check expired data by the underlying storage system failed, err:%s", err.Error())
-				}
-				break
+			select {
+			case <-stop:
+				return
+			default:
+				self.batchBuffer.CommitAll()
 			}
 		case <-stop:
 			return
@@ -371,6 +370,16 @@ func (raftBuffer *raftExpiredBuffer) Reset() {
 	}
 }
 
+func (raftBuff *raftExpiredBuffer) GetStats() string {
+	stats := bytes.NewBufferString("the stats of expired data buffer:\r\n")
+	for _, buff := range raftBuff.internalBuf {
+		if buff != nil {
+			stats.WriteString(buff.GetStats())
+		}
+	}
+	return stats.String()
+}
+
 type raftBatchBuffer struct {
 	sync.Mutex
 	dataType common.DataType
@@ -411,4 +420,28 @@ func (rb *raftBatchBuffer) clear() {
 	rb.Lock()
 	rb.keys = rb.keys[:0]
 	rb.Unlock()
+
+}
+
+func (rb *raftBatchBuffer) GetStats() string {
+	stats := make(map[string]int)
+	rb.Lock()
+	for _, k := range rb.keys {
+		if t, _, err := common.ExtractTable(k); err != nil {
+			continue
+		} else {
+			stats[string(t)] += 1
+		}
+	}
+	rb.Unlock()
+
+	statsBuf := bytes.NewBufferString(fmt.Sprintf("tables have more than 300 %s keys expired: ", rb.dataType.String()))
+	for table, count := range stats {
+		if count >= 300 {
+			statsBuf.WriteString(fmt.Sprintf("[%s: %d], ", table, count))
+		}
+	}
+	statsBuf.WriteString("\r\n")
+
+	return statsBuf.String()
 }

@@ -194,12 +194,10 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 	case common.KV:
 		return func(keys [][]byte) error {
 			defer wb.Clear()
-			localDB := db.TheSameDBWithOtherWriteBatch(wb)
-			if err := localDB.BeginBatchWrite(); err != nil {
-				return err
+			for _, k := range keys {
+				db.KVDelWithBatch(k, wb)
 			}
-			db.DelKeys(keys...)
-			return db.CommitBatchWrite()
+			return db.eng.Write(db.defaultWriteOpts, wb)
 		}
 	case common.HASH:
 		return func(keys [][]byte) error {
