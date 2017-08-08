@@ -245,6 +245,7 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 
 	expPolicy, err := common.StringToExpirationPolicy(conf.ExpirationPolicy)
 	if err != nil {
+		nodeLog.Infof("namespace %v invalid expire policy : %v", conf.Name, conf.ExpirationPolicy)
 		return nil, err
 	}
 

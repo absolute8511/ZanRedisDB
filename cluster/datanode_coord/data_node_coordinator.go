@@ -718,7 +718,9 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.PartitionNum = nsInfo.PartitionNum
 	nsConf.Replicator = nsInfo.Replica
 	nsConf.OptimizedFsync = nsInfo.OptimizedFsync
-	nsConf.ExpirationPolicy = nsInfo.ExpirationPolicy
+	if nsInfo.ExpirationPolicy != "" {
+		nsConf.ExpirationPolicy = nsInfo.ExpirationPolicy
+	}
 	if nsInfo.SnapCount > 100 {
 		nsConf.SnapCount = nsInfo.SnapCount
 		nsConf.SnapCatchup = nsInfo.SnapCount / 4
@@ -929,7 +931,7 @@ func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo, for
 	if forceStandaloneCluster {
 		join = false
 	}
-	localNode, _ := self.localNSMgr.InitNamespaceNode(nsConf, raftID, join)
+	localNode, localErr := self.localNSMgr.InitNamespaceNode(nsConf, raftID, join)
 	if localNode != nil {
 		if checkErr := localNode.CheckRaftConf(raftID, nsConf); checkErr != nil {
 			CoordLog().Infof("local namespace %v mismatch with the new raft config removing: %v", nsInfo.GetDesp(), checkErr)
@@ -937,11 +939,11 @@ func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo, for
 		}
 	}
 	if localNode == nil {
-		CoordLog().Warningf("local namespace %v init failed", nsInfo.GetDesp())
+		CoordLog().Warningf("local namespace %v init failed: %v", nsInfo.GetDesp(), localErr)
 		return nil, ErrLocalInitNamespaceFailed
 	}
 
-	localErr := localNode.SetMagicCode(nsInfo.MagicCode)
+	localErr = localNode.SetMagicCode(nsInfo.MagicCode)
 	if localErr != nil {
 		CoordLog().Warningf("local namespace %v init magic code failed: %v", nsInfo.GetDesp(), localErr)
 		return localNode, ErrLocalInitNamespaceFailed
