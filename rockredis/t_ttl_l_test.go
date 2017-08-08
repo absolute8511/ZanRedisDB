@@ -225,15 +225,15 @@ func TestZSetTTL_L(t *testing.T) {
 }
 
 func TestLocalDeletionTTLChecker(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.LocalDeletion)
-	defer os.RemoveAll(db.cfg.DataDir)
-	defer db.Close()
-
 	oldCheckInterval := localExpCheckInterval
 	localExpCheckInterval = 5
 	defer func() {
 		localExpCheckInterval = oldCheckInterval
 	}()
+
+	db := getTestDBWithExpirationPolicy(t, common.LocalDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
 
 	kTypeMap := make(map[string]byte)
 
