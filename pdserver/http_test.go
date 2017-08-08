@@ -26,7 +26,7 @@ const (
 	pdHttpPort        = "18007"
 )
 
-var testEtcdServers = "http://etcd0-qa.s.qima-inc.com:2379"
+var testEtcdServers = "http://127.0.0.1:2379"
 var testOnce sync.Once
 var gpdServer *Server
 var gkvList []dataNodeWrapper
