@@ -3,25 +3,26 @@ package pdnode_coord
 import (
 	"encoding/json"
 	"errors"
-	. "github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
 	"net"
 	"time"
+
+	. "github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 var (
 	ErrInvalidSchema = errors.New("invalid schema info")
 )
 
-func getIndexSchemasFromDataNode(remoteNode string, ns string, table string) (map[string]*common.IndexSchema, error) {
+func getIndexSchemasFromDataNode(remoteNode string, ns string) (map[string]*common.IndexSchema, error) {
 	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
 	rsp := make(map[string]*common.IndexSchema)
 	_, err := common.APIRequest("GET",
-		"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetIndexes+"/"+ns+"/"+table,
+		"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetIndexes+"/"+ns,
 		nil, time.Second*3, &rsp)
 	if err != nil {
-		CoordLog().Infof("failed (%v) to get indexes for namespace %v table %v: %v",
-			nip, ns, table, err)
+		CoordLog().Infof("failed (%v) to get indexes for namespace %v : %v",
+			nip, ns, err)
 		return nil, err
 	}
 	return rsp, nil
@@ -76,11 +77,14 @@ func (self *PDCoordinator) doSchemaCheck() {
 				isReady = false
 				break
 			}
-			schemas, err := getIndexSchemasFromDataNode(part.RaftNodes[0], ns, "")
+			schemas, err := getIndexSchemasFromDataNode(part.RaftNodes[0],
+				common.GetNsDesp(ns, pid))
 			if err != nil {
 				isReady = false
 				break
 			}
+			CoordLog().Infof("namespace %v got schema : %v", common.GetNsDesp(ns, pid),
+				len(schemas))
 			allPartsSchema[pid] = schemas
 		}
 		if !isReady || len(allPartsSchema) != parts[0].PartitionNum {
@@ -103,12 +107,15 @@ func (self *PDCoordinator) doSchemaCheck() {
 						schemaChanged = true
 						hindex.State = common.BuildingIndex
 					}
+					go self.triggerCheckNamespaces(ns, -1, time.Second)
 				case common.BuildingIndex:
 					// wait all partitions to finish building index, and then change the state to ready
 					if isAllPartsIndexSchemaReady(allPartsSchema, table, hindex.Name, common.BuildDoneIndex) {
 						schemaChanged = true
 						hindex.State = common.ReadyIndex
-						CoordLog().Infof("namespace %v table %v schema info ready: %v", ns, table, indexes)
+						CoordLog().Infof("namespace %v table %v schema info ready: %v", ns, table, hindex)
+					} else {
+						go self.triggerCheckNamespaces(ns, -1, time.Second*3)
 					}
 				default:
 				}
@@ -118,8 +125,8 @@ func (self *PDCoordinator) doSchemaCheck() {
 			}
 
 			if schemaChanged {
-				CoordLog().Infof("namespace %v table %v schema info changed: %v", ns, table, indexes)
 				newSchemaInfo.Schema, _ = json.Marshal(indexes)
+				CoordLog().Infof("namespace %v table %v schema info changed: %v", ns, table, string(newSchemaInfo.Schema))
 				err := self.register.UpdateNamespaceSchema(ns, table, &newSchemaInfo)
 				if err != nil {
 					CoordLog().Infof("update %v-%v schema to register failed: %v", ns, table, err)

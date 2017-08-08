@@ -2,11 +2,12 @@ package pdnode_coord
 
 import (
 	"errors"
-	. "github.com/absolute8511/ZanRedisDB/cluster"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	. "github.com/absolute8511/ZanRedisDB/cluster"
 )
 
 var (
@@ -276,7 +277,7 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster b
 				return
 			}
 			// check if any node changed.
-			CoordLog().Debugf("Current data nodes: %v", len(nodes))
+			CoordLog().Infof("Current data nodes: %v", len(nodes))
 			oldNodes := self.dataNodes
 			newNodes := make(map[string]NodeInfo)
 			for _, v := range nodes {
@@ -441,19 +442,16 @@ func (self *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
 		CoordLog().Infof("check namespaces quit.")
 	}()
 
+	if self.register == nil {
+		return
+	}
 	for {
 		select {
 		case <-monitorChan:
 			return
 		case <-ticker.C:
-			if self.register == nil {
-				continue
-			}
 			self.doCheckNamespaces(monitorChan, nil, waitingMigrateNamespace, true)
 		case failedInfo := <-self.checkNamespaceFailChan:
-			if self.register == nil {
-				continue
-			}
 			self.doCheckNamespaces(monitorChan, &failedInfo, waitingMigrateNamespace, failedInfo.NamespaceName == "")
 		}
 	}
@@ -475,7 +473,10 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			CoordLog().Infof("scan namespaces failed. %v", commonErr)
 			return
 		}
-		for _, parts := range allNamespaces {
+		for n, parts := range allNamespaces {
+			if failedInfo != nil && failedInfo.NamespaceName != "" && failedInfo.NamespaceName != n {
+				continue
+			}
 			for _, p := range parts {
 				namespaces = append(namespaces, p)
 			}

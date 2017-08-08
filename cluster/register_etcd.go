@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	etcdlock "github.com/absolute8511/xlock2"
 	"github.com/coreos/etcd/client"
-	etcdlock "github.com/reechou/xlock2"
 	"golang.org/x/net/context"
 )
 
@@ -1165,7 +1165,7 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 			}
 		} else {
 			if isMissing {
-				coordLog.Errorf("key[%s] new data : %s", key, rsp.Node.String())
+				coordLog.Infof("key[%s] new data : %s", key, rsp.Node.String())
 				err := json.Unmarshal([]byte(rsp.Node.Value), &node)
 				if err != nil {
 					continue

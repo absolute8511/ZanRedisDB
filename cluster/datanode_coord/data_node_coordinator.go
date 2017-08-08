@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	. "github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	node "github.com/absolute8511/ZanRedisDB/node"
 	"net"
 	"path/filepath"
 	"sort"
@@ -14,6 +11,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	. "github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/common"
+	node "github.com/absolute8511/ZanRedisDB/node"
 )
 
 var (
@@ -458,7 +459,34 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 
 		// check local namespaces with cluster to remove the unneed data
 		tmpChecks := self.localNSMgr.GetNamespaces()
-		indexSchemas := make(map[string]*common.IndexSchema)
+		allIndexSchemas := make(map[string]map[string]*common.IndexSchema)
+		allNamespaces, _, err := self.register.GetAllNamespaces()
+		if err != nil {
+			return
+		}
+		for ns, parts := range allNamespaces {
+			tableSchemas := make(map[string]*common.IndexSchema)
+			schemas, err := self.register.GetNamespaceSchemas(ns)
+			if err != nil {
+				if err != ErrKeyNotFound {
+					CoordLog().Infof("get schema info failed: %v", err)
+				}
+				continue
+			}
+			if len(parts) == 0 || len(parts) != parts[0].PartitionNum {
+				continue
+			}
+			for table, schemaData := range schemas {
+				var indexes common.IndexSchema
+				err := json.Unmarshal(schemaData.Schema, &indexes)
+				if err != nil {
+					CoordLog().Infof("unmarshal schema data failed: %v", err)
+					continue
+				}
+				tableSchemas[table] = &indexes
+			}
+			allIndexSchemas[ns] = tableSchemas
+		}
 		for name, localNamespace := range tmpChecks {
 			namespace, pid := common.GetNamespaceAndPartition(name)
 			if namespace == "" {
@@ -613,7 +641,10 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					}
 				}
 				if isFullStable {
-					self.doSyncSchemaInfo(localNamespace, indexSchemas)
+					indexSchemas, ok := allIndexSchemas[namespace]
+					if ok {
+						self.doSyncSchemaInfo(localNamespace, indexSchemas)
+					}
 				}
 
 			}

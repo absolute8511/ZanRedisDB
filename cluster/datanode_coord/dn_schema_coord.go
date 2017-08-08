@@ -2,6 +2,7 @@ package datanode_coord
 
 import (
 	"encoding/json"
+
 	. "github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 	node "github.com/absolute8511/ZanRedisDB/node"
@@ -11,8 +12,8 @@ import (
 func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode,
 	indexSchemas map[string]*common.IndexSchema) {
 
-	CoordLog().Debugf("namespace %v checking schema sync",
-		localNamespace.FullName())
+	CoordLog().Infof("namespace %v checking schema sync: %v",
+		localNamespace.FullName(), len(indexSchemas))
 	for table, tindexes := range indexSchemas {
 		localIndexSchema, err := localNamespace.Node.GetIndexSchema(table)
 		schemaMap := make(map[string]*common.HsetIndexSchema)

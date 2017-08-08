@@ -1080,8 +1080,7 @@ func (self *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 		return nil, errors.New("failed to begin backup: maybe too much backup running")
 	}
 	si.WaitReady()
-	si.LeaderInfo = self.rn.GetLeadMember()
-	si.Members = self.rn.GetMembers()
+	si.Members, si.LeaderInfo = self.rn.GetMembersAndLeader()
 	return &si, nil
 }
 

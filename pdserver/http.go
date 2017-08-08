@@ -79,9 +79,9 @@ func (self *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/upgrade/begin", common.Decorate(self.doClusterBeginUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/upgrade/done", common.Decorate(self.doClusterFinishUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/create", common.Decorate(self.doCreateNamespace, log, common.V1))
-	router.Handle("POST", "/cluster/namespace/delete", common.Decorate(self.doDeleteNamespace, log, common.V1))
+	router.Handle("DELETE", "/cluster/namespace/delete", common.Decorate(self.doDeleteNamespace, log, common.V1))
 	router.Handle("POST", "/cluster/schema/index/add", common.Decorate(self.doAddIndexSchema, log, common.V1))
-	router.Handle("POST", "/cluster/schema/index/del", common.Decorate(self.doDelIndexSchema, log, common.V1))
+	router.Handle("DELETE", "/cluster/schema/index/del", common.Decorate(self.doDelIndexSchema, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/meta/update", common.Decorate(self.doUpdateNamespaceMeta, log, common.V1))
 	router.Handle("POST", "/stable/nodenum", common.Decorate(self.doSetStableNodeNum, log, common.V1))
 
@@ -121,7 +121,7 @@ func (self *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps h
 
 func (self *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	nodes := make([]*node, 0)
-	dns, _ := self.pdCoord.GetAllDataNodes()
+	dns, epoch := self.pdCoord.GetAllDataNodes()
 	for _, n := range dns {
 		dn := &node{
 			BroadcastAddress: n.NodeIP,
@@ -131,6 +131,9 @@ func (self *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps ht
 			HTTPPort:         n.HttpPort,
 		}
 		nodes = append(nodes, dn)
+	}
+	if len(nodes) == 0 {
+		sLog.Infof("no data nodes found: %v, %v", dns, epoch)
 	}
 	return map[string]interface{}{
 		"nodes": nodes,
@@ -422,16 +425,19 @@ func (self *Server) doAddIndexSchema(w http.ResponseWriter, req *http.Request, p
 
 	indexType := reqParams.Get("indextype")
 	if indexType == "" {
+		sLog.Infof("missing index type: %v, %v", ns, table)
 		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_TYPE"}
 	}
 	if indexType == "hash_secondary" {
 		data, err := ioutil.ReadAll(req.Body)
 		if err != nil {
+			sLog.Infof("read schema body error: %v, %v, %v", ns, table, err)
 			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 		}
 		var meta common.HsetIndexSchema
 		err = json.Unmarshal(data, &meta)
 		if err != nil {
+			sLog.Infof("schema body unmarshal error: %v, %v, %v", ns, table, err)
 			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 		}
 		sLog.Infof("add hash index : %v, %v", ns, meta)
@@ -474,10 +480,12 @@ func (self *Server) doDelIndexSchema(w http.ResponseWriter, req *http.Request, p
 
 	indexType := reqParams.Get("indextype")
 	if indexType == "" {
+		sLog.Infof("del index missing type: %v", ns)
 		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_TYPE"}
 	}
 	indexName := reqParams.Get("indexname")
 	if indexName == "" {
+		sLog.Infof("del index missing name: %v", ns)
 		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_NAME"}
 	}
 
