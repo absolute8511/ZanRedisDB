@@ -53,15 +53,14 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.Replicator = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	nsConf.ExpirationPolicy = "consistency_deletion"
 	kv := NewServer(kvOpts)
-	nsNode, err := kv.InitKVNamespace(1, nsConf, false)
-	if err != nil {
+	if _, err := kv.InitKVNamespace(1, nsConf, false); err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
 
 	kv.Start()
 	time.Sleep(time.Second)
-	nsNode.StartTTLChecker()
 	return kv, redisport, tmpDir
 }
 
@@ -252,7 +251,7 @@ func TestKVBatch(t *testing.T) {
 		node.SetLogLevel(int(common.LOG_DETAIL))
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()

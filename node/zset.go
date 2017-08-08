@@ -3,10 +3,11 @@ package node
 import (
 	"bytes"
 	"errors"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/redcon"
 	"strconv"
 	"strings"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/redcon"
 )
 
 var (
@@ -564,4 +565,16 @@ func (self *KVNode) localZclearCommand(cmd redcon.Command, ts int64) (interface{
 		return nil, common.ErrInvalidArgs
 	}
 	return self.store.ZClear(cmd.Args[1])
+}
+
+func (self *KVNode) localZMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	var count int64 = 0
+	for _, zkey := range cmd.Args[1:] {
+		if _, err := self.store.ZClear(zkey); err != nil {
+			return count, err
+		} else {
+			count++
+		}
+	}
+	return count, nil
 }

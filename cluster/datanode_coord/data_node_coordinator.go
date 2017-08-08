@@ -718,6 +718,7 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.PartitionNum = nsInfo.PartitionNum
 	nsConf.Replicator = nsInfo.Replica
 	nsConf.OptimizedFsync = nsInfo.OptimizedFsync
+	nsConf.ExpirationPolicy = nsInfo.ExpirationPolicy
 	if nsInfo.SnapCount > 100 {
 		nsConf.SnapCount = nsInfo.SnapCount
 		nsConf.SnapCatchup = nsInfo.SnapCount / 4

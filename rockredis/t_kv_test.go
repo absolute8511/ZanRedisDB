@@ -2,9 +2,10 @@ package rockredis
 
 import (
 	"bytes"
-	"github.com/absolute8511/ZanRedisDB/common"
 	"os"
 	"testing"
+
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 func TestKVCodec(t *testing.T) {
@@ -237,59 +238,5 @@ func TestDBKVWithNoTable(t *testing.T) {
 		t.Error("failed to get no value")
 	} else if v != nil {
 		t.Error("should get no value")
-	}
-}
-
-func TestKVPersist(t *testing.T) {
-	db := getTestDB(t)
-	defer os.RemoveAll(db.cfg.DataDir)
-	defer db.Close()
-
-	key := []byte("test:persist")
-	db.KVSet(0, key, []byte{})
-
-	if n, err := db.Persist(key); err != nil {
-		t.Fatal(err)
-	} else if n != 0 {
-		t.Fatal(n)
-	}
-
-	if _, err := db.Expire(key, 10); err != nil {
-		t.Fatal(err)
-	}
-
-	if n, err := db.Persist(key); err != nil {
-		t.Fatal(err)
-	} else if n != 1 {
-		t.Fatal(n)
-	}
-}
-
-func TestKVSetEX(t *testing.T) {
-	db := getTestDB(t)
-	defer os.RemoveAll(db.cfg.DataDir)
-	defer db.Close()
-
-	key := []byte("test:testdb_kv_c")
-
-	if err := db.SetEx(0, key, 10, []byte("hello world")); err != nil {
-		t.Fatal(err)
-	}
-
-	v, err := db.KVGet(key)
-	if err != nil {
-		t.Fatal(err)
-	} else if string(v) == "" {
-		t.Fatal("v is nil")
-	}
-
-	if n, err := db.KVTtl(key); err != nil {
-		t.Fatal(err)
-	} else if n != 10 {
-		t.Fatal(n)
-	}
-
-	if v, _ := db.KVGet(key); string(v) != "hello world" {
-		t.Fatal(string(v))
 	}
 }

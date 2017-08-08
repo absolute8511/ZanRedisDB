@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/gorocksdb"
 )
 
 const (
@@ -114,6 +115,25 @@ func (db *RockDB) KVDel(key []byte) error {
 	}
 	db.wb.Delete(key)
 	return db.MaybeCommitBatch()
+}
+
+func (db *RockDB) KVDelWithBatch(key []byte, wb *gorocksdb.WriteBatch) error {
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return err
+	}
+	if db.cfg.EnableTableCounter {
+		if !db.cfg.EstimateTableCounter {
+			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			if v != nil {
+				db.IncrTableKeyCount(table, -1, wb)
+			}
+		} else {
+			db.IncrTableKeyCount(table, -1, wb)
+		}
+	}
+	wb.Delete(key)
+	return nil
 }
 
 func (db *RockDB) Decr(ts int64, key []byte) (int64, error) {

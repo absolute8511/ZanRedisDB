@@ -402,6 +402,19 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 	return int64(len(keys)), err
 }
 
+func (db *RockDB) sMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
+	if len(keys) >= MAX_BATCH_NUM {
+		return errTooMuchBatchSize
+	}
+	for _, key := range keys {
+		if err := checkKeySize(key); err != nil {
+			return err
+		}
+		db.sDelete(key, wb)
+	}
+	return nil
+}
+
 func (db *RockDB) SExpire(key []byte, duration int64) (int64, error) {
 	if exists, err := db.SKeyExists(key); err != nil || exists != 1 {
 		return 0, err
