@@ -9,9 +9,10 @@ import (
 	"github.com/absolute8511/gorocksdb"
 )
 
+var localExpCheckInterval = 300
+
 const (
-	localExpCheckInterval = 300
-	localBatchedBufSize   = 16 * 1024
+	localBatchedBufSize = 16 * 1024
 )
 
 var (
@@ -88,7 +89,7 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 	dbLog.Infof("start to apply-expiration using Local-Deletion policy")
 	defer dbLog.Infof("apply-expiration using Local-Deletion policy exit")
 
-	t := time.NewTicker(time.Second * localExpCheckInterval)
+	t := time.NewTicker(time.Second * time.Duration(localExpCheckInterval))
 	defer t.Stop()
 
 	checker := exp.TTLChecker

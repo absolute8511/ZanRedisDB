@@ -229,11 +229,17 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
+	oldCheckInterval := localExpCheckInterval
+	localExpCheckInterval = 5
+	defer func() {
+		localExpCheckInterval = oldCheckInterval
+	}()
+
 	kTypeMap := make(map[string]byte)
 
 	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType}
 
-	for i := 0; i < 10000*3+rand.Intn(10000); i++ {
+	for i := 0; i < 1000*3+rand.Intn(1000); i++ {
 		key := "test:ttl_checker_local:" + strconv.Itoa(i)
 		dataType := dataTypes[rand.Int()%len(dataTypes)]
 		kTypeMap[key] = dataType
@@ -277,7 +283,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 		}
 	}
 
-	time.Sleep((localExpCheckInterval + 1) * time.Second)
+	time.Sleep(time.Duration(localExpCheckInterval+1) * time.Second)
 
 	for k, v := range kTypeMap {
 		switch v {
