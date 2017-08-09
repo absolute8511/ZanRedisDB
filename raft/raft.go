@@ -177,6 +177,16 @@ type Config struct {
 	// Logger is the logger used for raft log. For multinode which can host
 	// multiple raft group, each raft group can have its own logger
 	Logger Logger
+
+	// DisableProposalForwarding set to true means that followers will drop
+	// proposals, rather than forwarding them to the leader. One use case for
+	// this feature would be in a situation where the Raft leader is used to
+	// compute the data of a proposal, for example, adding a timestamp from a
+	// hybrid logical clock to data in a monotonically increasing way. Forwarding
+	// should be disabled to prevent a follower with an innaccurate hybrid
+	// logical clock from assigning the timestamp and then forwarding the data
+	// to the leader.
+	DisableProposalForwarding bool
 }
 
 func (c *Config) validate() error {
@@ -272,6 +282,7 @@ type raft struct {
 	// [electiontimeout, 2 * electiontimeout - 1]. It gets reset
 	// when raft changes its state to follower or candidate.
 	randomizedElectionTimeout int
+	disableProposalForwarding bool
 
 	tick func()
 	step stepFunc
@@ -307,19 +318,20 @@ func newRaft(c *Config) *raft {
 		}
 	}
 	r := &raft{
-		id:               c.ID,
-		group:            c.Group,
-		lead:             None,
-		raftLog:          raftlog,
-		maxMsgSize:       c.MaxSizePerMsg,
-		maxInflight:      c.MaxInflightMsgs,
-		prs:              make(map[uint64]*Progress),
-		electionTimeout:  c.ElectionTick,
-		heartbeatTimeout: c.HeartbeatTick,
-		logger:           c.Logger,
-		checkQuorum:      c.CheckQuorum,
-		preVote:          c.PreVote,
-		readOnly:         newReadOnly(c.ReadOnlyOption),
+		id:                        c.ID,
+		group:                     c.Group,
+		lead:                      None,
+		raftLog:                   raftlog,
+		maxMsgSize:                c.MaxSizePerMsg,
+		maxInflight:               c.MaxInflightMsgs,
+		prs:                       make(map[uint64]*Progress),
+		electionTimeout:           c.ElectionTick,
+		heartbeatTimeout:          c.HeartbeatTick,
+		logger:                    c.Logger,
+		checkQuorum:               c.CheckQuorum,
+		preVote:                   c.PreVote,
+		readOnly:                  newReadOnly(c.ReadOnlyOption),
+		disableProposalForwarding: c.DisableProposalForwarding,
 	}
 	for _, p := range peers {
 		r.prs[p.RaftReplicaId] = &Progress{Next: 1, ins: newInflights(r.maxInflight), group: p}
@@ -385,10 +397,21 @@ func (r *raft) send(m pb.Message) {
 			m.ToGroup = pr.group
 		}
 	}
-	if m.Type == pb.MsgVote || m.Type == pb.MsgPreVote {
+	if m.Type == pb.MsgVote || m.Type == pb.MsgVoteResp ||
+		m.Type == pb.MsgPreVote || m.Type == pb.MsgPreVoteResp {
 		if m.Term == 0 {
-			// PreVote RPCs are sent at a term other than our actual term, so the code
-			// that sends these messages is responsible for setting the term.
+			// All {pre-,}campaign messages need to have the term set when
+			// sending.
+			// - MsgVote: m.Term is the term the node is campaigning for,
+			//   non-zero as we increment the term when campaigning.
+			// - MsgVoteResp: m.Term is the new r.Term if the MsgVote was
+			//   granted, non-zero for the same reason MsgVote is
+			// - MsgPreVote: m.Term is the term the node will campaign,
+			//   non-zero as we use m.Term to indicate the next term we'll be
+			//   campaigning for
+			// - MsgPreVoteResp: m.Term is the term received in the original
+			//   MsgPreVote if the pre-vote was granted, non-zero for the
+			//   same reasons MsgPreVote is
 			panic(fmt.Sprintf("term should be set when sending %s", m.Type))
 		}
 	} else {
@@ -632,6 +655,7 @@ func (r *raft) becomePreCandidate() {
 	// but doesn't change anything else. In particular it does not increase
 	// r.Term or change r.Vote.
 	r.step = stepCandidate
+	r.votes = make(map[uint64]bool)
 	r.tick = r.tickElection
 	r.state = StatePreCandidate
 	r.logger.Infof("%x(%v) became pre-candidate at term %d", r.id, r.group.Name, r.Term)
@@ -810,7 +834,16 @@ func (r *raft) Step(m pb.Message) error {
 			r.logger.Infof("%x(%v) [logterm: %d, index: %d, vote: %x] cast %s for %x(%v) [logterm: %d, index: %d] at term %d",
 				r.id, r.group.Name, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type,
 				m.From, m.FromGroup, m.LogTerm, m.Index, r.Term)
-			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: voteRespMsgType(m.Type)})
+			// When responding to Msg{Pre,}Vote messages we include the term
+			// from the message, not the local term. To see why consider the
+			// case where a single node was previously partitioned away and
+			// it's local term is now of date. If we include the local term
+			// (recall that for pre-votes we don't update the local term), the
+			// (pre-)campaigning node on the other end will proceed to ignore
+			// the message (it ignores all out of date messages).
+			// The term in the original message and current local term are the
+			// same in the case of regular votes, but different for pre-votes.
+			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Term: m.Term, Type: voteRespMsgType(m.Type)})
 			if m.Type == pb.MsgVote {
 				// Only record real votes.
 				r.electionElapsed = 0
@@ -819,7 +852,7 @@ func (r *raft) Step(m pb.Message) error {
 		} else {
 			r.logger.Infof("%x(%v) [logterm: %d, index: %d, vote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
 				r.id, r.group.Name, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
-			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: voteRespMsgType(m.Type), Reject: true})
+			r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Term: r.Term, Type: voteRespMsgType(m.Type), Reject: true})
 		}
 
 	default:
@@ -1085,6 +1118,9 @@ func stepFollower(r *raft, m pb.Message) {
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
 			return
+		} else if r.disableProposalForwarding {
+			r.logger.Infof("%x not forwarding to leader %x at term %d; dropping proposal", r.id, r.lead, r.Term)
+			return
 		}
 		m.To = r.lead
 		if g, ok := r.prs[m.To]; ok {
@@ -1241,6 +1277,10 @@ func (r *raft) addNode(id uint64, g pb.Group) {
 	}
 
 	r.setProgress(id, 0, r.raftLog.lastIndex()+1, g)
+	// When a node is first added, we should mark it as recently active.
+	// Otherwise, CheckQuorum may cause us to step down if it is invoked
+	// before the added node has a chance to communicate with us.
+	r.prs[id].RecentActive = true
 }
 
 func (r *raft) removeNode(id uint64) {
