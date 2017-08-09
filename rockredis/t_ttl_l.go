@@ -97,17 +97,22 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 	for {
 		select {
 		case <-t.C:
-			err := checker.check(exp.localBuffer, stop)
-			if err != nil && err != ErrLocalBatchedBuffFull {
-				dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
+			for {
+				err := checker.check(exp.localBuffer, stop)
+				select {
+				case <-stop:
+					return
+				default:
+					exp.localBuffer.commit()
+				}
+				//start the next check immediately if the last check is stopped because of the buffer is fully filled
+				if err == ErrLocalBatchedBuffFull {
+					continue
+				} else if err != nil {
+					dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
+				}
+				break
 			}
-			select {
-			case <-stop:
-				return
-			default:
-				exp.localBuffer.commit()
-			}
-
 		case <-stop:
 			return
 		}
