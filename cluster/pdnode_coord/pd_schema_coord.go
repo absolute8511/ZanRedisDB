@@ -183,17 +183,16 @@ func (self *PDCoordinator) delHIndexSchema(ns string, table string, hindexName s
 			return err
 		}
 	}
-	newHindexes := make([]*common.HsetIndexSchema, 0, len(indexes.HsetIndexes))
 	for _, hi := range indexes.HsetIndexes {
 		if hi.Name == hindexName {
+			if hi.State != common.ReadyIndex {
+				CoordLog().Infof("namespace %v table %v index schema not ready: %v", ns, table, hi)
+				return errors.New("Unready index can not be deleted")
+			}
 			CoordLog().Infof("namespace %v table %v index schema deleted: %v", ns, table, hi)
-			continue
-		} else {
-			newHindexes = append(newHindexes, hi)
+			hi.State = common.DeletedIndex
 		}
 	}
-	indexes.HsetIndexes = newHindexes
-
 	newSchema.Schema, _ = json.Marshal(indexes)
 	return self.register.UpdateNamespaceSchema(ns, table, &newSchema)
 }
