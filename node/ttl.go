@@ -31,11 +31,11 @@ func init() {
 	expireCmds[common.ZSET] = []byte("zmclear")
 }
 
-func (self *KVNode) setexCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) setexCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) expireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) expireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -43,7 +43,7 @@ func (self *KVNode) expireCommand(conn redcon.Conn, cmd redcon.Command, v interf
 	}
 }
 
-func (self *KVNode) listExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) listExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -51,7 +51,7 @@ func (self *KVNode) listExpireCommand(conn redcon.Conn, cmd redcon.Command, v in
 	}
 }
 
-func (self *KVNode) hashExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) hashExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -59,7 +59,7 @@ func (self *KVNode) hashExpireCommand(conn redcon.Conn, cmd redcon.Command, v in
 	}
 }
 
-func (self *KVNode) setExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) setExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -67,7 +67,7 @@ func (self *KVNode) setExpireCommand(conn redcon.Conn, cmd redcon.Command, v int
 	}
 }
 
-func (self *KVNode) zsetExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) zsetExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -75,55 +75,55 @@ func (self *KVNode) zsetExpireCommand(conn redcon.Conn, cmd redcon.Command, v in
 	}
 }
 
-func (self *KVNode) localSetexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localSetexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return nil, err
 	} else {
-		return nil, self.store.SetEx(ts, cmd.Args[1], int64(duration), cmd.Args[3])
+		return nil, nd.store.SetEx(ts, cmd.Args[1], int64(duration), cmd.Args[3])
 	}
 }
 
-func (self *KVNode) localExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.Expire(cmd.Args[1], int64(duration))
+		return nd.store.Expire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (self *KVNode) localHashExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localHashExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.HExpire(cmd.Args[1], int64(duration))
+		return nd.store.HExpire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (self *KVNode) localListExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localListExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.LExpire(cmd.Args[1], int64(duration))
+		return nd.store.LExpire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (self *KVNode) localSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.SExpire(cmd.Args[1], int64(duration))
+		return nd.store.SExpire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (self *KVNode) localZSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localZSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return self.store.ZExpire(cmd.Args[1], int64(duration))
+		return nd.store.ZExpire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (self *KVNode) persistCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) persistCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -131,61 +131,61 @@ func (self *KVNode) persistCommand(conn redcon.Conn, cmd redcon.Command, v inter
 	}
 }
 
-func (self *KVNode) localPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.Persist(cmd.Args[1])
+func (nd *KVNode) localPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.Persist(cmd.Args[1])
 }
 
-func (self *KVNode) localHashPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.HPersist(cmd.Args[1])
+func (nd *KVNode) localHashPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.HPersist(cmd.Args[1])
 }
 
-func (self *KVNode) localListPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.LPersist(cmd.Args[1])
+func (nd *KVNode) localListPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.LPersist(cmd.Args[1])
 }
 
-func (self *KVNode) localSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.SPersist(cmd.Args[1])
+func (nd *KVNode) localSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.SPersist(cmd.Args[1])
 }
 
-func (self *KVNode) localZSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.ZPersist(cmd.Args[1])
+func (nd *KVNode) localZSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.ZPersist(cmd.Args[1])
 }
 
 //read commands related to TTL
-func (self *KVNode) ttlCommand(conn redcon.Conn, cmd redcon.Command) {
-	if v, err := self.store.KVTtl(cmd.Args[1]); err != nil {
+func (nd *KVNode) ttlCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.KVTtl(cmd.Args[1]); err != nil {
 		conn.WriteError(err.Error())
 	} else {
 		conn.WriteInt64(v)
 	}
 }
 
-func (self *KVNode) httlCommand(conn redcon.Conn, cmd redcon.Command) {
-	if v, err := self.store.HashTtl(cmd.Args[1]); err != nil {
+func (nd *KVNode) httlCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.HashTtl(cmd.Args[1]); err != nil {
 		conn.WriteError(err.Error())
 	} else {
 		conn.WriteInt64(v)
 	}
 }
 
-func (self *KVNode) lttlCommand(conn redcon.Conn, cmd redcon.Command) {
-	if v, err := self.store.ListTtl(cmd.Args[1]); err != nil {
+func (nd *KVNode) lttlCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.ListTtl(cmd.Args[1]); err != nil {
 		conn.WriteError(err.Error())
 	} else {
 		conn.WriteInt64(v)
 	}
 }
 
-func (self *KVNode) sttlCommand(conn redcon.Conn, cmd redcon.Command) {
-	if v, err := self.store.SetTtl(cmd.Args[1]); err != nil {
+func (nd *KVNode) sttlCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.SetTtl(cmd.Args[1]); err != nil {
 		conn.WriteError(err.Error())
 	} else {
 		conn.WriteInt64(v)
 	}
 }
 
-func (self *KVNode) zttlCommand(conn redcon.Conn, cmd redcon.Command) {
-	if v, err := self.store.ZSetTtl(cmd.Args[1]); err != nil {
+func (nd *KVNode) zttlCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.ZSetTtl(cmd.Args[1]); err != nil {
 		conn.WriteError(err.Error())
 	} else {
 		conn.WriteInt64(v)
@@ -212,57 +212,57 @@ func NewExpireHandler(node *KVNode) *ExpireHandler {
 	}
 }
 
-func (self *ExpireHandler) Start() {
-	if !atomic.CompareAndSwapInt32(&self.running, 0, 1) {
+func (exp *ExpireHandler) Start() {
+	if !atomic.CompareAndSwapInt32(&exp.running, 0, 1) {
 		return
 	}
 
-	self.wg.Add(1)
+	exp.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.watchLeaderChanged()
+		defer exp.wg.Done()
+		exp.watchLeaderChanged()
 	}()
 
 }
 
-func (self *ExpireHandler) Stop() {
-	if atomic.CompareAndSwapInt32(&self.running, 1, 0) {
-		close(self.quitC)
-		self.wg.Wait()
+func (exp *ExpireHandler) Stop() {
+	if atomic.CompareAndSwapInt32(&exp.running, 1, 0) {
+		close(exp.quitC)
+		exp.wg.Wait()
 	}
 }
 
-func (self *ExpireHandler) LeaderChanged() {
+func (exp *ExpireHandler) LeaderChanged() {
 	select {
-	case self.leaderChangedCh <- struct{}{}:
-	case <-self.quitC:
+	case exp.leaderChangedCh <- struct{}{}:
+	case <-exp.quitC:
 		return
 	}
 }
 
-func (self *ExpireHandler) watchLeaderChanged() {
+func (exp *ExpireHandler) watchLeaderChanged() {
 	var stop chan struct{}
 	applying := false
 	for {
 		select {
-		case <-self.leaderChangedCh:
-			if self.node.expirationPolicy != common.ConsistencyDeletion {
+		case <-exp.leaderChangedCh:
+			if exp.node.expirationPolicy != common.ConsistencyDeletion {
 				continue
 			}
-			if self.node.IsLead() && !applying {
+			if exp.node.IsLead() && !applying {
 				stop = make(chan struct{})
-				self.wg.Add(1)
+				exp.wg.Add(1)
 				go func(stop chan struct{}) {
-					defer self.wg.Done()
-					self.applyExpiration(stop)
+					defer exp.wg.Done()
+					exp.applyExpiration(stop)
 				}(stop)
 				applying = true
 
-			} else if !self.node.IsLead() && applying {
+			} else if !exp.node.IsLead() && applying {
 				close(stop)
 				applying = false
 			}
-		case <-self.quitC:
+		case <-exp.quitC:
 			if applying {
 				close(stop)
 				applying = false
@@ -296,15 +296,15 @@ func buildRawExpireCommand(dt common.DataType, keys [][]byte) []byte {
 	return buf
 }
 
-func (self *ExpireHandler) applyExpiration(stop chan struct{}) {
+func (exp *ExpireHandler) applyExpiration(stop chan struct{}) {
 	nodeLog.Infof("begin to apply expiration")
-	self.applyLock.Lock()
+	exp.applyLock.Lock()
 	checkTicker := time.NewTicker(time.Second)
 
 	defer func() {
 		checkTicker.Stop()
-		self.batchBuffer.Reset()
-		self.applyLock.Unlock()
+		exp.batchBuffer.Reset()
+		exp.applyLock.Unlock()
 		nodeLog.Infof("apply expiration has been stopped")
 	}()
 
@@ -312,9 +312,9 @@ func (self *ExpireHandler) applyExpiration(stop chan struct{}) {
 	for {
 		select {
 		case <-checkTicker.C:
-			if err := self.node.store.CheckExpiredData(self.batchBuffer, stop); err == ErrExpiredBatchedBuffFull {
+			if err := exp.node.store.CheckExpiredData(exp.batchBuffer, stop); err == ErrExpiredBatchedBuffFull {
 				if buffFullTimes += 1; buffFullTimes >= 3 {
-					nodeLog.Warningf("expired data buffer is filled three times in succession, stats:%s", self.batchBuffer.GetStats())
+					nodeLog.Warningf("expired data buffer is filled three times in succession, stats:%s", exp.batchBuffer.GetStats())
 					buffFullTimes = 0
 				}
 			} else if err != nil {
@@ -325,7 +325,7 @@ func (self *ExpireHandler) applyExpiration(stop chan struct{}) {
 			case <-stop:
 				return
 			default:
-				self.batchBuffer.CommitAll()
+				exp.batchBuffer.CommitAll()
 			}
 		case <-stop:
 			return

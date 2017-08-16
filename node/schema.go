@@ -3,14 +3,15 @@ package node
 import (
 	"encoding/json"
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 )
 
-func (self *KVNode) GetIndexSchema(table string) (map[string]*common.IndexSchema, error) {
+func (nd *KVNode) GetIndexSchema(table string) (map[string]*common.IndexSchema, error) {
 	if len(table) == 0 {
-		return self.store.GetAllIndexSchema()
+		return nd.store.GetAllIndexSchema()
 	}
-	schema, err := self.store.GetIndexSchema(table)
+	schema, err := nd.store.GetIndexSchema(table)
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +20,7 @@ func (self *KVNode) GetIndexSchema(table string) (map[string]*common.IndexSchema
 	}, nil
 }
 
-func (self *KVNode) handleSchemaUpdate(sc SchemaChange) error {
+func (nd *KVNode) handleSchemaUpdate(sc SchemaChange) error {
 	switch sc.Type {
 	case SchemaChangeAddHsetIndex, SchemaChangeUpdateHsetIndex, SchemaChangeDeleteHsetIndex:
 		var hindex common.HsetIndexSchema
@@ -28,9 +29,9 @@ func (self *KVNode) handleSchemaUpdate(sc SchemaChange) error {
 			return err
 		}
 		if sc.Type == SchemaChangeAddHsetIndex {
-			err = self.store.AddHsetIndex(sc.Table, &hindex)
+			err = nd.store.AddHsetIndex(sc.Table, &hindex)
 		} else {
-			err = self.store.UpdateHsetIndexState(sc.Table, &hindex)
+			err = nd.store.UpdateHsetIndexState(sc.Table, &hindex)
 		}
 		return err
 	default:

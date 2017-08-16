@@ -1,14 +1,15 @@
 package pdserver
 
 import (
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/cluster/pdnode_coord"
-	"github.com/absolute8511/ZanRedisDB/common"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
+
+	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/cluster/pdnode_coord"
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("pdserver"))
@@ -94,23 +95,23 @@ func NewServer(conf *ServerConfig) *Server {
 	return s
 }
 
-func (self *Server) Stop() {
-	close(self.stopC)
-	self.pdCoord.Stop()
-	self.wg.Wait()
+func (s *Server) Stop() {
+	close(s.stopC)
+	s.pdCoord.Stop()
+	s.wg.Wait()
 	sLog.Infof("server stopped")
 }
 
-func (self *Server) Start() {
-	err := self.pdCoord.Start()
+func (s *Server) Start() {
+	err := s.pdCoord.Start()
 	if err != nil {
 		sLog.Errorf("FATAL: start coordinator failed - %s", err)
 		os.Exit(1)
 	}
 
-	self.wg.Add(1)
+	s.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.serveHttpAPI(self.conf.HTTPAddress, self.stopC)
+		defer s.wg.Done()
+		s.serveHttpAPI(s.conf.HTTPAddress, s.stopC)
 	}()
 }

@@ -14,7 +14,7 @@ var (
 	errInvalidCommand = errors.New("invalid command")
 )
 
-func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -49,14 +49,14 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteString("OK")
 		conn.Close()
 	case "info":
-		s := self.GetStats(false)
+		s := s.GetStats(false)
 		d, _ := json.MarshalIndent(s, "", " ")
 		conn.WriteBulkString(string(d))
 	default:
 		if common.IsMergeCommand(cmdName) {
-			self.doMergeCommand(conn, cmd)
+			s.doMergeCommand(conn, cmd)
 		} else {
-			h, cmd, err := self.GetHandler(cmdName, cmd)
+			h, cmd, err := s.GetHandler(cmdName, cmd)
 			if err == nil {
 				h(conn, cmd)
 			} else {
@@ -66,10 +66,10 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
+func (s *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
 	redisS := redcon.NewServer(
 		":"+strconv.Itoa(port),
-		self.serverRedis,
+		s.serverRedis,
 		func(conn redcon.Conn) bool {
 			//sLog.Infof("accept: %s", conn.RemoteAddr())
 			return true

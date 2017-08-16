@@ -25,17 +25,17 @@ type RaftStatus struct {
 	RaftStat   raft.Status
 }
 
-func (self *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	self.router.ServeHTTP(w, req)
+func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	s.router.ServeHTTP(w, req)
 }
 
-func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	key := req.RequestURI
 	ns, realKey, err := common.ExtractNamesapce([]byte(key))
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	kv, err := self.GetNamespace(ns, realKey)
+	kv, err := s.GetNamespace(ns, realKey)
 	if err != nil || !kv.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: err.Error()}
 	}
@@ -49,14 +49,14 @@ func (self *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprout
 	}
 }
 
-func (self *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	self.OptimizeDB()
+func (s *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	s.OptimizeDB()
 	return nil, nil
 }
 
-func (self *Server) doForceNewCluster(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doForceNewCluster(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespaceFromFullName(ns)
+	v := s.GetNamespaceFromFullName(ns)
 	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
@@ -64,16 +64,16 @@ func (self *Server) doForceNewCluster(w http.ResponseWriter, req *http.Request, 
 		return nil, common.HttpErr{Code: http.StatusForbidden, Text: "can not force new cluster while leader is ok"}
 	}
 
-	err := self.RestartAsStandalone(ns)
+	err := s.RestartAsStandalone(ns)
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
 	}
 	return nil, nil
 }
 
-func (self *Server) doForceCleanRaftNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doForceCleanRaftNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespaceFromFullName(ns)
+	v := s.GetNamespaceFromFullName(ns)
 	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
@@ -85,7 +85,7 @@ func (self *Server) doForceCleanRaftNode(w http.ResponseWriter, req *http.Reques
 	return nil, nil
 }
 
-func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
@@ -97,8 +97,8 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	if self.dataCoord != nil {
-		removing, err := self.dataCoord.IsRemovingMember(m)
+	if s.dataCoord != nil {
+		removing, err := s.dataCoord.IsRemovingMember(m)
 		if err != nil {
 			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 		}
@@ -107,7 +107,7 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "removing node should not add to cluster"}
 		}
 	}
-	nsNode := self.GetNamespaceFromFullName(m.GroupName)
+	nsNode := s.GetNamespaceFromFullName(m.GroupName)
 	if nsNode == nil || !nsNode.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: node.ErrNamespacePartitionNotFound.Error()}
 	}
@@ -119,9 +119,9 @@ func (self *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httpr
 	return nil, nil
 }
 
-func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespaceFromFullName(ns)
+	v := s.GetNamespaceFromFullName(ns)
 	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
@@ -132,18 +132,18 @@ func (self *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httpr
 	return l, nil
 }
 
-func (self *Server) getMembers(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) getMembers(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespaceFromFullName(ns)
+	v := s.GetNamespaceFromFullName(ns)
 	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
 	return v.Node.GetMembers(), nil
 }
 
-func (self *Server) getIndexes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) getIndexes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespaceFromFullName(ns)
+	v := s.GetNamespaceFromFullName(ns)
 	if v == nil || !v.IsReady() {
 		sLog.Infof("failed to get namespace node - %s", ns)
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
@@ -152,9 +152,9 @@ func (self *Server) getIndexes(w http.ResponseWriter, req *http.Request, ps http
 	return v.Node.GetIndexSchema(table)
 }
 
-func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	v := self.GetNamespaceFromFullName(ns)
+	v := s.GetNamespaceFromFullName(ns)
 	if v == nil || !v.IsReady() {
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
@@ -169,11 +169,11 @@ func (self *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps
 	return nil, nil
 }
 
-func (self *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	return "OK", nil
 }
 
-func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
@@ -193,7 +193,7 @@ func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps h
 	return nil, nil
 }
 
-func (self *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
@@ -207,22 +207,22 @@ func (self *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprout
 		StartTime        int64  `json:"start_time"`
 	}{
 		Version:          common.VerBinary,
-		BroadcastAddress: self.conf.BroadcastAddr,
+		BroadcastAddress: s.conf.BroadcastAddr,
 		Hostname:         hostname,
-		HTTPPort:         self.conf.HttpAPIPort,
-		RedisPort:        self.conf.RedisAPIPort,
-		StartTime:        self.startTime.Unix(),
+		HTTPPort:         s.conf.HttpAPIPort,
+		RedisPort:        s.conf.RedisAPIPort,
+		StartTime:        s.startTime.Unix(),
 	}, nil
 }
 
-func (self *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
 	ns := reqParams.Get("namespace")
-	nsList := self.nsMgr.GetNamespaces()
+	nsList := s.nsMgr.GetNamespaces()
 	rstat := make([]*RaftStatus, 0)
 	for name, nsNode := range nsList {
 		if !strings.HasPrefix(name, ns) {
@@ -240,7 +240,7 @@ func (self *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps htt
 	return rstat, nil
 }
 
-func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
@@ -248,9 +248,9 @@ func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprou
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
-	ss := self.GetStats(leaderOnly)
+	ss := s.GetStats(leaderOnly)
 
-	startTime := self.startTime
+	startTime := s.startTime
 	uptime := time.Since(startTime)
 
 	return struct {
@@ -260,7 +260,7 @@ func (self *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprou
 	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
-func (self *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
@@ -268,45 +268,45 @@ func (self *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httpr
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
-	ss := self.GetDBStats(leaderOnly)
+	ss := s.GetDBStats(leaderOnly)
 	return ss, nil
 }
 
-func (self *Server) initHttpHandler() {
+func (s *Server) initHttpHandler() {
 	log := common.HttpLog(sLog, common.LOG_INFO)
 	debugLog := common.HttpLog(sLog, common.LOG_DEBUG)
 	router := httprouter.New()
-	router.Handle("GET", common.APIGetLeader+"/:namespace", common.Decorate(self.getLeader, common.V1))
-	router.Handle("GET", common.APIGetMembers+"/:namespace", common.Decorate(self.getMembers, common.V1))
-	router.Handle("GET", common.APIGetIndexes+"/:namespace/:table", common.Decorate(self.getIndexes, common.V1))
-	router.Handle("GET", common.APIGetIndexes+"/:namespace", common.Decorate(self.getIndexes, common.V1))
-	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(self.checkNodeBackup, common.V1))
-	router.Handle("GET", "/kv/get/:namespace", common.Decorate(self.getKey, common.PlainText))
-	router.Handle("POST", "/kv/optimize", common.Decorate(self.doOptimize, log, common.V1))
-	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(self.doForceNewCluster, log, common.V1))
-	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(self.doForceCleanRaftNode, log, common.V1))
-	router.Handle("POST", common.APIAddNode, common.Decorate(self.doAddNode, log, common.V1))
+	router.Handle("GET", common.APIGetLeader+"/:namespace", common.Decorate(s.getLeader, common.V1))
+	router.Handle("GET", common.APIGetMembers+"/:namespace", common.Decorate(s.getMembers, common.V1))
+	router.Handle("GET", common.APIGetIndexes+"/:namespace/:table", common.Decorate(s.getIndexes, common.V1))
+	router.Handle("GET", common.APIGetIndexes+"/:namespace", common.Decorate(s.getIndexes, common.V1))
+	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, common.V1))
+	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
+	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimize, log, common.V1))
+	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
+	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
+	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))
 
-	router.Handle("GET", "/ping", common.Decorate(self.pingHandler, common.PlainText))
-	router.Handle("POST", "/loglevel/set", common.Decorate(self.doSetLogLevel, log, common.V1))
-	router.Handle("GET", "/info", common.Decorate(self.doInfo, common.V1))
+	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
+	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
+	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 
-	router.Handle("GET", "/stats", common.Decorate(self.doStats, common.V1))
-	router.Handle("GET", "/db/stats", common.Decorate(self.doDBStats, common.V1))
-	router.Handle("GET", "/raft/stats", common.Decorate(self.doRaftStats, debugLog, common.V1))
+	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
+	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
+	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 
-	self.router = router
+	s.router = router
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
-func (self *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
-	if self.conf.ProfilePort >= 0 {
-		go http.ListenAndServe(":"+strconv.Itoa(self.conf.ProfilePort), nil)
+func (s *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
+	if s.conf.ProfilePort >= 0 {
+		go http.ListenAndServe(":"+strconv.Itoa(s.conf.ProfilePort), nil)
 	}
-	self.initHttpHandler()
+	s.initHttpHandler()
 	srv := http.Server{
 		Addr:    ":" + strconv.Itoa(port),
-		Handler: self,
+		Handler: s,
 	}
 	l, err := common.NewStoppableListener(srv.Addr, stopC)
 	if err != nil {

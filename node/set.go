@@ -4,8 +4,8 @@ import (
 	"github.com/absolute8511/redcon"
 )
 
-func (self *KVNode) scardCommand(conn redcon.Conn, cmd redcon.Command) {
-	n, err := self.store.SCard(cmd.Args[1])
+func (nd *KVNode) scardCommand(conn redcon.Conn, cmd redcon.Command) {
+	n, err := nd.store.SCard(cmd.Args[1])
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -13,8 +13,8 @@ func (self *KVNode) scardCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteInt64(n)
 }
 
-func (self *KVNode) sismemberCommand(conn redcon.Conn, cmd redcon.Command) {
-	n, err := self.store.SIsMember(cmd.Args[1], cmd.Args[2])
+func (nd *KVNode) sismemberCommand(conn redcon.Conn, cmd redcon.Command) {
+	n, err := nd.store.SIsMember(cmd.Args[1], cmd.Args[2])
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -23,8 +23,8 @@ func (self *KVNode) sismemberCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteInt64(n)
 }
 
-func (self *KVNode) smembersCommand(conn redcon.Conn, cmd redcon.Command) {
-	v, err := self.store.SMembers(cmd.Args[1])
+func (nd *KVNode) smembersCommand(conn redcon.Conn, cmd redcon.Command) {
+	v, err := nd.store.SMembers(cmd.Args[1])
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -36,7 +36,7 @@ func (self *KVNode) smembersCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) saddCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) saddCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -44,7 +44,7 @@ func (self *KVNode) saddCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	}
 }
 
-func (self *KVNode) sremCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) sremCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -52,7 +52,7 @@ func (self *KVNode) sremCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	}
 }
 
-func (self *KVNode) sclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) sclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -60,7 +60,7 @@ func (self *KVNode) sclearCommand(conn redcon.Conn, cmd redcon.Command, v interf
 	}
 }
 
-func (self *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -68,17 +68,17 @@ func (self *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v inter
 	}
 }
 
-func (self *KVNode) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.SAdd(cmd.Args[1], cmd.Args[2:]...)
+func (nd *KVNode) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.SAdd(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localSrem(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.SRem(cmd.Args[1], cmd.Args[2:]...)
+func (nd *KVNode) localSrem(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.SRem(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.SClear(cmd.Args[1])
+func (nd *KVNode) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.SClear(cmd.Args[1])
 }
-func (self *KVNode) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.SMclear(cmd.Args[1:]...)
+func (nd *KVNode) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.SMclear(cmd.Args[1:]...)
 }

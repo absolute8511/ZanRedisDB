@@ -2,11 +2,12 @@ package node
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/redcon"
-	"strconv"
-	"strings"
 )
 
 type HindexSearchResults struct {
@@ -95,7 +96,7 @@ func parseIndexQueryLimit(args [][]byte) (int, int, error) {
 // HIDX.FROM {namespace:table} WHERE {WHERE clause} [LIMIT offset num] [ANY HASH REDIS COMMAND]
 // handle (xx and xx) or (xx and xx), get the min and max range and iterator in the possible range,
 // match all the conditions to decide whether the cursor should be returned
-func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
+func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 4 {
 		return nil, common.ErrInvalidArgs
 	}
@@ -108,7 +109,7 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 	if strings.ToLower(string(cmd.Args[2])) != "where" {
 		return nil, common.ErrInvalidArgs
 	}
-	self.rn.Debugf("parsing where condition: %v", string(cmd.Args[3]))
+	nd.rn.Debugf("parsing where condition: %v", string(cmd.Args[3]))
 	field, cond, err := parseIndexQueryWhere(cmd.Args[3])
 	if err != nil {
 		return nil, err
@@ -123,13 +124,13 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 		cond.Limit = count
 		args = args[3:]
 	}
-	self.rn.Debugf("table %v parsing where condition result: %v, field: %v", string(table), cond, string(field))
-	_, pkList, err := self.store.HsetIndexSearch(table, field, cond, false)
+	nd.rn.Debugf("table %v parsing where condition result: %v, field: %v", string(table), cond, string(field))
+	_, pkList, err := nd.store.HsetIndexSearch(table, field, cond, false)
 	if err != nil {
-		self.rn.Infof("search %v, %v error: %v", string(table), string(field), err)
+		nd.rn.Infof("search %v, %v error: %v", string(table), string(field), err)
 		return nil, err
 	}
-	self.rn.Debugf("search result count: %v", len(pkList))
+	nd.rn.Debugf("search result count: %v", len(pkList))
 	if len(args) > 0 {
 		postCmdArgs := args
 		if len(postCmdArgs) < 2 {
@@ -143,7 +144,7 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 				return nil, common.ErrInvalidArgs
 			}
 			for _, pk := range pkList {
-				v, err := self.store.HGet(pk, postCmdArgs[2])
+				v, err := nd.store.HGet(pk, postCmdArgs[2])
 				if err != nil {
 					continue
 				}
@@ -154,7 +155,7 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 				return nil, common.ErrInvalidArgs
 			}
 			for _, pk := range pkList {
-				vals, err := self.store.HMget(pk, postCmdArgs[2:]...)
+				vals, err := nd.store.HMget(pk, postCmdArgs[2:]...)
 				if err != nil {
 					continue
 				}
@@ -162,7 +163,7 @@ func (self *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error)
 			}
 		case "hgetall":
 			for _, pk := range pkList {
-				n, valCh, err := self.store.HGetAll(pk)
+				n, valCh, err := nd.store.HGetAll(pk)
 				if err != nil {
 					continue
 				}
