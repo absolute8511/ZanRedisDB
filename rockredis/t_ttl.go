@@ -223,14 +223,14 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 		scanned += 1
 		if scanned == 1 {
 			//log the first scanned key
-			dbLog.Infof("ttl check start at key:[%s] of type:%s whose expire time is: %s", string(k),
+			dbLog.Debugf("ttl check start at key:[%s] of type:%s whose expire time is: %s", string(k),
 				TypeName[dt], time.Unix(nt, 0).Format(logTimeFormatStr))
 		}
 
 		if nt > now {
 			//the next ttl check time is nt!
 			nc = nt
-			dbLog.Infof("ttl check end at key:[%s] of type:%s whose expire time is: %s", string(k),
+			dbLog.Debugf("ttl check end at key:[%s] of type:%s whose expire time is: %s", string(k),
 				TypeName[dt], time.Unix(nt, 0).Format(logTimeFormatStr))
 			break
 		}
@@ -247,7 +247,9 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 	c.setNextCheckTime(nc, true)
 
 	checkCost := time.Since(checkStart).Nanoseconds() / 1000
-	dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us", eCount, scanned, checkCost)
+	if dbLog.Level() >= common.LOG_DEBUG || eCount > 100 || checkCost >= time.Second.Nanoseconds()/1000 {
+		dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us", eCount, scanned, checkCost)
+	}
 
 	return err
 }
