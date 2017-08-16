@@ -132,23 +132,23 @@ func NewEtcdRegister(host string) *EtcdRegister {
 	return r
 }
 
-func (self *EtcdRegister) InitClusterID(id string) {
-	self.clusterID = id
-	self.namespaceRoot = self.getNamespaceRootPath()
-	self.clusterPath = self.getClusterPath()
-	self.pdNodeRootPath = self.getPDNodeRootPath()
-	go self.watchNamespaces()
-	go self.refreshNamespaces()
+func (etcdReg *EtcdRegister) InitClusterID(id string) {
+	etcdReg.clusterID = id
+	etcdReg.namespaceRoot = etcdReg.getNamespaceRootPath()
+	etcdReg.clusterPath = etcdReg.getClusterPath()
+	etcdReg.pdNodeRootPath = etcdReg.getPDNodeRootPath()
+	go etcdReg.watchNamespaces()
+	go etcdReg.refreshNamespaces()
 }
 
-func (self *EtcdRegister) Stop() {
-	if self.watchNamespaceStopCh != nil {
-		close(self.watchNamespaceStopCh)
+func (etcdReg *EtcdRegister) Stop() {
+	if etcdReg.watchNamespaceStopCh != nil {
+		close(etcdReg.watchNamespaceStopCh)
 	}
 }
 
-func (self *EtcdRegister) GetAllPDNodes() ([]NodeInfo, error) {
-	rsp, err := self.client.Get(self.pdNodeRootPath, false, false)
+func (etcdReg *EtcdRegister) GetAllPDNodes() ([]NodeInfo, error) {
+	rsp, err := etcdReg.client.Get(etcdReg.pdNodeRootPath, false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return nil, ErrKeyNotFound
@@ -166,20 +166,20 @@ func (self *EtcdRegister) GetAllPDNodes() ([]NodeInfo, error) {
 	return nodeList, nil
 }
 
-func (self *EtcdRegister) GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
-	if atomic.LoadInt32(&self.ifNamespaceChanged) == 1 {
-		return self.scanNamespaces()
+func (etcdReg *EtcdRegister) GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
+	if atomic.LoadInt32(&etcdReg.ifNamespaceChanged) == 1 {
+		return etcdReg.scanNamespaces()
 	}
 
-	self.nsMutex.Lock()
-	nsInfos := self.allNamespaceInfos
-	nsEpoch := self.nsEpoch
-	self.nsMutex.Unlock()
+	etcdReg.nsMutex.Lock()
+	nsInfos := etcdReg.allNamespaceInfos
+	nsEpoch := etcdReg.nsEpoch
+	etcdReg.nsMutex.Unlock()
 	return nsInfos, nsEpoch, nil
 }
 
-func (self *EtcdRegister) GetNamespaceSchemas(ns string) (map[string]SchemaInfo, error) {
-	rsp, err := self.client.Get(self.getNamespaceSchemaPath(ns), false, true)
+func (etcdReg *EtcdRegister) GetNamespaceSchemas(ns string) (map[string]SchemaInfo, error) {
+	rsp, err := etcdReg.client.Get(etcdReg.getNamespaceSchemaPath(ns), false, true)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return nil, ErrKeyNotFound
@@ -201,31 +201,31 @@ func (self *EtcdRegister) GetNamespaceSchemas(ns string) (map[string]SchemaInfo,
 	return schemas, nil
 }
 
-func (self *EtcdRegister) GetNamespacesNotifyChan() chan struct{} {
-	return self.nsChangedChan
+func (etcdReg *EtcdRegister) GetNamespacesNotifyChan() chan struct{} {
+	return etcdReg.nsChangedChan
 }
 
-func (self *EtcdRegister) refreshNamespaces() {
+func (etcdReg *EtcdRegister) refreshNamespaces() {
 	ticker := time.NewTicker(time.Second * 3)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-self.watchNamespaceStopCh:
+		case <-etcdReg.watchNamespaceStopCh:
 			return
 		case <-ticker.C:
-			if atomic.LoadInt32(&self.ifNamespaceChanged) == 1 {
-				self.scanNamespaces()
+			if atomic.LoadInt32(&etcdReg.ifNamespaceChanged) == 1 {
+				etcdReg.scanNamespaces()
 			}
 		}
 	}
 }
 
-func (self *EtcdRegister) watchNamespaces() {
-	watcher := self.client.Watch(self.namespaceRoot, 0, true)
+func (etcdReg *EtcdRegister) watchNamespaces() {
+	watcher := etcdReg.client.Watch(etcdReg.namespaceRoot, 0, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
-		case <-self.watchNamespaceStopCh:
+		case <-etcdReg.watchNamespaceStopCh:
 			cancel()
 		}
 	}()
@@ -233,19 +233,19 @@ func (self *EtcdRegister) watchNamespaces() {
 		_, err := watcher.Next(ctx)
 		if err != nil {
 			if err == context.Canceled {
-				coordLog.Infof("watch key[%s] canceled.", self.namespaceRoot)
+				coordLog.Infof("watch key[%s] canceled.", etcdReg.namespaceRoot)
 				return
 			} else {
-				atomic.StoreInt32(&self.ifNamespaceChanged, 1)
-				coordLog.Errorf("watcher key[%s] error: %s", self.namespaceRoot, err.Error())
+				atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+				coordLog.Errorf("watcher key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
 				if etcdlock.IsEtcdWatchExpired(err) {
-					rsp, err := self.client.Get(self.namespaceRoot, false, true)
+					rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, false, true)
 					if err != nil {
-						coordLog.Errorf("rewatch and get key[%s] error: %s", self.namespaceRoot, err.Error())
+						coordLog.Errorf("rewatch and get key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
 						time.Sleep(time.Second)
 						continue
 					}
-					watcher = self.client.Watch(self.namespaceRoot, rsp.Index+1, true)
+					watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index+1, true)
 					// watch expired should be treated as changed of node
 				} else {
 					time.Sleep(5 * time.Second)
@@ -254,28 +254,28 @@ func (self *EtcdRegister) watchNamespaces() {
 			}
 		}
 		coordLog.Debugf("namespace changed.")
-		atomic.StoreInt32(&self.ifNamespaceChanged, 1)
+		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		select {
-		case self.nsChangedChan <- struct{}{}:
+		case etcdReg.nsChangedChan <- struct{}{}:
 		default:
 		}
 	}
 }
 
-func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
+func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
 	coordLog.Infof("refreshing namespaces")
-	atomic.StoreInt32(&self.ifNamespaceChanged, 0)
+	atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 0)
 
-	rsp, err := self.client.Get(self.namespaceRoot, true, true)
+	rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, true, true)
 	if err != nil {
-		atomic.StoreInt32(&self.ifNamespaceChanged, 1)
+		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		if client.IsKeyNotFound(err) {
 			return nil, 0, ErrKeyNotFound
 		}
-		self.nsMutex.Lock()
-		nsInfos := self.allNamespaceInfos
-		nsEpoch := self.nsEpoch
-		self.nsMutex.Unlock()
+		etcdReg.nsMutex.Lock()
+		nsInfos := etcdReg.allNamespaceInfos
+		nsEpoch := etcdReg.nsEpoch
+		etcdReg.nsMutex.Unlock()
 		coordLog.Infof("refreshing namespaces failed: %v, use old info instead", err)
 		return nsInfos, nsEpoch, err
 	}
@@ -283,7 +283,7 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 	metaMap := make(map[string]NamespaceMetaInfo)
 	replicasMap := make(map[string]map[string]PartitionReplicaInfo)
 	leaderMap := make(map[string]map[string]RealLeader)
-	maxEpoch := self.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap, leaderMap)
+	maxEpoch := etcdReg.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap, leaderMap)
 
 	nsInfos := make(map[string]map[int]PartitionMetaInfo)
 	if EpochType(rsp.Node.ModifiedIndex) > maxEpoch {
@@ -320,22 +320,22 @@ func (self *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo
 		}
 	}
 
-	self.nsMutex.Lock()
-	self.allNamespaceInfos = nsInfos
-	self.nsEpoch = maxEpoch
-	self.nsMutex.Unlock()
+	etcdReg.nsMutex.Lock()
+	etcdReg.allNamespaceInfos = nsInfos
+	etcdReg.nsEpoch = maxEpoch
+	etcdReg.nsMutex.Unlock()
 
 	return nsInfos, maxEpoch, nil
 }
 
-func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
+func (etcdReg *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 	metaMap map[string]NamespaceMetaInfo,
 	replicasMap map[string]map[string]PartitionReplicaInfo,
 	leaderMap map[string]map[string]RealLeader) EpochType {
 	maxEpoch := EpochType(0)
 	for _, node := range nodes {
 		if node.Nodes != nil {
-			newEpoch := self.processNamespaceNode(node.Nodes, metaMap, replicasMap, leaderMap)
+			newEpoch := etcdReg.processNamespaceNode(node.Nodes, metaMap, replicasMap, leaderMap)
 			if newEpoch > maxEpoch {
 				maxEpoch = newEpoch
 			}
@@ -408,10 +408,10 @@ func (self *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 	return maxEpoch
 }
 
-func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*PartitionMetaInfo, error) {
-	self.nsMutex.Lock()
-	defer self.nsMutex.Unlock()
-	nsInfo, ok := self.allNamespaceInfos[ns]
+func (etcdReg *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*PartitionMetaInfo, error) {
+	etcdReg.nsMutex.Lock()
+	defer etcdReg.nsMutex.Unlock()
+	nsInfo, ok := etcdReg.allNamespaceInfos[ns]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
@@ -425,11 +425,11 @@ func (self *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*Parti
 	return p.GetCopy(), nil
 }
 
-func (self *EtcdRegister) GetRemoteNamespaceReplicaInfo(ns string, partition int) (*PartitionReplicaInfo, error) {
-	rsp, err := self.client.Get(self.getNamespaceReplicaInfoPath(ns, partition), false, false)
+func (etcdReg *EtcdRegister) GetRemoteNamespaceReplicaInfo(ns string, partition int) (*PartitionReplicaInfo, error) {
+	rsp, err := etcdReg.client.Get(etcdReg.getNamespaceReplicaInfoPath(ns, partition), false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
-			atomic.StoreInt32(&self.ifNamespaceChanged, 1)
+			atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 			return nil, ErrKeyNotFound
 		}
 		return nil, err
@@ -442,8 +442,8 @@ func (self *EtcdRegister) GetRemoteNamespaceReplicaInfo(ns string, partition int
 	return &rInfo, nil
 }
 
-func (self *EtcdRegister) GetNamespaceTableSchema(ns string, table string) (*SchemaInfo, error) {
-	rsp, err := self.client.Get(self.getNamespaceTableSchemaPath(ns, table), false, false)
+func (etcdReg *EtcdRegister) GetNamespaceTableSchema(ns string, table string) (*SchemaInfo, error) {
+	rsp, err := etcdReg.client.Get(etcdReg.getNamespaceTableSchemaPath(ns, table), false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return nil, ErrKeyNotFound
@@ -456,10 +456,10 @@ func (self *EtcdRegister) GetNamespaceTableSchema(ns string, table string) (*Sch
 	return &info, nil
 }
 
-func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error) {
-	self.nsMutex.Lock()
-	defer self.nsMutex.Unlock()
-	nsInfo, ok := self.allNamespaceInfos[ns]
+func (etcdReg *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, error) {
+	etcdReg.nsMutex.Lock()
+	defer etcdReg.nsMutex.Unlock()
+	nsInfo, ok := etcdReg.allNamespaceInfos[ns]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
@@ -470,13 +470,13 @@ func (self *EtcdRegister) GetNamespaceInfo(ns string) ([]PartitionMetaInfo, erro
 	return parts, nil
 }
 
-func (self *EtcdRegister) GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, error) {
-	self.nsMutex.Lock()
-	parts, ok := self.allNamespaceInfos[ns]
-	self.nsMutex.Unlock()
+func (etcdReg *EtcdRegister) GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, error) {
+	etcdReg.nsMutex.Lock()
+	parts, ok := etcdReg.allNamespaceInfos[ns]
+	etcdReg.nsMutex.Unlock()
 	var meta NamespaceMetaInfo
 	if !ok || len(parts) == 0 {
-		rsp, err := self.client.Get(self.getNamespaceMetaPath(ns), false, false)
+		rsp, err := etcdReg.client.Get(etcdReg.getNamespaceMetaPath(ns), false, false)
 		if err != nil {
 			if client.IsKeyNotFound(err) {
 				return meta, ErrKeyNotFound
@@ -493,56 +493,56 @@ func (self *EtcdRegister) GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo, er
 	return parts[0].NamespaceMetaInfo, nil
 }
 
-func (self *EtcdRegister) getClusterPath() string {
-	return path.Join("/", ROOT_DIR, self.clusterID)
+func (etcdReg *EtcdRegister) getClusterPath() string {
+	return path.Join("/", ROOT_DIR, etcdReg.clusterID)
 }
 
-func (self *EtcdRegister) getClusterMetaPath() string {
-	return path.Join(self.getClusterPath(), CLUSTER_META_INFO)
+func (etcdReg *EtcdRegister) getClusterMetaPath() string {
+	return path.Join(etcdReg.getClusterPath(), CLUSTER_META_INFO)
 }
 
-func (self *EtcdRegister) getPDNodePath(value *NodeInfo) string {
-	return path.Join(self.getPDNodeRootPath(), "Node-"+value.ID)
+func (etcdReg *EtcdRegister) getPDNodePath(value *NodeInfo) string {
+	return path.Join(etcdReg.getPDNodeRootPath(), "Node-"+value.ID)
 }
 
-func (self *EtcdRegister) getPDNodeRootPath() string {
-	return path.Join(self.getClusterPath(), PD_ROOT_DIR, PD_NODE_DIR)
+func (etcdReg *EtcdRegister) getPDNodeRootPath() string {
+	return path.Join(etcdReg.getClusterPath(), PD_ROOT_DIR, PD_NODE_DIR)
 }
 
-func (self *EtcdRegister) getPDLeaderPath() string {
-	return path.Join(self.getClusterPath(), PD_ROOT_DIR, PD_LEADER_SESSION)
+func (etcdReg *EtcdRegister) getPDLeaderPath() string {
+	return path.Join(etcdReg.getClusterPath(), PD_ROOT_DIR, PD_LEADER_SESSION)
 }
 
-func (self *EtcdRegister) getDataNodeRootPath() string {
-	return path.Join(self.getClusterPath(), DATA_NODE_DIR)
+func (etcdReg *EtcdRegister) getDataNodeRootPath() string {
+	return path.Join(etcdReg.getClusterPath(), DATA_NODE_DIR)
 }
 
-func (self *EtcdRegister) getNamespaceRootPath() string {
-	return path.Join(self.getClusterPath(), NAMESPACE_DIR)
+func (etcdReg *EtcdRegister) getNamespaceRootPath() string {
+	return path.Join(etcdReg.getClusterPath(), NAMESPACE_DIR)
 }
 
-func (self *EtcdRegister) getNamespacePath(ns string) string {
-	return path.Join(self.namespaceRoot, ns)
+func (etcdReg *EtcdRegister) getNamespacePath(ns string) string {
+	return path.Join(etcdReg.namespaceRoot, ns)
 }
 
-func (self *EtcdRegister) getNamespaceMetaPath(ns string) string {
-	return path.Join(self.getNamespacePath(ns), NAMESPACE_META)
+func (etcdReg *EtcdRegister) getNamespaceMetaPath(ns string) string {
+	return path.Join(etcdReg.getNamespacePath(ns), NAMESPACE_META)
 }
 
-func (self *EtcdRegister) getNamespaceSchemaPath(ns string) string {
-	return path.Join(self.getNamespacePath(ns), NAMESPACE_SCHEMA)
+func (etcdReg *EtcdRegister) getNamespaceSchemaPath(ns string) string {
+	return path.Join(etcdReg.getNamespacePath(ns), NAMESPACE_SCHEMA)
 }
 
-func (self *EtcdRegister) getNamespaceTableSchemaPath(ns string, table string) string {
-	return path.Join(self.getNamespaceSchemaPath(ns), table)
+func (etcdReg *EtcdRegister) getNamespaceTableSchemaPath(ns string, table string) string {
+	return path.Join(etcdReg.getNamespaceSchemaPath(ns), table)
 }
 
-func (self *EtcdRegister) getNamespacePartitionPath(ns string, partition int) string {
-	return path.Join(self.getNamespacePath(ns), strconv.Itoa(partition))
+func (etcdReg *EtcdRegister) getNamespacePartitionPath(ns string, partition int) string {
+	return path.Join(etcdReg.getNamespacePath(ns), strconv.Itoa(partition))
 }
 
-func (self *EtcdRegister) getNamespaceReplicaInfoPath(ns string, partition int) string {
-	return path.Join(self.getNamespacePartitionPath(ns, partition), NAMESPACE_REPLICA_INFO)
+func (etcdReg *EtcdRegister) getNamespaceReplicaInfoPath(ns string, partition int) string {
+	return path.Join(etcdReg.getNamespacePartitionPath(ns, partition), NAMESPACE_REPLICA_INFO)
 }
 
 // placement driver register
@@ -567,41 +567,41 @@ func NewPDEtcdRegister(host string) *PDEtcdRegister {
 	}
 }
 
-func (self *PDEtcdRegister) Register(value *NodeInfo) error {
-	self.leaderSessionPath = self.getPDLeaderPath()
-	self.nodeInfo = value
+func (etcdReg *PDEtcdRegister) Register(value *NodeInfo) error {
+	etcdReg.leaderSessionPath = etcdReg.getPDLeaderPath()
+	etcdReg.nodeInfo = value
 	valueB, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if self.refreshStopCh != nil {
-		close(self.refreshStopCh)
+	if etcdReg.refreshStopCh != nil {
+		close(etcdReg.refreshStopCh)
 	}
 
-	self.leaderStr = string(valueB)
-	self.nodeKey = self.getPDNodePath(value)
-	self.nodeValue = string(valueB)
-	_, err = self.client.Set(self.nodeKey, self.nodeValue, ETCD_TTL)
+	etcdReg.leaderStr = string(valueB)
+	etcdReg.nodeKey = etcdReg.getPDNodePath(value)
+	etcdReg.nodeValue = string(valueB)
+	_, err = etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
 	if err != nil {
 		return err
 	}
-	self.refreshStopCh = make(chan bool)
+	etcdReg.refreshStopCh = make(chan bool)
 	// start to refresh
-	go self.refresh(self.refreshStopCh)
+	go etcdReg.refresh(etcdReg.refreshStopCh)
 
 	return nil
 }
 
-func (self *PDEtcdRegister) refresh(stopC <-chan bool) {
+func (etcdReg *PDEtcdRegister) refresh(stopC <-chan bool) {
 	for {
 		select {
 		case <-stopC:
 			return
 		case <-time.After(time.Second * time.Duration(ETCD_TTL/10)):
-			_, err := self.client.SetWithTTL(self.nodeKey, ETCD_TTL)
+			_, err := etcdReg.client.SetWithTTL(etcdReg.nodeKey, ETCD_TTL)
 			if err != nil {
 				coordLog.Errorf("update error: %s", err.Error())
-				_, err := self.client.Set(self.nodeKey, self.nodeValue, ETCD_TTL)
+				_, err := etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
 				if err != nil {
 					coordLog.Errorf("set key error: %s", err.Error())
 				}
@@ -610,36 +610,36 @@ func (self *PDEtcdRegister) refresh(stopC <-chan bool) {
 	}
 }
 
-func (self *PDEtcdRegister) Unregister(value *NodeInfo) error {
+func (etcdReg *PDEtcdRegister) Unregister(value *NodeInfo) error {
 	// stop to refresh
-	if self.refreshStopCh != nil {
-		close(self.refreshStopCh)
-		self.refreshStopCh = nil
+	if etcdReg.refreshStopCh != nil {
+		close(etcdReg.refreshStopCh)
+		etcdReg.refreshStopCh = nil
 	}
 
-	_, err := self.client.Delete(self.getPDNodePath(value), false)
+	_, err := etcdReg.client.Delete(etcdReg.getPDNodePath(value), false)
 	if err != nil {
-		coordLog.Warningf("cluser[%s] node[%s] unregister failed: %v", self.clusterID, value, err)
+		coordLog.Warningf("cluser[%s] node[%s] unregister failed: %v", etcdReg.clusterID, value, err)
 		return err
 	}
 
 	return nil
 }
 
-func (self *PDEtcdRegister) Stop() {
-	//	self.Unregister()
-	if self.watchNodesStopCh != nil {
-		close(self.watchNodesStopCh)
+func (etcdReg *PDEtcdRegister) Stop() {
+	//	etcdReg.Unregister()
+	if etcdReg.watchNodesStopCh != nil {
+		close(etcdReg.watchNodesStopCh)
 	}
-	self.EtcdRegister.Stop()
+	etcdReg.EtcdRegister.Stop()
 }
 
-func (self *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
+func (etcdReg *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
 	var clusterMeta ClusterMetaInfo
 	initValue, _ := json.Marshal(clusterMeta)
 	err := exchangeNodeValue(
-		self.client,
-		self.getClusterMetaPath(),
+		etcdReg.client,
+		etcdReg.getClusterMetaPath(),
 		string(initValue),
 		func(isNew bool, oldValue string) (string, error) {
 			if !isNew && oldValue != "" {
@@ -658,8 +658,8 @@ func (self *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
 	return clusterMeta.MaxGID, err
 }
 
-func (self *PDEtcdRegister) GetClusterEpoch() (EpochType, error) {
-	rsp, err := self.client.Get(self.clusterPath, false, false)
+func (etcdReg *PDEtcdRegister) GetClusterEpoch() (EpochType, error) {
+	rsp, err := etcdReg.client.Get(etcdReg.clusterPath, false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return 0, ErrKeyNotFound
@@ -670,13 +670,13 @@ func (self *PDEtcdRegister) GetClusterEpoch() (EpochType, error) {
 	return EpochType(rsp.Node.ModifiedIndex), nil
 }
 
-func (self *PDEtcdRegister) AcquireAndWatchLeader(leader chan *NodeInfo, stop chan struct{}) {
-	master := etcdlock.NewMaster(self.client, self.leaderSessionPath, self.leaderStr, ETCD_TTL)
-	go self.processMasterEvents(master, leader, stop)
+func (etcdReg *PDEtcdRegister) AcquireAndWatchLeader(leader chan *NodeInfo, stop chan struct{}) {
+	master := etcdlock.NewMaster(etcdReg.client, etcdReg.leaderSessionPath, etcdReg.leaderStr, ETCD_TTL)
+	go etcdReg.processMasterEvents(master, leader, stop)
 	master.Start()
 }
 
-func (self *PDEtcdRegister) processMasterEvents(master etcdlock.Master, leader chan *NodeInfo, stop chan struct{}) {
+func (etcdReg *PDEtcdRegister) processMasterEvents(master etcdlock.Master, leader chan *NodeInfo, stop chan struct{}) {
 	for {
 		select {
 		case e := <-master.GetEventsChan():
@@ -706,23 +706,23 @@ func (self *PDEtcdRegister) processMasterEvents(master etcdlock.Master, leader c
 	}
 }
 
-func (self *PDEtcdRegister) CheckIfLeader() bool {
-	rsp, err := self.client.Get(self.leaderSessionPath, false, false)
+func (etcdReg *PDEtcdRegister) CheckIfLeader() bool {
+	rsp, err := etcdReg.client.Get(etcdReg.leaderSessionPath, false, false)
 	if err != nil {
 		return false
 	}
-	if rsp.Node.Value == self.leaderStr {
+	if rsp.Node.Value == etcdReg.leaderStr {
 		return true
 	}
 	return false
 }
 
-func (self *PDEtcdRegister) GetDataNodes() ([]NodeInfo, error) {
-	return self.getDataNodes()
+func (etcdReg *PDEtcdRegister) GetDataNodes() ([]NodeInfo, error) {
+	return etcdReg.getDataNodes()
 }
 
-func (self *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop chan struct{}) {
-	dataNodes, err := self.getDataNodes()
+func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop chan struct{}) {
+	dataNodes, err := etcdReg.getDataNodes()
 	if err == nil {
 		select {
 		case dataNodesChan <- dataNodes:
@@ -732,14 +732,14 @@ func (self *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop c
 		}
 	}
 
-	key := self.getDataNodeRootPath()
-	watcher := self.client.Watch(key, 0, true)
+	key := etcdReg.getDataNodeRootPath()
+	watcher := etcdReg.client.Watch(key, 0, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
 		case <-stop:
 			cancel()
-		case <-self.watchNodesStopCh:
+		case <-etcdReg.watchNodesStopCh:
 			cancel()
 		}
 	}()
@@ -754,13 +754,13 @@ func (self *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop c
 				coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
 				//rewatch
 				if etcdlock.IsEtcdWatchExpired(err) {
-					rsp, err = self.client.Get(key, false, true)
+					rsp, err = etcdReg.client.Get(key, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
 						time.Sleep(time.Second)
 						continue
 					}
-					watcher = self.client.Watch(key, rsp.Index+1, true)
+					watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
 					// should get the nodes to notify watcher since last watch is expired
 				} else {
 					time.Sleep(5 * time.Second)
@@ -768,7 +768,7 @@ func (self *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop c
 				}
 			}
 		}
-		dataNodes, err := self.getDataNodes()
+		dataNodes, err := etcdReg.getDataNodes()
 		if err != nil {
 			coordLog.Errorf("key[%s] getNodes error: %s", key, err.Error())
 			continue
@@ -782,8 +782,8 @@ func (self *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop c
 	}
 }
 
-func (self *PDEtcdRegister) getDataNodes() ([]NodeInfo, error) {
-	rsp, err := self.client.Get(self.getDataNodeRootPath(), false, false)
+func (etcdReg *PDEtcdRegister) getDataNodes() ([]NodeInfo, error) {
+	rsp, err := etcdReg.client.Get(etcdReg.getDataNodeRootPath(), false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return nil, ErrKeyNotFound
@@ -805,8 +805,8 @@ func (self *PDEtcdRegister) getDataNodes() ([]NodeInfo, error) {
 	return dataNodes, nil
 }
 
-func (self *PDEtcdRegister) CreateNamespacePartition(ns string, partition int) error {
-	_, err := self.client.CreateDir(self.getNamespacePartitionPath(ns, partition), 0)
+func (etcdReg *PDEtcdRegister) CreateNamespacePartition(ns string, partition int) error {
+	_, err := etcdReg.client.CreateDir(etcdReg.getNamespacePartitionPath(ns, partition), 0)
 	if err != nil {
 		if IsEtcdNotFile(err) {
 			return ErrKeyAlreadyExist
@@ -816,7 +816,7 @@ func (self *PDEtcdRegister) CreateNamespacePartition(ns string, partition int) e
 	return nil
 }
 
-func (self *PDEtcdRegister) CreateNamespace(ns string, meta *NamespaceMetaInfo) error {
+func (etcdReg *PDEtcdRegister) CreateNamespace(ns string, meta *NamespaceMetaInfo) error {
 	if meta.MinGID <= 0 {
 		return errors.New("namespace MinGID is invalid")
 	}
@@ -824,7 +824,7 @@ func (self *PDEtcdRegister) CreateNamespace(ns string, meta *NamespaceMetaInfo) 
 	if err != nil {
 		return err
 	}
-	rsp, err := self.client.Create(self.getNamespaceMetaPath(ns), string(metaValue), 0)
+	rsp, err := etcdReg.client.Create(etcdReg.getNamespaceMetaPath(ns), string(metaValue), 0)
 	if err != nil {
 		if IsEtcdNodeExist(err) {
 			return ErrKeyAlreadyExist
@@ -836,8 +836,8 @@ func (self *PDEtcdRegister) CreateNamespace(ns string, meta *NamespaceMetaInfo) 
 	return nil
 }
 
-func (self *PDEtcdRegister) IsExistNamespace(ns string) (bool, error) {
-	_, err := self.client.Get(self.getNamespacePath(ns), false, false)
+func (etcdReg *PDEtcdRegister) IsExistNamespace(ns string) (bool, error) {
+	_, err := etcdReg.client.Get(etcdReg.getNamespacePath(ns), false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return false, nil
@@ -848,8 +848,8 @@ func (self *PDEtcdRegister) IsExistNamespace(ns string) (bool, error) {
 	return true, nil
 }
 
-func (self *PDEtcdRegister) IsExistNamespacePartition(ns string, partitionNum int) (bool, error) {
-	_, err := self.client.Get(self.getNamespacePartitionPath(ns, partitionNum), false, false)
+func (etcdReg *PDEtcdRegister) IsExistNamespacePartition(ns string, partitionNum int) (bool, error) {
+	_, err := etcdReg.client.Get(etcdReg.getNamespacePartitionPath(ns, partitionNum), false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return false, nil
@@ -860,17 +860,17 @@ func (self *PDEtcdRegister) IsExistNamespacePartition(ns string, partitionNum in
 	return true, nil
 }
 
-func (self *PDEtcdRegister) UpdateNamespaceMetaInfo(ns string, meta *NamespaceMetaInfo, oldGen EpochType) error {
+func (etcdReg *PDEtcdRegister) UpdateNamespaceMetaInfo(ns string, meta *NamespaceMetaInfo, oldGen EpochType) error {
 	value, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
 	coordLog.Infof("Update meta info: %s %s %d", ns, string(value), oldGen)
 
-	self.nsMutex.Lock()
-	defer self.nsMutex.Unlock()
-	atomic.StoreInt32(&self.ifNamespaceChanged, 1)
-	rsp, err := self.client.CompareAndSwap(self.getNamespaceMetaPath(ns), string(value), 0, "", uint64(oldGen))
+	etcdReg.nsMutex.Lock()
+	defer etcdReg.nsMutex.Unlock()
+	atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+	rsp, err := etcdReg.client.CompareAndSwap(etcdReg.getNamespaceMetaPath(ns), string(value), 0, "", uint64(oldGen))
 	if err != nil {
 		return err
 	}
@@ -884,17 +884,17 @@ func (self *PDEtcdRegister) UpdateNamespaceMetaInfo(ns string, meta *NamespaceMe
 	return nil
 }
 
-func (self *PDEtcdRegister) DeleteWholeNamespace(ns string) error {
-	self.nsMutex.Lock()
-	atomic.StoreInt32(&self.ifNamespaceChanged, 1)
-	rsp, err := self.client.Delete(self.getNamespacePath(ns), true)
+func (etcdReg *PDEtcdRegister) DeleteWholeNamespace(ns string) error {
+	etcdReg.nsMutex.Lock()
+	atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+	rsp, err := etcdReg.client.Delete(etcdReg.getNamespacePath(ns), true)
 	coordLog.Infof("delete whole topic: %v, %v, %v", ns, err, rsp)
-	self.nsMutex.Unlock()
+	etcdReg.nsMutex.Unlock()
 	return err
 }
 
-func (self *PDEtcdRegister) DeleteNamespacePart(ns string, partition int) error {
-	_, err := self.client.Delete(self.getNamespacePartitionPath(ns, partition), true)
+func (etcdReg *PDEtcdRegister) DeleteNamespacePart(ns string, partition int) error {
+	_, err := etcdReg.client.Delete(etcdReg.getNamespacePartitionPath(ns, partition), true)
 	if err != nil {
 		if !client.IsKeyNotFound(err) {
 			return err
@@ -903,7 +903,7 @@ func (self *PDEtcdRegister) DeleteNamespacePart(ns string, partition int) error 
 	return nil
 }
 
-func (self *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partition int,
+func (etcdReg *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partition int,
 	replicaInfo *PartitionReplicaInfo, oldGen EpochType) error {
 	value, err := json.Marshal(replicaInfo)
 	if err != nil {
@@ -911,14 +911,14 @@ func (self *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partition 
 	}
 	coordLog.Infof("Update info: %s %d %s %d", ns, partition, string(value), oldGen)
 	if oldGen == 0 {
-		rsp, err := self.client.Create(self.getNamespaceReplicaInfoPath(ns, partition), string(value), 0)
+		rsp, err := etcdReg.client.Create(etcdReg.getNamespaceReplicaInfoPath(ns, partition), string(value), 0)
 		if err != nil {
 			return err
 		}
 		replicaInfo.epoch = EpochType(rsp.Node.ModifiedIndex)
 		return nil
 	}
-	rsp, err := self.client.CompareAndSwap(self.getNamespaceReplicaInfoPath(ns, partition), string(value), 0, "", uint64(oldGen))
+	rsp, err := etcdReg.client.CompareAndSwap(etcdReg.getNamespaceReplicaInfoPath(ns, partition), string(value), 0, "", uint64(oldGen))
 	if err != nil {
 		return err
 	}
@@ -926,9 +926,9 @@ func (self *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partition 
 	return nil
 }
 
-func (self *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, schema *SchemaInfo) error {
+func (etcdReg *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, schema *SchemaInfo) error {
 	if schema.Epoch == 0 {
-		rsp, err := self.client.Create(self.getNamespaceTableSchemaPath(ns, table), string(schema.Schema), 0)
+		rsp, err := etcdReg.client.Create(etcdReg.getNamespaceTableSchemaPath(ns, table), string(schema.Schema), 0)
 		if err != nil {
 			return err
 		}
@@ -936,7 +936,7 @@ func (self *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, schem
 		return nil
 	}
 
-	rsp, err := self.client.CompareAndSwap(self.getNamespaceTableSchemaPath(ns, table), string(schema.Schema),
+	rsp, err := etcdReg.client.CompareAndSwap(etcdReg.getNamespaceTableSchemaPath(ns, table), string(schema.Schema),
 		0, "", uint64(schema.Epoch))
 	if err != nil {
 		return err
@@ -964,39 +964,39 @@ func NewDNEtcdRegister(host string) *DNEtcdRegister {
 	}
 }
 
-func (self *DNEtcdRegister) Register(nodeData *NodeInfo) error {
+func (etcdReg *DNEtcdRegister) Register(nodeData *NodeInfo) error {
 	value, err := json.Marshal(nodeData)
 	if err != nil {
 		return err
 	}
-	if self.refreshStopCh != nil {
-		close(self.refreshStopCh)
+	if etcdReg.refreshStopCh != nil {
+		close(etcdReg.refreshStopCh)
 	}
 
-	self.nodeKey = self.getDataNodePath(nodeData)
-	self.nodeValue = string(value)
-	_, err = self.client.Set(self.nodeKey, self.nodeValue, ETCD_TTL)
+	etcdReg.nodeKey = etcdReg.getDataNodePath(nodeData)
+	etcdReg.nodeValue = string(value)
+	_, err = etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
 	if err != nil {
 		return err
 	}
 	coordLog.Infof("registered new node: %v", nodeData)
-	self.refreshStopCh = make(chan bool)
+	etcdReg.refreshStopCh = make(chan bool)
 	// start refresh node
-	go self.refresh(self.refreshStopCh)
+	go etcdReg.refresh(etcdReg.refreshStopCh)
 
 	return nil
 }
 
-func (self *DNEtcdRegister) refresh(stopChan chan bool) {
+func (etcdReg *DNEtcdRegister) refresh(stopChan chan bool) {
 	for {
 		select {
 		case <-stopChan:
 			return
 		case <-time.After(time.Second * time.Duration(ETCD_TTL/10)):
-			_, err := self.client.SetWithTTL(self.nodeKey, ETCD_TTL)
+			_, err := etcdReg.client.SetWithTTL(etcdReg.nodeKey, ETCD_TTL)
 			if err != nil {
 				coordLog.Errorf("update error: %s", err.Error())
-				_, err := self.client.Set(self.nodeKey, self.nodeValue, ETCD_TTL)
+				_, err := etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
 				if err != nil {
 					coordLog.Errorf("set key error: %s", err.Error())
 				}
@@ -1005,30 +1005,30 @@ func (self *DNEtcdRegister) refresh(stopChan chan bool) {
 	}
 }
 
-func (self *DNEtcdRegister) Unregister(nodeData *NodeInfo) error {
-	self.Lock()
-	defer self.Unlock()
+func (etcdReg *DNEtcdRegister) Unregister(nodeData *NodeInfo) error {
+	etcdReg.Lock()
+	defer etcdReg.Unlock()
 
 	// stop refresh
-	if self.refreshStopCh != nil {
-		close(self.refreshStopCh)
-		self.refreshStopCh = nil
+	if etcdReg.refreshStopCh != nil {
+		close(etcdReg.refreshStopCh)
+		etcdReg.refreshStopCh = nil
 	}
 
-	_, err := self.client.Delete(self.getDataNodePath(nodeData), false)
+	_, err := etcdReg.client.Delete(etcdReg.getDataNodePath(nodeData), false)
 	if err != nil {
-		coordLog.Warningf("cluser[%s] node[%s] unregister failed: %v", self.clusterID, nodeData, err)
+		coordLog.Warningf("cluser[%s] node[%s] unregister failed: %v", etcdReg.clusterID, nodeData, err)
 		return err
 	}
 
-	coordLog.Infof("cluser[%s] node[%v] unregistered", self.clusterID, nodeData)
+	coordLog.Infof("cluser[%s] node[%v] unregistered", etcdReg.clusterID, nodeData)
 	return nil
 }
 
-func (self *DNEtcdRegister) GetNamespaceLeader(ns string, partition int) (string, EpochType, error) {
-	self.nsMutex.Lock()
-	defer self.nsMutex.Unlock()
-	nsInfo, ok := self.allNamespaceInfos[ns]
+func (etcdReg *DNEtcdRegister) GetNamespaceLeader(ns string, partition int) (string, EpochType, error) {
+	etcdReg.nsMutex.Lock()
+	defer etcdReg.nsMutex.Unlock()
+	nsInfo, ok := etcdReg.allNamespaceInfos[ns]
 	if !ok {
 		return "", 0, ErrKeyNotFound
 	}
@@ -1039,20 +1039,20 @@ func (self *DNEtcdRegister) GetNamespaceLeader(ns string, partition int) (string
 	return p.GetRealLeader(), p.currentLeader.epoch, nil
 }
 
-func (self *DNEtcdRegister) UpdateNamespaceLeader(ns string, partition int, rl RealLeader, oldGen EpochType) (EpochType, error) {
+func (etcdReg *DNEtcdRegister) UpdateNamespaceLeader(ns string, partition int, rl RealLeader, oldGen EpochType) (EpochType, error) {
 	value, err := json.Marshal(rl)
 	if err != nil {
 		return oldGen, err
 	}
 	if oldGen == 0 {
-		rsp, err := self.client.Create(self.getNamespaceLeaderPath(ns, partition), string(value), 0)
+		rsp, err := etcdReg.client.Create(etcdReg.getNamespaceLeaderPath(ns, partition), string(value), 0)
 		if err != nil {
 			return 0, err
 		}
 		rl.epoch = EpochType(rsp.Node.ModifiedIndex)
 		return rl.epoch, nil
 	}
-	rsp, err := self.client.CompareAndSwap(self.getNamespaceLeaderPath(ns, partition), string(value), 0, "", uint64(oldGen))
+	rsp, err := etcdReg.client.CompareAndSwap(etcdReg.getNamespaceLeaderPath(ns, partition), string(value), 0, "", uint64(oldGen))
 	if err != nil {
 		return 0, err
 	}
@@ -1060,9 +1060,9 @@ func (self *DNEtcdRegister) UpdateNamespaceLeader(ns string, partition int, rl R
 	return rl.epoch, nil
 }
 
-func (self *DNEtcdRegister) GetNodeInfo(nid string) (NodeInfo, error) {
+func (etcdReg *DNEtcdRegister) GetNodeInfo(nid string) (NodeInfo, error) {
 	var node NodeInfo
-	rsp, err := self.client.Get(self.getDataNodePathFromID(nid), false, false)
+	rsp, err := etcdReg.client.Get(etcdReg.getDataNodePathFromID(nid), false, false)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return node, ErrKeyNotFound
@@ -1076,10 +1076,10 @@ func (self *DNEtcdRegister) GetNodeInfo(nid string) (NodeInfo, error) {
 	return node, nil
 }
 
-func (self *DNEtcdRegister) NewRegisterNodeID() (uint64, error) {
+func (etcdReg *DNEtcdRegister) NewRegisterNodeID() (uint64, error) {
 	var clusterMeta ClusterMetaInfo
 	initValue, _ := json.Marshal(clusterMeta)
-	exchangeErr := exchangeNodeValue(self.client, self.getClusterMetaPath(), string(initValue), func(isNew bool, oldValue string) (string, error) {
+	exchangeErr := exchangeNodeValue(etcdReg.client, etcdReg.getClusterMetaPath(), string(initValue), func(isNew bool, oldValue string) (string, error) {
 		if !isNew && oldValue != "" {
 			err := json.Unmarshal([]byte(oldValue), &clusterMeta)
 			if err != nil {
@@ -1093,10 +1093,10 @@ func (self *DNEtcdRegister) NewRegisterNodeID() (uint64, error) {
 	return clusterMeta.MaxRegID, exchangeErr
 }
 
-func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struct{}) error {
-	key := self.getPDLeaderPath()
+func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struct{}) error {
+	key := etcdReg.getPDLeaderPath()
 
-	rsp, err := self.client.Get(key, false, false)
+	rsp, err := etcdReg.client.Get(key, false, false)
 	if err == nil {
 		coordLog.Infof("key: %s value: %s", rsp.Node.Key, rsp.Node.Value)
 		var node NodeInfo
@@ -1113,7 +1113,7 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 		coordLog.Errorf("get error: %s", err.Error())
 	}
 
-	watcher := self.client.Watch(key, 0, true)
+	watcher := etcdReg.client.Watch(key, 0, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -1134,14 +1134,14 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 				//rewatch
 				if etcdlock.IsEtcdWatchExpired(err) {
 					isMissing = true
-					rsp, err = self.client.Get(key, false, true)
+					rsp, err = etcdReg.client.Get(key, false, true)
 					if err != nil {
 						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
 						time.Sleep(time.Second)
 						continue
 					}
 					coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
-					watcher = self.client.Watch(key, rsp.Index+1, true)
+					watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
 				} else {
 					time.Sleep(5 * time.Second)
 					continue
@@ -1188,14 +1188,14 @@ func (self *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struc
 	return nil
 }
 
-func (self *DNEtcdRegister) getDataNodePathFromID(nid string) string {
-	return path.Join(self.getClusterPath(), DATA_NODE_DIR, "Node-"+nid)
+func (etcdReg *DNEtcdRegister) getDataNodePathFromID(nid string) string {
+	return path.Join(etcdReg.getClusterPath(), DATA_NODE_DIR, "Node-"+nid)
 }
 
-func (self *DNEtcdRegister) getDataNodePath(nodeData *NodeInfo) string {
-	return path.Join(self.getClusterPath(), DATA_NODE_DIR, "Node-"+nodeData.ID)
+func (etcdReg *DNEtcdRegister) getDataNodePath(nodeData *NodeInfo) string {
+	return path.Join(etcdReg.getClusterPath(), DATA_NODE_DIR, "Node-"+nodeData.ID)
 }
 
-func (self *DNEtcdRegister) getNamespaceLeaderPath(ns string, partition int) string {
-	return path.Join(self.getNamespacePartitionPath(ns, partition), NAMESPACE_REAL_LEADER)
+func (etcdReg *DNEtcdRegister) getNamespaceLeaderPath(ns string, partition int) string {
+	return path.Join(etcdReg.getNamespacePartitionPath(ns, partition), NAMESPACE_REAL_LEADER)
 }

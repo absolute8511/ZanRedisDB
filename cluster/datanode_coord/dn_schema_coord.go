@@ -3,7 +3,7 @@ package datanode_coord
 import (
 	"encoding/json"
 
-	. "github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 	node "github.com/absolute8511/ZanRedisDB/node"
 )
@@ -12,7 +12,7 @@ import (
 func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode,
 	indexSchemas map[string]*common.IndexSchema) {
 
-	CoordLog().Infof("namespace %v checking schema sync: %v",
+	cluster.CoordLog().Infof("namespace %v checking schema sync: %v",
 		localNamespace.FullName(), len(indexSchemas))
 	for table, tindexes := range indexSchemas {
 		localIndexSchema, err := localNamespace.Node.GetIndexSchema(table)
@@ -40,11 +40,11 @@ func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode
 					continue
 				}
 				if hindex.State != common.InitIndex {
-					CoordLog().Warningf("namespace %v update index state invalid: %v, local index not init",
+					cluster.CoordLog().Warningf("namespace %v update index state invalid: %v, local index not init",
 						localNamespace.FullName(), hindex)
 					continue
 				}
-				CoordLog().Infof("namespace %v init new index : %v, table: %v",
+				cluster.CoordLog().Infof("namespace %v init new index : %v, table: %v",
 					localNamespace.FullName(), hindex, table)
 				localNamespace.Node.ProposeChangeTableSchema(table, sc)
 			} else if hindex.State == localHIndex.State {
@@ -52,14 +52,14 @@ func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode
 				switch hindex.State {
 				case common.BuildingIndex:
 					if localHIndex.State == common.InitIndex {
-						CoordLog().Infof("namespace %v index start to build : %v, %v",
+						cluster.CoordLog().Infof("namespace %v index start to build : %v, %v",
 							localNamespace.FullName(), hindex, table)
 						sc.Type = node.SchemaChangeUpdateHsetIndex
 						localNamespace.Node.ProposeChangeTableSchema(table, sc)
 					}
 				case common.ReadyIndex:
 					if localHIndex.State == common.BuildDoneIndex {
-						CoordLog().Infof("namespace %v index ready for read: %v, %v",
+						cluster.CoordLog().Infof("namespace %v index ready for read: %v, %v",
 							localNamespace.FullName(), hindex, table)
 						sc.Type = node.SchemaChangeUpdateHsetIndex
 						localNamespace.Node.ProposeChangeTableSchema(table, sc)
@@ -69,7 +69,7 @@ func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode
 					if localHIndex.State == common.BuildDoneIndex ||
 						localHIndex.State == common.ReadyIndex ||
 						localHIndex.State == common.DeletedIndex {
-						CoordLog().Warningf("namespace %v rebuild index: %v for table %v, local index state: %v",
+						cluster.CoordLog().Warningf("namespace %v rebuild index: %v for table %v, local index state: %v",
 							localNamespace.FullName(), hindex, table, localHIndex)
 						sc.Type = node.SchemaChangeUpdateHsetIndex
 						localNamespace.Node.ProposeChangeTableSchema(table, sc)

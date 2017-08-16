@@ -2,10 +2,11 @@ package pdnode_coord
 
 import (
 	"errors"
-	. "github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
 	"sync/atomic"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 // some API for outside
@@ -18,19 +19,19 @@ func (self *PDCoordinator) IsMineLeader() bool {
 	return self.leaderNode.GetID() == self.myNode.GetID()
 }
 
-func (self *PDCoordinator) GetAllPDNodes() ([]NodeInfo, error) {
+func (self *PDCoordinator) GetAllPDNodes() ([]cluster.NodeInfo, error) {
 	return self.register.GetAllPDNodes()
 }
 
-func (self *PDCoordinator) GetPDLeader() NodeInfo {
+func (self *PDCoordinator) GetPDLeader() cluster.NodeInfo {
 	return self.leaderNode
 }
 
-func (self *PDCoordinator) GetAllDataNodes() (map[string]NodeInfo, int64) {
+func (self *PDCoordinator) GetAllDataNodes() (map[string]cluster.NodeInfo, int64) {
 	return self.getCurrentNodesWithRemoving()
 }
 
-func (self *PDCoordinator) GetAllNamespaces() (map[string]map[int]PartitionMetaInfo, int64, error) {
+func (self *PDCoordinator) GetAllNamespaces() (map[string]map[int]cluster.PartitionMetaInfo, int64, error) {
 	ns, epoch, err := self.register.GetAllNamespaces()
 	return ns, int64(epoch), err
 }
@@ -45,21 +46,21 @@ func (self *PDCoordinator) SetClusterStableNodeNum(num int) error {
 
 func (self *PDCoordinator) SetClusterUpgradeState(upgrading bool) error {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
-		CoordLog().Infof("not leader while delete namespace")
+		cluster.CoordLog().Infof("not leader while delete namespace")
 		return ErrNotLeader
 	}
 
 	if upgrading {
 		if !atomic.CompareAndSwapInt32(&self.isUpgrading, 0, 1) {
-			CoordLog().Infof("the cluster state is already upgrading")
+			cluster.CoordLog().Infof("the cluster state is already upgrading")
 			return nil
 		}
-		CoordLog().Infof("the cluster state has been changed to upgrading")
+		cluster.CoordLog().Infof("the cluster state has been changed to upgrading")
 	} else {
 		if !atomic.CompareAndSwapInt32(&self.isUpgrading, 1, 0) {
 			return nil
 		}
-		CoordLog().Infof("the cluster state has been changed to normal")
+		cluster.CoordLog().Infof("the cluster state has been changed to normal")
 		self.triggerCheckNamespaces("", 0, time.Second)
 	}
 	return nil
@@ -67,15 +68,15 @@ func (self *PDCoordinator) SetClusterUpgradeState(upgrading bool) error {
 
 func (self *PDCoordinator) MarkNodeAsRemoving(nid string) error {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
-		CoordLog().Infof("not leader while delete namespace")
+		cluster.CoordLog().Infof("not leader while delete namespace")
 		return ErrNotLeader
 	}
 
-	CoordLog().Infof("try mark node %v as removed", nid)
+	cluster.CoordLog().Infof("try mark node %v as removed", nid)
 	self.nodesMutex.Lock()
 	newRemovingNodes := make(map[string]string)
 	if _, ok := self.removingNodes[nid]; ok {
-		CoordLog().Infof("already mark as removing")
+		cluster.CoordLog().Infof("already mark as removing")
 	} else {
 		newRemovingNodes[nid] = "marked"
 		for id, removeState := range self.removingNodes {
@@ -89,40 +90,40 @@ func (self *PDCoordinator) MarkNodeAsRemoving(nid string) error {
 
 func (self *PDCoordinator) DeleteNamespace(ns string, partition string) error {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
-		CoordLog().Infof("not leader while delete namespace")
+		cluster.CoordLog().Infof("not leader while delete namespace")
 		return ErrNotLeader
 	}
 
 	begin := time.Now()
 	for !atomic.CompareAndSwapInt32(&self.doChecking, 0, 1) {
-		CoordLog().Infof("delete %v waiting check namespace finish", ns)
+		cluster.CoordLog().Infof("delete %v waiting check namespace finish", ns)
 		time.Sleep(time.Millisecond * 200)
 		if time.Since(begin) > time.Second*5 {
 			return ErrClusterUnstable
 		}
 	}
 	defer atomic.StoreInt32(&self.doChecking, 0)
-	CoordLog().Infof("delete namespace: %v, with partition: %v", ns, partition)
+	cluster.CoordLog().Infof("delete namespace: %v, with partition: %v", ns, partition)
 	if ok, err := self.register.IsExistNamespace(ns); !ok {
-		CoordLog().Infof("no namespace : %v", err)
-		return ErrKeyNotFound
+		cluster.CoordLog().Infof("no namespace : %v", err)
+		return cluster.ErrKeyNotFound
 	}
 
 	if partition == "**" {
 		// delete all
 		meta, err := self.register.GetNamespaceMetaInfo(ns)
 		if err != nil {
-			CoordLog().Infof("failed to get meta for namespace: %v", err)
+			cluster.CoordLog().Infof("failed to get meta for namespace: %v", err)
 		}
 		for pid := 0; pid < meta.PartitionNum; pid++ {
 			err := self.deleteNamespacePartition(ns, pid)
 			if err != nil {
-				CoordLog().Infof("failed to delete namespace partition %v for namespace: %v, err:%v", pid, ns, err)
+				cluster.CoordLog().Infof("failed to delete namespace partition %v for namespace: %v, err:%v", pid, ns, err)
 			}
 		}
 		err = self.register.DeleteWholeNamespace(ns)
 		if err != nil {
-			CoordLog().Infof("failed to delete whole namespace: %v : %v", ns, err)
+			cluster.CoordLog().Infof("failed to delete whole namespace: %v : %v", ns, err)
 		}
 	}
 	return nil
@@ -131,7 +132,7 @@ func (self *PDCoordinator) DeleteNamespace(ns string, partition string) error {
 func (self *PDCoordinator) deleteNamespacePartition(namespace string, pid int) error {
 	commonErr := self.register.DeleteNamespacePart(namespace, pid)
 	if commonErr != nil {
-		CoordLog().Infof("failed to delete the namespace info : %v", commonErr)
+		cluster.CoordLog().Infof("failed to delete the namespace info : %v", commonErr)
 		return commonErr
 	}
 	return nil
@@ -140,7 +141,7 @@ func (self *PDCoordinator) deleteNamespacePartition(namespace string, pid int) e
 func (self *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newReplicator int,
 	optimizeFsync string, snapCount int) error {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
-		CoordLog().Infof("not leader while create namespace")
+		cluster.CoordLog().Infof("not leader while create namespace")
 		return ErrNotLeader
 	}
 
@@ -152,14 +153,14 @@ func (self *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newReplica
 		return errors.New("max replicator allowed exceed")
 	}
 
-	var meta NamespaceMetaInfo
+	var meta cluster.NamespaceMetaInfo
 	if ok, _ := self.register.IsExistNamespace(namespace); !ok {
-		CoordLog().Infof("namespace not exist %v :%v", namespace)
-		return ErrNamespaceNotCreated.ToErrorType()
+		cluster.CoordLog().Infof("namespace not exist %v :%v", namespace)
+		return cluster.ErrNamespaceNotCreated.ToErrorType()
 	} else {
 		oldMeta, err := self.register.GetNamespaceMetaInfo(namespace)
 		if err != nil {
-			CoordLog().Infof("get namespace key %v failed :%v", namespace, err)
+			cluster.CoordLog().Infof("get namespace key %v failed :%v", namespace, err)
 			return err
 		}
 		currentNodes := self.getCurrentNodes(oldMeta.Tags)
@@ -184,19 +185,19 @@ func (self *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newReplica
 	return nil
 }
 
-func (self *PDCoordinator) updateNamespaceMeta(currentNodes map[string]NodeInfo, namespace string, meta *NamespaceMetaInfo) error {
-	CoordLog().Infof("update namespace: %v, with meta: %v", namespace, meta)
+func (self *PDCoordinator) updateNamespaceMeta(currentNodes map[string]cluster.NodeInfo, namespace string, meta *cluster.NamespaceMetaInfo) error {
+	cluster.CoordLog().Infof("update namespace: %v, with meta: %v", namespace, meta)
 
 	if len(currentNodes) < meta.Replica {
-		CoordLog().Infof("nodes %v is less than replica  %v", len(currentNodes), meta)
+		cluster.CoordLog().Infof("nodes %v is less than replica  %v", len(currentNodes), meta)
 		return ErrNodeUnavailable.ToErrorType()
 	}
 	return self.register.UpdateNamespaceMetaInfo(namespace, meta, meta.MetaEpoch())
 }
 
-func (self *PDCoordinator) CreateNamespace(namespace string, meta NamespaceMetaInfo) error {
+func (self *PDCoordinator) CreateNamespace(namespace string, meta cluster.NamespaceMetaInfo) error {
 	if self.leaderNode.GetID() != self.myNode.GetID() {
-		CoordLog().Infof("not leader while create namespace")
+		cluster.CoordLog().Infof("not leader while create namespace")
 		return ErrNotLeader
 	}
 
@@ -210,7 +211,7 @@ func (self *PDCoordinator) CreateNamespace(namespace string, meta NamespaceMetaI
 
 	currentNodes := self.getCurrentNodes(meta.Tags)
 	if len(currentNodes) < meta.Replica {
-		CoordLog().Infof("nodes %v is less than replica %v", len(currentNodes), meta)
+		cluster.CoordLog().Infof("nodes %v is less than replica %v", len(currentNodes), meta)
 		return ErrNodeUnavailable.ToErrorType()
 	}
 	if ok, _ := self.register.IsExistNamespace(namespace); !ok {
@@ -218,45 +219,45 @@ func (self *PDCoordinator) CreateNamespace(namespace string, meta NamespaceMetaI
 		var err error
 		meta.MinGID, err = self.register.PrepareNamespaceMinGID()
 		if err != nil {
-			CoordLog().Infof("prepare namespace %v gid failed :%v", namespace, err)
+			cluster.CoordLog().Infof("prepare namespace %v gid failed :%v", namespace, err)
 			return err
 		}
 		err = self.register.CreateNamespace(namespace, &meta)
 		if err != nil {
-			CoordLog().Infof("create namespace key %v failed :%v", namespace, err)
+			cluster.CoordLog().Infof("create namespace key %v failed :%v", namespace, err)
 			return err
 		}
 	} else {
-		CoordLog().Warningf("namespace already exist :%v ", namespace)
+		cluster.CoordLog().Warningf("namespace already exist :%v ", namespace)
 		return ErrAlreadyExist
 	}
-	CoordLog().Infof("create namespace: %v, with meta: %v", namespace, meta)
+	cluster.CoordLog().Infof("create namespace: %v, with meta: %v", namespace, meta)
 	return self.checkAndUpdateNamespacePartitions(currentNodes, namespace, meta)
 }
 
-func (self *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map[string]NodeInfo,
-	namespace string, meta NamespaceMetaInfo) error {
-	existPart := make(map[int]*PartitionMetaInfo)
+func (self *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map[string]cluster.NodeInfo,
+	namespace string, meta cluster.NamespaceMetaInfo) error {
+	existPart := make(map[int]*cluster.PartitionMetaInfo)
 	for i := 0; i < meta.PartitionNum; i++ {
 		err := self.register.CreateNamespacePartition(namespace, i)
 		if err != nil {
-			CoordLog().Warningf("failed to create namespace %v-%v: %v", namespace, i, err)
+			cluster.CoordLog().Warningf("failed to create namespace %v-%v: %v", namespace, i, err)
 			// handle already exist
 			t, err := self.register.GetNamespacePartInfo(namespace, i)
 			if err != nil {
-				CoordLog().Warningf("exist namespace partition failed to get info: %v", err)
-				if err != ErrKeyNotFound {
+				cluster.CoordLog().Warningf("exist namespace partition failed to get info: %v", err)
+				if err != cluster.ErrKeyNotFound {
 					return err
 				}
 			} else {
-				CoordLog().Infof("create namespace partition already exist %v-%v", namespace, i)
+				cluster.CoordLog().Infof("create namespace partition already exist %v-%v", namespace, i)
 				existPart[i] = t
 			}
 		}
 	}
 	partReplicaList, err := self.dpm.allocNamespaceRaftNodes(namespace, currentNodes, meta.Replica, meta.PartitionNum, existPart)
 	if err != nil {
-		CoordLog().Infof("failed to alloc nodes for namespace: %v", err)
+		cluster.CoordLog().Infof("failed to alloc nodes for namespace: %v", err)
 		return err.ToErrorType()
 	}
 	if len(partReplicaList) != meta.PartitionNum {
@@ -269,12 +270,12 @@ func (self *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map[st
 
 		tmpReplicaInfo := partReplicaList[i]
 		if len(tmpReplicaInfo.GetISR()) <= meta.Replica/2 {
-			CoordLog().Infof("failed update info for namespace : %v-%v since not quorum", namespace, i, tmpReplicaInfo)
+			cluster.CoordLog().Infof("failed update info for namespace : %v-%v since not quorum", namespace, i, tmpReplicaInfo)
 			continue
 		}
 		commonErr := self.register.UpdateNamespacePartReplicaInfo(namespace, i, &tmpReplicaInfo, tmpReplicaInfo.Epoch())
 		if commonErr != nil {
-			CoordLog().Infof("failed update info for namespace : %v-%v, %v", namespace, i, commonErr)
+			cluster.CoordLog().Infof("failed update info for namespace : %v-%v, %v", namespace, i, commonErr)
 			continue
 		}
 	}

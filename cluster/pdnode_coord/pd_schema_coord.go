@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	. "github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 )
 
@@ -15,13 +15,13 @@ var (
 )
 
 func getIndexSchemasFromDataNode(remoteNode string, ns string) (map[string]*common.IndexSchema, error) {
-	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+	nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(remoteNode)
 	rsp := make(map[string]*common.IndexSchema)
 	_, err := common.APIRequest("GET",
 		"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetIndexes+"/"+ns,
 		nil, time.Second*3, &rsp)
 	if err != nil {
-		CoordLog().Infof("failed (%v) to get indexes for namespace %v : %v",
+		cluster.CoordLog().Infof("failed (%v) to get indexes for namespace %v : %v",
 			nip, ns, err)
 		return nil, err
 	}
@@ -62,8 +62,8 @@ func (self *PDCoordinator) doSchemaCheck() {
 	for ns, parts := range allNamespaces {
 		schemas, err := self.register.GetNamespaceSchemas(ns)
 		if err != nil {
-			if err != ErrKeyNotFound {
-				CoordLog().Infof("get schema info failed: %v", err)
+			if err != cluster.ErrKeyNotFound {
+				cluster.CoordLog().Infof("get schema info failed: %v", err)
 			}
 			continue
 		}
@@ -83,7 +83,7 @@ func (self *PDCoordinator) doSchemaCheck() {
 				isReady = false
 				break
 			}
-			CoordLog().Infof("namespace %v got schema : %v", common.GetNsDesp(ns, pid),
+			cluster.CoordLog().Infof("namespace %v got schema : %v", common.GetNsDesp(ns, pid),
 				len(schemas))
 			allPartsSchema[pid] = schemas
 		}
@@ -94,7 +94,7 @@ func (self *PDCoordinator) doSchemaCheck() {
 			var indexes common.IndexSchema
 			err := json.Unmarshal(schemaInfo.Schema, &indexes)
 			if err != nil {
-				CoordLog().Infof("unmarshal schema data failed: %v", err)
+				cluster.CoordLog().Infof("unmarshal schema data failed: %v", err)
 				continue
 			}
 			schemaChanged := false
@@ -113,7 +113,7 @@ func (self *PDCoordinator) doSchemaCheck() {
 					if isAllPartsIndexSchemaReady(allPartsSchema, table, hindex.Name, common.BuildDoneIndex) {
 						schemaChanged = true
 						hindex.State = common.ReadyIndex
-						CoordLog().Infof("namespace %v table %v schema info ready: %v", ns, table, hindex)
+						cluster.CoordLog().Infof("namespace %v table %v schema info ready: %v", ns, table, hindex)
 					} else {
 						go self.triggerCheckNamespaces(ns, -1, time.Second*3)
 					}
@@ -126,10 +126,10 @@ func (self *PDCoordinator) doSchemaCheck() {
 
 			if schemaChanged {
 				newSchemaInfo.Schema, _ = json.Marshal(indexes)
-				CoordLog().Infof("namespace %v table %v schema info changed: %v", ns, table, string(newSchemaInfo.Schema))
+				cluster.CoordLog().Infof("namespace %v table %v schema info changed: %v", ns, table, string(newSchemaInfo.Schema))
 				err := self.register.UpdateNamespaceSchema(ns, table, &newSchemaInfo)
 				if err != nil {
-					CoordLog().Infof("update %v-%v schema to register failed: %v", ns, table, err)
+					cluster.CoordLog().Infof("update %v-%v schema to register failed: %v", ns, table, err)
 				}
 			}
 		}
@@ -141,11 +141,11 @@ func (self *PDCoordinator) addHIndexSchema(ns string, table string, hindex *comm
 		return ErrInvalidSchema
 	}
 	var indexes common.IndexSchema
-	var newSchema SchemaInfo
+	var newSchema cluster.SchemaInfo
 
 	schema, err := self.register.GetNamespaceTableSchema(ns, table)
 	if err != nil {
-		if err != ErrKeyNotFound {
+		if err != cluster.ErrKeyNotFound {
 			return err
 		}
 		newSchema.Epoch = 0
@@ -153,7 +153,7 @@ func (self *PDCoordinator) addHIndexSchema(ns string, table string, hindex *comm
 		newSchema.Epoch = schema.Epoch
 		err := json.Unmarshal(schema.Schema, &indexes)
 		if err != nil {
-			CoordLog().Infof("unmarshal schema data failed: %v", err)
+			cluster.CoordLog().Infof("unmarshal schema data failed: %v", err)
 			return err
 		}
 	}
@@ -170,7 +170,7 @@ func (self *PDCoordinator) addHIndexSchema(ns string, table string, hindex *comm
 
 func (self *PDCoordinator) delHIndexSchema(ns string, table string, hindexName string) error {
 	var indexes common.IndexSchema
-	var newSchema SchemaInfo
+	var newSchema cluster.SchemaInfo
 
 	schema, err := self.register.GetNamespaceTableSchema(ns, table)
 	if err != nil {
@@ -179,17 +179,17 @@ func (self *PDCoordinator) delHIndexSchema(ns string, table string, hindexName s
 		newSchema.Epoch = schema.Epoch
 		err := json.Unmarshal(schema.Schema, &indexes)
 		if err != nil {
-			CoordLog().Infof("unmarshal schema data failed: %v", err)
+			cluster.CoordLog().Infof("unmarshal schema data failed: %v", err)
 			return err
 		}
 	}
 	for _, hi := range indexes.HsetIndexes {
 		if hi.Name == hindexName {
 			if hi.State != common.ReadyIndex {
-				CoordLog().Infof("namespace %v table %v index schema not ready: %v", ns, table, hi)
+				cluster.CoordLog().Infof("namespace %v table %v index schema not ready: %v", ns, table, hi)
 				return errors.New("Unready index can not be deleted")
 			}
-			CoordLog().Infof("namespace %v table %v index schema deleted: %v", ns, table, hi)
+			cluster.CoordLog().Infof("namespace %v table %v index schema deleted: %v", ns, table, hi)
 			hi.State = common.DeletedIndex
 		}
 	}
