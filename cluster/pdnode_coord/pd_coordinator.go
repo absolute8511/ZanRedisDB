@@ -72,39 +72,39 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 	return coord
 }
 
-func (self *PDCoordinator) SetRegister(r cluster.PDRegister) {
-	self.register = r
+func (pdCoord *PDCoordinator) SetRegister(r cluster.PDRegister) {
+	pdCoord.register = r
 }
 
-func (self *PDCoordinator) Start() error {
-	if self.register != nil {
-		self.register.InitClusterID(self.clusterKey)
-		err := self.register.Register(&self.myNode)
+func (pdCoord *PDCoordinator) Start() error {
+	if pdCoord.register != nil {
+		pdCoord.register.InitClusterID(pdCoord.clusterKey)
+		err := pdCoord.register.Register(&pdCoord.myNode)
 		if err != nil {
 			cluster.CoordLog().Warningf("failed to register pd coordinator: %v", err)
 			return err
 		}
 	}
-	self.wg.Add(1)
-	go self.handleLeadership()
+	pdCoord.wg.Add(1)
+	go pdCoord.handleLeadership()
 	return nil
 }
 
-func (self *PDCoordinator) Stop() {
-	close(self.stopChan)
-	if self.register != nil {
-		self.register.Unregister(&self.myNode)
-		self.register.Stop()
+func (pdCoord *PDCoordinator) Stop() {
+	close(pdCoord.stopChan)
+	if pdCoord.register != nil {
+		pdCoord.register.Unregister(&pdCoord.myNode)
+		pdCoord.register.Stop()
 	}
-	self.wg.Wait()
+	pdCoord.wg.Wait()
 	cluster.CoordLog().Infof("coordinator stopped.")
 }
 
-func (self *PDCoordinator) handleLeadership() {
-	defer self.wg.Done()
+func (pdCoord *PDCoordinator) handleLeadership() {
+	defer pdCoord.wg.Done()
 	leaderChan := make(chan *cluster.NodeInfo)
-	if self.register != nil {
-		go self.register.AcquireAndWatchLeader(leaderChan, self.stopChan)
+	if pdCoord.register != nil {
+		go pdCoord.register.AcquireAndWatchLeader(leaderChan, pdCoord.stopChan)
 	}
 	defer func() {
 		if e := recover(); e != nil {
@@ -115,9 +115,9 @@ func (self *PDCoordinator) handleLeadership() {
 		}
 
 		cluster.CoordLog().Warningf("leadership watch exit.")
-		if self.monitorChan != nil {
-			close(self.monitorChan)
-			self.monitorChan = nil
+		if pdCoord.monitorChan != nil {
+			close(pdCoord.monitorChan)
+			pdCoord.monitorChan = nil
 		}
 	}()
 	for {
@@ -128,48 +128,48 @@ func (self *PDCoordinator) handleLeadership() {
 				return
 			}
 			if l == nil {
-				atomic.StoreInt32(&self.isClusterUnstable, 1)
+				atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 				cluster.CoordLog().Warningf("leader is lost.")
 				continue
 			}
-			if l.GetID() != self.leaderNode.GetID() {
-				cluster.CoordLog().Infof("leader changed from %v to %v", self.leaderNode, *l)
-				self.leaderNode = *l
-				if self.leaderNode.GetID() != self.myNode.GetID() {
+			if l.GetID() != pdCoord.leaderNode.GetID() {
+				cluster.CoordLog().Infof("leader changed from %v to %v", pdCoord.leaderNode, *l)
+				pdCoord.leaderNode = *l
+				if pdCoord.leaderNode.GetID() != pdCoord.myNode.GetID() {
 					// remove watchers.
-					if self.monitorChan != nil {
-						close(self.monitorChan)
+					if pdCoord.monitorChan != nil {
+						close(pdCoord.monitorChan)
 					}
-					self.monitorChan = make(chan struct{})
+					pdCoord.monitorChan = make(chan struct{})
 				}
-				self.notifyLeaderChanged(self.monitorChan)
+				pdCoord.notifyLeaderChanged(pdCoord.monitorChan)
 			}
-			if self.leaderNode.GetID() == "" {
+			if pdCoord.leaderNode.GetID() == "" {
 				cluster.CoordLog().Warningf("leader is missing.")
 			}
 		}
 	}
 }
 
-func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
-	if self.leaderNode.GetID() != self.myNode.GetID() {
-		cluster.CoordLog().Infof("I am slave (%v). Leader is: %v", self.myNode, self.leaderNode)
-		self.nodesMutex.Lock()
-		self.removingNodes = make(map[string]string)
-		self.nodesMutex.Unlock()
+func (pdCoord *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
+	if pdCoord.leaderNode.GetID() != pdCoord.myNode.GetID() {
+		cluster.CoordLog().Infof("I am slave (%v). Leader is: %v", pdCoord.myNode, pdCoord.leaderNode)
+		pdCoord.nodesMutex.Lock()
+		pdCoord.removingNodes = make(map[string]string)
+		pdCoord.nodesMutex.Unlock()
 
-		self.wg.Add(1)
+		pdCoord.wg.Add(1)
 		go func() {
-			defer self.wg.Done()
-			self.handleDataNodes(monitorChan, false)
+			defer pdCoord.wg.Done()
+			pdCoord.handleDataNodes(monitorChan, false)
 		}()
 
 		return
 	}
 	cluster.CoordLog().Infof("I am master now.")
 	// reload namespace information
-	if self.register != nil {
-		newNamespaces, _, err := self.register.GetAllNamespaces()
+	if pdCoord.register != nil {
+		newNamespaces, _, err := pdCoord.register.GetAllNamespaces()
 		if err != nil {
 			cluster.CoordLog().Errorf("load namespace info failed: %v", err)
 		} else {
@@ -177,35 +177,35 @@ func (self *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 		}
 	}
 
-	self.wg.Add(1)
+	pdCoord.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.handleDataNodes(monitorChan, true)
+		defer pdCoord.wg.Done()
+		pdCoord.handleDataNodes(monitorChan, true)
 	}()
-	self.wg.Add(1)
+	pdCoord.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.checkNamespaces(monitorChan)
+		defer pdCoord.wg.Done()
+		pdCoord.checkNamespaces(monitorChan)
 	}()
-	self.wg.Add(1)
+	pdCoord.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.dpm.DoBalance(monitorChan)
+		defer pdCoord.wg.Done()
+		pdCoord.dpm.DoBalance(monitorChan)
 	}()
-	self.wg.Add(1)
+	pdCoord.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.handleRemovingNodes(monitorChan)
+		defer pdCoord.wg.Done()
+		pdCoord.handleRemovingNodes(monitorChan)
 	}()
 }
 
-func (self *PDCoordinator) getCurrentNodes(tags map[string]bool) map[string]cluster.NodeInfo {
-	self.nodesMutex.RLock()
-	currentNodes := self.dataNodes
-	if len(self.removingNodes) > 0 || len(tags) > 0 {
+func (pdCoord *PDCoordinator) getCurrentNodes(tags map[string]bool) map[string]cluster.NodeInfo {
+	pdCoord.nodesMutex.RLock()
+	currentNodes := pdCoord.dataNodes
+	if len(pdCoord.removingNodes) > 0 || len(tags) > 0 {
 		currentNodes = make(map[string]cluster.NodeInfo)
-		for nid, n := range self.dataNodes {
-			if _, ok := self.removingNodes[nid]; ok {
+		for nid, n := range pdCoord.dataNodes {
+			if _, ok := pdCoord.removingNodes[nid]; ok {
 				continue
 			}
 			filtered := false
@@ -221,25 +221,25 @@ func (self *PDCoordinator) getCurrentNodes(tags map[string]bool) map[string]clus
 			currentNodes[nid] = n
 		}
 	}
-	self.nodesMutex.RUnlock()
+	pdCoord.nodesMutex.RUnlock()
 	return currentNodes
 }
 
-func (self *PDCoordinator) getCurrentNodesWithRemoving() (map[string]cluster.NodeInfo, int64) {
-	self.nodesMutex.RLock()
-	currentNodes := self.dataNodes
-	currentNodesEpoch := atomic.LoadInt64(&self.nodesEpoch)
-	self.nodesMutex.RUnlock()
+func (pdCoord *PDCoordinator) getCurrentNodesWithRemoving() (map[string]cluster.NodeInfo, int64) {
+	pdCoord.nodesMutex.RLock()
+	currentNodes := pdCoord.dataNodes
+	currentNodesEpoch := atomic.LoadInt64(&pdCoord.nodesEpoch)
+	pdCoord.nodesMutex.RUnlock()
 	return currentNodes, currentNodesEpoch
 }
 
-func (self *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]bool) (map[string]cluster.NodeInfo, int64) {
-	self.nodesMutex.RLock()
-	currentNodes := self.dataNodes
-	if len(self.removingNodes) > 0 || len(tags) > 0 {
+func (pdCoord *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]bool) (map[string]cluster.NodeInfo, int64) {
+	pdCoord.nodesMutex.RLock()
+	currentNodes := pdCoord.dataNodes
+	if len(pdCoord.removingNodes) > 0 || len(tags) > 0 {
 		currentNodes = make(map[string]cluster.NodeInfo)
-		for nid, n := range self.dataNodes {
-			if _, ok := self.removingNodes[nid]; ok {
+		for nid, n := range pdCoord.dataNodes {
+			if _, ok := pdCoord.removingNodes[nid]; ok {
 				continue
 			}
 			filtered := false
@@ -256,15 +256,15 @@ func (self *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]bool) (map[s
 			currentNodes[nid] = n
 		}
 	}
-	currentNodesEpoch := atomic.LoadInt64(&self.nodesEpoch)
-	self.nodesMutex.RUnlock()
+	currentNodesEpoch := atomic.LoadInt64(&pdCoord.nodesEpoch)
+	pdCoord.nodesMutex.RUnlock()
 	return currentNodes, currentNodesEpoch
 }
 
-func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster bool) {
+func (pdCoord *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster bool) {
 	nodesChan := make(chan []cluster.NodeInfo)
-	if self.register != nil {
-		go self.register.WatchDataNodes(nodesChan, monitorChan)
+	if pdCoord.register != nil {
+		go pdCoord.register.WatchDataNodes(nodesChan, monitorChan)
 	}
 	cluster.CoordLog().Debugf("start watch the nodes.")
 	defer func() {
@@ -278,14 +278,14 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster b
 			}
 			// check if any node changed.
 			cluster.CoordLog().Infof("Current data nodes: %v", len(nodes))
-			oldNodes := self.dataNodes
+			oldNodes := pdCoord.dataNodes
 			newNodes := make(map[string]cluster.NodeInfo)
 			for _, v := range nodes {
 				//cluster.CoordLog().Infof("node %v : %v", v.GetID(), v)
 				newNodes[v.GetID()] = v
 			}
-			self.nodesMutex.Lock()
-			self.dataNodes = newNodes
+			pdCoord.nodesMutex.Lock()
+			pdCoord.dataNodes = newNodes
 			check := false
 			for oldID, oldNode := range oldNodes {
 				if _, ok := newNodes[oldID]; !ok {
@@ -296,16 +296,16 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster b
 			}
 			// failed need be protected by lock so we can avoid contention.
 			if check {
-				atomic.AddInt64(&self.nodesEpoch, 1)
+				atomic.AddInt64(&pdCoord.nodesEpoch, 1)
 			}
-			if int32(len(self.dataNodes)) > atomic.LoadInt32(&self.stableNodeNum) {
-				oldNum := atomic.LoadInt32(&self.stableNodeNum)
-				atomic.StoreInt32(&self.stableNodeNum, int32(len(self.dataNodes)))
-				cluster.CoordLog().Warningf("stable cluster node number changed from %v to: %v", oldNum, atomic.LoadInt32(&self.stableNodeNum))
+			if int32(len(pdCoord.dataNodes)) > atomic.LoadInt32(&pdCoord.stableNodeNum) {
+				oldNum := atomic.LoadInt32(&pdCoord.stableNodeNum)
+				atomic.StoreInt32(&pdCoord.stableNodeNum, int32(len(pdCoord.dataNodes)))
+				cluster.CoordLog().Warningf("stable cluster node number changed from %v to: %v", oldNum, atomic.LoadInt32(&pdCoord.stableNodeNum))
 			}
-			self.nodesMutex.Unlock()
+			pdCoord.nodesMutex.Unlock()
 
-			if self.register == nil {
+			if pdCoord.register == nil {
 				continue
 			}
 			for newID, newNode := range newNodes {
@@ -315,15 +315,15 @@ func (self *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaster b
 				}
 			}
 			if check && isMaster {
-				atomic.AddInt64(&self.nodesEpoch, 1)
-				atomic.StoreInt32(&self.isClusterUnstable, 1)
-				self.triggerCheckNamespaces("", 0, time.Millisecond*10)
+				atomic.AddInt64(&pdCoord.nodesEpoch, 1)
+				atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+				pdCoord.triggerCheckNamespaces("", 0, time.Millisecond*10)
 			}
 		}
 	}
 }
 
-func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
+func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 	cluster.CoordLog().Debugf("start handle the removing nodes.")
 	defer func() {
 		cluster.CoordLog().Infof("stop handle the removing nodes.")
@@ -337,23 +337,23 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 		case <-ticker.C:
 			//
 			anyStateChanged := false
-			self.nodesMutex.RLock()
+			pdCoord.nodesMutex.RLock()
 			removingNodes := make(map[string]string)
-			for nid, removeState := range self.removingNodes {
+			for nid, removeState := range pdCoord.removingNodes {
 				removingNodes[nid] = removeState
 			}
-			self.nodesMutex.RUnlock()
+			pdCoord.nodesMutex.RUnlock()
 			// remove state: marked -> pending -> data_transfered -> done
 			if len(removingNodes) == 0 {
 				continue
 			}
-			currentNodes := self.getCurrentNodes(nil)
+			currentNodes := pdCoord.getCurrentNodes(nil)
 			nodeNameList := make([]string, 0, len(currentNodes))
 			for _, s := range currentNodes {
 				nodeNameList = append(nodeNameList, s.ID)
 			}
 
-			allNamespaces, _, err := self.register.GetAllNamespaces()
+			allNamespaces, _, err := pdCoord.register.GetAllNamespaces()
 			if err != nil {
 				continue
 			}
@@ -372,7 +372,7 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							anyPending = true
 							// find new catchup and wait isr ready
 							removingNodes[nid] = "pending"
-							newInfo, err := self.dpm.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
+							newInfo, err := pdCoord.dpm.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 								nodeNameList)
 							if err != nil {
 								cluster.CoordLog().Infof("namespace %v data on node %v transfered failed, waiting next time", namespaceInfo.GetDesp(), nid)
@@ -383,7 +383,7 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							cluster.CoordLog().Infof("namespace %v data on node %v transfered success", namespaceInfo.GetDesp(), nid)
 							anyStateChanged = true
 						}
-						err := self.removeNamespaceFromNode(&namespaceInfo, nid)
+						err := pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 						if err != nil {
 							anyPending = true
 						}
@@ -397,13 +397,13 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							if removingNodes[nid] == "data_transfered" {
 								removingNodes[nid] = "done"
 							} else if removingNodes[nid] == "done" {
-								self.nodesMutex.Lock()
-								_, ok := self.dataNodes[nid]
+								pdCoord.nodesMutex.Lock()
+								_, ok := pdCoord.dataNodes[nid]
 								if !ok {
 									delete(removingNodes, nid)
 									cluster.CoordLog().Infof("the node %v is removed finally since not alive in cluster", nid)
 								}
-								self.nodesMutex.Unlock()
+								pdCoord.nodesMutex.Unlock()
 							}
 						}
 					}
@@ -411,20 +411,20 @@ func (self *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 			}
 
 			if anyStateChanged {
-				self.nodesMutex.Lock()
-				self.removingNodes = removingNodes
-				self.nodesMutex.Unlock()
+				pdCoord.nodesMutex.Lock()
+				pdCoord.removingNodes = removingNodes
+				pdCoord.nodesMutex.Unlock()
 			}
 		}
 	}
 }
 
-func (self *PDCoordinator) triggerCheckNamespaces(namespace string, part int, delay time.Duration) {
+func (pdCoord *PDCoordinator) triggerCheckNamespaces(namespace string, part int, delay time.Duration) {
 	time.Sleep(delay)
 
 	select {
-	case self.checkNamespaceFailChan <- cluster.NamespaceNameInfo{NamespaceName: namespace, NamespacePartition: part}:
-	case <-self.stopChan:
+	case pdCoord.checkNamespaceFailChan <- cluster.NamespaceNameInfo{NamespaceName: namespace, NamespacePartition: part}:
+	case <-pdCoord.stopChan:
 		return
 	case <-time.After(time.Second):
 		return
@@ -434,7 +434,7 @@ func (self *PDCoordinator) triggerCheckNamespaces(namespace string, part int, de
 // check if partition is enough,
 // check if replication is enough
 // check any unexpected state.
-func (self *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
+func (pdCoord *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
 	ticker := time.NewTicker(time.Second * 30)
 	waitingMigrateNamespace := make(map[string]map[int]time.Time)
 	defer func() {
@@ -442,7 +442,7 @@ func (self *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
 		cluster.CoordLog().Infof("check namespaces quit.")
 	}()
 
-	if self.register == nil {
+	if pdCoord.register == nil {
 		return
 	}
 	for {
@@ -450,25 +450,25 @@ func (self *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
 		case <-monitorChan:
 			return
 		case <-ticker.C:
-			self.doCheckNamespaces(monitorChan, nil, waitingMigrateNamespace, true)
-		case failedInfo := <-self.checkNamespaceFailChan:
-			self.doCheckNamespaces(monitorChan, &failedInfo, waitingMigrateNamespace, failedInfo.NamespaceName == "")
+			pdCoord.doCheckNamespaces(monitorChan, nil, waitingMigrateNamespace, true)
+		case failedInfo := <-pdCoord.checkNamespaceFailChan:
+			pdCoord.doCheckNamespaces(monitorChan, &failedInfo, waitingMigrateNamespace, failedInfo.NamespaceName == "")
 		}
 	}
 }
 
-func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedInfo *cluster.NamespaceNameInfo,
+func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedInfo *cluster.NamespaceNameInfo,
 	waitingMigrateNamespace map[string]map[int]time.Time, fullCheck bool) {
 
-	if !atomic.CompareAndSwapInt32(&self.doChecking, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&pdCoord.doChecking, 0, 1) {
 		return
 	}
 	time.Sleep(time.Millisecond * 10)
-	defer atomic.StoreInt32(&self.doChecking, 0)
+	defer atomic.StoreInt32(&pdCoord.doChecking, 0)
 
 	namespaces := []cluster.PartitionMetaInfo{}
 	if failedInfo == nil || failedInfo.NamespaceName == "" || failedInfo.NamespacePartition < 0 {
-		allNamespaces, _, commonErr := self.register.GetAllNamespaces()
+		allNamespaces, _, commonErr := pdCoord.register.GetAllNamespaces()
 		if commonErr != nil {
 			cluster.CoordLog().Infof("scan namespaces failed. %v", commonErr)
 			return
@@ -486,7 +486,7 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 		var err error
 		cluster.CoordLog().Infof("check single namespace : %v ", failedInfo)
 		var t *cluster.PartitionMetaInfo
-		t, err = self.register.GetNamespacePartInfo(failedInfo.NamespaceName, failedInfo.NamespacePartition)
+		t, err = pdCoord.register.GetNamespacePartInfo(failedInfo.NamespaceName, failedInfo.NamespacePartition)
 		if err != nil {
 			cluster.CoordLog().Infof("get namespace info failed: %v, %v", failedInfo, err)
 			return
@@ -497,12 +497,12 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 	// TODO: check partition number for namespace, maybe failed to create
 	// some partition when creating namespace.
 
-	currentNodes, currentNodesEpoch := self.getCurrentNodesWithRemoving()
+	currentNodes, currentNodesEpoch := pdCoord.getCurrentNodesWithRemoving()
 	cluster.CoordLog().Infof("do check namespaces (%v), current nodes: %v, ...", len(namespaces), len(currentNodes))
 	checkOK := true
 	for _, nsInfo := range namespaces {
-		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
-			cluster.CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
+		if currentNodesEpoch != atomic.LoadInt64(&pdCoord.nodesEpoch) {
+			cluster.CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&pdCoord.nodesEpoch))
 			return
 		}
 		select {
@@ -529,22 +529,22 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 				aliveCount++
 			}
 		}
-		if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
-			cluster.CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&self.nodesEpoch))
-			atomic.StoreInt32(&self.isClusterUnstable, 1)
+		if currentNodesEpoch != atomic.LoadInt64(&pdCoord.nodesEpoch) {
+			cluster.CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&pdCoord.nodesEpoch))
+			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 			return
 		}
-		if len(currentNodes) < 3 || int32(len(currentNodes)) <= atomic.LoadInt32(&self.stableNodeNum)/2 {
+		if len(currentNodes) < 3 || int32(len(currentNodes)) <= atomic.LoadInt32(&pdCoord.stableNodeNum)/2 {
 			checkOK = false
-			cluster.CoordLog().Infof("nodes not enough while checking: %v, stable need: %v", currentNodes, atomic.LoadInt32(&self.stableNodeNum))
-			atomic.StoreInt32(&self.isClusterUnstable, 1)
+			cluster.CoordLog().Infof("nodes not enough while checking: %v, stable need: %v", currentNodes, atomic.LoadInt32(&pdCoord.stableNodeNum))
+			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 			return
 		}
-		_, regErr := self.register.GetRemoteNamespaceReplicaInfo(nsInfo.Name, nsInfo.Partition)
+		_, regErr := pdCoord.register.GetRemoteNamespaceReplicaInfo(nsInfo.Name, nsInfo.Partition)
 		if regErr != nil {
 			cluster.CoordLog().Warningf("get remote namespace %v failed:%v, etcd may be unreachable.",
 				nsInfo.GetDesp(), regErr)
-			atomic.StoreInt32(&self.isClusterUnstable, 1)
+			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 			checkOK = false
 			continue
 		}
@@ -557,18 +557,18 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 
 		// handle removing should before migrate since the migrate may be blocked by the
 		// removing node.
-		if atomic.LoadInt32(&self.balanceWaiting) == 0 && len(nsInfo.Removings) > 0 {
-			self.removeNamespaceFromRemovings(&nsInfo)
+		if atomic.LoadInt32(&pdCoord.balanceWaiting) == 0 && len(nsInfo.Removings) > 0 {
+			pdCoord.removeNamespaceFromRemovings(&nsInfo)
 		}
 
-		if needMigrate && self.autoBalance {
+		if needMigrate && pdCoord.autoBalance {
 			if _, ok := partitions[nsInfo.Partition]; !ok {
 				partitions[nsInfo.Partition] = time.Now()
 				// migrate next time
 				continue
 			}
 
-			if atomic.LoadInt32(&self.isUpgrading) == 1 {
+			if atomic.LoadInt32(&pdCoord.isUpgrading) == 1 {
 				cluster.CoordLog().Infof("wait checking namespaces since the cluster is upgrading")
 				continue
 			}
@@ -576,21 +576,21 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			emergency := (aliveCount <= nsInfo.Replica/2) && failedTime.Before(time.Now().Add(-1*waitEmergencyMigrateInterval))
 			if emergency ||
 				failedTime.Before(time.Now().Add(-1*waitMigrateInterval)) {
-				aliveNodes, aliveEpoch := self.getCurrentNodesWithEpoch(nsInfo.Tags)
+				aliveNodes, aliveEpoch := pdCoord.getCurrentNodesWithEpoch(nsInfo.Tags)
 				if aliveEpoch != currentNodesEpoch {
-					go self.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second)
+					go pdCoord.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second)
 					continue
 				}
 				cluster.CoordLog().Infof("begin migrate the namespace :%v", nsInfo.GetDesp())
-				if coordErr := self.handleNamespaceMigrate(&nsInfo, aliveNodes, aliveEpoch); coordErr != nil {
+				if coordErr := pdCoord.handleNamespaceMigrate(&nsInfo, aliveNodes, aliveEpoch); coordErr != nil {
 					if emergency {
-						go self.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second*3)
+						go pdCoord.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second*3)
 					}
 					continue
 				} else {
 					delete(partitions, nsInfo.Partition)
 					// migrate only one at once to reduce the migrate traffic
-					atomic.StoreInt32(&self.isClusterUnstable, 1)
+					atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 					for _, parts := range waitingMigrateNamespace {
 						for pid, _ := range parts {
 							parts[pid].Add(time.Second)
@@ -604,14 +604,14 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 			delete(partitions, nsInfo.Partition)
 		}
 
-		if atomic.LoadInt32(&self.balanceWaiting) == 0 {
+		if atomic.LoadInt32(&pdCoord.balanceWaiting) == 0 {
 			if aliveCount > nsInfo.Replica && !needMigrate {
 				//remove the unwanted node in isr
 				cluster.CoordLog().Infof("namespace %v isr %v is more than replicator: %v, %v", nsInfo.GetDesp(),
 					nsInfo.RaftNodes, aliveCount, nsInfo.Replica)
-				removeNode := self.dpm.decideUnwantedRaftNode(&nsInfo, currentNodes)
+				removeNode := pdCoord.dpm.decideUnwantedRaftNode(&nsInfo, currentNodes)
 				if removeNode != "" {
-					coordErr := self.removeNamespaceFromNode(&nsInfo, removeNode)
+					coordErr := pdCoord.removeNamespaceFromNode(&nsInfo, removeNode)
 					if coordErr == nil {
 						cluster.CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, nsInfo)
 					}
@@ -621,17 +621,17 @@ func (self *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, failedIn
 	}
 	if checkOK {
 		if fullCheck {
-			atomic.StoreInt32(&self.isClusterUnstable, 0)
-			self.doSchemaCheck()
+			atomic.StoreInt32(&pdCoord.isClusterUnstable, 0)
+			pdCoord.doSchemaCheck()
 		}
 	} else {
-		atomic.StoreInt32(&self.isClusterUnstable, 1)
+		atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 	}
 }
 
-func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.PartitionMetaInfo,
+func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.PartitionMetaInfo,
 	currentNodes map[string]cluster.NodeInfo, currentNodesEpoch int64) *cluster.CoordErr {
-	if currentNodesEpoch != atomic.LoadInt64(&self.nodesEpoch) {
+	if currentNodesEpoch != atomic.LoadInt64(&pdCoord.nodesEpoch) {
 		return cluster.ErrClusterChanged
 	}
 	if len(origNSInfo.Removings) > 0 {
@@ -667,7 +667,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.PartitionM
 
 	if len(nsInfo.Removings) == 0 {
 		for i := aliveReplicas; i < nsInfo.Replica; i++ {
-			n, err := self.dpm.allocNodeForNamespace(nsInfo, currentNodes)
+			n, err := pdCoord.dpm.allocNodeForNamespace(nsInfo, currentNodes)
 			if err != nil {
 				cluster.CoordLog().Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
 			} else {
@@ -684,7 +684,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.PartitionM
 			cluster.CoordLog().Infof("namespace should not have two removing nodes: %v", nsInfo)
 			return cluster.ErrNamespaceConfInvalid
 		}
-		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+		err := pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 		if err != nil {
 			cluster.CoordLog().Infof("update namespace replica info failed: %v", err.Error())
@@ -698,7 +698,7 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.PartitionM
 	return nil
 }
 
-func (self *PDCoordinator) addNamespaceToNode(origNSInfo *cluster.PartitionMetaInfo, nid string) *cluster.CoordErr {
+func (pdCoord *PDCoordinator) addNamespaceToNode(origNSInfo *cluster.PartitionMetaInfo, nid string) *cluster.CoordErr {
 	if len(origNSInfo.Removings) > 0 {
 		// we do not add new node until the removing node is actually removed
 		// because we need avoid too much failed node in the cluster,
@@ -709,13 +709,13 @@ func (self *PDCoordinator) addNamespaceToNode(origNSInfo *cluster.PartitionMetaI
 	}
 	nsInfo := origNSInfo.GetCopy()
 	nsInfo.RaftNodes = append(nsInfo.RaftNodes, nid)
-	if !self.dpm.checkNamespaceNodeConflict(nsInfo) {
+	if !pdCoord.dpm.checkNamespaceNodeConflict(nsInfo) {
 		return ErrNamespaceNodeConflict
 	}
 	nsInfo.MaxRaftID++
 	nsInfo.RaftIDs[nid] = uint64(nsInfo.MaxRaftID)
 
-	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+	err := pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 	if err != nil {
 		cluster.CoordLog().Infof("add namespace replica info failed: %v", err.Error())
@@ -728,7 +728,7 @@ func (self *PDCoordinator) addNamespaceToNode(origNSInfo *cluster.PartitionMetaI
 }
 
 // should avoid mark as removing if there are not enough alive nodes for replicator.
-func (self *PDCoordinator) removeNamespaceFromNode(origNSInfo *cluster.PartitionMetaInfo, nid string) *cluster.CoordErr {
+func (pdCoord *PDCoordinator) removeNamespaceFromNode(origNSInfo *cluster.PartitionMetaInfo, nid string) *cluster.CoordErr {
 	_, ok := origNSInfo.Removings[nid]
 	if ok {
 		// already removed
@@ -754,7 +754,7 @@ func (self *PDCoordinator) removeNamespaceFromNode(origNSInfo *cluster.Partition
 	if !nsInfo.IsISRQuorum() || len(nsInfo.Removings) > 1 {
 		return ErrNamespaceReplicaNotEnough
 	}
-	err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+	err := pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 	if err != nil {
 		cluster.CoordLog().Infof("update namespace replica info failed: %v", err.Error())
@@ -767,7 +767,7 @@ func (self *PDCoordinator) removeNamespaceFromNode(origNSInfo *cluster.Partition
 	return nil
 }
 
-func (self *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *cluster.PartitionMetaInfo) {
+func (pdCoord *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *cluster.PartitionMetaInfo) {
 	// make sure all the current members are notified the newest cluster info and
 	// have the raft synced
 	nsInfo := origNSInfo.GetCopy()
@@ -776,7 +776,7 @@ func (self *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *cluster.Part
 		if time.Now().UnixNano()-rinfo.RemoveTime < 5*time.Minute.Nanoseconds() {
 			continue
 		}
-		inRaft, err := self.dpm.IsRaftNodeJoined(nsInfo, nid)
+		inRaft, err := pdCoord.dpm.IsRaftNodeJoined(nsInfo, nid)
 		if inRaft || err != nil {
 			continue
 		}
@@ -798,7 +798,7 @@ func (self *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *cluster.Part
 		cluster.CoordLog().Infof("namespace %v replica removed from removing node:%v, %v", nsInfo.GetDesp(), nid, rinfo)
 	}
 	if changed && nsInfo.IsISRQuorum() {
-		err := self.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+		err := pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 			&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 		if err != nil {
 			cluster.CoordLog().Infof("update namespace replica info failed: %v", err.Error())

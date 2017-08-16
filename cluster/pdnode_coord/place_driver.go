@@ -66,7 +66,7 @@ func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
 }
 
 // query the raft peers if the nid already in the raft group for the namespace
-func (self *DataPlacement) IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
+func (dp *DataPlacement) IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
 	if len(nsInfo.RaftNodes) == 0 {
 		return false, nil
 	}
@@ -96,7 +96,7 @@ func (self *DataPlacement) IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, n
 	return false, lastErr
 }
 
-func (self *DataPlacement) IsRaftNodeFullJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
+func (dp *DataPlacement) IsRaftNodeFullJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
 	if len(nsInfo.RaftNodes) == 0 {
 		return false, nil
 	}
@@ -129,15 +129,15 @@ func (self *DataPlacement) IsRaftNodeFullJoined(nsInfo *cluster.PartitionMetaInf
 	return true, nil
 }
 
-func (self *DataPlacement) SetBalanceInterval(start int, end int) {
+func (dp *DataPlacement) SetBalanceInterval(start int, end int) {
 	if start == end && start == 0 {
 		return
 	}
-	self.balanceInterval[0] = start
-	self.balanceInterval[1] = end
+	dp.balanceInterval[0] = start
+	dp.balanceInterval[1] = end
 }
 
-func (self *DataPlacement) DoBalance(monitorChan chan struct{}) {
+func (dp *DataPlacement) DoBalance(monitorChan chan struct{}) {
 	//check period for the data balance.
 	ticker := time.NewTicker(time.Minute * 10)
 	defer func() {
@@ -150,39 +150,39 @@ func (self *DataPlacement) DoBalance(monitorChan chan struct{}) {
 			return
 		case <-ticker.C:
 			// only balance at given interval
-			if time.Now().Hour() > self.balanceInterval[1] || time.Now().Hour() < self.balanceInterval[0] {
+			if time.Now().Hour() > dp.balanceInterval[1] || time.Now().Hour() < dp.balanceInterval[0] {
 				continue
 			}
-			if !self.pdCoord.IsMineLeader() {
+			if !dp.pdCoord.IsMineLeader() {
 				cluster.CoordLog().Infof("not leader while checking balance")
 				continue
 			}
-			if !self.pdCoord.IsClusterStable() {
+			if !dp.pdCoord.IsClusterStable() {
 				cluster.CoordLog().Infof("no balance since cluster is not stable while checking balance")
 				continue
 			}
-			if !self.pdCoord.autoBalance {
+			if !dp.pdCoord.autoBalance {
 				continue
 			}
 			cluster.CoordLog().Infof("begin checking balance of namespace data...")
-			currentNodes := self.pdCoord.getCurrentNodes(nil)
+			currentNodes := dp.pdCoord.getCurrentNodes(nil)
 			validNum := len(currentNodes)
 			if validNum < 2 {
 				continue
 			}
-			self.rebalanceNamespace(monitorChan)
+			dp.rebalanceNamespace(monitorChan)
 		}
 	}
 }
 
-func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{}, namespaceInfo *cluster.PartitionMetaInfo,
+func (dp *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{}, namespaceInfo *cluster.PartitionMetaInfo,
 	nodeNameList []string) (*cluster.PartitionMetaInfo, error) {
 	retry := 0
 	currentSelect := 0
 	namespaceName := namespaceInfo.Name
 	partitionID := namespaceInfo.Partition
 	// since we need add new catchup, we make the replica as replica+1
-	partitionNodes, coordErr := self.getRebalancedPartitionsFromNameList(
+	partitionNodes, coordErr := dp.getRebalancedPartitionsFromNameList(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica+1, nodeNameList)
@@ -207,11 +207,11 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 			return nInfo, ErrBalanceNodeUnavailable
 		}
 		nid := selectedCatchup[currentSelect]
-		nInfo, err = self.pdCoord.register.GetNamespacePartInfo(namespaceName, partitionID)
+		nInfo, err = dp.pdCoord.register.GetNamespacePartInfo(namespaceName, partitionID)
 		if err != nil {
 			cluster.CoordLog().Infof("failed to get namespace %v info: %v", fullName, err)
 		} else {
-			if inRaft, _ := self.IsRaftNodeFullJoined(nInfo, nid); inRaft {
+			if inRaft, _ := dp.IsRaftNodeFullJoined(nInfo, nid); inRaft {
 				break
 			} else if cluster.FindSlice(nInfo.RaftNodes, nid) != -1 {
 				// wait ready
@@ -224,7 +224,7 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 				continue
 			} else {
 				cluster.CoordLog().Infof("node: %v is added for namespace %v: (%v)", nid, nInfo.GetDesp(), nInfo.RaftNodes)
-				coordErr = self.pdCoord.addNamespaceToNode(nInfo, nid)
+				coordErr = dp.pdCoord.addNamespaceToNode(nInfo, nid)
 				if coordErr != nil {
 					cluster.CoordLog().Infof("node: %v added for namespace %v (%v) failed: %v", nid,
 						nInfo.GetDesp(), nInfo.RaftNodes, coordErr)
@@ -246,7 +246,7 @@ func (self *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struc
 	return nInfo, nil
 }
 
-func (self *DataPlacement) getExcludeNodesForNamespace(namespaceInfo *cluster.PartitionMetaInfo) (map[string]struct{}, error) {
+func (dp *DataPlacement) getExcludeNodesForNamespace(namespaceInfo *cluster.PartitionMetaInfo) (map[string]struct{}, error) {
 	excludeNodes := make(map[string]struct{})
 	for _, v := range namespaceInfo.RaftNodes {
 		excludeNodes[v] = struct{}{}
@@ -254,15 +254,15 @@ func (self *DataPlacement) getExcludeNodesForNamespace(namespaceInfo *cluster.Pa
 	return excludeNodes, nil
 }
 
-func (self *DataPlacement) allocNodeForNamespace(namespaceInfo *cluster.PartitionMetaInfo,
+func (dp *DataPlacement) allocNodeForNamespace(namespaceInfo *cluster.PartitionMetaInfo,
 	currentNodes map[string]cluster.NodeInfo) (*cluster.NodeInfo, *cluster.CoordErr) {
 	var chosenNode cluster.NodeInfo
-	excludeNodes, commonErr := self.getExcludeNodesForNamespace(namespaceInfo)
+	excludeNodes, commonErr := dp.getExcludeNodesForNamespace(namespaceInfo)
 	if commonErr != nil {
 		return nil, cluster.ErrRegisterServiceUnstable
 	}
 
-	partitionNodes, err := self.getRebalancedNamespacePartitions(
+	partitionNodes, err := dp.getRebalancedNamespacePartitions(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica, currentNodes)
@@ -285,7 +285,7 @@ func (self *DataPlacement) allocNodeForNamespace(namespaceInfo *cluster.Partitio
 	return &chosenNode, nil
 }
 
-func (self *DataPlacement) checkNamespaceNodeConflict(namespaceInfo *cluster.PartitionMetaInfo) bool {
+func (dp *DataPlacement) checkNamespaceNodeConflict(namespaceInfo *cluster.PartitionMetaInfo) bool {
 	existSlaves := make(map[string]struct{})
 	// isr should be different
 	for _, id := range namespaceInfo.RaftNodes {
@@ -297,10 +297,10 @@ func (self *DataPlacement) checkNamespaceNodeConflict(namespaceInfo *cluster.Par
 	return true
 }
 
-func (self *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[string]cluster.NodeInfo,
+func (dp *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[string]cluster.NodeInfo,
 	replica int, partitionNum int, existPart map[int]*cluster.PartitionMetaInfo) ([]cluster.PartitionReplicaInfo, *cluster.CoordErr) {
 	replicaList := make([]cluster.PartitionReplicaInfo, partitionNum)
-	partitionNodes, err := self.getRebalancedNamespacePartitions(
+	partitionNodes, err := dp.getRebalancedNamespacePartitions(
 		ns,
 		partitionNum,
 		replica, currentNodes)
@@ -327,16 +327,16 @@ func (self *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[s
 	return replicaList, nil
 }
 
-func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bool) {
+func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bool) {
 	moved := false
 	isAllBalanced := false
-	if !atomic.CompareAndSwapInt32(&self.pdCoord.balanceWaiting, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&dp.pdCoord.balanceWaiting, 0, 1) {
 		cluster.CoordLog().Infof("another balance is running, should wait")
 		return moved, isAllBalanced
 	}
-	defer atomic.StoreInt32(&self.pdCoord.balanceWaiting, 0)
+	defer atomic.StoreInt32(&dp.pdCoord.balanceWaiting, 0)
 
-	allNamespaces, _, err := self.pdCoord.register.GetAllNamespaces()
+	allNamespaces, _, err := dp.pdCoord.register.GetAllNamespaces()
 	if err != nil {
 		cluster.CoordLog().Infof("scan namespaces error: %v", err)
 		return moved, isAllBalanced
@@ -356,10 +356,10 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			return moved, false
 		default:
 		}
-		if !self.pdCoord.IsClusterStable() {
+		if !dp.pdCoord.IsClusterStable() {
 			return moved, false
 		}
-		if !self.pdCoord.IsMineLeader() {
+		if !dp.pdCoord.IsMineLeader() {
 			return moved, true
 		}
 		// balance only one namespace once
@@ -369,13 +369,13 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 		if len(namespaceInfo.Removings) > 0 {
 			continue
 		}
-		currentNodes := self.pdCoord.getCurrentNodes(namespaceInfo.Tags)
+		currentNodes := dp.pdCoord.getCurrentNodes(namespaceInfo.Tags)
 		nodeNameList = nodeNameList[0:0]
 		for _, n := range currentNodes {
 			nodeNameList = append(nodeNameList, n.ID)
 		}
 
-		partitionNodes, err := self.getRebalancedNamespacePartitions(
+		partitionNodes, err := dp.getRebalancedNamespacePartitions(
 			namespaceInfo.Name,
 			namespaceInfo.PartitionNum,
 			namespaceInfo.Replica, currentNodes)
@@ -403,7 +403,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			var err error
 			var newInfo *cluster.PartitionMetaInfo
 			if len(namespaceInfo.GetISR()) <= namespaceInfo.Replica {
-				newInfo, err = self.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
+				newInfo, err = dp.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 					nodeNameList)
 			}
 			if err != nil {
@@ -412,7 +412,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			if newInfo != nil {
 				namespaceInfo = *newInfo
 			}
-			coordErr := self.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
+			coordErr := dp.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 			moved = true
 			if coordErr != nil {
 				return moved, false
@@ -431,7 +431,7 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 						cluster.CoordLog().Infof("need move leader for namespace %v since %v not expected leader: %v",
 							namespaceInfo.GetDesp(), namespaceInfo.RaftNodes, expectLeader)
 						namespaceInfo.RaftNodes[0], namespaceInfo.RaftNodes[index] = namespaceInfo.RaftNodes[index], namespaceInfo.RaftNodes[0]
-						err := self.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
+						err := dp.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
 							&namespaceInfo.PartitionReplicaInfo, namespaceInfo.PartitionReplicaInfo.Epoch())
 						moved = true
 						if err != nil {
@@ -466,7 +466,7 @@ func (s SortableStrings) Swap(l, r int) {
 	s[l], s[r] = s[r], s[l]
 }
 
-func (self *DataPlacement) getRebalancedNamespacePartitions(ns string,
+func (dp *DataPlacement) getRebalancedNamespacePartitions(ns string,
 	partitionNum int, replica int,
 	currentNodes map[string]cluster.NodeInfo) ([][]string, *cluster.CoordErr) {
 	if len(currentNodes) < replica {
@@ -510,10 +510,10 @@ func (self *DataPlacement) getRebalancedNamespacePartitions(ns string,
 	for nid, _ := range currentNodes {
 		nodeNameList = append(nodeNameList, nid)
 	}
-	return self.getRebalancedPartitionsFromNameList(ns, partitionNum, replica, nodeNameList)
+	return dp.getRebalancedPartitionsFromNameList(ns, partitionNum, replica, nodeNameList)
 }
 
-func (self *DataPlacement) getRebalancedPartitionsFromNameList(ns string,
+func (dp *DataPlacement) getRebalancedPartitionsFromNameList(ns string,
 	partitionNum int, replica int,
 	nodeNameList SortableStrings) ([][]string, *cluster.CoordErr) {
 	if len(nodeNameList) < replica {
@@ -534,10 +534,10 @@ func (self *DataPlacement) getRebalancedPartitionsFromNameList(ns string,
 	return partitionNodes, nil
 }
 
-func (self *DataPlacement) decideUnwantedRaftNode(namespaceInfo *cluster.PartitionMetaInfo, currentNodes map[string]cluster.NodeInfo) string {
+func (dp *DataPlacement) decideUnwantedRaftNode(namespaceInfo *cluster.PartitionMetaInfo, currentNodes map[string]cluster.NodeInfo) string {
 	unwantedNode := ""
 	//remove the unwanted node in isr
-	partitionNodes, err := self.getRebalancedNamespacePartitions(
+	partitionNodes, err := dp.getRebalancedNamespacePartitions(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica, currentNodes)

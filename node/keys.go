@@ -5,18 +5,18 @@ import (
 	"github.com/absolute8511/redcon"
 )
 
-func (self *KVNode) Lookup(key []byte) ([]byte, error) {
+func (nd *KVNode) Lookup(key []byte) ([]byte, error) {
 	_, key, err := common.ExtractNamesapce(key)
 	if err != nil {
 		return nil, err
 	}
 
-	v, err := self.store.LocalLookup(key)
+	v, err := nd.store.LocalLookup(key)
 	return v, err
 }
 
-func (self *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, err := self.store.LocalLookup(cmd.Args[1])
+func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, err := nd.store.LocalLookup(cmd.Args[1])
 	if err != nil || val == nil {
 		conn.WriteNull()
 	} else {
@@ -24,8 +24,8 @@ func (self *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, _ := self.store.KVExists(cmd.Args[1])
+func (nd *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, _ := nd.store.KVExists(cmd.Args[1])
 	if val != 1 {
 		conn.WriteInt(0)
 	} else {
@@ -33,8 +33,8 @@ func (self *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
-	vals, _ := self.store.MGet(cmd.Args[1:]...)
+func (nd *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
+	vals, _ := nd.store.MGet(cmd.Args[1:]...)
 	conn.WriteArray(len(vals))
 	for _, v := range vals {
 		if v == nil {
@@ -45,11 +45,11 @@ func (self *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -57,11 +57,11 @@ func (self *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command, v interfa
 	}
 }
 
-func (self *KVNode) msetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) msetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -69,7 +69,7 @@ func (self *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	}
 }
 
-func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {
@@ -80,32 +80,32 @@ func (self *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (self *KVNode) localSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	err := self.store.KVSet(ts, cmd.Args[1], cmd.Args[2])
+func (nd *KVNode) localSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	err := nd.store.KVSet(ts, cmd.Args[1], cmd.Args[2])
 	return nil, err
 }
 
-func (self *KVNode) localSetnxCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := self.store.SetNX(ts, cmd.Args[1], cmd.Args[2])
+func (nd *KVNode) localSetnxCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := nd.store.SetNX(ts, cmd.Args[1], cmd.Args[2])
 	return v, err
 }
 
-func (self *KVNode) localMSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localMSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	args := cmd.Args[1:]
 	kvlist := make([]common.KVRecord, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
 		kvlist = append(kvlist, common.KVRecord{Key: args[i], Value: args[i+1]})
 	}
-	err := self.store.MSet(ts, kvlist...)
+	err := nd.store.MSet(ts, kvlist...)
 	return nil, err
 }
 
-func (self *KVNode) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := self.store.Incr(ts, cmd.Args[1])
+func (nd *KVNode) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := nd.store.Incr(ts, cmd.Args[1])
 	return v, err
 }
 
-func (self *KVNode) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	self.store.DelKeys(cmd.Args[1:]...)
+func (nd *KVNode) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	nd.store.DelKeys(cmd.Args[1:]...)
 	return int64(len(cmd.Args[1:])), nil
 }

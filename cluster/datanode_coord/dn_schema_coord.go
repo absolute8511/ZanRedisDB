@@ -9,7 +9,7 @@ import (
 )
 
 // this will only be handled on leader of raft group
-func (self *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode,
+func (dc *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode,
 	indexSchemas map[string]*common.IndexSchema) {
 
 	cluster.CoordLog().Infof("namespace %v checking schema sync: %v",

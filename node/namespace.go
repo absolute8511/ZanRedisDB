@@ -39,84 +39,84 @@ type NamespaceNode struct {
 	ready int32
 }
 
-func (self *NamespaceNode) IsReady() bool {
-	return atomic.LoadInt32(&self.ready) == 1
+func (nn *NamespaceNode) IsReady() bool {
+	return atomic.LoadInt32(&nn.ready) == 1
 }
 
-func (self *NamespaceNode) FullName() string {
-	return self.conf.Name
+func (nn *NamespaceNode) FullName() string {
+	return nn.conf.Name
 }
 
-func (self *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
+func (nn *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 }
 
-func (self *NamespaceNode) SetMagicCode(magic int64) error {
+func (nn *NamespaceNode) SetMagicCode(magic int64) error {
 	return nil
 }
 
-func (self *NamespaceNode) SetDataFixState(needFix bool) {
+func (nn *NamespaceNode) SetDataFixState(needFix bool) {
 }
 
-func (self *NamespaceNode) GetLastLeaderChangedTime() int64 {
-	return self.Node.GetLastLeaderChangedTime()
+func (nn *NamespaceNode) GetLastLeaderChangedTime() int64 {
+	return nn.Node.GetLastLeaderChangedTime()
 }
 
-func (self *NamespaceNode) GetRaftID() uint64 {
-	return self.Node.rn.config.ID
+func (nn *NamespaceNode) GetRaftID() uint64 {
+	return nn.Node.rn.config.ID
 }
 
-func (self *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) error {
-	if self.conf.EngType != conf.EngType ||
-		self.conf.RaftGroupConf.GroupID != conf.RaftGroupConf.GroupID {
-		nodeLog.Infof("mine :%v, check raft conf:%v", self.conf, conf)
+func (nn *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) error {
+	if nn.conf.EngType != conf.EngType ||
+		nn.conf.RaftGroupConf.GroupID != conf.RaftGroupConf.GroupID {
+		nodeLog.Infof("mine :%v, check raft conf:%v", nn.conf, conf)
 		return ErrRaftConfMismatch
 	}
-	if raftID != self.Node.rn.config.ID {
-		nodeLog.Infof("mine :%v, check raft conf:%v", self.Node.rn.config.ID, raftID)
+	if raftID != nn.Node.rn.config.ID {
+		nodeLog.Infof("mine :%v, check raft conf:%v", nn.Node.rn.config.ID, raftID)
 		return ErrRaftIDMismatch
 	}
 	return nil
 }
 
-func (self *NamespaceNode) StopRaft() {
-	self.Node.StopRaft()
+func (nn *NamespaceNode) StopRaft() {
+	nn.Node.StopRaft()
 }
 
-func (self *NamespaceNode) Close() {
-	self.Node.Stop()
-	nodeLog.Infof("namespace stopped: %v", self.conf.Name)
+func (nn *NamespaceNode) Close() {
+	nn.Node.Stop()
+	nodeLog.Infof("namespace stopped: %v", nn.conf.Name)
 }
 
-func (self *NamespaceNode) Destroy() error {
-	return self.Node.destroy()
+func (nn *NamespaceNode) Destroy() error {
+	return nn.Node.destroy()
 }
 
-func (self *NamespaceNode) IsDataNeedFix() bool {
+func (nn *NamespaceNode) IsDataNeedFix() bool {
 	return false
 }
 
-func (self *NamespaceNode) IsRaftSynced(checkCommitIndex bool) bool {
-	return self.Node.IsRaftSynced(checkCommitIndex)
+func (nn *NamespaceNode) IsRaftSynced(checkCommitIndex bool) bool {
+	return nn.Node.IsRaftSynced(checkCommitIndex)
 }
 
-func (self *NamespaceNode) GetMembers() []*common.MemberInfo {
-	return self.Node.GetMembers()
+func (nn *NamespaceNode) GetMembers() []*common.MemberInfo {
+	return nn.Node.GetMembers()
 }
 
-func (self *NamespaceNode) Start(forceStandaloneCluster bool) error {
-	if err := self.Node.Start(forceStandaloneCluster); err != nil {
+func (nn *NamespaceNode) Start(forceStandaloneCluster bool) error {
+	if err := nn.Node.Start(forceStandaloneCluster); err != nil {
 		return err
 	}
-	atomic.StoreInt32(&self.ready, 1)
+	atomic.StoreInt32(&nn.ready, 1)
 	return nil
 }
 
-func (self *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
+func (nn *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	oldLeader := self.Node.rn.Lead()
-	self.Node.rn.node.TransferLeadership(ctx, oldLeader, toRaftID)
-	for self.Node.rn.Lead() != toRaftID {
+	oldLeader := nn.Node.rn.Lead()
+	nn.Node.rn.node.TransferLeadership(ctx, oldLeader, toRaftID)
+	for nn.Node.rn.Lead() != toRaftID {
 		select {
 		case <-ctx.Done():
 			return errTimeoutLeaderTransfer
@@ -164,13 +164,13 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	return ns
 }
 
-func (self *NamespaceMgr) SetClusterInfoInterface(clusterInfo common.IClusterInfo) {
-	self.clusterInfo = clusterInfo
+func (nsm *NamespaceMgr) SetClusterInfoInterface(clusterInfo common.IClusterInfo) {
+	nsm.clusterInfo = clusterInfo
 }
 
-func (self *NamespaceMgr) LoadMachineRegID() (uint64, error) {
+func (nsm *NamespaceMgr) LoadMachineRegID() (uint64, error) {
 	d, err := ioutil.ReadFile(
-		path.Join(self.machineConf.DataRootDir, "myid"),
+		path.Join(nsm.machineConf.DataRootDir, "myid"),
 	)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -182,64 +182,64 @@ func (self *NamespaceMgr) LoadMachineRegID() (uint64, error) {
 	return uint64(v), err
 }
 
-func (self *NamespaceMgr) SaveMachineRegID(regID uint64) error {
-	self.machineConf.NodeID = regID
+func (nsm *NamespaceMgr) SaveMachineRegID(regID uint64) error {
+	nsm.machineConf.NodeID = regID
 	return ioutil.WriteFile(
-		path.Join(self.machineConf.DataRootDir, "myid"),
+		path.Join(nsm.machineConf.DataRootDir, "myid"),
 		[]byte(strconv.FormatInt(int64(regID), 10)),
 		common.FILE_PERM)
 }
 
-func (self *NamespaceMgr) Start() {
-	self.mutex.Lock()
-	for _, kv := range self.kvNodes {
+func (nsm *NamespaceMgr) Start() {
+	nsm.mutex.Lock()
+	for _, kv := range nsm.kvNodes {
 		kv.Start(false)
 	}
-	self.mutex.Unlock()
-	self.wg.Add(1)
+	nsm.mutex.Unlock()
+	nsm.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.clearUnusedRaftPeer()
+		defer nsm.wg.Done()
+		nsm.clearUnusedRaftPeer()
 	}()
 
-	self.wg.Add(1)
+	nsm.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.checkNamespaceRaftLeader()
+		defer nsm.wg.Done()
+		nsm.checkNamespaceRaftLeader()
 	}()
 
-	self.wg.Add(1)
+	nsm.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.processRaftTick()
+		defer nsm.wg.Done()
+		nsm.processRaftTick()
 	}()
 }
 
-func (self *NamespaceMgr) Stop() {
-	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
+func (nsm *NamespaceMgr) Stop() {
+	if !atomic.CompareAndSwapInt32(&nsm.stopping, 0, 1) {
 		return
 	}
-	close(self.stopC)
-	tmp := self.GetNamespaces()
+	close(nsm.stopC)
+	tmp := nsm.GetNamespaces()
 	for _, n := range tmp {
 		n.Close()
 	}
-	self.wg.Wait()
+	nsm.wg.Wait()
 	nodeLog.Infof("namespace manager stopped")
 }
 
-func (self *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
+func (nsm *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 	tmp := make(map[string]*NamespaceNode)
-	self.mutex.RLock()
-	for k, n := range self.kvNodes {
+	nsm.mutex.RLock()
+	for k, n := range nsm.kvNodes {
 		tmp[k] = n
 	}
-	self.mutex.RUnlock()
+	nsm.mutex.RUnlock()
 	return tmp
 }
 
-func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64, join bool) (*NamespaceNode, error) {
-	if atomic.LoadInt32(&self.stopping) == 1 {
+func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64, join bool) (*NamespaceNode, error) {
+	if atomic.LoadInt32(&nsm.stopping) == 1 {
 		return nil, errStopping
 	}
 
@@ -249,16 +249,16 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		return nil, err
 	}
 
-	self.mutex.Lock()
-	defer self.mutex.Unlock()
-	if n, ok := self.kvNodes[conf.Name]; ok {
+	nsm.mutex.Lock()
+	defer nsm.mutex.Unlock()
+	if n, ok := nsm.kvNodes[conf.Name]; ok {
 		return n, ErrNamespaceAlreadyExist
 	}
 
 	kvOpts := &KVOptions{
-		DataDir:          path.Join(self.machineConf.DataRootDir, conf.Name),
+		DataDir:          path.Join(nsm.machineConf.DataRootDir, conf.Name),
 		EngType:          conf.EngType,
-		RockOpts:         self.machineConf.RocksDBOpts,
+		RockOpts:         nsm.machineConf.RocksDBOpts,
 		ExpirationPolicy: expPolicy,
 	}
 	rockredis.FillDefaultOptions(&kvOpts.RockOpts)
@@ -287,7 +287,7 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		GroupID:        conf.RaftGroupConf.GroupID,
 		GroupName:      conf.Name,
 		ID:             uint64(raftID),
-		RaftAddr:       self.machineConf.LocalRaftAddr,
+		RaftAddr:       nsm.machineConf.LocalRaftAddr,
 		DataDir:        kvOpts.DataDir,
 		RaftPeers:      clusterNodes,
 		SnapCount:      conf.SnapCount,
@@ -295,14 +295,14 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		Replicator:     conf.Replicator,
 		OptimizedFsync: conf.OptimizedFsync,
 	}
-	kv, err := NewKVNode(kvOpts, self.machineConf, raftConf, self.raftTransport,
-		join, self.onNamespaceDeleted(raftConf.GroupID, conf.Name),
-		self.clusterInfo, self.newLeaderChan)
+	kv, err := NewKVNode(kvOpts, nsm.machineConf, raftConf, nsm.raftTransport,
+		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),
+		nsm.clusterInfo, nsm.newLeaderChan)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := self.nsMetas[conf.BaseName]; !ok {
-		self.nsMetas[conf.BaseName] = NamespaceMeta{
+	if _, ok := nsm.nsMetas[conf.BaseName]; !ok {
+		nsm.nsMetas[conf.BaseName] = NamespaceMeta{
 			PartitionNum: conf.PartitionNum,
 		}
 	}
@@ -312,8 +312,8 @@ func (self *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64
 		conf: conf,
 	}
 
-	self.kvNodes[conf.Name] = n
-	self.groups[raftConf.GroupID] = conf.Name
+	nsm.kvNodes[conf.Name] = n
+	nsm.groups[raftConf.GroupID] = conf.Name
 	return n, nil
 }
 
@@ -321,17 +321,17 @@ func GetHashedPartitionID(pk []byte, pnum int) int {
 	return int(murmur3.Sum32(pk)) % pnum
 }
 
-func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []byte) (*NamespaceNode, error) {
-	self.mutex.RLock()
-	defer self.mutex.RUnlock()
-	v, ok := self.nsMetas[nsBaseName]
+func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []byte) (*NamespaceNode, error) {
+	nsm.mutex.RLock()
+	defer nsm.mutex.RUnlock()
+	v, ok := nsm.nsMetas[nsBaseName]
 	if !ok {
 		nodeLog.Infof("namespace %v meta not found", nsBaseName)
 		return nil, ErrNamespaceNotFound
 	}
 	pid := GetHashedPartitionID(pk, v.PartitionNum)
 	fullName := common.GetNsDesp(nsBaseName, pid)
-	n, ok := self.kvNodes[fullName]
+	n, ok := nsm.kvNodes[fullName]
 	if !ok {
 		nodeLog.Debugf("namespace %v partition %v not found for pk: %v", nsBaseName, pid, string(pk))
 		return nil, ErrNamespacePartitionNotFound
@@ -342,10 +342,10 @@ func (self *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk [
 	return n, nil
 }
 
-func (self *NamespaceMgr) GetNamespaceNodes(nsBaseName string, leaderOnly bool) (map[string]*NamespaceNode, error) {
+func (nsm *NamespaceMgr) GetNamespaceNodes(nsBaseName string, leaderOnly bool) (map[string]*NamespaceNode, error) {
 	nsNodes := make(map[string]*NamespaceNode)
 
-	tmp := self.GetNamespaces()
+	tmp := nsm.GetNamespaces()
 	for k, v := range tmp {
 		ns, _ := common.GetNamespaceAndPartition(k)
 		if ns == nsBaseName && v.IsReady() {
@@ -366,10 +366,10 @@ func (self *NamespaceMgr) GetNamespaceNodes(nsBaseName string, leaderOnly bool) 
 	return nsNodes, nil
 }
 
-func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {
-	self.mutex.RLock()
-	v, _ := self.kvNodes[ns]
-	self.mutex.RUnlock()
+func (nsm *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {
+	nsm.mutex.RLock()
+	v, _ := nsm.kvNodes[ns]
+	nsm.mutex.RUnlock()
 	if v != nil {
 		if !v.IsReady() {
 			return nil
@@ -378,15 +378,15 @@ func (self *NamespaceMgr) GetNamespaceNode(ns string) *NamespaceNode {
 	return v
 }
 
-func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
-	self.mutex.RLock()
-	defer self.mutex.RUnlock()
-	gn, ok := self.groups[gid]
+func (nsm *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
+	nsm.mutex.RLock()
+	defer nsm.mutex.RUnlock()
+	gn, ok := nsm.groups[gid]
 	if !ok {
 		nodeLog.Errorf("group name not found %v ", gid)
 		return nil
 	}
-	kv, ok := self.kvNodes[gn]
+	kv, ok := nsm.kvNodes[gn]
 	if !ok {
 		nodeLog.Errorf("kv namespace not found %v ", gn)
 		return nil
@@ -398,10 +398,10 @@ func (self *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 	return kv
 }
 
-func (self *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
-	self.mutex.RLock()
-	nsStats := make(map[string]string, len(self.kvNodes))
-	for k, n := range self.kvNodes {
+func (nsm *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
+	nsm.mutex.RLock()
+	nsStats := make(map[string]string, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
 		if !n.IsReady() {
 			continue
 		}
@@ -411,14 +411,14 @@ func (self *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
 		dbStats := n.Node.GetDBInternalStats()
 		nsStats[k] = dbStats
 	}
-	self.mutex.RUnlock()
+	nsm.mutex.RUnlock()
 	return nsStats
 }
 
-func (self *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
-	self.mutex.RLock()
-	nsStats := make([]common.NamespaceStats, 0, len(self.kvNodes))
-	for k, n := range self.kvNodes {
+func (nsm *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
+	nsm.mutex.RLock()
+	nsStats := make([]common.NamespaceStats, 0, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
 		if !n.IsReady() {
 			continue
 		}
@@ -431,19 +431,19 @@ func (self *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
 		ns.IsLeader = n.Node.IsLead()
 		nsStats = append(nsStats, ns)
 	}
-	self.mutex.RUnlock()
+	nsm.mutex.RUnlock()
 	return nsStats
 }
 
-func (self *NamespaceMgr) OptimizeDB() {
-	self.mutex.RLock()
-	nodeList := make([]*NamespaceNode, 0, len(self.kvNodes))
-	for _, n := range self.kvNodes {
+func (nsm *NamespaceMgr) OptimizeDB() {
+	nsm.mutex.RLock()
+	nodeList := make([]*NamespaceNode, 0, len(nsm.kvNodes))
+	for _, n := range nsm.kvNodes {
 		nodeList = append(nodeList, n)
 	}
-	self.mutex.RUnlock()
+	nsm.mutex.RUnlock()
 	for _, n := range nodeList {
-		if atomic.LoadInt32(&self.stopping) == 1 {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
 			return
 		}
 		if n.IsReady() {
@@ -452,69 +452,69 @@ func (self *NamespaceMgr) OptimizeDB() {
 	}
 }
 
-func (self *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
+func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
 	return func() {
-		self.mutex.Lock()
-		_, ok := self.kvNodes[ns]
+		nsm.mutex.Lock()
+		_, ok := nsm.kvNodes[ns]
 		if ok {
 			nodeLog.Infof("namespace deleted: %v-%v", ns, gid)
-			delete(self.kvNodes, ns)
-			delete(self.groups, gid)
+			delete(nsm.kvNodes, ns)
+			delete(nsm.groups, gid)
 		}
-		self.mutex.Unlock()
+		nsm.mutex.Unlock()
 	}
 }
 
-func (self *NamespaceMgr) processRaftTick() {
-	ticker := time.NewTicker(time.Duration(self.machineConf.TickMs) * time.Millisecond)
+func (nsm *NamespaceMgr) processRaftTick() {
+	ticker := time.NewTicker(time.Duration(nsm.machineConf.TickMs) * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			// send tick for all raft group
-			self.mutex.RLock()
-			nodes := make([]*KVNode, 0, len(self.kvNodes))
-			for _, v := range self.kvNodes {
+			nsm.mutex.RLock()
+			nodes := make([]*KVNode, 0, len(nsm.kvNodes))
+			for _, v := range nsm.kvNodes {
 				if v.IsReady() {
 					nodes = append(nodes, v.Node)
 				}
 			}
-			self.mutex.RUnlock()
+			nsm.mutex.RUnlock()
 			for _, n := range nodes {
 				n.Tick()
 			}
 
-		case <-self.stopC:
+		case <-nsm.stopC:
 			return
 		}
 	}
 }
 
 // TODO:
-func (self *NamespaceMgr) SetNamespaceMagicCode(node *NamespaceNode, magic int64) error {
+func (nsm *NamespaceMgr) SetNamespaceMagicCode(node *NamespaceNode, magic int64) error {
 	return nil
 }
 
-func (self *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error {
+func (nsm *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error {
 	return nil
 }
 
-func (self *NamespaceMgr) checkNamespaceRaftLeader() {
+func (nsm *NamespaceMgr) checkNamespaceRaftLeader() {
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	leaderNodes := make([]*NamespaceNode, 0)
 	// report to leader may failed, so we need retry and check period
 	doCheck := func() {
 		leaderNodes = leaderNodes[:0]
-		self.mutex.RLock()
-		for _, v := range self.kvNodes {
+		nsm.mutex.RLock()
+		for _, v := range nsm.kvNodes {
 			if v.IsReady() {
 				if v.Node.IsLead() {
 					leaderNodes = append(leaderNodes, v)
 				}
 			}
 		}
-		self.mutex.RUnlock()
+		nsm.mutex.RUnlock()
 		for _, v := range leaderNodes {
 			v.Node.ReportMeLeaderToCluster()
 		}
@@ -524,32 +524,32 @@ func (self *NamespaceMgr) checkNamespaceRaftLeader() {
 		select {
 		case <-ticker.C:
 			doCheck()
-		case ns := <-self.newLeaderChan:
-			self.mutex.RLock()
-			v, ok := self.kvNodes[ns]
-			self.mutex.RUnlock()
+		case ns := <-nsm.newLeaderChan:
+			nsm.mutex.RLock()
+			v, ok := nsm.kvNodes[ns]
+			nsm.mutex.RUnlock()
 			if !ok {
 				nodeLog.Infof("leader changed namespace not found: %v", ns)
 			} else if v.IsReady() {
 				v.Node.OnRaftLeaderChanged()
 			}
-		case <-self.stopC:
+		case <-nsm.stopC:
 			return
 		}
 	}
 }
 
-func (self *NamespaceMgr) clearUnusedRaftPeer() {
+func (nsm *NamespaceMgr) clearUnusedRaftPeer() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	// while close or remove raft node, we need check if any remote transport peer
 	// should be closed.
 	doCheck := func() {
-		self.mutex.RLock()
-		defer self.mutex.RUnlock()
-		peers := self.raftTransport.GetAllPeers()
+		nsm.mutex.RLock()
+		defer nsm.mutex.RUnlock()
+		peers := nsm.raftTransport.GetAllPeers()
 		currentNodeIDs := make(map[uint64]bool)
-		for _, v := range self.kvNodes {
+		for _, v := range nsm.kvNodes {
 			mems := v.Node.GetMembers()
 			for _, m := range mems {
 				currentNodeIDs[m.NodeID] = true
@@ -558,7 +558,7 @@ func (self *NamespaceMgr) clearUnusedRaftPeer() {
 		for _, p := range peers {
 			if _, ok := currentNodeIDs[uint64(p)]; !ok {
 				nodeLog.Infof("remove peer %v from transport since no any raft is related", p)
-				self.raftTransport.RemovePeer(p)
+				nsm.raftTransport.RemovePeer(p)
 			}
 		}
 	}
@@ -567,7 +567,7 @@ func (self *NamespaceMgr) clearUnusedRaftPeer() {
 		select {
 		case <-ticker.C:
 			doCheck()
-		case <-self.stopC:
+		case <-nsm.stopC:
 			return
 		}
 	}

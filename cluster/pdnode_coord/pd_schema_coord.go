@@ -54,13 +54,13 @@ func isAllPartsIndexSchemaReady(allPartsSchema map[int]map[string]*common.IndexS
 	return allDone
 }
 
-func (self *PDCoordinator) doSchemaCheck() {
-	allNamespaces, _, err := self.register.GetAllNamespaces()
+func (pdCoord *PDCoordinator) doSchemaCheck() {
+	allNamespaces, _, err := pdCoord.register.GetAllNamespaces()
 	if err != nil {
 		return
 	}
 	for ns, parts := range allNamespaces {
-		schemas, err := self.register.GetNamespaceSchemas(ns)
+		schemas, err := pdCoord.register.GetNamespaceSchemas(ns)
 		if err != nil {
 			if err != cluster.ErrKeyNotFound {
 				cluster.CoordLog().Infof("get schema info failed: %v", err)
@@ -107,7 +107,7 @@ func (self *PDCoordinator) doSchemaCheck() {
 						schemaChanged = true
 						hindex.State = common.BuildingIndex
 					}
-					go self.triggerCheckNamespaces(ns, -1, time.Second)
+					go pdCoord.triggerCheckNamespaces(ns, -1, time.Second)
 				case common.BuildingIndex:
 					// wait all partitions to finish building index, and then change the state to ready
 					if isAllPartsIndexSchemaReady(allPartsSchema, table, hindex.Name, common.BuildDoneIndex) {
@@ -115,7 +115,7 @@ func (self *PDCoordinator) doSchemaCheck() {
 						hindex.State = common.ReadyIndex
 						cluster.CoordLog().Infof("namespace %v table %v schema info ready: %v", ns, table, hindex)
 					} else {
-						go self.triggerCheckNamespaces(ns, -1, time.Second*3)
+						go pdCoord.triggerCheckNamespaces(ns, -1, time.Second*3)
 					}
 				default:
 				}
@@ -127,7 +127,7 @@ func (self *PDCoordinator) doSchemaCheck() {
 			if schemaChanged {
 				newSchemaInfo.Schema, _ = json.Marshal(indexes)
 				cluster.CoordLog().Infof("namespace %v table %v schema info changed: %v", ns, table, string(newSchemaInfo.Schema))
-				err := self.register.UpdateNamespaceSchema(ns, table, &newSchemaInfo)
+				err := pdCoord.register.UpdateNamespaceSchema(ns, table, &newSchemaInfo)
 				if err != nil {
 					cluster.CoordLog().Infof("update %v-%v schema to register failed: %v", ns, table, err)
 				}
@@ -136,14 +136,14 @@ func (self *PDCoordinator) doSchemaCheck() {
 	}
 }
 
-func (self *PDCoordinator) addHIndexSchema(ns string, table string, hindex *common.HsetIndexSchema) error {
+func (pdCoord *PDCoordinator) addHIndexSchema(ns string, table string, hindex *common.HsetIndexSchema) error {
 	if !hindex.IsValidNewSchema() {
 		return ErrInvalidSchema
 	}
 	var indexes common.IndexSchema
 	var newSchema cluster.SchemaInfo
 
-	schema, err := self.register.GetNamespaceTableSchema(ns, table)
+	schema, err := pdCoord.register.GetNamespaceTableSchema(ns, table)
 	if err != nil {
 		if err != cluster.ErrKeyNotFound {
 			return err
@@ -165,14 +165,14 @@ func (self *PDCoordinator) addHIndexSchema(ns string, table string, hindex *comm
 	}
 	indexes.HsetIndexes = append(indexes.HsetIndexes, hindex)
 	newSchema.Schema, _ = json.Marshal(indexes)
-	return self.register.UpdateNamespaceSchema(ns, table, &newSchema)
+	return pdCoord.register.UpdateNamespaceSchema(ns, table, &newSchema)
 }
 
-func (self *PDCoordinator) delHIndexSchema(ns string, table string, hindexName string) error {
+func (pdCoord *PDCoordinator) delHIndexSchema(ns string, table string, hindexName string) error {
 	var indexes common.IndexSchema
 	var newSchema cluster.SchemaInfo
 
-	schema, err := self.register.GetNamespaceTableSchema(ns, table)
+	schema, err := pdCoord.register.GetNamespaceTableSchema(ns, table)
 	if err != nil {
 		return err
 	}
@@ -193,5 +193,5 @@ func (self *PDCoordinator) delHIndexSchema(ns string, table string, hindexName s
 		}
 	}
 	newSchema.Schema, _ = json.Marshal(indexes)
-	return self.register.UpdateNamespaceSchema(ns, table, &newSchema)
+	return pdCoord.register.UpdateNamespaceSchema(ns, table, &newSchema)
 }
