@@ -568,7 +568,7 @@ func (self *KVNode) localZclearCommand(cmd redcon.Command, ts int64) (interface{
 }
 
 func (self *KVNode) localZMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	var count int64 = 0
+	var count int64
 	for _, zkey := range cmd.Args[1:] {
 		if _, err := self.store.ZClear(zkey); err != nil {
 			return count, err

@@ -308,7 +308,7 @@ func (self *ExpireHandler) applyExpiration(stop chan struct{}) {
 		nodeLog.Infof("apply expiration has been stopped")
 	}()
 
-	var buffFullTimes int = 0
+	var buffFullTimes int
 	for {
 		select {
 		case <-checkTicker.C:

@@ -184,8 +184,8 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 	minKey := expEncodeTimeKey(NoneType, nil, 0)
 	maxKey := expEncodeTimeKey(maxDataType, nil, nc)
 
-	var eCount int64 = 0
-	var scanned int64 = 0
+	var eCount int64
+	var scanned int64
 	checkStart := time.Now()
 
 	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,

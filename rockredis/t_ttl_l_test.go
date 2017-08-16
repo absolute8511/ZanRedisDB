@@ -291,31 +291,31 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 			if v, err := db.KVGet([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != nil {
-				t.Fatal("key:%s of KVType do not expired", string(k))
+				t.Fatalf("key:%s of KVType do not expired", string(k))
 			}
 		case HashType:
 			if v, err := db.HLen([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatal("key:%s of HashType do not expired", string(k))
+				t.Fatalf("key:%s of HashType do not expired", string(k))
 			}
 		case ListType:
 			if v, err := db.LLen([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatal("key:%s of ListType do not expired", string(k))
+				t.Fatalf("key:%s of ListType do not expired", string(k))
 			}
 		case SetType:
 			if v, err := db.SCard([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatal("key:%s of SetType do not expired", string(k))
+				t.Fatalf("key:%s of SetType do not expired", string(k))
 			}
 		case ZSetType:
 			if v, err := db.ZCard([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatal("key:%s of ZSetType do not expired", string(k))
+				t.Fatalf("key:%s of ZSetType do not expired", string(k))
 			}
 		}
 	}

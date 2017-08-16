@@ -136,9 +136,8 @@ func (self *KVNode) localHDelCommand(cmd redcon.Command, ts int64) (interface{},
 	if err != nil {
 		// leader write need response
 		return int64(0), err
-	} else {
-		return n, nil
 	}
+	return n, nil
 }
 
 func (self *KVNode) localHclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -146,7 +145,7 @@ func (self *KVNode) localHclearCommand(cmd redcon.Command, ts int64) (interface{
 }
 
 func (self *KVNode) localHMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	var count int64 = 0
+	var count int64
 	for _, hkey := range cmd.Args[1:] {
 		if _, err := self.store.HClear(hkey); err == nil {
 			count++

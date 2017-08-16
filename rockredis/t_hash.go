@@ -207,7 +207,7 @@ func (db *RockDB) hIncrSize(hkey []byte, delta int64, wb *gorocksdb.WriteBatch) 
 	sk := hEncodeSizeKey(hkey)
 
 	var err error
-	var size int64 = 0
+	var size int64
 	if size, err = Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk)); err != nil {
 		return 0, err
 	} else {
@@ -269,7 +269,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 		defer tableIndexes.Unlock()
 	}
 
-	var num int64 = 0
+	var num int64
 	var value []byte
 	tsBuf := PutInt64(ts)
 	for i := 0; i < len(args); i++ {
@@ -564,7 +564,7 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 		hindex = tableIndexes.GetHIndexNoLock(string(field))
 	}
 
-	var n int64 = 0
+	var n int64
 	oldV, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 	if len(oldV) >= tsLen {
 		oldV = oldV[:len(oldV)-tsLen]

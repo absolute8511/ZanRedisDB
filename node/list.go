@@ -194,7 +194,7 @@ func (self *KVNode) localLclearCommand(cmd redcon.Command, ts int64) (interface{
 }
 
 func (self *KVNode) localLMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	var count int64 = 0
+	var count int64
 	for _, lkey := range cmd.Args[1:] {
 		if _, err := self.store.LClear(lkey); err != nil {
 			return count, err

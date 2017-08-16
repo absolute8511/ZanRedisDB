@@ -165,12 +165,12 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		return 0, err
 	}
 
-	var pushCnt int = len(args)
+	pushCnt := len(args)
 	if pushCnt == 0 {
 		return int64(size), nil
 	}
 
-	var seq int64 = headSeq
+	seq := headSeq
 	var delta int64 = -1
 	if whereSeq == listTailSeq {
 		seq = tailSeq
@@ -411,7 +411,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 		return 0
 	}
 
-	var num int64 = 0
+	var num int64
 	startKey := lEncodeListKey(table, rk, headSeq)
 	stopKey := lEncodeListKey(table, rk, tailSeq)
 	if size > RANGE_DELETE_NUM {
@@ -458,7 +458,7 @@ func (db *RockDB) lGetMeta(ek []byte) (headSeq int64, tailSeq int64, size int64,
 }
 
 func (db *RockDB) lSetMeta(ek []byte, headSeq int64, tailSeq int64, wb *gorocksdb.WriteBatch) (int64, error) {
-	var size int64 = tailSeq - headSeq + 1
+	size := tailSeq - headSeq + 1
 	if size < 0 {
 		//	todo : log error + panic
 		//log.Fatalf("invalid meta sequence range [%d, %d]", headSeq, tailSeq)

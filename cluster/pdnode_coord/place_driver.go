@@ -408,15 +408,14 @@ func (self *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, 
 			}
 			if err != nil {
 				return moved, false
-			} else {
-				if newInfo != nil {
-					namespaceInfo = *newInfo
-				}
-				coordErr := self.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
-				moved = true
-				if coordErr != nil {
-					return moved, false
-				}
+			}
+			if newInfo != nil {
+				namespaceInfo = *newInfo
+			}
+			coordErr := self.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
+			moved = true
+			if coordErr != nil {
+				return moved, false
 			}
 		}
 		expectLeader := partitionNodes[namespaceInfo.Partition][0]

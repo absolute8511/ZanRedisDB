@@ -175,13 +175,12 @@ func (self *PDCoordinator) delHIndexSchema(ns string, table string, hindexName s
 	schema, err := self.register.GetNamespaceTableSchema(ns, table)
 	if err != nil {
 		return err
-	} else {
-		newSchema.Epoch = schema.Epoch
-		err := json.Unmarshal(schema.Schema, &indexes)
-		if err != nil {
-			cluster.CoordLog().Infof("unmarshal schema data failed: %v", err)
-			return err
-		}
+	}
+	newSchema.Epoch = schema.Epoch
+	err = json.Unmarshal(schema.Schema, &indexes)
+	if err != nil {
+		cluster.CoordLog().Infof("unmarshal schema data failed: %v", err)
+		return err
 	}
 	for _, hi := range indexes.HsetIndexes {
 		if hi.Name == hindexName {

@@ -21,7 +21,7 @@ var (
 )
 
 var (
-	scanJobCount int32 = 0
+	scanJobCount int32
 )
 
 // handle range, scan command which need across multi partitions

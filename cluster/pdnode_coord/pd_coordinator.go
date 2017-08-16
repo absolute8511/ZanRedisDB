@@ -689,10 +689,9 @@ func (self *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.PartitionM
 		if err != nil {
 			cluster.CoordLog().Infof("update namespace replica info failed: %v", err.Error())
 			return cluster.ErrRegisterServiceUnstable
-		} else {
-			cluster.CoordLog().Infof("namespace %v migrate to replicas : %v", nsInfo.GetDesp(), nsInfo.RaftNodes)
-			*origNSInfo = *nsInfo
 		}
+		cluster.CoordLog().Infof("namespace %v migrate to replicas : %v", nsInfo.GetDesp(), nsInfo.RaftNodes)
+		*origNSInfo = *nsInfo
 	} else {
 		return ErrNamespaceMigrateWaiting
 	}

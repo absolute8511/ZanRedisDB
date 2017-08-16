@@ -375,7 +375,7 @@ type HsetIndex struct {
 }
 
 func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly bool) (int64, [][]byte, error) {
-	var n int64 = 0
+	var n int64
 	pkList := make([][]byte, 0, 32)
 	var min []byte
 	var max []byte

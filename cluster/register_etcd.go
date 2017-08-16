@@ -235,22 +235,21 @@ func (etcdReg *EtcdRegister) watchNamespaces() {
 			if err == context.Canceled {
 				coordLog.Infof("watch key[%s] canceled.", etcdReg.namespaceRoot)
 				return
-			} else {
-				atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
-				coordLog.Errorf("watcher key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
-				if etcdlock.IsEtcdWatchExpired(err) {
-					rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, false, true)
-					if err != nil {
-						coordLog.Errorf("rewatch and get key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
-						time.Sleep(time.Second)
-						continue
-					}
-					watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index+1, true)
-					// watch expired should be treated as changed of node
-				} else {
-					time.Sleep(5 * time.Second)
+			}
+			atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+			coordLog.Errorf("watcher key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
+			if etcdlock.IsEtcdWatchExpired(err) {
+				rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, false, true)
+				if err != nil {
+					coordLog.Errorf("rewatch and get key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
+					time.Sleep(time.Second)
 					continue
 				}
+				watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index+1, true)
+				// watch expired should be treated as changed of node
+			} else {
+				time.Sleep(5 * time.Second)
+				continue
 			}
 		}
 		coordLog.Debugf("namespace changed.")
