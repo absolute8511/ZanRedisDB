@@ -65,10 +65,14 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 				start = time.Now()
 			}
 			h, cmd, err := s.GetHandler(cmdName, cmd)
+			cmdStr := string(cmd.Args[0])
+			if len(cmd.Args) > 1 {
+				cmdStr += ", " + string(cmd.Args[1])
+			}
 			if err == nil {
 				h(conn, cmd)
 			} else {
-				conn.WriteError(err.Error() + " : ERR handle command " + string(cmd.Args[0]))
+				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
 			}
 			if level > 0 {
 				cost := time.Since(start)
@@ -76,10 +80,7 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 					(level > 1 && cost > time.Millisecond*500) ||
 					(level > 2 && cost > time.Millisecond*100) ||
 					(level > 3 && cost > time.Millisecond) {
-					cmdStr := string(cmd.Args[0])
-					if len(cmd.Args) > 1 {
-						cmdStr += ", " + string(cmd.Args[1])
-					}
+
 					sLog.Infof("slow command %v cost %v", cmdStr, cost)
 				}
 			}
