@@ -1,12 +1,13 @@
 package rockredis
 
 import (
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestHashCodec(t *testing.T) {
@@ -275,9 +276,9 @@ func TestHashIndexBuildAndClean(t *testing.T) {
 	}
 	condAll := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
@@ -418,9 +419,9 @@ func TestHashIndexStringV(t *testing.T) {
 	db.eng.Write(db.defaultWriteOpts, db.wb)
 	condAll := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
@@ -435,7 +436,7 @@ func TestHashIndexStringV(t *testing.T) {
 	}
 	condLess := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       inputFVList[len(inputFVList)-1],
 		IncludeEnd:   false,
 		Offset:       0,
@@ -443,7 +444,7 @@ func TestHashIndexStringV(t *testing.T) {
 	}
 	condLessEq := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       inputFVList[len(inputFVList)-1],
 		IncludeEnd:   true,
 		Offset:       0,
@@ -454,7 +455,7 @@ func TestHashIndexStringV(t *testing.T) {
 		StartKey:     inputFVList[0],
 		IncludeStart: false,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
@@ -462,7 +463,7 @@ func TestHashIndexStringV(t *testing.T) {
 		StartKey:     inputFVList[0],
 		IncludeStart: true,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
@@ -577,9 +578,9 @@ func TestHashIndexInt64V(t *testing.T) {
 	db.eng.Write(db.defaultWriteOpts, db.wb)
 	condAll := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
@@ -593,7 +594,7 @@ func TestHashIndexInt64V(t *testing.T) {
 	}
 	condLess := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       inputFVList[len(inputFVList)-1],
 		IncludeEnd:   false,
 		Offset:       0,
@@ -601,7 +602,7 @@ func TestHashIndexInt64V(t *testing.T) {
 	}
 	condLessEq := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       inputFVList[len(inputFVList)-1],
 		IncludeEnd:   true,
 		Offset:       0,
@@ -612,7 +613,7 @@ func TestHashIndexInt64V(t *testing.T) {
 		StartKey:     inputFVList[0],
 		IncludeStart: false,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
@@ -620,7 +621,7 @@ func TestHashIndexInt64V(t *testing.T) {
 		StartKey:     inputFVList[0],
 		IncludeStart: true,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
@@ -740,9 +741,9 @@ func TestHashUpdateWithIndex(t *testing.T) {
 
 	condAll := &IndexCondition{
 		StartKey:     nil,
-		IncludeStart: true,
+		IncludeStart: false,
 		EndKey:       nil,
-		IncludeEnd:   true,
+		IncludeEnd:   false,
 		Offset:       0,
 		Limit:        -1,
 	}
