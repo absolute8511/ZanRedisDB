@@ -5,6 +5,8 @@ import (
 	"errors"
 	"runtime"
 	"strconv"
+	"sync/atomic"
+	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
@@ -12,6 +14,7 @@ import (
 
 var (
 	errInvalidCommand = errors.New("invalid command")
+	costStatsLevel    int32
 )
 
 func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
@@ -56,11 +59,29 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		if common.IsMergeCommand(cmdName) {
 			s.doMergeCommand(conn, cmd)
 		} else {
+			var start time.Time
+			level := atomic.LoadInt32(&costStatsLevel)
+			if level > 0 {
+				start = time.Now()
+			}
 			h, cmd, err := s.GetHandler(cmdName, cmd)
 			if err == nil {
 				h(conn, cmd)
 			} else {
 				conn.WriteError(err.Error() + " : ERR handle command " + string(cmd.Args[0]))
+			}
+			if level > 0 {
+				cost := time.Since(start)
+				if cost >= time.Second ||
+					(level > 1 && cost > time.Millisecond*500) ||
+					(level > 2 && cost > time.Millisecond*100) ||
+					(level > 3 && cost > time.Millisecond) {
+					cmdStr := string(cmd.Args[0])
+					if len(cmd.Args) > 1 {
+						cmdStr += ", " + string(cmd.Args[1])
+					}
+					sLog.Infof("slow command %v cost %v", cmdStr, cost)
+				}
 			}
 		}
 	}

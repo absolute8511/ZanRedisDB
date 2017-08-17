@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/cluster"
@@ -193,6 +194,23 @@ func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps http
 	return nil, nil
 }
 
+func (s *Server) doSetCostLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	levelStr := reqParams.Get("level")
+	if levelStr == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_LEVEL"}
+	}
+	level, err := strconv.Atoi(levelStr)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "BAD_LEVEL_STRING"}
+	}
+	atomic.StoreInt32(&costStatsLevel, int32(level))
+	return nil, nil
+}
+
 func (s *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -289,6 +307,7 @@ func (s *Server) initHttpHandler() {
 
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
+	router.Handle("POST", "/costlevel/set", common.Decorate(s.doSetCostLevel, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
