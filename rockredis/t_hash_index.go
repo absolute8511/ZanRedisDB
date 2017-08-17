@@ -475,6 +475,9 @@ func (self *HsetIndex) UpdateRec(oldvalue []byte, value []byte, pk []byte, wb *g
 	if oldvalue != nil {
 		self.RemoveRec(oldvalue, pkkey, wb)
 	}
+	if len(value) == 0 {
+		return nil
+	}
 	if self.ValueType == Int64V || self.ValueType == Int32V {
 		n, err := strconv.ParseInt(string(value), 10, 64)
 		if err != nil {
