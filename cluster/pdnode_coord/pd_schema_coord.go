@@ -83,7 +83,7 @@ func (pdCoord *PDCoordinator) doSchemaCheck() {
 				isReady = false
 				break
 			}
-			cluster.CoordLog().Infof("namespace %v got schema : %v", common.GetNsDesp(ns, pid),
+			cluster.CoordLog().Debugf("namespace %v got schema : %v", common.GetNsDesp(ns, pid),
 				len(schemas))
 			allPartsSchema[pid] = schemas
 		}

@@ -12,7 +12,7 @@ import (
 func (dc *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode,
 	indexSchemas map[string]*common.IndexSchema) {
 
-	cluster.CoordLog().Infof("namespace %v checking schema sync: %v",
+	cluster.CoordLog().Debugf("namespace %v checking schema sync: %v",
 		localNamespace.FullName(), len(indexSchemas))
 	for table, tindexes := range indexSchemas {
 		localIndexSchema, err := localNamespace.Node.GetIndexSchema(table)

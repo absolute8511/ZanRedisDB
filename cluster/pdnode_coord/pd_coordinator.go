@@ -435,7 +435,7 @@ func (pdCoord *PDCoordinator) triggerCheckNamespaces(namespace string, part int,
 // check if replication is enough
 // check any unexpected state.
 func (pdCoord *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
-	ticker := time.NewTicker(time.Second * 30)
+	ticker := time.NewTicker(time.Second * 60)
 	waitingMigrateNamespace := make(map[string]map[int]time.Time)
 	defer func() {
 		ticker.Stop()
