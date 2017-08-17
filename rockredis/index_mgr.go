@@ -3,9 +3,10 @@ package rockredis
 import (
 	"bytes"
 	"errors"
+	"sync"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
-	"sync"
 )
 
 var (
@@ -454,19 +455,19 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 					return false, nil
 				}()
 				if done {
-					if err != nil {
-					} else {
-						dbLog.Infof("finish rebuild index for table %v, total: %v", string(buildTable), indexPKCnt)
-						t.Lock()
-						for _, f := range fields {
-							hindex, ok := t.hsetIndexes[string(f)]
-							if ok {
+					dbLog.Infof("finish rebuild index for table %v, total: %v", string(buildTable), indexPKCnt)
+					t.Lock()
+					for _, f := range fields {
+						hindex, ok := t.hsetIndexes[string(f)]
+						if ok {
+							if err != nil {
+								hindex.State = InitIndex
+							} else {
 								hindex.State = BuildDoneIndex
 							}
 						}
-						t.Unlock()
-
 					}
+					t.Unlock()
 					break
 				}
 			}
