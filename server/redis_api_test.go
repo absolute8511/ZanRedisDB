@@ -3,10 +3,12 @@ package server
 import (
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"path"
 	"reflect"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +47,10 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		TickMs:        100,
 		ElectionTick:  5,
 	}
+	if testing.Verbose() {
+		rockredis.SetLogLevel(4)
+		node.SetLogLevel(4)
+	}
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
 	nsConf.BaseName = "default"
@@ -60,7 +66,7 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	}
 
 	kv.Start()
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 3)
 	return kv, redisport, tmpDir
 }
 
@@ -1084,6 +1090,109 @@ func disableTestTrim(t *testing.T) {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
+	}
+}
+func TestListLPushRPop(t *testing.T) {
+	c := getTestConn(t)
+	c2 := getTestConn(t)
+	defer c.Close()
+	defer c2.Close()
+
+	k1 := []byte("default:test_lpushrpop:1")
+	klist := make([][]byte, 0, 10)
+	klist = append(klist, k1)
+	for i := 2; i < 9; i++ {
+		klist = append(klist, []byte("default:test_lpushrpop:"+strconv.Itoa(i)))
+	}
+
+	n, err := goredis.Int(c.Do("llen", k1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	c.Do("lpush", k1, []byte("a"))
+	n, err = goredis.Int(c.Do("llen", k1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+	c.Do("rpop", k1)
+	n, err = goredis.Int(c.Do("llen", k1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	c.Do("rpop", k1)
+	n, err = goredis.Int(c.Do("llen", k1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	c.Do("lpush", k1, []byte("a"))
+	c.Do("lpush", k1, []byte("a"))
+	c.Do("lpush", k1, []byte("a"))
+	c.Do("lpush", k1, []byte("a"))
+	c.Do("rpop", k1)
+	c.Do("rpop", k1)
+	c.Do("lpush", k1, []byte("a"))
+	c.Do("lpush", k1, []byte("a"))
+	c.Do("rpop", k1)
+	c.Do("rpop", k1)
+	c.Do("lpush", k1, []byte("a"))
+	c.Do("rpop", k1)
+	c.Do("rpop", k1)
+	n, err = goredis.Int(c.Do("llen", k1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+	v, err := goredis.Bytes(c.Do("rpop", k1))
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("a"), v)
+	n, err = goredis.Int(c.Do("llen", k1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+
+	pushed := make([]int32, len(klist))
+	poped := make([]int32, len(klist))
+	connPushList := make([]*goredis.PoolConn, len(klist))
+	connPopList := make([]*goredis.PoolConn, len(klist))
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	for i, _ := range klist {
+		connPushList[i] = getTestConn(t)
+		connPopList[i] = getTestConn(t)
+		wg.Add(2)
+		go func(index int) {
+			defer wg.Done()
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			for {
+				_, err := connPushList[index].Do("lpush", klist[index], []byte("a"))
+				assert.Nil(t, err)
+				atomic.AddInt32(&pushed[index], 1)
+				time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
+				if time.Since(start) > time.Second*10 {
+					break
+				}
+			}
+		}(i)
+		go func(index int) {
+			defer wg.Done()
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			for {
+				v, err := goredis.Bytes(connPopList[index].Do("rpop", klist[index]))
+				assert.Nil(t, err)
+				if len(v) > 0 {
+					assert.Equal(t, []byte("a"), v)
+					atomic.AddInt32(&poped[index], 1)
+				}
+				time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
+				if time.Since(start) > time.Second*10 {
+					break
+				}
+			}
+		}(i)
+
+	}
+	wg.Wait()
+
+	for i, tk := range klist {
+		n, err = goredis.Int(c.Do("llen", tk))
+		assert.Nil(t, err)
+		t.Logf("pushed %v poped %v", atomic.LoadInt32(&pushed[i]), atomic.LoadInt32(&poped[i]))
+		assert.True(t, pushed[i] >= poped[i])
+		assert.Equal(t, int(pushed[i]-poped[i]), n)
 	}
 }
 

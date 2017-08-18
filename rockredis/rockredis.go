@@ -25,6 +25,10 @@ const (
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
 
+func SetLogLevel(level int32) {
+	dbLog.SetLevel(level)
+}
+
 func SetLogger(level int32, logger common.Logger) {
 	dbLog.SetLevel(level)
 	dbLog.Logger = logger

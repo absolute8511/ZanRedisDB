@@ -302,7 +302,6 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 				}
 			}
 		}
-
 	}
 	if newNum, err := db.hIncrSize(key, num, db.wb); err != nil {
 		return err

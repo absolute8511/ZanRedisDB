@@ -142,6 +142,77 @@ func lDecodeListKey(ek []byte) (table []byte, key []byte, seq int64, err error) 
 	return
 }
 
+func (db *RockDB) fixListKey(key []byte) {
+	// fix head and tail by iterator to find if any list key found or not found
+	var headSeq int64
+	var tailSeq int64
+	var llen int64
+	var err error
+
+	db.wb.Clear()
+	metaKey := lEncodeMetaKey(key)
+	if headSeq, tailSeq, llen, err = db.lGetMeta(metaKey); err != nil {
+		dbLog.Warningf("read list %v meta error: %v", string(key), err.Error())
+		return
+	}
+	dbLog.Infof("list %v before fix: meta: %v, %v", string(key), headSeq, tailSeq)
+	startKey, err := convertRedisKeyToDBListKey(key, listMinSeq)
+	if err != nil {
+		return
+	}
+	stopKey, err := convertRedisKeyToDBListKey(key, listMaxSeq)
+	if err != nil {
+		return
+	}
+	rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
+	if err != nil {
+		dbLog.Warningf("read list %v error: %v", string(key), err.Error())
+		return
+	}
+	defer rit.Close()
+	var fixedHead int64
+	var fixedTail int64
+	var cnt int64
+	lastSeq := int64(-1)
+	for ; rit.Valid(); rit.Next() {
+		_, _, seq, err := lDecodeListKey(rit.RefKey())
+		if err != nil {
+			dbLog.Warningf("decode list %v error: %v", rit.Key(), err.Error())
+			return
+		}
+		cnt++
+		if lastSeq < 0 {
+			fixedHead = seq
+		} else if lastSeq+1 != seq {
+			dbLog.Warningf("list %v should be continuous: last %v, cur: %v", string(key),
+				lastSeq, seq)
+			return
+		}
+
+		lastSeq = seq
+		fixedTail = seq
+	}
+	if headSeq == fixedHead && tailSeq == fixedTail {
+		dbLog.Infof("list %v no need to fix %v, %v", fixedHead, fixedTail)
+		return
+	}
+	if llen == 0 && cnt == 0 {
+		dbLog.Infof("list %v no need to fix since empty")
+		return
+	}
+	_, err = db.lSetMeta(metaKey, fixedHead, fixedTail, db.wb)
+	if err != nil {
+		return
+	}
+	if cnt == 0 {
+		db.wb.Delete(metaKey)
+		table, _, _ := extractTableFromRedisKey(key)
+		db.IncrTableKeyCount(table, -1, db.wb)
+	}
+	dbLog.Infof("list %v fixed to %v, %v, cnt: %v", fixedHead, fixedTail, cnt)
+	db.eng.Write(db.defaultWriteOpts, db.wb)
+}
+
 func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
@@ -188,6 +259,13 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 	}
 	for i := 0; i < pushCnt; i++ {
 		ek := lEncodeListKey(table, rk, seq+int64(i)*delta)
+		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
+		if v != nil {
+			dbLog.Warningf("list %v should not override the old value: %v, meta: %v, %v,%v", string(key),
+				v, seq, headSeq, tailSeq)
+			db.fixListKey(key)
+			return 0, errListSeq
+		}
 		wb.Put(ek, args[i])
 	}
 	if size == 0 && pushCnt > 0 {
@@ -201,7 +279,14 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		tailSeq = seq
 	}
 
-	db.lSetMeta(metaKey, headSeq, tailSeq, wb)
+	_, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
+	if dbLog.Level() >= common.LOG_DETAIL {
+		dbLog.Debugf("lpush %v list %v meta updated to: %v, %v, %v", whereSeq, string(key), headSeq, tailSeq, size)
+	}
+	if err != nil {
+		db.fixListKey(key)
+		return 0, err
+	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return int64(size) + int64(pushCnt), err
 }
@@ -230,6 +315,9 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	} else if size == 0 {
 		return nil, nil
 	}
+	if dbLog.Level() >= common.LOG_DETAIL {
+		dbLog.Debugf("pop %v list %v meta: %v, %v", whereSeq, string(key), headSeq, tailSeq)
+	}
 
 	var value []byte
 
@@ -241,6 +329,9 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	itemKey := lEncodeListKey(table, rk, seq)
 	value, err = db.eng.GetBytesNoLock(db.defaultReadOpts, itemKey)
 	if err != nil {
+		dbLog.Warningf("list %v pop error: %v, meta: %v, %v, %v", string(key), err,
+			seq, headSeq, tailSeq)
+		db.fixListKey(key)
 		return nil, err
 	}
 
@@ -252,7 +343,11 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 
 	wb.Delete(itemKey)
 	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
+	if dbLog.Level() >= common.LOG_DETAIL {
+		dbLog.Debugf("pop %v list %v meta updated to: %v, %v, %v", whereSeq, string(key), headSeq, tailSeq, size)
+	}
 	if err != nil {
+		db.fixListKey(key)
 		return nil, err
 	}
 	if size == 0 {
@@ -317,7 +412,11 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 		}
 	}
 
-	newLen, _ := db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
+	newLen, err := db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
+	if err != nil {
+		db.fixListKey(key)
+		return err
+	}
 	if llen > 0 && newLen == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 		//delete the expire data related to the list key
@@ -378,6 +477,7 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 
 	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
 	if err != nil {
+		db.fixListKey(key)
 		return 0, err
 	}
 	if size == 0 {
@@ -461,7 +561,7 @@ func (db *RockDB) lSetMeta(ek []byte, headSeq int64, tailSeq int64, wb *gorocksd
 	size := tailSeq - headSeq + 1
 	if size < 0 {
 		//	todo : log error + panic
-		//log.Fatalf("invalid meta sequence range [%d, %d]", headSeq, tailSeq)
+		dbLog.Warningf("list %v invalid meta sequence range [%d, %d]", string(ek), headSeq, tailSeq)
 		return 0, errListSeq
 	} else if size == 0 {
 		wb.Delete(ek)
@@ -512,6 +612,10 @@ func (db *RockDB) LLen(key []byte) (int64, error) {
 	ek := lEncodeMetaKey(key)
 	_, _, size, err := db.lGetMeta(ek)
 	return int64(size), err
+}
+
+func (db *RockDB) LFixKey(key []byte) {
+	db.fixListKey(key)
 }
 
 func (db *RockDB) LPop(key []byte) ([]byte, error) {
@@ -578,12 +682,13 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	}
 
 	var headSeq int64
+	var tailSeq int64
 	var llen int64
 	var err error
 
 	metaKey := lEncodeMetaKey(key)
 
-	if headSeq, _, llen, err = db.lGetMeta(metaKey); err != nil {
+	if headSeq, tailSeq, llen, err = db.lGetMeta(metaKey); err != nil {
 		return nil, err
 	}
 
@@ -617,7 +722,11 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	rit, err := NewDBRangeLimitIterator(db.eng, startKey, nil, common.RangeClose, 0, int(limit), false)
+	stopKey, err := convertRedisKeyToDBListKey(key, tailSeq)
+	if err != nil {
+		return nil, err
+	}
+	rit, err := NewDBRangeLimitIterator(db.eng, startKey, stopKey, common.RangeClose, 0, int(limit), false)
 	if err != nil {
 		return nil, err
 	}
@@ -625,6 +734,10 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 		v = append(v, rit.Value())
 	}
 	rit.Close()
+	if int64(len(v)) < llen && int64(len(v)) < limit {
+		dbLog.Infof("list %v range count %v not match llen: %v, meta: %v, %v",
+			string(key), len(v), llen, headSeq, tailSeq)
+	}
 	return v, nil
 }
 

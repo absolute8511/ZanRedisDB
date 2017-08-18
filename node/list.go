@@ -56,6 +56,10 @@ func (nd *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (nd *KVNode) lfixkeyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	conn.WriteString("OK")
+}
+
 func (nd *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.([]byte)
 	if !ok {
@@ -151,6 +155,11 @@ func (nd *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
+func (nd *KVNode) localLfixkeyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	nd.store.LFixKey(cmd.Args[1])
+	return nil, nil
+}
+
 func (nd *KVNode) localLpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	return nd.store.LPop(cmd.Args[1])
 }

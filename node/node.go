@@ -301,6 +301,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "lindex", wrapReadCommandKSubkey(nd.lindexCommand))
 	nd.router.Register(false, "llen", wrapReadCommandK(nd.llenCommand))
 	nd.router.Register(false, "lrange", wrapReadCommandKAnySubkey(nd.lrangeCommand))
+	nd.router.Register(true, "lfixkey", wrapWriteCommandK(nd, nd.lfixkeyCommand))
 	nd.router.Register(true, "lpop", wrapWriteCommandK(nd, nd.lpopCommand))
 	nd.router.Register(true, "lpush", wrapWriteCommandKVV(nd, nd.lpushCommand))
 	nd.router.Register(true, "lset", nd.lsetCommand)
@@ -382,6 +383,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterInternal("hclear", nd.localHclearCommand)
 	nd.router.RegisterInternal("hmclear", nd.localHMClearCommand)
 	// list
+	nd.router.RegisterInternal("lfixkey", nd.localLfixkeyCommand)
 	nd.router.RegisterInternal("lpop", nd.localLpopCommand)
 	nd.router.RegisterInternal("lpush", nd.localLpushCommand)
 	nd.router.RegisterInternal("lset", nd.localLsetCommand)
@@ -823,6 +825,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 							_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
 							_, ok := dupCheckMap[string(pk)]
 							handled := false
+							// TODO: table counter can be batched???
 							if nd.store.IsBatchableWrite(cmdName) &&
 								len(batchReqIDList) < maxBatchCmdNum &&
 								!ok {

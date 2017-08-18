@@ -15,3 +15,9 @@ func TestRsync(t *testing.T) {
 	t.Log(tmpDir)
 	RunFileSync("127.0.0.1", "~/test_rsync", tmpDir)
 }
+
+//func TestHashPID(t *testing.T) {
+//	// ic_event_index:18509865_335939261
+//	t.Fatalf("pid: %v", int(murmur3.Sum32([]byte("ic_event_index:18510778_342808306")))%8)
+//	//ic_event_index:18510778_346675939
+//}

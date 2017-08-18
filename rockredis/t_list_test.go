@@ -1,9 +1,15 @@
 package rockredis
 
 import (
+	"math/rand"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestListCodec(t *testing.T) {
@@ -245,5 +251,103 @@ func TestListPop(t *testing.T) {
 	} else if v != nil {
 		t.Fatal(v)
 	}
+}
 
+func TestListLPushRPop(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	k1 := []byte("ic_event_index:18509865_335939261")
+	k2 := []byte("ic_event_index:18510778_346675939")
+
+	s, err := db.LLen(k2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), s)
+	_, err = db.LPush(k2, []byte("a"))
+	_, err = db.LPush(k2, []byte("b"))
+	//_, err = db.LPush(k1, []byte("a"))
+
+	//length, err := db.LLen(k1)
+	//assert.Nil(t, err)
+	//assert.Equal(t, int64(1), length)
+	//length, err = db.LLen(k2)
+	//assert.Nil(t, err)
+	//assert.Equal(t, int64(2), length)
+	//_, err = db.RPop(k1)
+	//length, err = db.LLen(k1)
+	//assert.Nil(t, err)
+	//assert.Equal(t, int64(0), length)
+	//_, err = db.RPop(k1)
+	//length, err = db.LLen(k1)
+	//assert.Nil(t, err)
+	//assert.Equal(t, int64(0), length)
+	//db.LPush(k1, []byte("a"))
+	//db.LPush(k1, []byte("a"))
+	//db.LPush(k1, []byte("a"))
+	//db.LPush(k1, []byte("a"))
+	//db.RPop(k1)
+	//db.RPop(k1)
+	//db.LPush(k1, []byte("a"))
+	//db.LPush(k1, []byte("a"))
+	//db.RPop(k1)
+	//db.RPop(k1)
+	//db.LPush(k1, []byte("a"))
+	//db.RPop(k1)
+	//db.RPop(k1)
+	//length, err = db.LLen(k1)
+	//assert.Nil(t, err)
+	//assert.Equal(t, int64(1), length)
+	//db.RPop(k1)
+	//length, err = db.LLen(k1)
+	//assert.Nil(t, err)
+	//assert.Equal(t, int64(0), length)
+
+	var pushed int32
+	var poped int32
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	start := time.Now()
+	var mutex sync.Mutex
+	go func() {
+		defer wg.Done()
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		for {
+			mutex.Lock()
+			_, err := db.LPush(k1, []byte("a"))
+			mutex.Unlock()
+			assert.Nil(t, err)
+			atomic.AddInt32(&pushed, 1)
+			time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
+			if time.Since(start) > time.Second*10 {
+				break
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		for {
+			mutex.Lock()
+			v, err := db.RPop(k1)
+			mutex.Unlock()
+			assert.Nil(t, err)
+			if v != nil {
+				assert.Equal(t, []byte("a"), v)
+				atomic.AddInt32(&poped, 1)
+			}
+			time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
+			if time.Since(start) > time.Second*10 {
+				break
+			}
+		}
+	}()
+	wg.Wait()
+
+	length, err := db.LLen(k1)
+	assert.Nil(t, err)
+	t.Logf("pushed %v poped %v", pushed, poped)
+	assert.True(t, pushed >= poped)
+	assert.Equal(t, int64(pushed-poped), length)
 }
