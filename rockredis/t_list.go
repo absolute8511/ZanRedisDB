@@ -193,11 +193,11 @@ func (db *RockDB) fixListKey(key []byte) {
 		fixedTail = seq
 	}
 	if headSeq == fixedHead && tailSeq == fixedTail {
-		dbLog.Infof("list %v no need to fix %v, %v", fixedHead, fixedTail)
+		dbLog.Infof("list %v no need to fix %v, %v", string(key), fixedHead, fixedTail)
 		return
 	}
 	if llen == 0 && cnt == 0 {
-		dbLog.Infof("list %v no need to fix since empty")
+		dbLog.Infof("list %v no need to fix since empty", string(key))
 		return
 	}
 	_, err = db.lSetMeta(metaKey, fixedHead, fixedTail, db.wb)
@@ -209,7 +209,7 @@ func (db *RockDB) fixListKey(key []byte) {
 		table, _, _ := extractTableFromRedisKey(key)
 		db.IncrTableKeyCount(table, -1, db.wb)
 	}
-	dbLog.Infof("list %v fixed to %v, %v, cnt: %v", fixedHead, fixedTail, cnt)
+	dbLog.Infof("list %v fixed to %v, %v, cnt: %v", string(key), fixedHead, fixedTail, cnt)
 	db.eng.Write(db.defaultWriteOpts, db.wb)
 }
 

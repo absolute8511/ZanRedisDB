@@ -990,7 +990,7 @@ func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 	}()
 	var serrc, werrc <-chan error
 	serrc = fileutil.PurgeFile(rc.config.SnapDir, "snap", 10, time.Minute*10, rc.stopc)
-	werrc = fileutil.PurgeFile(rc.config.WALDir, "wal", 10, time.Minute*10, rc.stopc)
+	werrc = fileutil.PurgeFile(rc.config.WALDir, "wal", 20, time.Minute*10, rc.stopc)
 	select {
 	case e := <-werrc:
 		rc.Infof("failed to purge wal file %v", e)
