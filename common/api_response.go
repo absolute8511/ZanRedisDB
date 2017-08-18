@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"errors"
+
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -117,7 +118,7 @@ func HttpLog(log *LevelLogger, level int32) Decorator {
 			if e, ok := err.(HttpErr); ok {
 				status = e.Code
 			}
-			if status != 200 || (status == 200 && log.Level() >= level) {
+			if (status != 304 && status != 200) || (status == 200 && log.Level() >= level) {
 				if log != nil && log.Logger != nil {
 					log.Logger.Output(2, fmt.Sprintf("%d %s %s (%s) %s",
 						status, req.Method, req.URL.RequestURI(), req.RemoteAddr, elapsed))

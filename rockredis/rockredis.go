@@ -113,6 +113,7 @@ type RockConfig struct {
 	EnableTableCounter bool
 	// this will ignore all update and non-exist delete
 	EstimateTableCounter bool
+	ExpirationPolicy     common.ExpirationPolicy
 	DefaultReadOpts      *gorocksdb.ReadOptions
 	DefaultWriteOpts     *gorocksdb.WriteOptions
 	RockOptions
@@ -182,6 +183,7 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string) {
 }
 
 type RockDB struct {
+	expiration
 	cfg              *RockConfig
 	eng              *gorocksdb.DB
 	dbOpts           *gorocksdb.Options
@@ -193,7 +195,7 @@ type RockDB struct {
 	wg               sync.WaitGroup
 	backupC          chan *BackupInfo
 	engOpened        int32
-	ttlChecker       *TTLChecker
+	indexMgr         *IndexMgr
 	isBatching       int32
 }
 
@@ -267,17 +269,37 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, err
 	}
 	db.eng = eng
+	db.indexMgr = NewIndexMgr()
+	err = db.indexMgr.LoadIndexes(db)
+	if err != nil {
+		dbLog.Infof("rocksdb %v load index failed: %v", db.GetDataDir(), err)
+		return nil, err
+	}
 	atomic.StoreInt32(&db.engOpened, 1)
 	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
 	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
-	db.ttlChecker = NewTTLChecker(db)
+	switch cfg.ExpirationPolicy {
+	case common.ConsistencyDeletion:
+		db.expiration = newConsistencyExpiration(db)
+
+	case common.LocalDeletion:
+		db.expiration = newLocalExpiration(db)
+
+	//TODO
+	//case common.PeriodicalRotation:
+	default:
+		return nil, errors.New("unsupported ExpirationPolicy")
+	}
+
+	db.expiration.Start()
 
 	db.wg.Add(1)
 	go func() {
 		defer db.wg.Done()
 		db.backupLoop()
 	}()
+
 	return db, nil
 }
 
@@ -285,18 +307,11 @@ func GetBackupDir(base string) string {
 	return path.Join(base, "rocksdb_backup")
 }
 
-func (r *RockDB) StartTTLChecker() {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		r.ttlChecker.Start()
-	}()
-}
-
-func (r *RockDB) StopTTLChecker() {
-	if r.ttlChecker != nil {
-		r.ttlChecker.Stop()
+func (r *RockDB) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
+	if r.cfg.ExpirationPolicy != common.ConsistencyDeletion {
+		return fmt.Errorf("can not check expired data at the expiration-policy:%d", r.cfg.ExpirationPolicy)
 	}
+	return r.expiration.check(buffer, stop)
 }
 
 func (r *RockDB) GetBackupBase() string {
@@ -318,11 +333,28 @@ func (r *RockDB) GetDataDir() string {
 func (r *RockDB) reOpenEng() error {
 	var err error
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
+	r.indexMgr = NewIndexMgr()
 	if err == nil {
+		err = r.indexMgr.LoadIndexes(r)
+		if err != nil {
+			dbLog.Infof("rocksdb %v load index failed: %v", r.GetDataDir(), err)
+			return err
+		}
+
 		atomic.StoreInt32(&r.engOpened, 1)
-		dbLog.Infof("rocksdb opened: %v", r.GetDataDir())
+		dbLog.Infof("rocksdb reopened: %v", r.GetDataDir())
 	}
 	return err
+}
+
+func (r *RockDB) getDBEng() *gorocksdb.DB {
+	e := r.eng
+	return e
+}
+
+func (r *RockDB) getIndexer() *IndexMgr {
+	e := r.indexMgr
+	return e
 }
 
 func (r *RockDB) CompactRange() {
@@ -333,6 +365,7 @@ func (r *RockDB) CompactRange() {
 func (r *RockDB) closeEng() {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
+			r.indexMgr.Close()
 			r.eng.Close()
 			dbLog.Infof("rocksdb closed: %v", r.GetDataDir())
 		}
@@ -347,7 +380,7 @@ func (r *RockDB) Close() {
 	default:
 	}
 	close(r.quit)
-	r.StopTTLChecker()
+	r.expiration.Stop()
 	r.wg.Wait()
 	r.closeEng()
 	if r.defaultReadOpts != nil {
@@ -356,6 +389,9 @@ func (r *RockDB) Close() {
 	}
 	if r.defaultWriteOpts != nil {
 		r.defaultWriteOpts.Destroy()
+	}
+	if r.wb != nil {
+		r.wb.Destroy()
 	}
 	if r.dbOpts != nil {
 		r.dbOpts.Destroy()
@@ -632,24 +668,32 @@ func (r *RockDB) ClearBackup(term uint64, index uint64) error {
 	return os.RemoveAll(path.Join(backupDir, checkpointDir))
 }
 
-func (r *RockDB) RegisterKVExpired(f OnExpiredFunc) {
-	r.ttlChecker.RegisterKVExpired(f)
+func (r *RockDB) GetIndexSchema(table string) (*common.IndexSchema, error) {
+	return r.indexMgr.GetIndexSchemaInfo(r, table)
 }
 
-func (r *RockDB) RegisterListExpired(f OnExpiredFunc) {
-	r.ttlChecker.RegisterListExpired(f)
+func (r *RockDB) GetAllIndexSchema() (map[string]*common.IndexSchema, error) {
+	return r.indexMgr.GetAllIndexSchemaInfo(r)
 }
 
-func (r *RockDB) RegisterSetExpired(f OnExpiredFunc) {
-	r.ttlChecker.RegisterSetExpired(f)
+func (r *RockDB) AddHsetIndex(table string, hindex *common.HsetIndexSchema) error {
+	indexInfo := HsetIndexInfo{
+		Name:       []byte(hindex.Name),
+		IndexField: []byte(hindex.IndexField),
+		PrefixLen:  hindex.PrefixLen,
+		Unique:     hindex.Unique,
+		ValueType:  IndexPropertyDType(hindex.ValueType),
+		State:      IndexState(hindex.State),
+	}
+	index := &HsetIndex{
+		Table:         []byte(table),
+		HsetIndexInfo: indexInfo,
+	}
+	return r.indexMgr.AddHsetIndex(r, index)
 }
 
-func (r *RockDB) RegisterZSetExpired(f OnExpiredFunc) {
-	r.ttlChecker.RegisterZSetExpired(f)
-}
-
-func (r *RockDB) RegisterHashExpired(f OnExpiredFunc) {
-	r.ttlChecker.RegisterHashExpired(f)
+func (r *RockDB) UpdateHsetIndexState(table string, hindex *common.HsetIndexSchema) error {
+	return r.indexMgr.UpdateHsetIndexState(r, table, hindex.IndexField, IndexState(hindex.State))
 }
 
 func (r *RockDB) BeginBatchWrite() error {
@@ -691,13 +735,8 @@ func IsBatchableWrite(cmd string) bool {
 func init() {
 	batchableCmds = make(map[string]bool)
 	// command need response value (not just error or ok) can not be batched
-	//batchableCmds["incr"] = true
 	batchableCmds["set"] = true
 	batchableCmds["mset"] = true
-	//batchableCmds["setnx"] = true
 	batchableCmds["setex"] = true
-	//batchableCmds["setrange"] = true
-	//batchableCmds["append"] = true
-	//batchableCmds["persist"] = true
 	batchableCmds["del"] = true
 }

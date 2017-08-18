@@ -12,7 +12,7 @@ type WriteStats struct {
 	WriteLatencyStats [16]int64 `json:"write_latency_stats"`
 }
 
-func (self *WriteStats) UpdateSizeStats(vSize int64) {
+func (ws *WriteStats) UpdateSizeStats(vSize int64) {
 	bucket := 0
 	if vSize < 100 {
 	} else if vSize < 1024 {
@@ -20,36 +20,36 @@ func (self *WriteStats) UpdateSizeStats(vSize int64) {
 	} else if vSize >= 1024 {
 		bucket = int(math.Log2(float64(vSize/1024))) + 2
 	}
-	if bucket >= len(self.ValueSizeStats) {
-		bucket = len(self.ValueSizeStats) - 1
+	if bucket >= len(ws.ValueSizeStats) {
+		bucket = len(ws.ValueSizeStats) - 1
 	}
-	atomic.AddInt64(&self.ValueSizeStats[bucket], 1)
+	atomic.AddInt64(&ws.ValueSizeStats[bucket], 1)
 }
 
-func (self *WriteStats) UpdateLatencyStats(latencyUs int64) {
+func (ws *WriteStats) UpdateLatencyStats(latencyUs int64) {
 	bucket := 0
 	if latencyUs < 1024 {
 	} else {
 		bucket = int(math.Log2(float64(latencyUs/1000))) + 1
 	}
-	if bucket >= len(self.WriteLatencyStats) {
-		bucket = len(self.WriteLatencyStats) - 1
+	if bucket >= len(ws.WriteLatencyStats) {
+		bucket = len(ws.WriteLatencyStats) - 1
 	}
-	atomic.AddInt64(&self.WriteLatencyStats[bucket], 1)
+	atomic.AddInt64(&ws.WriteLatencyStats[bucket], 1)
 }
 
-func (self *WriteStats) UpdateWriteStats(vSize int64, latencyUs int64) {
-	self.UpdateSizeStats(vSize)
-	self.UpdateLatencyStats(latencyUs)
+func (ws *WriteStats) UpdateWriteStats(vSize int64, latencyUs int64) {
+	ws.UpdateSizeStats(vSize)
+	ws.UpdateLatencyStats(latencyUs)
 }
 
-func (self *WriteStats) Copy() *WriteStats {
+func (ws *WriteStats) Copy() *WriteStats {
 	var s WriteStats
-	for i := 0; i < len(self.ValueSizeStats); i++ {
-		s.ValueSizeStats[i] = atomic.LoadInt64(&self.ValueSizeStats[i])
+	for i := 0; i < len(ws.ValueSizeStats); i++ {
+		s.ValueSizeStats[i] = atomic.LoadInt64(&ws.ValueSizeStats[i])
 	}
-	for i := 0; i < len(self.WriteLatencyStats); i++ {
-		s.WriteLatencyStats[i] = atomic.LoadInt64(&self.WriteLatencyStats[i])
+	for i := 0; i < len(ws.WriteLatencyStats); i++ {
+		s.WriteLatencyStats[i] = atomic.LoadInt64(&ws.WriteLatencyStats[i])
 	}
 	return &s
 }
@@ -75,32 +75,32 @@ type ScanStats struct {
 	ScanLatencyStats [16]int64 `json:"scan_latency_stats"`
 }
 
-func (self *ScanStats) IncScanCount() {
-	atomic.AddUint64(&self.ScanCount, 1)
+func (ss *ScanStats) IncScanCount() {
+	atomic.AddUint64(&ss.ScanCount, 1)
 }
 
-func (self *ScanStats) UpdateLatencyStats(latencyUs int64) {
+func (ss *ScanStats) UpdateLatencyStats(latencyUs int64) {
 	bucket := 0
 	if latencyUs < 1024 {
 	} else {
 		bucket = int(math.Log2(float64(latencyUs/1000))) + 1
 	}
-	if bucket >= len(self.ScanLatencyStats) {
-		bucket = len(self.ScanLatencyStats) - 1
+	if bucket >= len(ss.ScanLatencyStats) {
+		bucket = len(ss.ScanLatencyStats) - 1
 	}
-	atomic.AddInt64(&self.ScanLatencyStats[bucket], 1)
+	atomic.AddInt64(&ss.ScanLatencyStats[bucket], 1)
 }
 
-func (self *ScanStats) UpdateScanStats(latencyUs int64) {
-	self.IncScanCount()
-	self.UpdateLatencyStats(latencyUs)
+func (ss *ScanStats) UpdateScanStats(latencyUs int64) {
+	ss.IncScanCount()
+	ss.UpdateLatencyStats(latencyUs)
 }
 
-func (self *ScanStats) Copy() *ScanStats {
+func (ss *ScanStats) Copy() *ScanStats {
 	var s ScanStats
-	s.ScanCount = atomic.LoadUint64(&self.ScanCount)
-	for i := 0; i < len(self.ScanLatencyStats); i++ {
-		s.ScanLatencyStats[i] = atomic.LoadInt64(&self.ScanLatencyStats[i])
+	s.ScanCount = atomic.LoadUint64(&ss.ScanCount)
+	for i := 0; i < len(ss.ScanLatencyStats); i++ {
+		s.ScanLatencyStats[i] = atomic.LoadInt64(&ss.ScanLatencyStats[i])
 	}
 	return &s
 }

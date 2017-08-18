@@ -152,84 +152,84 @@ func NewServer(conf ServerConfig) *Server {
 	return s
 }
 
-func (self *Server) Stop() {
+func (s *Server) Stop() {
 	sLog.Infof("server begin stopping")
-	if self.dataCoord != nil {
-		self.dataCoord.Stop()
+	if s.dataCoord != nil {
+		s.dataCoord.Stop()
 	} else {
-		self.nsMgr.Stop()
+		s.nsMgr.Stop()
 	}
-	close(self.stopC)
-	self.raftTransport.Stop()
-	<-self.raftHttpDoneC
-	self.wg.Wait()
+	close(s.stopC)
+	s.raftTransport.Stop()
+	<-s.raftHttpDoneC
+	s.wg.Wait()
 	sLog.Infof("server stopped")
 }
 
-func (self *Server) GetNamespace(ns string, pk []byte) (*node.NamespaceNode, error) {
-	return self.nsMgr.GetNamespaceNodeWithPrimaryKey(ns, pk)
+func (s *Server) GetNamespace(ns string, pk []byte) (*node.NamespaceNode, error) {
+	return s.nsMgr.GetNamespaceNodeWithPrimaryKey(ns, pk)
 }
-func (self *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
-	return self.nsMgr.GetNamespaceNode(ns)
+func (s *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
+	return s.nsMgr.GetNamespaceNode(ns)
 }
 
-func (self *Server) GetStats(leaderOnly bool) common.ServerStats {
+func (s *Server) GetStats(leaderOnly bool) common.ServerStats {
 	var ss common.ServerStats
-	ss.NSStats = self.nsMgr.GetStats(leaderOnly)
-	ss.ScanStats = self.scanStats.Copy()
+	ss.NSStats = s.nsMgr.GetStats(leaderOnly)
+	ss.ScanStats = s.scanStats.Copy()
 	return ss
 }
 
-func (self *Server) GetDBStats(leaderOnly bool) map[string]string {
-	return self.nsMgr.GetDBStats(leaderOnly)
+func (s *Server) GetDBStats(leaderOnly bool) map[string]string {
+	return s.nsMgr.GetDBStats(leaderOnly)
 }
 
-func (self *Server) OptimizeDB() {
-	self.nsMgr.OptimizeDB()
+func (s *Server) OptimizeDB() {
+	s.nsMgr.OptimizeDB()
 }
 
-func (self *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig, join bool) (*node.NamespaceNode, error) {
-	return self.nsMgr.InitNamespaceNode(conf, id, join)
+func (s *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig, join bool) (*node.NamespaceNode, error) {
+	return s.nsMgr.InitNamespaceNode(conf, id, join)
 }
 
-func (self *Server) RestartAsStandalone(fullNamespace string) error {
-	if self.dataCoord != nil {
-		return self.dataCoord.RestartAsStandalone(fullNamespace)
+func (s *Server) RestartAsStandalone(fullNamespace string) error {
+	if s.dataCoord != nil {
+		return s.dataCoord.RestartAsStandalone(fullNamespace)
 	}
 	return nil
 }
 
-func (self *Server) Start() {
-	self.raftTransport.Start()
-	self.wg.Add(1)
+func (s *Server) Start() {
+	s.raftTransport.Start()
+	s.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.serveRaft()
+		defer s.wg.Done()
+		s.serveRaft()
 	}()
 
-	if self.dataCoord != nil {
-		err := self.dataCoord.Start()
+	if s.dataCoord != nil {
+		err := s.dataCoord.Start()
 		if err != nil {
 			sLog.Fatalf("data coordinator start failed: %v", err)
 		}
 	} else {
-		self.nsMgr.Start()
+		s.nsMgr.Start()
 	}
 
 	// api server should disable the api request while starting until replay log finished and
 	// also while we recovery we need to disable api.
-	self.wg.Add(2)
+	s.wg.Add(2)
 	go func() {
-		defer self.wg.Done()
-		self.serveRedisAPI(self.conf.RedisAPIPort, self.stopC)
+		defer s.wg.Done()
+		s.serveRedisAPI(s.conf.RedisAPIPort, s.stopC)
 	}()
 	go func() {
-		defer self.wg.Done()
-		self.serveHttpAPI(self.conf.HttpAPIPort, self.stopC)
+		defer s.wg.Done()
+		s.serveHttpAPI(s.conf.HttpAPIPort, s.stopC)
 	}()
 }
 
-func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.CommandFunc, redcon.Command, error) {
+func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (common.CommandFunc, redcon.Command, error) {
 	if len(cmd.Args) < 2 {
 		return nil, cmd, common.ErrInvalidArgs
 	}
@@ -242,7 +242,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	}
 	// we need decide the partition id from the primary key
 	// if the command need cross multi partitions, we need handle separate
-	n, err := self.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
+	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
 	if err != nil {
 		return nil, cmd, err
 	}
@@ -259,7 +259,7 @@ func (self *Server) GetHandler(cmdName string, cmd redcon.Command) (common.Comma
 	return h, cmd, nil
 }
 
-func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, error) {
+func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, error) {
 	if len(cmd.Args) < 2 {
 		return nil, nil, common.ErrInvalidArgs
 	}
@@ -271,7 +271,7 @@ func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandF
 		return nil, nil, err
 	}
 
-	nodes, err := self.nsMgr.GetNamespaceNodes(namespace, true)
+	nodes, err := s.nsMgr.GetNamespaceNodes(namespace, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -279,8 +279,8 @@ func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandF
 	cmdName := strings.ToLower(string(cmd.Args[0]))
 	var cmds map[string]redcon.Command
 	//do nodes filter
-	if common.IsMergeCommand(cmdName) {
-		cmds, err = self.doScanNodesFilter(realKey, namespace, cmd, nodes)
+	if common.IsMergeScanCommand(cmdName) {
+		cmds, err = s.doScanNodesFilter(realKey, namespace, cmd, nodes)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -310,31 +310,31 @@ func (self *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandF
 	return handlers, commands, nil
 }
 
-func (self *Server) serveRaft() {
-	url, err := url.Parse(self.conf.LocalRaftAddr)
+func (s *Server) serveRaft() {
+	url, err := url.Parse(s.conf.LocalRaftAddr)
 	if err != nil {
 		sLog.Fatalf("failed parsing raft url: %v", err)
 	}
-	ln, err := common.NewStoppableListener(url.Host, self.stopC)
+	ln, err := common.NewStoppableListener(url.Host, s.stopC)
 	if err != nil {
 		sLog.Fatalf("failed to listen rafthttp : %v", err)
 	}
-	err = (&http.Server{Handler: self.raftTransport.Handler()}).Serve(ln)
+	err = (&http.Server{Handler: s.raftTransport.Handler()}).Serve(ln)
 	select {
-	case <-self.stopC:
+	case <-s.stopC:
 	default:
 		sLog.Fatalf("failed to serve rafthttp : %v", err)
 	}
 	sLog.Infof("raft http transport exit")
-	close(self.raftHttpDoneC)
+	close(s.raftHttpDoneC)
 }
 
 // implement the Raft interface for transport
-func (self *Server) Process(ctx context.Context, m raftpb.Message) error {
+func (s *Server) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgVoteResp {
 		sLog.Infof("got message from raft transport %v ", m.String())
 	}
-	kv := self.nsMgr.GetNamespaceNodeFromGID(m.ToGroup.GroupId)
+	kv := s.nsMgr.GetNamespaceNodeFromGID(m.ToGroup.GroupId)
 	if kv == nil {
 		sLog.Errorf("kv namespace not found while processing %v ", m.String())
 		return node.ErrNamespacePartitionNotFound
@@ -345,11 +345,11 @@ func (self *Server) Process(ctx context.Context, m raftpb.Message) error {
 	return kv.Node.Process(ctx, m)
 }
 
-func (self *Server) IsPeerRemoved(peerID uint64) bool { return false }
+func (s *Server) IsPeerRemoved(peerID uint64) bool { return false }
 
-func (self *Server) ReportUnreachable(id uint64, group raftpb.Group) {
+func (s *Server) ReportUnreachable(id uint64, group raftpb.Group) {
 	//sLog.Infof("report node %v in group %v unreachable", id, group)
-	kv := self.nsMgr.GetNamespaceNodeFromGID(group.GroupId)
+	kv := s.nsMgr.GetNamespaceNodeFromGID(group.GroupId)
 	if kv == nil {
 		sLog.Errorf("kv namespace not found %v ", group.GroupId)
 		return
@@ -360,9 +360,9 @@ func (self *Server) ReportUnreachable(id uint64, group raftpb.Group) {
 	kv.Node.ReportUnreachable(id, group)
 }
 
-func (self *Server) ReportSnapshot(id uint64, gp raftpb.Group, status raft.SnapshotStatus) {
+func (s *Server) ReportSnapshot(id uint64, gp raftpb.Group, status raft.SnapshotStatus) {
 	sLog.Infof("node %v in group %v snapshot status: %v", id, gp, status)
-	kv := self.nsMgr.GetNamespaceNodeFromGID(gp.GroupId)
+	kv := s.nsMgr.GetNamespaceNodeFromGID(gp.GroupId)
 	if kv == nil {
 		sLog.Errorf("kv namespace not found %v ", gp.GroupId)
 		return
@@ -375,8 +375,8 @@ func (self *Server) ReportSnapshot(id uint64, gp raftpb.Group, status raft.Snaps
 }
 
 // implement the snapshotter interface for transport
-func (self *Server) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
-	kv := self.nsMgr.GetNamespaceNodeFromGID(msg.ToGroup.GroupId)
+func (s *Server) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
+	kv := s.nsMgr.GetNamespaceNodeFromGID(msg.ToGroup.GroupId)
 	if kv == nil {
 		return 0, node.ErrNamespacePartitionNotFound
 	}

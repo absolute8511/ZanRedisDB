@@ -1,13 +1,14 @@
 github.com/absolute8511/glog
+github.com/absolute8511/xlock2
 github.com/coreos/etcd         dd0d5902177b6336b8cf344e6cbf1962b5981dde
 github.com/coreos/go-etcd/etcd
 github.com/coreos/go-semver/semver
+github.com/coreos/go-systemd/journal
 github.com/coreos/pkg
 github.com/gobwas/glob
 github.com/judwhite/go-svc/svc
 github.com/julienschmidt/httprouter
 github.com/prometheus/client_golang/prometheus
-github.com/reechou/xlock2
 github.com/spaolacci/murmur3
 github.com/absolute8511/redcon
 github.com/xiang90/probing

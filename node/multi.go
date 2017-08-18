@@ -2,12 +2,13 @@ package node
 
 import (
 	"errors"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
 )
 
 // all pipeline command handle here
-func (self *KVNode) plgetCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) plgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) < 2 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
@@ -21,7 +22,7 @@ func (self *KVNode) plgetCommand(conn redcon.Conn, cmd redcon.Command) {
 		cmd.Args[i] = key
 	}
 
-	vals, _ := self.store.MGet(cmd.Args[1:]...)
+	vals, _ := nd.store.MGet(cmd.Args[1:]...)
 	for _, v := range vals {
 		if v == nil {
 			conn.WriteNull()
@@ -31,7 +32,7 @@ func (self *KVNode) plgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) plsetCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) plsetCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) < 3 || (len(cmd.Args)-1)%2 != 0 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
@@ -52,7 +53,7 @@ func (self *KVNode) plsetCommand(conn redcon.Conn, cmd redcon.Command) {
 	copy(cmd.Raw[0:], ncmd.Raw[:])
 	cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
-	_, err := self.Propose(cmd.Raw)
+	_, err := nd.Propose(cmd.Raw)
 	if err != nil {
 		for i := 1; i < len(cmd.Args); i += 2 {
 			conn.WriteError("ERR :" + err.Error())
@@ -64,7 +65,7 @@ func (self *KVNode) plsetCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) localPlsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localPlsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) < 3 || (len(cmd.Args)-1)%2 != 0 {
 		return nil, errors.New("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 	}
@@ -73,6 +74,6 @@ func (self *KVNode) localPlsetCommand(cmd redcon.Command, ts int64) (interface{}
 	for i := 1; i < len(cmd.Args); i += 2 {
 		kvpairs = append(kvpairs, common.KVRecord{Key: cmd.Args[i], Value: cmd.Args[i+1]})
 	}
-	err := self.store.MSet(ts, kvpairs...)
+	err := nd.store.MSet(ts, kvpairs...)
 	return nil, err
 }

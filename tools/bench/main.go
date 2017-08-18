@@ -29,7 +29,7 @@ var minExpireSecs = flag.Int("minExpire", 10, "min expire seconds to be allowed 
 var wg sync.WaitGroup
 
 var client *goredis.Client
-var loop int = 0
+var loop int
 
 func waitBench(c *goredis.PoolConn, cmd string, args ...interface{}) error {
 	v := args[0]
@@ -118,10 +118,10 @@ func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) err
 		float64(*number)/d.Seconds())
 }
 
-var kvSetBase int64 = 0
-var kvGetBase int64 = 0
-var kvIncrBase int64 = 0
-var kvDelBase int64 = 0
+var kvSetBase int64
+var kvGetBase int64
+var kvIncrBase int64
+var kvDelBase int64
 
 func benchSet() {
 	valueSample := make([]byte, *valueSize)
@@ -231,11 +231,11 @@ func benchDel() {
 	bench("del", f)
 }
 
-var listPushBase int64 = 0
-var listRange10Base int64 = 0
-var listRange50Base int64 = 0
-var listRange100Base int64 = 0
-var listPopBase int64 = 0
+var listPushBase int64
+var listRange10Base int64
+var listRange50Base int64
+var listRange100Base int64
+var listPopBase int64
 
 func benchPushList() {
 	valueSample := make([]byte, *valueSize)
@@ -298,11 +298,11 @@ func benchPopList() {
 	bench("lpop", f)
 }
 
-var hashPKBase int64 = 0
-var hashSetBase int64 = 0
-var hashIncrBase int64 = 0
-var hashGetBase int64 = 0
-var hashDelBase int64 = 0
+var hashPKBase int64
+var hashSetBase int64
+var hashIncrBase int64
+var hashGetBase int64
+var hashDelBase int64
 
 func benchHset() {
 	valueSample := make([]byte, *valueSize)
@@ -367,9 +367,9 @@ func benchHDel() {
 	bench("hdel", f)
 }
 
-var zsetPKBase int64 = 0
-var zsetAddBase int64 = 0
-var zsetDelBase int64 = 0
+var zsetPKBase int64
+var zsetAddBase int64
+var zsetDelBase int64
 
 func benchZAdd() {
 	atomic.StoreInt64(&zsetPKBase, 0)

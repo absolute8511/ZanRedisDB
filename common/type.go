@@ -1,9 +1,10 @@
 package common
 
 import (
-	"bytes"
 	"errors"
 	"strings"
+
+	"bytes"
 
 	"github.com/absolute8511/redcon"
 )
@@ -31,6 +32,7 @@ var (
 	ErrScanCursorNoTable = errors.New("scan cursor must has table")
 	ErrUnexpectError     = errors.New("unexpected error")
 	ErrInvalidPrefix     = errors.New("invalid prefix")
+	ErrNotSupport        = errors.New("not supported")
 )
 
 // for out use
@@ -75,6 +77,40 @@ func (d DataType) String() string {
 	}
 }
 
+type ExpirationPolicy byte
+
+const (
+	// LocalDeletion indicates the expired data would be deleted by the underlying storage system automatically and the logical layer
+	// do not need to care about the data expiration. Every node in the cluster should start the 'TTLChecker' of the storage system
+	// with this policy.
+	LocalDeletion ExpirationPolicy = iota
+
+	// ConsistencyDeletion indicates all the expired data should be deleted through Raft, the underlying storage system should
+	// not delete any data and all the expired keys should be sent to the expired channel. Only the leader should starts
+	// the 'TTLChecker' with this policy.
+	ConsistencyDeletion
+
+	//
+	PeriodicalRotation
+
+	UnknownPolicy
+)
+
+const (
+	DefaultExpirationPolicy = "local_deletion"
+)
+
+func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
+	switch s {
+	case "local_deletion":
+		return LocalDeletion, nil
+	case "consistency_deletion":
+		return ConsistencyDeletion, nil
+	default:
+		return UnknownPolicy, errors.New("unknown policy")
+	}
+}
+
 type WriteCmd struct {
 	Operation string
 	Args      [][]byte
@@ -88,6 +124,16 @@ type KVRecord struct {
 type KVRecordRet struct {
 	Rec KVRecord
 	Err error
+}
+
+type KVals struct {
+	PK   []byte
+	Vals [][]byte
+}
+
+type KFVals struct {
+	PK   []byte
+	Vals []KVRecordRet
 }
 
 const (
@@ -104,16 +150,6 @@ const (
 	RangeROpen uint8 = 0x10
 	RangeOpen  uint8 = 0x11
 )
-
-func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
-	index := bytes.IndexByte(rawKey, ':')
-	if index <= 0 {
-		return "", nil, ErrInvalidRedisKey
-	}
-	namespace := string(rawKey[:index])
-	realKey := rawKey[index+1:]
-	return namespace, realKey, nil
-}
 
 func ExtractTable(rawKey []byte) ([]byte, []byte, error) {
 	pos := bytes.IndexByte(rawKey, KEYSEP)
@@ -266,6 +302,52 @@ type ScanResult struct {
 	NextCursor []byte
 	PartionId  string
 	Error      error
+}
+
+type IndexState int32
+
+const (
+	InitIndex      IndexState = 0
+	BuildingIndex  IndexState = 1
+	BuildDoneIndex IndexState = 2
+	ReadyIndex     IndexState = 3
+	DeletedIndex   IndexState = 4
+	MaxIndexState  IndexState = 5
+)
+
+type IndexPropertyDType int32
+
+const (
+	Int64V  IndexPropertyDType = 0
+	Int32V  IndexPropertyDType = 1
+	StringV IndexPropertyDType = 2
+	MaxVT   IndexPropertyDType = 3
+)
+
+type HsetIndexSchema struct {
+	Name       string             `json:"name"`
+	IndexField string             `json:"index_field"`
+	PrefixLen  int32              `json:"prefix_len"`
+	Unique     int32              `json:"unique"`
+	ValueType  IndexPropertyDType `json:"value_type"`
+	State      IndexState         `json:"state"`
+}
+
+func (s *HsetIndexSchema) IsValidNewSchema() bool {
+	return s.Name != "" && s.IndexField != "" && s.ValueType < MaxVT && s.State < MaxIndexState
+}
+
+type JsonIndexSchema struct {
+	State IndexState `json:"state"`
+}
+
+type IndexSchema struct {
+	HsetIndexes []*HsetIndexSchema `json:"hset_indexes"`
+	JsonIndexes []*JsonIndexSchema `json:"json_indexes"`
+}
+
+type ExpiredDataBuffer interface {
+	Write(DataType, []byte) error
 }
 
 type FullScanResult struct {

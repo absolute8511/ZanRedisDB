@@ -1,0 +1,38 @@
+syntax = "proto3";
+package rockredis;
+
+import "gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.sizer_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+option (gogoproto.goproto_getters_all) = false;
+option (gogoproto.goproto_enum_prefix_all) = false;
+
+enum IndexPropertyDType {
+    Int64V = 0;
+    Int32V = 1;
+    StringV = 2;
+}
+
+enum IndexState {
+    InitIndex = 0;
+    BuildingIndex = 1;
+    BuildDoneIndex = 2;
+    ReadyIndex = 3;
+    DeletedIndex = 4;
+}
+
+message HsetIndexInfo {
+    bytes name = 1 [(gogoproto.nullable) = false];
+    bytes index_field = 2 [(gogoproto.nullable) = false];
+    int32 prefix_len = 3 [(gogoproto.nullable) = false];
+    int32 unique = 4 [(gogoproto.nullable) = false];
+    IndexPropertyDType value_type = 5 [(gogoproto.nullable) = false];
+    IndexState state = 6 [(gogoproto.nullable) = false];
+}
+
+message HsetIndexList {
+    repeated HsetIndexInfo hset_indexes = 1 [(gogoproto.nullable) = false];
+}
+

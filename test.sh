@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-GOMAXPROCS=1 go test -tags=embed -timeout 900s `go list ./... `
-GOMAXPROCS=4 go test -tags=embed -timeout 900s -race `go list ./...`
+GOMAXPROCS=1 go test -tags=embed -timeout 900s `go list ./... | grep -v pdserver`
+GOMAXPROCS=4 go test -tags=embed -timeout 900s -race `go list ./... | grep -v pdserver`
 
 # no tests, but a build is something
 for dir in $(find apps tools -maxdepth 1 -type d) ; do

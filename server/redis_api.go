@@ -5,6 +5,8 @@ import (
 	"errors"
 	"runtime"
 	"strconv"
+	"sync/atomic"
+	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
@@ -12,15 +14,17 @@ import (
 
 var (
 	errInvalidCommand = errors.New("invalid command")
+	costStatsLevel    int32
 )
 
-func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			sLog.Infof("handle redis command panic: %s:%v", buf, e)
+			sLog.Infof("handle redis command %v panic: %s:%v", string(cmd.Args[0]), buf, e)
+			conn.Close()
 		}
 	}()
 
@@ -48,27 +52,46 @@ func (self *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteString("OK")
 		conn.Close()
 	case "info":
-		s := self.GetStats(false)
+		s := s.GetStats(false)
 		d, _ := json.MarshalIndent(s, "", " ")
 		conn.WriteBulkString(string(d))
 	default:
 		if common.IsMergeCommand(cmdName) {
-			self.doMergeCommand(conn, cmd)
+			s.doMergeCommand(conn, cmd)
 		} else {
-			h, cmd, err := self.GetHandler(cmdName, cmd)
+			var start time.Time
+			level := atomic.LoadInt32(&costStatsLevel)
+			if level > 0 {
+				start = time.Now()
+			}
+			h, cmd, err := s.GetHandler(cmdName, cmd)
+			cmdStr := string(cmd.Args[0])
+			if len(cmd.Args) > 1 {
+				cmdStr += ", " + string(cmd.Args[1])
+			}
 			if err == nil {
 				h(conn, cmd)
 			} else {
-				conn.WriteError(err.Error() + " : ERR handle command " + string(cmd.Args[0]))
+				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
+			}
+			if level > 0 {
+				cost := time.Since(start)
+				if cost >= time.Second ||
+					(level > 1 && cost > time.Millisecond*500) ||
+					(level > 2 && cost > time.Millisecond*100) ||
+					(level > 3 && cost > time.Millisecond) {
+
+					sLog.Infof("slow command %v cost %v", cmdStr, cost)
+				}
 			}
 		}
 	}
 }
 
-func (self *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
+func (s *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
 	redisS := redcon.NewServer(
 		":"+strconv.Itoa(port),
-		self.serverRedis,
+		s.serverRedis,
 		func(conn redcon.Conn) bool {
 			//sLog.Infof("accept: %s", conn.RemoteAddr())
 			return true

@@ -163,7 +163,7 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	start := sEncodeStartKey(table, rk)
 	stop := sEncodeStopKey(table, rk)
 
-	var num int64 = 0
+	var num int64
 	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0
@@ -186,7 +186,7 @@ func (db *RockDB) sIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (
 	sk := sEncodeSizeKey(key)
 
 	var err error
-	var size int64 = 0
+	var size int64
 	if size, err = Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk)); err != nil {
 		return 0, err
 	} else {
@@ -400,6 +400,19 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 
 	err := db.eng.Write(db.defaultWriteOpts, wb)
 	return int64(len(keys)), err
+}
+
+func (db *RockDB) sMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
+	if len(keys) >= MAX_BATCH_NUM {
+		return errTooMuchBatchSize
+	}
+	for _, key := range keys {
+		if err := checkKeySize(key); err != nil {
+			return err
+		}
+		db.sDelete(key, wb)
+	}
+	return nil
 }
 
 func (db *RockDB) SExpire(key []byte, duration int64) (int64, error) {

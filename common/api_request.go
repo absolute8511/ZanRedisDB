@@ -49,17 +49,19 @@ func APIRequest(method string, endpoint string, body io.Reader, timeout time.Dur
 
 	resp, err := httpclient.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("req %v error %v",
+			endpoint, err.Error())
 	}
 
 	respBody, err := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		return resp.StatusCode, err
+		return resp.StatusCode, fmt.Errorf("req %v read body error %v",
+			endpoint, err.Error())
 	}
 
 	if resp.StatusCode != 200 {
-		return resp.StatusCode, fmt.Errorf("got error response %s %q", resp.Status, respBody)
+		return resp.StatusCode, fmt.Errorf("req %v got error response %s %q", endpoint, resp.Status, respBody)
 	}
 
 	if len(respBody) == 0 {

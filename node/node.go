@@ -38,10 +38,11 @@ var (
 )
 
 const (
-	RedisReq       int8 = 0
-	HTTPReq        int8 = 1
-	proposeTimeout      = time.Second * 10
-	maxBatchCmdNum      = 500
+	RedisReq        int8 = 0
+	HTTPReq         int8 = 1
+	SchemaChangeReq int8 = 2
+	proposeTimeout       = time.Second * 10
+	maxBatchCmdNum       = 500
 )
 
 const (
@@ -82,6 +83,8 @@ type KVNode struct {
 	commitC           <-chan applyInfo
 	committedIndex    uint64
 	clusterInfo       common.IClusterInfo
+	expireHandler     *ExpireHandler
+	expirationPolicy  common.ExpirationPolicy
 }
 
 type KVSnapInfo struct {
@@ -91,13 +94,13 @@ type KVSnapInfo struct {
 	Members    []*common.MemberInfo `json:"members"`
 }
 
-func (self *KVSnapInfo) GetData() ([]byte, error) {
-	meta, err := self.BackupInfo.GetResult()
+func (si *KVSnapInfo) GetData() ([]byte, error) {
+	meta, err := si.BackupInfo.GetResult()
 	if err != nil {
 		return nil, err
 	}
-	self.BackupMeta = meta
-	d, _ := json.Marshal(self)
+	si.BackupMeta = meta
+	d, _ := json.Marshal(si)
 	return d, nil
 }
 
@@ -113,19 +116,20 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:   make(chan *internalReq, 200),
-		stopChan:      make(chan struct{}),
-		store:         store,
-		w:             wait.New(),
-		router:        common.NewCmdRouter(),
-		deleteCb:      deleteCb,
-		ns:            config.GroupName,
-		machineConfig: machineConfig,
+		reqProposeC:      make(chan *internalReq, 200),
+		stopChan:         make(chan struct{}),
+		store:            store,
+		w:                wait.New(),
+		router:           common.NewCmdRouter(),
+		deleteCb:         deleteCb,
+		ns:               config.GroupName,
+		machineConfig:    machineConfig,
+		expirationPolicy: kvopts.ExpirationPolicy,
 	}
 	s.clusterInfo = clusterInfo
+	s.expireHandler = NewExpireHandler(s)
 
 	s.registerHandler()
-	s.registerExpiredCallBack()
 
 	commitC, raftNode, err := newRaftNode(config, transport,
 		join, s, newLeaderChan)
@@ -137,43 +141,51 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	return s, nil
 }
 
-func (self *KVNode) Start(standalone bool) error {
-	err := self.rn.startRaft(self, standalone)
+func (nd *KVNode) Start(standalone bool) error {
+	err := nd.rn.startRaft(nd, standalone)
 	if err != nil {
 		return err
 	}
 	// read commits from raft into KVStore map until error
-	self.wg.Add(1)
+	nd.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.applyCommits(self.commitC)
+		defer nd.wg.Done()
+		nd.applyCommits(nd.commitC)
 	}()
-	self.wg.Add(1)
+	nd.wg.Add(1)
 	go func() {
-		defer self.wg.Done()
-		self.handleProposeReq()
+		defer nd.wg.Done()
+		nd.handleProposeReq()
 	}()
+
+	nd.wg.Add(1)
+	go func() {
+		defer nd.wg.Done()
+		nd.expireHandler.Start()
+	}()
+
 	return nil
 }
 
-func (self *KVNode) StopRaft() {
-	self.rn.StopNode()
+func (nd *KVNode) StopRaft() {
+	nd.rn.StopNode()
 }
 
-func (self *KVNode) Stop() {
-	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
+func (nd *KVNode) Stop() {
+	if !atomic.CompareAndSwapInt32(&nd.stopping, 0, 1) {
 		return
 	}
-	close(self.stopChan)
-	go self.deleteCb()
-	self.wg.Wait()
-	self.rn.StopNode()
-	self.store.Close()
-	self.rn.Infof("node %v stopped", self.ns)
+	close(nd.stopChan)
+	go nd.deleteCb()
+	nd.expireHandler.Stop()
+	nd.wg.Wait()
+	nd.rn.StopNode()
+	nd.store.Close()
+	nd.rn.Infof("node %v stopped", nd.ns)
 }
 
-func (self *KVNode) OptimizeDB() {
-	self.store.CompactRange()
+func (nd *KVNode) OptimizeDB() {
+	nd.store.CompactRange()
 	// since we can not know whether leader or follower is done on optimize
 	// we backup anyway after optimize
 	p := &httpProposeData{
@@ -181,51 +193,51 @@ func (self *KVNode) OptimizeDB() {
 		NeedBackup: true,
 	}
 	d, _ := json.Marshal(p)
-	self.HTTPPropose(d)
+	nd.HTTPPropose(d)
 }
 
-func (self *KVNode) IsLead() bool {
-	return self.rn.IsLead()
+func (nd *KVNode) IsLead() bool {
+	return nd.rn.IsLead()
 }
 
-func (self *KVNode) GetRaftStatus() raft.Status {
-	return self.rn.node.Status()
+func (nd *KVNode) GetRaftStatus() raft.Status {
+	return nd.rn.node.Status()
 }
 
-func (self *KVNode) GetLeadMember() *common.MemberInfo {
-	return self.rn.GetLeadMember()
+func (nd *KVNode) GetLeadMember() *common.MemberInfo {
+	return nd.rn.GetLeadMember()
 }
 
-func (self *KVNode) GetMembers() []*common.MemberInfo {
-	return self.rn.GetMembers()
+func (nd *KVNode) GetMembers() []*common.MemberInfo {
+	return nd.rn.GetMembers()
 }
 
-func (self *KVNode) GetLocalMemberInfo() *common.MemberInfo {
-	if self.rn == nil {
+func (nd *KVNode) GetLocalMemberInfo() *common.MemberInfo {
+	if nd.rn == nil {
 		return nil
 	}
 	var m common.MemberInfo
-	m.ID = uint64(self.rn.config.ID)
-	m.NodeID = self.rn.config.nodeConfig.NodeID
-	m.GroupID = self.rn.config.GroupID
-	m.GroupName = self.rn.config.GroupName
-	m.RaftURLs = append(m.RaftURLs, self.rn.config.RaftAddr)
+	m.ID = uint64(nd.rn.config.ID)
+	m.NodeID = nd.rn.config.nodeConfig.NodeID
+	m.GroupID = nd.rn.config.GroupID
+	m.GroupName = nd.rn.config.GroupName
+	m.RaftURLs = append(m.RaftURLs, nd.rn.config.RaftAddr)
 	return &m
 }
 
-func (self *KVNode) GetDBInternalStats() string {
-	return self.store.GetStatistics()
+func (nd *KVNode) GetDBInternalStats() string {
+	return nd.store.GetStatistics()
 }
 
-func (self *KVNode) GetStats() common.NamespaceStats {
-	tbs := self.store.GetTables()
+func (nd *KVNode) GetStats() common.NamespaceStats {
+	tbs := nd.store.GetTables()
 	var ns common.NamespaceStats
-	ns.DBWriteStats = self.dbWriteStats.Copy()
-	ns.ClusterWriteStats = self.clusterWriteStats.Copy()
-	ns.InternalStats = self.store.GetInternalStatus()
+	ns.DBWriteStats = nd.dbWriteStats.Copy()
+	ns.ClusterWriteStats = nd.clusterWriteStats.Copy()
+	ns.InternalStats = nd.store.GetInternalStatus()
 
 	for t := range tbs {
-		cnt, err := self.store.GetTableKeyCount(t)
+		cnt, err := nd.store.GetTableKeyCount(t)
 		if err != nil {
 			continue
 		}
@@ -234,190 +246,179 @@ func (self *KVNode) GetStats() common.NamespaceStats {
 		ts.KeyNum = cnt
 		ns.TStats = append(ns.TStats, ts)
 	}
-	//self.rn.Infof(self.store.GetStatistics())
+	//nd.rn.Infof(nd.store.GetStatistics())
 	return ns
 }
 
-func (self *KVNode) destroy() error {
-	self.Stop()
-	self.store.Destroy()
+func (nd *KVNode) destroy() error {
+	nd.Stop()
+	nd.store.Destroy()
 	ts := strconv.Itoa(int(time.Now().UnixNano()))
-	return os.Rename(self.rn.config.DataDir,
-		self.rn.config.DataDir+"-deleted-"+ts)
+	return os.Rename(nd.rn.config.DataDir,
+		nd.rn.config.DataDir+"-deleted-"+ts)
 }
 
-func (self *KVNode) CleanData() error {
-	if err := self.store.CleanData(); err != nil {
+func (nd *KVNode) CleanData() error {
+	if err := nd.store.CleanData(); err != nil {
 		return err
-	}
-
-	//the ttlChecker should be reset after the store cleaned
-	self.registerExpiredCallBack()
-
-	if self.IsLead() {
-		self.store.StartTTLChecker()
 	}
 	return nil
 }
 
-func (self *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
-	return self.router.GetCmdHandler(cmd)
+func (nd *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
+	return nd.router.GetCmdHandler(cmd)
 }
 
-func (self *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool) {
-	return self.router.GetMergeCmdHandler(cmd)
+func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool) {
+	return nd.router.GetMergeCmdHandler(cmd)
 }
 
-func (self *KVNode) registerExpiredCallBack() {
-	self.store.RegisterKVExpired(self.createOnExpiredFunc("del"))
-	self.store.RegisterListExpired(self.createOnExpiredFunc("lclear"))
-	self.store.RegisterHashExpired(self.createOnExpiredFunc("hclear"))
-	self.store.RegisterSetExpired(self.createOnExpiredFunc("sclear"))
-	self.store.RegisterZSetExpired(self.createOnExpiredFunc("zclear"))
-}
-
-func (self *KVNode) registerHandler() {
+func (nd *KVNode) registerHandler() {
 	// for kv
-	self.router.Register(false, "get", wrapReadCommandK(self.getCommand))
-	self.router.Register(false, "mget", wrapReadCommandKK(self.mgetCommand))
-	self.router.Register(false, "exists", wrapReadCommandK(self.existsCommand))
-	self.router.Register(true, "set", wrapWriteCommandKV(self, self.setCommand))
-	self.router.Register(true, "setnx", wrapWriteCommandKV(self, self.setnxCommand))
-	self.router.Register(true, "mset", wrapWriteCommandKVKV(self, self.msetCommand))
-	self.router.Register(true, "incr", wrapWriteCommandK(self, self.incrCommand))
-	self.router.Register(true, "del", wrapWriteCommandKK(self, self.delCommand))
-	self.router.Register(false, "plget", self.plgetCommand)
-	self.router.Register(true, "plset", self.plsetCommand)
+	nd.router.Register(false, "get", wrapReadCommandK(nd.getCommand))
+	nd.router.Register(false, "mget", wrapReadCommandKK(nd.mgetCommand))
+	nd.router.Register(false, "exists", wrapReadCommandK(nd.existsCommand))
+	nd.router.Register(true, "set", wrapWriteCommandKV(nd, nd.setCommand))
+	nd.router.Register(true, "setnx", wrapWriteCommandKV(nd, nd.setnxCommand))
+	nd.router.Register(true, "mset", wrapWriteCommandKVKV(nd, nd.msetCommand))
+	nd.router.Register(true, "incr", wrapWriteCommandK(nd, nd.incrCommand))
+	nd.router.Register(true, "del", wrapWriteCommandKK(nd, nd.delCommand))
+	nd.router.Register(false, "plget", nd.plgetCommand)
+	nd.router.Register(true, "plset", nd.plsetCommand)
 	// for hash
-	self.router.Register(false, "hget", wrapReadCommandKSubkey(self.hgetCommand))
-	self.router.Register(false, "hgetall", wrapReadCommandK(self.hgetallCommand))
-	self.router.Register(false, "hkeys", wrapReadCommandK(self.hkeysCommand))
-	self.router.Register(false, "hexists", wrapReadCommandKSubkey(self.hexistsCommand))
-	self.router.Register(false, "hmget", wrapReadCommandKSubkeySubkey(self.hmgetCommand))
-	self.router.Register(false, "hlen", wrapReadCommandK(self.hlenCommand))
-	self.router.Register(true, "hset", wrapWriteCommandKSubkeyV(self, self.hsetCommand))
-	self.router.Register(true, "hmset", wrapWriteCommandKSubkeyVSubkeyV(self, self.hmsetCommand))
-	self.router.Register(true, "hdel", wrapWriteCommandKSubkeySubkey(self, self.hdelCommand))
-	self.router.Register(true, "hincrby", wrapWriteCommandKSubkeyV(self, self.hincrbyCommand))
-	self.router.Register(true, "hclear", wrapWriteCommandK(self, self.hclearCommand))
+	nd.router.Register(false, "hget", wrapReadCommandKSubkey(nd.hgetCommand))
+	nd.router.Register(false, "hgetall", wrapReadCommandK(nd.hgetallCommand))
+	nd.router.Register(false, "hkeys", wrapReadCommandK(nd.hkeysCommand))
+	nd.router.Register(false, "hexists", wrapReadCommandKSubkey(nd.hexistsCommand))
+	nd.router.Register(false, "hmget", wrapReadCommandKSubkeySubkey(nd.hmgetCommand))
+	nd.router.Register(false, "hlen", wrapReadCommandK(nd.hlenCommand))
+	nd.router.Register(true, "hset", wrapWriteCommandKSubkeyV(nd, nd.hsetCommand))
+	nd.router.Register(true, "hmset", wrapWriteCommandKSubkeyVSubkeyV(nd, nd.hmsetCommand))
+	nd.router.Register(true, "hdel", wrapWriteCommandKSubkeySubkey(nd, nd.hdelCommand))
+	nd.router.Register(true, "hincrby", wrapWriteCommandKSubkeyV(nd, nd.hincrbyCommand))
+	nd.router.Register(true, "hclear", wrapWriteCommandK(nd, nd.hclearCommand))
 	// for list
-	self.router.Register(false, "lindex", wrapReadCommandKSubkey(self.lindexCommand))
-	self.router.Register(false, "llen", wrapReadCommandK(self.llenCommand))
-	self.router.Register(false, "lrange", wrapReadCommandKAnySubkey(self.lrangeCommand))
-	self.router.Register(true, "lpop", wrapWriteCommandK(self, self.lpopCommand))
-	self.router.Register(true, "lpush", wrapWriteCommandKVV(self, self.lpushCommand))
-	self.router.Register(true, "lset", self.lsetCommand)
-	self.router.Register(true, "ltrim", self.ltrimCommand)
-	self.router.Register(true, "rpop", wrapWriteCommandK(self, self.rpopCommand))
-	self.router.Register(true, "rpush", wrapWriteCommandKVV(self, self.rpushCommand))
-	self.router.Register(true, "lclear", wrapWriteCommandK(self, self.lclearCommand))
+	nd.router.Register(false, "lindex", wrapReadCommandKSubkey(nd.lindexCommand))
+	nd.router.Register(false, "llen", wrapReadCommandK(nd.llenCommand))
+	nd.router.Register(false, "lrange", wrapReadCommandKAnySubkey(nd.lrangeCommand))
+	nd.router.Register(true, "lpop", wrapWriteCommandK(nd, nd.lpopCommand))
+	nd.router.Register(true, "lpush", wrapWriteCommandKVV(nd, nd.lpushCommand))
+	nd.router.Register(true, "lset", nd.lsetCommand)
+	nd.router.Register(true, "ltrim", nd.ltrimCommand)
+	nd.router.Register(true, "rpop", wrapWriteCommandK(nd, nd.rpopCommand))
+	nd.router.Register(true, "rpush", wrapWriteCommandKVV(nd, nd.rpushCommand))
+	nd.router.Register(true, "lclear", wrapWriteCommandK(nd, nd.lclearCommand))
 	// for zset
-	self.router.Register(false, "zscore", wrapReadCommandKSubkey(self.zscoreCommand))
-	self.router.Register(false, "zcount", wrapReadCommandKAnySubkey(self.zcountCommand))
-	self.router.Register(false, "zcard", wrapReadCommandK(self.zcardCommand))
-	self.router.Register(false, "zlexcount", wrapReadCommandKAnySubkey(self.zlexcountCommand))
-	self.router.Register(false, "zrange", wrapReadCommandKAnySubkey(self.zrangeCommand))
-	self.router.Register(false, "zrevrange", wrapReadCommandKAnySubkey(self.zrevrangeCommand))
-	self.router.Register(false, "zrangebylex", wrapReadCommandKAnySubkey(self.zrangebylexCommand))
-	self.router.Register(false, "zrangebyscore", wrapReadCommandKAnySubkey(self.zrangebyscoreCommand))
-	self.router.Register(false, "zrevrangebyscore", wrapReadCommandKAnySubkey(self.zrevrangebyscoreCommand))
-	self.router.Register(false, "zrank", wrapReadCommandKSubkey(self.zrankCommand))
-	self.router.Register(false, "zrevrank", wrapReadCommandKSubkey(self.zrevrankCommand))
-	self.router.Register(true, "zadd", self.zaddCommand)
-	self.router.Register(true, "zincrby", self.zincrbyCommand)
-	self.router.Register(true, "zrem", wrapWriteCommandKSubkeySubkey(self, self.zremCommand))
-	self.router.Register(true, "zremrangebyrank", self.zremrangebyrankCommand)
-	self.router.Register(true, "zremrangebyscore", self.zremrangebyscoreCommand)
-	self.router.Register(true, "zremrangebylex", self.zremrangebylexCommand)
-	self.router.Register(true, "zclear", wrapWriteCommandK(self, self.zclearCommand))
+	nd.router.Register(false, "zscore", wrapReadCommandKSubkey(nd.zscoreCommand))
+	nd.router.Register(false, "zcount", wrapReadCommandKAnySubkey(nd.zcountCommand))
+	nd.router.Register(false, "zcard", wrapReadCommandK(nd.zcardCommand))
+	nd.router.Register(false, "zlexcount", wrapReadCommandKAnySubkey(nd.zlexcountCommand))
+	nd.router.Register(false, "zrange", wrapReadCommandKAnySubkey(nd.zrangeCommand))
+	nd.router.Register(false, "zrevrange", wrapReadCommandKAnySubkey(nd.zrevrangeCommand))
+	nd.router.Register(false, "zrangebylex", wrapReadCommandKAnySubkey(nd.zrangebylexCommand))
+	nd.router.Register(false, "zrangebyscore", wrapReadCommandKAnySubkey(nd.zrangebyscoreCommand))
+	nd.router.Register(false, "zrevrangebyscore", wrapReadCommandKAnySubkey(nd.zrevrangebyscoreCommand))
+	nd.router.Register(false, "zrank", wrapReadCommandKSubkey(nd.zrankCommand))
+	nd.router.Register(false, "zrevrank", wrapReadCommandKSubkey(nd.zrevrankCommand))
+	nd.router.Register(true, "zadd", nd.zaddCommand)
+	nd.router.Register(true, "zincrby", nd.zincrbyCommand)
+	nd.router.Register(true, "zrem", wrapWriteCommandKSubkeySubkey(nd, nd.zremCommand))
+	nd.router.Register(true, "zremrangebyrank", nd.zremrangebyrankCommand)
+	nd.router.Register(true, "zremrangebyscore", nd.zremrangebyscoreCommand)
+	nd.router.Register(true, "zremrangebylex", nd.zremrangebylexCommand)
+	nd.router.Register(true, "zclear", wrapWriteCommandK(nd, nd.zclearCommand))
 	// for set
-	self.router.Register(false, "scard", wrapReadCommandK(self.scardCommand))
-	self.router.Register(false, "sismember", wrapReadCommandKSubkey(self.sismemberCommand))
-	self.router.Register(false, "smembers", wrapReadCommandK(self.smembersCommand))
-	self.router.Register(true, "sadd", wrapWriteCommandKSubkeySubkey(self, self.saddCommand))
-	self.router.Register(true, "srem", wrapWriteCommandKSubkeySubkey(self, self.sremCommand))
-	self.router.Register(true, "sclear", wrapWriteCommandK(self, self.sclearCommand))
-	self.router.Register(true, "smclear", wrapWriteCommandKK(self, self.smclearCommand))
+	nd.router.Register(false, "scard", wrapReadCommandK(nd.scardCommand))
+	nd.router.Register(false, "sismember", wrapReadCommandKSubkey(nd.sismemberCommand))
+	nd.router.Register(false, "smembers", wrapReadCommandK(nd.smembersCommand))
+	nd.router.Register(true, "sadd", wrapWriteCommandKSubkeySubkey(nd, nd.saddCommand))
+	nd.router.Register(true, "srem", wrapWriteCommandKSubkeySubkey(nd, nd.sremCommand))
+	nd.router.Register(true, "sclear", wrapWriteCommandK(nd, nd.sclearCommand))
+	nd.router.Register(true, "smclear", wrapWriteCommandKK(nd, nd.smclearCommand))
 	// for ttl
-	self.router.Register(false, "ttl", wrapReadCommandK(self.ttlCommand))
-	self.router.Register(false, "httl", wrapReadCommandK(self.httlCommand))
-	self.router.Register(false, "lttl", wrapReadCommandK(self.lttlCommand))
-	self.router.Register(false, "sttl", wrapReadCommandK(self.sttlCommand))
-	self.router.Register(false, "zttl", wrapReadCommandK(self.zttlCommand))
+	nd.router.Register(false, "ttl", wrapReadCommandK(nd.ttlCommand))
+	nd.router.Register(false, "httl", wrapReadCommandK(nd.httlCommand))
+	nd.router.Register(false, "lttl", wrapReadCommandK(nd.lttlCommand))
+	nd.router.Register(false, "sttl", wrapReadCommandK(nd.sttlCommand))
+	nd.router.Register(false, "zttl", wrapReadCommandK(nd.zttlCommand))
 
-	self.router.Register(true, "setex", wrapWriteCommandKVV(self, self.setexCommand))
-	self.router.Register(true, "expire", wrapWriteCommandKV(self, self.expireCommand))
-	self.router.Register(true, "hexpire", wrapWriteCommandKV(self, self.hashExpireCommand))
-	self.router.Register(true, "lexpire", wrapWriteCommandKV(self, self.listExpireCommand))
-	self.router.Register(true, "sexpire", wrapWriteCommandKV(self, self.setExpireCommand))
-	self.router.Register(true, "zexpire", wrapWriteCommandKV(self, self.zsetExpireCommand))
+	nd.router.Register(true, "setex", wrapWriteCommandKVV(nd, nd.setexCommand))
+	nd.router.Register(true, "expire", wrapWriteCommandKV(nd, nd.expireCommand))
+	nd.router.Register(true, "hexpire", wrapWriteCommandKV(nd, nd.hashExpireCommand))
+	nd.router.Register(true, "lexpire", wrapWriteCommandKV(nd, nd.listExpireCommand))
+	nd.router.Register(true, "sexpire", wrapWriteCommandKV(nd, nd.setExpireCommand))
+	nd.router.Register(true, "zexpire", wrapWriteCommandKV(nd, nd.zsetExpireCommand))
 
-	self.router.Register(true, "persist", wrapWriteCommandK(self, self.persistCommand))
-	self.router.Register(true, "hpersist", wrapWriteCommandK(self, self.persistCommand))
-	self.router.Register(true, "lpersist", wrapWriteCommandK(self, self.persistCommand))
-	self.router.Register(true, "spersist", wrapWriteCommandK(self, self.persistCommand))
-	self.router.Register(true, "zpersist", wrapWriteCommandK(self, self.persistCommand))
+	nd.router.Register(true, "persist", wrapWriteCommandK(nd, nd.persistCommand))
+	nd.router.Register(true, "hpersist", wrapWriteCommandK(nd, nd.persistCommand))
+	nd.router.Register(true, "lpersist", wrapWriteCommandK(nd, nd.persistCommand))
+	nd.router.Register(true, "spersist", wrapWriteCommandK(nd, nd.persistCommand))
+	nd.router.Register(true, "zpersist", wrapWriteCommandK(nd, nd.persistCommand))
 
 	// for scan
-	self.router.Register(false, "hscan", wrapReadCommandKAnySubkey(self.hscanCommand))
-	self.router.Register(false, "sscan", wrapReadCommandKAnySubkey(self.sscanCommand))
-	self.router.Register(false, "zscan", wrapReadCommandKAnySubkey(self.zscanCommand))
+	nd.router.Register(false, "hscan", wrapReadCommandKAnySubkey(nd.hscanCommand))
+	nd.router.Register(false, "sscan", wrapReadCommandKAnySubkey(nd.sscanCommand))
+	nd.router.Register(false, "zscan", wrapReadCommandKAnySubkey(nd.zscanCommand))
 
 	//for cross mutil partion
-	self.router.RegisterMerge("scan", wrapMergeCommand(self.scanCommand))
-	self.router.RegisterMerge("advscan", self.advanceScanCommand)
-	self.router.RegisterMerge("fullscan", self.fullScanCommand)
+	nd.router.RegisterMerge("scan", wrapMergeCommand(nd.scanCommand))
+	nd.router.RegisterMerge("advscan", nd.advanceScanCommand)
+	nd.router.RegisterMerge("fullscan", nd.fullScanCommand)
+	nd.router.RegisterMerge("hidx.from", nd.hindexSearchCommand)
 
 	// only write command need to be registered as internal
 	// kv
-	self.router.RegisterInternal("del", self.localDelCommand)
-	self.router.RegisterInternal("set", self.localSetCommand)
-	self.router.RegisterInternal("setnx", self.localSetnxCommand)
-	self.router.RegisterInternal("mset", self.localMSetCommand)
-	self.router.RegisterInternal("incr", self.localIncrCommand)
-	self.router.RegisterInternal("plset", self.localPlsetCommand)
+	nd.router.RegisterInternal("del", nd.localDelCommand)
+	nd.router.RegisterInternal("set", nd.localSetCommand)
+	nd.router.RegisterInternal("setnx", nd.localSetnxCommand)
+	nd.router.RegisterInternal("mset", nd.localMSetCommand)
+	nd.router.RegisterInternal("incr", nd.localIncrCommand)
+	nd.router.RegisterInternal("plset", nd.localPlsetCommand)
 	// hash
-	self.router.RegisterInternal("hset", self.localHSetCommand)
-	self.router.RegisterInternal("hmset", self.localHMsetCommand)
-	self.router.RegisterInternal("hdel", self.localHDelCommand)
-	self.router.RegisterInternal("hincrby", self.localHIncrbyCommand)
-	self.router.RegisterInternal("hclear", self.localHclearCommand)
+	nd.router.RegisterInternal("hset", nd.localHSetCommand)
+	nd.router.RegisterInternal("hmset", nd.localHMsetCommand)
+	nd.router.RegisterInternal("hdel", nd.localHDelCommand)
+	nd.router.RegisterInternal("hincrby", nd.localHIncrbyCommand)
+	nd.router.RegisterInternal("hclear", nd.localHclearCommand)
+	nd.router.RegisterInternal("hmclear", nd.localHMClearCommand)
 	// list
-	self.router.RegisterInternal("lpop", self.localLpopCommand)
-	self.router.RegisterInternal("lpush", self.localLpushCommand)
-	self.router.RegisterInternal("lset", self.localLsetCommand)
-	self.router.RegisterInternal("ltrim", self.localLtrimCommand)
-	self.router.RegisterInternal("rpop", self.localRpopCommand)
-	self.router.RegisterInternal("rpush", self.localRpushCommand)
-	self.router.RegisterInternal("lclear", self.localLclearCommand)
+	nd.router.RegisterInternal("lpop", nd.localLpopCommand)
+	nd.router.RegisterInternal("lpush", nd.localLpushCommand)
+	nd.router.RegisterInternal("lset", nd.localLsetCommand)
+	nd.router.RegisterInternal("ltrim", nd.localLtrimCommand)
+	nd.router.RegisterInternal("rpop", nd.localRpopCommand)
+	nd.router.RegisterInternal("rpush", nd.localRpushCommand)
+	nd.router.RegisterInternal("lclear", nd.localLclearCommand)
+	nd.router.RegisterInternal("lmclear", nd.localLMClearCommand)
 	// zset
-	self.router.RegisterInternal("zadd", self.localZaddCommand)
-	self.router.RegisterInternal("zincrby", self.localZincrbyCommand)
-	self.router.RegisterInternal("zrem", self.localZremCommand)
-	self.router.RegisterInternal("zremrangebyrank", self.localZremrangebyrankCommand)
-	self.router.RegisterInternal("zremrangebyscore", self.localZremrangebyscoreCommand)
-	self.router.RegisterInternal("zremrangebylex", self.localZremrangebylexCommand)
-	self.router.RegisterInternal("zclear", self.localZclearCommand)
+	nd.router.RegisterInternal("zadd", nd.localZaddCommand)
+	nd.router.RegisterInternal("zincrby", nd.localZincrbyCommand)
+	nd.router.RegisterInternal("zrem", nd.localZremCommand)
+	nd.router.RegisterInternal("zremrangebyrank", nd.localZremrangebyrankCommand)
+	nd.router.RegisterInternal("zremrangebyscore", nd.localZremrangebyscoreCommand)
+	nd.router.RegisterInternal("zremrangebylex", nd.localZremrangebylexCommand)
+	nd.router.RegisterInternal("zclear", nd.localZclearCommand)
+	nd.router.RegisterInternal("zmclear", nd.localZMClearCommand)
 	// set
-	self.router.RegisterInternal("sadd", self.localSadd)
-	self.router.RegisterInternal("srem", self.localSrem)
-	self.router.RegisterInternal("sclear", self.localSclear)
-	self.router.RegisterInternal("smclear", self.localSmclear)
+	nd.router.RegisterInternal("sadd", nd.localSadd)
+	nd.router.RegisterInternal("srem", nd.localSrem)
+	nd.router.RegisterInternal("sclear", nd.localSclear)
+	nd.router.RegisterInternal("smclear", nd.localSmclear)
 	// expire
-	self.router.RegisterInternal("setex", self.localSetexCommand)
-	self.router.RegisterInternal("expire", self.localExpireCommand)
-	self.router.RegisterInternal("lexpire", self.localListExpireCommand)
-	self.router.RegisterInternal("hexpire", self.localHashExpireCommand)
-	self.router.RegisterInternal("sexpire", self.localSetExpireCommand)
-	self.router.RegisterInternal("zexpire", self.localZSetExpireCommand)
-	self.router.RegisterInternal("persist", self.localPersistCommand)
-	self.router.RegisterInternal("hpersist", self.localHashPersistCommand)
-	self.router.RegisterInternal("lpersist", self.localListPersistCommand)
-	self.router.RegisterInternal("spersist", self.localSetPersistCommand)
-	self.router.RegisterInternal("zpersist", self.localZSetPersistCommand)
+	nd.router.RegisterInternal("setex", nd.localSetexCommand)
+	nd.router.RegisterInternal("expire", nd.localExpireCommand)
+	nd.router.RegisterInternal("lexpire", nd.localListExpireCommand)
+	nd.router.RegisterInternal("hexpire", nd.localHashExpireCommand)
+	nd.router.RegisterInternal("sexpire", nd.localSetExpireCommand)
+	nd.router.RegisterInternal("zexpire", nd.localZSetExpireCommand)
+	nd.router.RegisterInternal("persist", nd.localPersistCommand)
+	nd.router.RegisterInternal("hpersist", nd.localHashPersistCommand)
+	nd.router.RegisterInternal("lpersist", nd.localListPersistCommand)
+	nd.router.RegisterInternal("spersist", nd.localSetPersistCommand)
+	nd.router.RegisterInternal("zpersist", nd.localZSetPersistCommand)
 }
 
-func (self *KVNode) handleProposeReq() {
+func (nd *KVNode) handleProposeReq() {
 	var reqList BatchInternalRaftRequest
 	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
 	var lastReq *internalReq
@@ -426,16 +427,16 @@ func (self *KVNode) handleProposeReq() {
 			buf := make([]byte, 4096)
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
-			self.rn.Errorf("handle propose loop panic: %s:%v", buf, e)
+			nd.rn.Errorf("handle propose loop panic: %s:%v", buf, e)
 		}
 		for _, r := range reqList.Reqs {
-			self.w.Trigger(r.Header.ID, common.ErrStopped)
+			nd.w.Trigger(r.Header.ID, common.ErrStopped)
 		}
-		self.rn.Infof("handle propose loop exit")
+		nd.rn.Infof("handle propose loop exit")
 		for {
 			select {
-			case r := <-self.reqProposeC:
-				self.w.Trigger(r.reqData.Header.ID, common.ErrStopped)
+			case r := <-nd.reqProposeC:
+				nd.w.Trigger(r.reqData.Header.ID, common.ErrStopped)
 			default:
 				return
 			}
@@ -443,16 +444,16 @@ func (self *KVNode) handleProposeReq() {
 	}()
 	for {
 		select {
-		case r := <-self.reqProposeC:
+		case r := <-nd.reqProposeC:
 			reqList.Reqs = append(reqList.Reqs, &r.reqData)
 			lastReq = r
 		default:
 			if len(reqList.Reqs) == 0 {
 				select {
-				case r := <-self.reqProposeC:
+				case r := <-nd.reqProposeC:
 					reqList.Reqs = append(reqList.Reqs, &r.reqData)
 					lastReq = r
-				case <-self.stopChan:
+				case <-nd.stopChan:
 					return
 				}
 			}
@@ -461,34 +462,34 @@ func (self *KVNode) handleProposeReq() {
 			// buffer will be reused by raft?
 			// TODO:buffer, err := reqList.MarshalTo()
 			if err != nil {
-				self.rn.Infof("failed to marshal request: %v", err)
+				nd.rn.Infof("failed to marshal request: %v", err)
 				for _, r := range reqList.Reqs {
-					self.w.Trigger(r.Header.ID, err)
+					nd.w.Trigger(r.Header.ID, err)
 				}
 				reqList.Reqs = reqList.Reqs[:0]
 				continue
 			}
 			lastReq.done = make(chan struct{})
-			//self.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
+			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
 			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout*2)
-			self.rn.node.Propose(ctx, buffer)
+			nd.rn.node.Propose(ctx, buffer)
 			select {
 			case <-lastReq.done:
 			case <-ctx.Done():
 				err := ctx.Err()
 				for _, r := range reqList.Reqs {
-					self.w.Trigger(r.Header.ID, err)
+					nd.w.Trigger(r.Header.ID, err)
 				}
-			case <-self.stopChan:
+			case <-nd.stopChan:
 				cancel()
 				return
 			}
 			cancel()
 			cost := (time.Now().UnixNano() - start) / 1000 / 1000 / 1000
 			if cost >= int64(proposeTimeout.Seconds())/2 {
-				self.rn.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
+				nd.rn.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
 			}
 			reqList.Reqs = reqList.Reqs[:0]
 			lastReq = nil
@@ -496,29 +497,29 @@ func (self *KVNode) handleProposeReq() {
 	}
 }
 
-func (self *KVNode) IsWriteReady() bool {
-	return atomic.LoadInt32(&self.rn.memberCnt) > int32(self.rn.config.Replicator/2)
+func (nd *KVNode) IsWriteReady() bool {
+	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(nd.rn.config.Replicator/2)
 }
 
-func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
-	if !self.IsWriteReady() {
+func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
+	if !nd.IsWriteReady() {
 		return nil, errRaftNotReadyForWrite
 	}
 	start := time.Now()
 	req.reqData.Header.Timestamp = start.UnixNano()
-	ch := self.w.Register(req.reqData.Header.ID)
+	ch := nd.w.Register(req.reqData.Header.ID)
 	select {
-	case self.reqProposeC <- req:
+	case nd.reqProposeC <- req:
 	default:
 		select {
-		case self.reqProposeC <- req:
-		case <-self.stopChan:
-			self.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
+		case nd.reqProposeC <- req:
+		case <-nd.stopChan:
+			nd.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
 		case <-time.After(proposeTimeout / 2):
-			self.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
+			nd.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
 		}
 	}
-	//self.rn.Infof("queue request: %v", req.reqData.String())
+	//nd.rn.Infof("queue request: %v", req.reqData.String())
 	var err error
 	var rsp interface{}
 	var ok bool
@@ -532,22 +533,22 @@ func (self *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		} else {
 			err = nil
 		}
-	case <-self.stopChan:
+	case <-nd.stopChan:
 		rsp = nil
 		err = common.ErrStopped
 	}
-	self.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), time.Since(start).Nanoseconds()/1000)
-	if err == nil && !self.IsWriteReady() {
-		self.rn.Infof("write request %v on raft success but raft member is less than replicator",
+	nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), time.Since(start).Nanoseconds()/1000)
+	if err == nil && !nd.IsWriteReady() {
+		nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
 			req.reqData.String())
 		return nil, errRaftNotReadyForWrite
 	}
 	return rsp, err
 }
 
-func (self *KVNode) Propose(buf []byte) (interface{}, error) {
+func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 	h := &RequestHeader{
-		ID:       self.rn.reqIDGen.Next(),
+		ID:       nd.rn.reqIDGen.Next(),
 		DataType: 0,
 	}
 	raftReq := InternalRaftRequest{
@@ -557,12 +558,12 @@ func (self *KVNode) Propose(buf []byte) (interface{}, error) {
 	req := &internalReq{
 		reqData: raftReq,
 	}
-	return self.queueRequest(req)
+	return nd.queueRequest(req)
 }
 
-func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
+func (nd *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	h := &RequestHeader{
-		ID:       self.rn.reqIDGen.Next(),
+		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(HTTPReq),
 	}
 	raftReq := InternalRaftRequest{
@@ -572,16 +573,34 @@ func (self *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
 	req := &internalReq{
 		reqData: raftReq,
 	}
-	return self.queueRequest(req)
+	return nd.queueRequest(req)
 }
 
-func (self *KVNode) FillMyMemberInfo(m *common.MemberInfo) {
-	m.RaftURLs = append(m.RaftURLs, self.machineConfig.LocalRaftAddr)
+func (nd *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error {
+	h := &RequestHeader{
+		ID:       nd.rn.reqIDGen.Next(),
+		DataType: int32(SchemaChangeReq),
+	}
+	buf, _ := sc.Marshal()
+	raftReq := InternalRaftRequest{
+		Header: h,
+		Data:   buf,
+	}
+	req := &internalReq{
+		reqData: raftReq,
+	}
+
+	_, err := nd.queueRequest(req)
+	return err
 }
 
-func (self *KVNode) ProposeAddMember(m common.MemberInfo) error {
-	if m.NodeID == self.machineConfig.NodeID {
-		self.FillMyMemberInfo(&m)
+func (nd *KVNode) FillMyMemberInfo(m *common.MemberInfo) {
+	m.RaftURLs = append(m.RaftURLs, nd.machineConfig.LocalRaftAddr)
+}
+
+func (nd *KVNode) ProposeAddMember(m common.MemberInfo) error {
+	if m.NodeID == nd.machineConfig.NodeID {
+		nd.FillMyMemberInfo(&m)
 	}
 	data, _ := json.Marshal(m)
 	cc := raftpb.ConfChange{
@@ -594,10 +613,10 @@ func (self *KVNode) ProposeAddMember(m common.MemberInfo) error {
 			RaftReplicaId: m.ID},
 		Context: data,
 	}
-	return self.proposeConfChange(cc)
+	return nd.proposeConfChange(cc)
 }
 
-func (self *KVNode) ProposeRemoveMember(m common.MemberInfo) error {
+func (nd *KVNode) ProposeRemoveMember(m common.MemberInfo) error {
 	cc := raftpb.ConfChange{
 		Type:      raftpb.ConfChangeRemoveNode,
 		ReplicaID: m.ID,
@@ -607,12 +626,12 @@ func (self *KVNode) ProposeRemoveMember(m common.MemberInfo) error {
 			GroupId:       uint64(m.GroupID),
 			RaftReplicaId: m.ID},
 	}
-	return self.proposeConfChange(cc)
+	return nd.proposeConfChange(cc)
 }
 
-func (self *KVNode) ProposeUpdateMember(m common.MemberInfo) error {
-	if m.NodeID == self.machineConfig.NodeID {
-		self.FillMyMemberInfo(&m)
+func (nd *KVNode) ProposeUpdateMember(m common.MemberInfo) error {
+	if m.NodeID == nd.machineConfig.NodeID {
+		nd.FillMyMemberInfo(&m)
 	}
 	data, _ := json.Marshal(m)
 	cc := raftpb.ConfChange{
@@ -625,43 +644,43 @@ func (self *KVNode) ProposeUpdateMember(m common.MemberInfo) error {
 			RaftReplicaId: m.ID},
 		Context: data,
 	}
-	return self.proposeConfChange(cc)
+	return nd.proposeConfChange(cc)
 }
 
-func (self *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
-	cc.ID = self.rn.reqIDGen.Next()
-	self.rn.Infof("propose the conf change: %v", cc.String())
+func (nd *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
+	cc.ID = nd.rn.reqIDGen.Next()
+	nd.rn.Infof("propose the conf change: %v", cc.String())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
-	err := self.rn.node.ProposeConfChange(ctx, cc)
+	err := nd.rn.node.ProposeConfChange(ctx, cc)
 	if err != nil {
-		self.rn.Infof("failed to propose the conf change: %v", err)
+		nd.rn.Infof("failed to propose the conf change: %v", err)
 	}
 	cancel()
 	return err
 }
 
-func (self *KVNode) Tick() {
-	self.rn.node.Tick()
+func (nd *KVNode) Tick() {
+	nd.rn.node.Tick()
 }
 
-func (self *KVNode) GetCommittedIndex() uint64 {
-	return atomic.LoadUint64(&self.committedIndex)
+func (nd *KVNode) GetCommittedIndex() uint64 {
+	return atomic.LoadUint64(&nd.committedIndex)
 }
 
-func (self *KVNode) SetCommittedIndex(ci uint64) {
-	atomic.StoreUint64(&self.committedIndex, ci)
+func (nd *KVNode) SetCommittedIndex(ci uint64) {
+	atomic.StoreUint64(&nd.committedIndex, ci)
 }
 
-func (self *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
-	if self.rn.Lead() == raft.None {
+func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
+	if nd.rn.Lead() == raft.None {
 		select {
-		case <-time.After(time.Duration(self.machineConfig.ElectionTick/10) * time.Millisecond * time.Duration(self.machineConfig.TickMs)):
-		case <-self.stopChan:
+		case <-time.After(time.Duration(nd.machineConfig.ElectionTick/10) * time.Millisecond * time.Duration(nd.machineConfig.TickMs)):
+		case <-nd.stopChan:
 			return false
 		}
-		if self.rn.Lead() == raft.None {
+		if nd.rn.Lead() == raft.None {
 			nodeLog.Infof("not synced, since no leader ")
-			self.rn.maybeTryElection()
+			nd.rn.maybeTryElection()
 			return false
 		}
 	}
@@ -670,9 +689,9 @@ func (self *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	}
 	to := time.Second * 2
 	req := make([]byte, 8)
-	binary.BigEndian.PutUint64(req, self.rn.reqIDGen.Next())
+	binary.BigEndian.PutUint64(req, nd.rn.reqIDGen.Next())
 	ctx, cancel := context.WithTimeout(context.Background(), to)
-	if err := self.rn.node.ReadIndex(ctx, req); err != nil {
+	if err := nd.rn.node.ReadIndex(ctx, req); err != nil {
 		cancel()
 		if err == raft.ErrStopped {
 		}
@@ -688,21 +707,21 @@ func (self *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	)
 	for !timeout && !done {
 		select {
-		case rs := <-self.rn.readStateC:
+		case rs := <-nd.rn.readStateC:
 			done = bytes.Equal(rs.RequestCtx, req)
 			if !done {
 			}
 		case <-time.After(to):
 			nodeLog.Infof("timeout waiting for read index response")
 			timeout = true
-		case <-self.stopChan:
+		case <-nd.stopChan:
 			return false
 		}
 	}
 	if !done {
 		return false
 	}
-	ci := self.GetCommittedIndex()
+	ci := nd.GetCommittedIndex()
 	if rs.Index <= 0 || ci >= rs.Index-1 {
 		return true
 	}
@@ -710,26 +729,26 @@ func (self *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	return false
 }
 
-func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
+func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	if raft.IsEmptySnap(applyEvent.snapshot) {
 		return
 	}
 	// signaled to load snapshot
-	self.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
-	defer self.rn.Infof("finished applying snapshot at index %d\n", np)
+	nd.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
+	defer nd.rn.Infof("finished applying snapshot at index %d\n", np)
 
 	if applyEvent.snapshot.Metadata.Index <= np.appliedi {
 		nodeLog.Panicf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
 
-	if err := self.RestoreFromSnapshot(false, applyEvent.snapshot); err != nil {
+	if err := nd.RestoreFromSnapshot(false, applyEvent.snapshot); err != nil {
 		nodeLog.Error(err)
 		go func() {
 			select {
-			case <-self.stopChan:
+			case <-nd.stopChan:
 			default:
-				self.Stop()
+				nd.Stop()
 			}
 		}()
 	}
@@ -740,7 +759,7 @@ func (self *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 }
 
 // return if configure changed and whether need force backup
-func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
+func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	var lastCommittedIndex uint64
 	if len(applyEvent.ents) > 0 {
 		lastCommittedIndex = applyEvent.ents[len(applyEvent.ents)-1].Index
@@ -748,10 +767,10 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 	if applyEvent.snapshot.Metadata.Index > lastCommittedIndex {
 		lastCommittedIndex = applyEvent.snapshot.Metadata.Index
 	}
-	if lastCommittedIndex > self.GetCommittedIndex() {
-		self.SetCommittedIndex(lastCommittedIndex)
+	if lastCommittedIndex > nd.GetCommittedIndex() {
+		nd.SetCommittedIndex(lastCommittedIndex)
 	}
-	self.applySnapshot(np, applyEvent)
+	nd.applySnapshot(np, applyEvent)
 	if len(applyEvent.ents) == 0 {
 		return false, false
 	}
@@ -779,12 +798,12 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 				var reqList BatchInternalRaftRequest
 				parseErr := reqList.Unmarshal(evnt.Data)
 				if parseErr != nil {
-					self.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
+					nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
 						parseErr, len(evnt.Data), evnt,
 						string(evnt.Data))
 				}
 				if len(reqList.Reqs) != int(reqList.ReqNum) {
-					self.rn.Infof("request check failed %v, real len:%v",
+					nd.rn.Infof("request check failed %v, real len:%v",
 						reqList, len(reqList.Reqs))
 				}
 				batching := false
@@ -797,74 +816,74 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 					if req.Header.DataType == 0 {
 						cmd, err := redcon.Parse(req.Data)
 						if err != nil {
-							self.w.Trigger(reqID, err)
+							nd.w.Trigger(reqID, err)
 						} else {
 							cmdStart := time.Now()
 							cmdName := strings.ToLower(string(cmd.Args[0]))
 							_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
 							_, ok := dupCheckMap[string(pk)]
 							handled := false
-							if self.store.IsBatchableWrite(cmdName) &&
+							if nd.store.IsBatchableWrite(cmdName) &&
 								len(batchReqIDList) < maxBatchCmdNum &&
 								!ok {
 								if !batching {
-									err := self.store.BeginBatchWrite()
+									err := nd.store.BeginBatchWrite()
 									if err != nil {
-										self.rn.Infof("bengin batch command %v failed: %v, %v", cmdName, cmd, err)
-										self.w.Trigger(reqID, err)
+										nd.rn.Infof("begin batch command %v failed: %v, %v", cmdName, string(cmd.Raw), err)
+										nd.w.Trigger(reqID, err)
 										continue
 									}
 									batchStart = time.Now()
 									batching = true
 								}
 								handled = true
-								h, ok := self.router.GetInternalCmdHandler(cmdName)
+								h, ok := nd.router.GetInternalCmdHandler(cmdName)
 								if !ok {
-									self.rn.Infof("unsupported redis command: %v", cmdName)
-									self.w.Trigger(reqID, common.ErrInvalidCommand)
+									nd.rn.Infof("unsupported redis command: %v", cmdName)
+									nd.w.Trigger(reqID, common.ErrInvalidCommand)
 								} else {
 									if pk != nil {
 										dupCheckMap[string(pk)] = true
 									}
 									v, err := h(cmd, req.Header.Timestamp)
 									if err != nil {
-										self.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
-										self.w.Trigger(reqID, err)
+										nd.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
+										nd.w.Trigger(reqID, err)
 										continue
 									}
 									batchReqIDList = append(batchReqIDList, reqID)
 									batchReqRspList = append(batchReqRspList, v)
-									self.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
+									nd.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
 								}
 								if nodeLog.Level() > common.LOG_DETAIL {
-									self.rn.Infof("batching redis command: %v", cmdName)
+									nd.rn.Infof("batching redis command: %v", cmdName)
 								}
 								if reqIndex < len(reqList.Reqs)-1 {
 									continue
 								}
 							}
 							if batching {
-								err := self.store.CommitBatchWrite()
+								err := nd.store.CommitBatchWrite()
 								dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 								batching = false
 								batchCost := time.Since(batchStart)
 								if nodeLog.Level() >= common.LOG_DETAIL {
-									self.rn.Infof("batching command number: %v", len(batchReqIDList))
+									nd.rn.Infof("batching command number: %v", len(batchReqIDList))
 								}
 								// write the future response or error
 								for idx, rid := range batchReqIDList {
 									if err != nil {
-										self.w.Trigger(rid, err)
+										nd.w.Trigger(rid, err)
 									} else {
-										self.w.Trigger(rid, batchReqRspList[idx])
+										nd.w.Trigger(rid, batchReqRspList[idx])
 									}
 								}
 								if batchCost >= time.Second {
-									self.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
+									nd.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
 										cmdName, len(batchReqIDList), batchCost)
 								}
 								if len(batchReqIDList) > 0 {
-									self.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+									nd.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
 								}
 								batchReqIDList = batchReqIDList[:0]
 								batchReqRspList = batchReqRspList[:0]
@@ -873,46 +892,46 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 								continue
 							}
 
-							h, ok := self.router.GetInternalCmdHandler(cmdName)
+							h, ok := nd.router.GetInternalCmdHandler(cmdName)
 							if !ok {
-								self.rn.Infof("unsupported redis command: %v", cmd)
-								self.w.Trigger(reqID, common.ErrInvalidCommand)
+								nd.rn.Infof("unsupported redis command: %v", cmd)
+								nd.w.Trigger(reqID, common.ErrInvalidCommand)
 							} else {
 								v, err := h(cmd, req.Header.Timestamp)
 								cmdCost := time.Since(cmdStart)
 								if cmdCost >= time.Second {
-									self.rn.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
+									nd.rn.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 								}
-								self.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
+								nd.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 								// write the future response or error
 								if err != nil {
-									self.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
-									self.w.Trigger(reqID, err)
+									nd.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
+									nd.w.Trigger(reqID, err)
 								} else {
-									self.w.Trigger(reqID, v)
+									nd.w.Trigger(reqID, v)
 								}
 							}
 						}
 					} else {
 						if batching {
-							err := self.store.CommitBatchWrite()
+							err := nd.store.CommitBatchWrite()
 							dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 							batching = false
 							batchCost := time.Since(batchStart)
 							// write the future response or error
 							for _, rid := range batchReqIDList {
 								if err != nil {
-									self.w.Trigger(rid, err)
+									nd.w.Trigger(rid, err)
 								} else {
-									self.w.Trigger(rid, nil)
+									nd.w.Trigger(rid, nil)
 								}
 							}
 							if batchCost >= time.Second {
-								self.rn.Infof("slow batch write command batch: %v, cost: %v",
+								nd.rn.Infof("slow batch write command batch: %v, cost: %v",
 									len(batchReqIDList), batchCost)
 							}
 							if len(batchReqIDList) > 0 {
-								self.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+								nd.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
 							}
 							batchReqIDList = batchReqIDList[:0]
 						}
@@ -920,47 +939,57 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 							var p httpProposeData
 							err := json.Unmarshal(req.Data, &p)
 							if err != nil {
-								self.rn.Infof("failed to unmarshal http propose: %v", req.String())
-								self.w.Trigger(reqID, err)
+								nd.rn.Infof("failed to unmarshal http propose: %v", req.String())
+								nd.w.Trigger(reqID, err)
 							}
 							if p.ProposeOp == HttpProposeOp_Backup {
-								self.rn.Infof("got force backup request")
+								nd.rn.Infof("got force backup request")
 								forceBackup = true
-								self.w.Trigger(reqID, nil)
+								nd.w.Trigger(reqID, nil)
 							} else {
-								self.w.Trigger(reqID, errUnknownData)
+								nd.w.Trigger(reqID, errUnknownData)
+							}
+						} else if req.Header.DataType == int32(SchemaChangeReq) {
+							nd.rn.Infof("handle schema change: %v", string(req.Data))
+							var sc SchemaChange
+							err := sc.Unmarshal(req.Data)
+							if err != nil {
+								nd.rn.Infof("schema data error: %v, %v", string(req.Data), err)
+								nd.w.Trigger(reqID, err)
+							} else {
+								err = nd.handleSchemaUpdate(sc)
+								nd.w.Trigger(reqID, err)
 							}
 						} else {
-							self.w.Trigger(reqID, errUnknownData)
+							nd.w.Trigger(reqID, errUnknownData)
 						}
 					}
 				}
 				cost := time.Since(start)
 				if cost >= proposeTimeout/2 {
-					self.rn.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
+					nd.rn.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
 				}
-
 			}
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange
 			cc.Unmarshal(evnt.Data)
-			removeSelf, changed, _ := self.rn.applyConfChange(cc, &np.confState)
+			removeSelf, changed, _ := nd.rn.applyConfChange(cc, &np.confState)
 			confChanged = changed
 			shouldStop = shouldStop || removeSelf
 		}
 		np.appliedi = evnt.Index
-		if evnt.Index == self.rn.lastIndex {
-			self.rn.Infof("replay finished at index: %v\n", evnt.Index)
+		if evnt.Index == nd.rn.lastIndex {
+			nd.rn.Infof("replay finished at index: %v\n", evnt.Index)
 		}
 	}
 	if shouldStop {
-		self.rn.Infof("I am removed from raft group: %v", self.ns)
+		nd.rn.Infof("I am removed from raft group: %v", nd.ns)
 		go func() {
 			time.Sleep(time.Second)
 			select {
-			case <-self.stopChan:
+			case <-nd.stopChan:
 			default:
-				self.Stop()
+				nd.Stop()
 			}
 		}()
 		return false, false
@@ -968,11 +997,11 @@ func (self *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, boo
 	return confChanged, forceBackup
 }
 
-func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
+func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 	defer func() {
-		self.rn.Infof("apply commit exit")
+		nd.rn.Infof("apply commit exit")
 	}()
-	snap, err := self.rn.raftStorage.Snapshot()
+	snap, err := nd.rn.raftStorage.Snapshot()
 	if err != nil {
 		panic(err)
 	}
@@ -981,16 +1010,16 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 		snapi:     snap.Metadata.Index,
 		appliedi:  snap.Metadata.Index,
 	}
-	self.rn.Infof("starting state: %v\n", np)
+	nd.rn.Infof("starting state: %v\n", np)
 	for {
 		select {
 		case ent, ok := <-commitC:
 			if !ok {
 				go func() {
 					select {
-					case <-self.stopChan:
+					case <-nd.stopChan:
 					default:
-						self.Stop()
+						nd.Stop()
 					}
 				}()
 				return
@@ -998,81 +1027,80 @@ func (self *KVNode) applyCommits(commitC <-chan applyInfo) {
 			if ent.raftDone == nil {
 				nodeLog.Panicf("wrong events : %v", ent)
 			}
-			confChanged, forceBackup := self.applyAll(&np, &ent)
+			confChanged, forceBackup := nd.applyAll(&np, &ent)
 			<-ent.raftDone
-			self.maybeTriggerSnapshot(&np, confChanged, forceBackup)
-			self.rn.handleSendSnapshot(&np)
+			nd.maybeTriggerSnapshot(&np, confChanged, forceBackup)
+			nd.rn.handleSendSnapshot(&np)
 			if ent.applyWaitDone != nil {
 				close(ent.applyWaitDone)
 			}
-		case <-self.stopChan:
+		case <-nd.stopChan:
 			return
 		}
 	}
 }
 
-func (self *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, forceBackup bool) {
+func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, forceBackup bool) {
 	if np.appliedi-np.snapi <= 0 {
 		return
 	}
-	if np.appliedi <= self.rn.lastIndex {
+	if np.appliedi <= nd.rn.lastIndex {
 		// replaying local log
 		if forceBackup {
-			self.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, self.rn.lastIndex)
+			nd.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, nd.rn.lastIndex)
 		}
 		return
 	}
-	if self.rn.Lead() == raft.None {
+	if nd.rn.Lead() == raft.None {
 		return
 	}
 
 	if !forceBackup {
-		if !confChanged && np.appliedi-np.snapi <= uint64(self.rn.config.SnapCount) {
+		if !confChanged && np.appliedi-np.snapi <= uint64(nd.rn.config.SnapCount) {
 			return
 		}
 	}
 
-	self.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
-	err := self.rn.beginSnapshot(np.appliedi, np.confState)
+	nd.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
+	err := nd.rn.beginSnapshot(np.appliedi, np.confState)
 	if err != nil {
-		self.rn.Infof("begin snapshot failed: %v", err)
+		nd.rn.Infof("begin snapshot failed: %v", err)
 		return
 	}
 
 	np.snapi = np.appliedi
 }
 
-func (self *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
+func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 	// use the rocksdb backup/checkpoint interface to backup data
 	var si KVSnapInfo
-	si.BackupInfo = self.store.Backup(term, index)
+	si.BackupInfo = nd.store.Backup(term, index)
 	if si.BackupInfo == nil {
 		return nil, errors.New("failed to begin backup: maybe too much backup running")
 	}
 	si.WaitReady()
-	si.LeaderInfo = self.rn.GetLeadMember()
-	si.Members = self.rn.GetMembers()
+	si.Members, si.LeaderInfo = nd.rn.GetMembersAndLeader()
 	return &si, nil
 }
 
-func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
+func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
 	snapshot := raftSnapshot.Data
 	var si KVSnapInfo
 	err := json.Unmarshal(snapshot, &si)
 	if err != nil {
 		return err
 	}
-	self.rn.RestoreMembers(si.Members)
-	self.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
+	nd.rn.RestoreMembers(si.Members)
+	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
 	retry := 0
 	for retry < 3 {
-		hasBackup, _ := self.checkLocalBackup(raftSnapshot)
+		hasBackup, _ := nd.checkLocalBackup(raftSnapshot)
 		if !hasBackup {
-			self.rn.Infof("local no backup for snapshot, copy from remote\n")
-			syncAddr, syncDir := self.GetValidBackupInfo(raftSnapshot, retry)
+			nd.rn.Infof("local no backup for snapshot, copy from remote\n")
+			syncAddr, syncDir := nd.GetValidBackupInfo(raftSnapshot, retry)
 			if syncAddr == "" && syncDir == "" {
 				return errors.New("no backup available from others")
 			}
@@ -1082,47 +1110,47 @@ func (self *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapsh
 			err = common.RunFileSync(syncAddr,
 				path.Join(rockredis.GetBackupDir(syncDir),
 					rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
-				self.store.GetBackupDir())
+				nd.store.GetBackupDir())
 			if err != nil {
-				self.rn.Infof("failed to copy snapshot: %v", err)
+				nd.rn.Infof("failed to copy snapshot: %v", err)
 				retry++
 				time.Sleep(time.Second)
 				continue
 			}
 		}
-		err = self.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
+		err = nd.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 		if err == nil {
 			return nil
 		}
 		select {
-		case <-self.stopChan:
+		case <-nd.stopChan:
 			return err
 		default:
 		}
 		retry++
 		time.Sleep(time.Second)
-		self.rn.Infof("failed to restore snapshot: %v", err)
+		nd.rn.Infof("failed to restore snapshot: %v", err)
 	}
 	return err
 }
 
-func (self *KVNode) CheckLocalBackup(snapData []byte) (bool, error) {
+func (nd *KVNode) CheckLocalBackup(snapData []byte) (bool, error) {
 	var rs raftpb.Snapshot
 	err := rs.Unmarshal(snapData)
 	if err != nil {
 		return false, err
 	}
-	return self.checkLocalBackup(rs)
+	return nd.checkLocalBackup(rs)
 }
 
-func (self *KVNode) checkLocalBackup(rs raftpb.Snapshot) (bool, error) {
+func (nd *KVNode) checkLocalBackup(rs raftpb.Snapshot) (bool, error) {
 	var si KVSnapInfo
 	err := json.Unmarshal(rs.Data, &si)
 	if err != nil {
-		self.rn.Infof("unmarshal snap meta failed: %v", string(rs.Data))
+		nd.rn.Infof("unmarshal snap meta failed: %v", string(rs.Data))
 		return false, err
 	}
-	return self.store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
+	return nd.store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
 }
 
 type deadlinedConn struct {
@@ -1153,24 +1181,24 @@ func newDeadlineTransport(timeout time.Duration) *http.Transport {
 	return transport
 }
 
-func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot, retry int) (string, string) {
+func (nd *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot, retry int) (string, string) {
 	// we need find the right backup data match with the raftsnapshot
 	// for each cluster member, it need check the term+index and the backup meta to
 	// make sure the data is valid
 	syncAddr := ""
 	syncDir := ""
-	h := self.machineConfig.BroadcastAddr
+	h := nd.machineConfig.BroadcastAddr
 
 	innerRetry := 0
 	var snapSyncInfoList []common.SnapshotSyncInfo
 	var err error
 	for innerRetry < 3 {
 		innerRetry++
-		snapSyncInfoList, err = self.clusterInfo.GetSnapshotSyncInfo(self.ns)
+		snapSyncInfoList, err = nd.clusterInfo.GetSnapshotSyncInfo(nd.ns)
 		if err != nil {
-			self.rn.Infof("get snapshot info failed: %v", err)
+			nd.rn.Infof("get snapshot info failed: %v", err)
 			select {
-			case <-self.stopChan:
+			case <-nd.stopChan:
 				break
 			case <-time.After(time.Second):
 			}
@@ -1179,97 +1207,95 @@ func (self *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot, retry int) 
 		}
 	}
 
-	self.rn.Infof("current cluster raft nodes info: %v", snapSyncInfoList)
+	nd.rn.Infof("current cluster raft nodes info: %v", snapSyncInfoList)
 	syncAddrList := make([]string, 0)
 	syncDirList := make([]string, 0)
 	for _, ssi := range snapSyncInfoList {
-		if ssi.ReplicaID == uint64(self.rn.config.ID) {
+		if ssi.ReplicaID == uint64(nd.rn.config.ID) {
 			continue
 		}
 
 		c := http.Client{Transport: newDeadlineTransport(time.Second)}
 		body, _ := raftSnapshot.Marshal()
 		req, _ := http.NewRequest("GET", "http://"+ssi.RemoteAddr+":"+
-			ssi.HttpAPIPort+common.APICheckBackup+"/"+self.ns, bytes.NewBuffer(body))
+			ssi.HttpAPIPort+common.APICheckBackup+"/"+nd.ns, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
 		if err != nil || rsp.StatusCode != http.StatusOK {
-			self.rn.Infof("request error: %v, %v", err, rsp)
+			nd.rn.Infof("request error: %v, %v", err, rsp)
 			continue
 		}
 		rsp.Body.Close()
 		if ssi.RemoteAddr == h {
-			if ssi.DataRoot == self.machineConfig.DataRootDir {
+			if ssi.DataRoot == nd.machineConfig.DataRootDir {
 				// the leader is old mine, try find another leader
-				self.rn.Infof("data dir can not be same if on local: %v, %v", ssi, self.machineConfig)
+				nd.rn.Infof("data dir can not be same if on local: %v, %v", ssi, nd.machineConfig)
 				continue
 			}
 			// local node with different directory
 			syncAddrList = append(syncAddrList, "")
-			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, self.ns))
+			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, nd.ns))
 		} else {
 			// for remote snapshot, we do rsync from remote module
 			syncAddrList = append(syncAddrList, ssi.RemoteAddr)
-			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, self.ns))
+			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, nd.ns))
 		}
 	}
 	if len(syncAddrList) > 0 {
 		syncAddr = syncAddrList[retry%len(syncAddrList)]
 		syncDir = syncDirList[retry%len(syncDirList)]
 	}
-	self.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
+	nd.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
 	return syncAddr, syncDir
 }
 
-func (self *KVNode) GetLastLeaderChangedTime() int64 {
-	return self.rn.getLastLeaderChangedTime()
+func (nd *KVNode) GetLastLeaderChangedTime() int64 {
+	return nd.rn.getLastLeaderChangedTime()
 }
 
-func (self *KVNode) ReportMeLeaderToCluster() {
-	if self.clusterInfo == nil {
+func (nd *KVNode) ReportMeLeaderToCluster() {
+	if nd.clusterInfo == nil {
 		return
 	}
-	if self.rn.IsLead() {
-		nid, epoch, err := self.clusterInfo.GetNamespaceLeader(self.ns)
+	if nd.rn.IsLead() {
+		nid, epoch, err := nd.clusterInfo.GetNamespaceLeader(nd.ns)
 		if err != nil {
-			self.rn.Infof("get raft leader from cluster failed: %v", err)
+			nd.rn.Infof("get raft leader from cluster failed: %v", err)
 			return
 		}
 
-		if self.rn.config.nodeConfig.NodeID == nid {
+		if nd.rn.config.nodeConfig.NodeID == nid {
 			return
 		}
-		_, err = self.clusterInfo.UpdateMeForNamespaceLeader(self.ns, epoch)
+		_, err = nd.clusterInfo.UpdateMeForNamespaceLeader(nd.ns, epoch)
 		if err != nil {
-			self.rn.Infof("update raft leader to me failed: %v", err)
+			nd.rn.Infof("update raft leader to me failed: %v", err)
 		} else {
-			self.rn.Infof("update %v raft leader to me : %v", self.ns, self.rn.config.ID)
+			nd.rn.Infof("update %v raft leader to me : %v", nd.ns, nd.rn.config.ID)
 		}
 	}
 }
 
 // should not block long in this
-func (self *KVNode) OnRaftLeaderChanged() {
-	if self.rn.IsLead() {
-		go self.ReportMeLeaderToCluster()
-		//leader should start the TTLChecker to handle the expired data
-		self.store.StartTTLChecker()
-	} else {
-		self.store.StopTTLChecker()
+func (nd *KVNode) OnRaftLeaderChanged() {
+	nd.expireHandler.LeaderChanged()
+
+	if nd.rn.IsLead() {
+		go nd.ReportMeLeaderToCluster()
 	}
 }
 
-func (self *KVNode) Process(ctx context.Context, m raftpb.Message) error {
-	return self.rn.Process(ctx, m)
+func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
+	return nd.rn.Process(ctx, m)
 }
 
-func (self *KVNode) ReportUnreachable(id uint64, group raftpb.Group) {
-	self.rn.ReportUnreachable(id, group)
+func (nd *KVNode) ReportUnreachable(id uint64, group raftpb.Group) {
+	nd.rn.ReportUnreachable(id, group)
 }
 
-func (self *KVNode) ReportSnapshot(id uint64, gp raftpb.Group, status raft.SnapshotStatus) {
-	self.rn.ReportSnapshot(id, gp, status)
+func (nd *KVNode) ReportSnapshot(id uint64, gp raftpb.Group, status raft.SnapshotStatus) {
+	nd.rn.ReportSnapshot(id, gp, status)
 }
 
-func (self *KVNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
-	return self.rn.SaveDBFrom(r, msg)
+func (nd *KVNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
+	return nd.rn.SaveDBFrom(r, msg)
 }

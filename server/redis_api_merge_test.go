@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"path"
@@ -13,11 +14,13 @@ import (
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 )
 
 var testOnceMerge sync.Once
 var kvsMerge *Server
 var redisportMerge int
+var testNamespaces = make(map[string]*node.NamespaceNode)
 
 func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
@@ -53,7 +56,7 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
 	kv := NewServer(kvOpts)
-	_, err = kv.InitKVNamespace(1, nsConf, false)
+	n, err := kv.InitKVNamespace(1, nsConf, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
@@ -65,7 +68,7 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	nsConf1.Replicator = 1
 	nsConf1.RaftGroupConf.GroupID = 1000
 	nsConf1.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	_, err = kv.InitKVNamespace(1, nsConf1, false)
+	n1, err := kv.InitKVNamespace(1, nsConf1, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
@@ -78,13 +81,16 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	nsConf2.Replicator = 1
 	nsConf2.RaftGroupConf.GroupID = 1000
 	nsConf2.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	_, err = kv.InitKVNamespace(1, nsConf2, false)
+	n2, err := kv.InitKVNamespace(1, nsConf2, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
 
 	kv.Start()
 	time.Sleep(time.Second)
+	testNamespaces[nsConf.Name] = n
+	testNamespaces[nsConf1.Name] = n1
+	testNamespaces[nsConf2.Name] = n2
 	return kv, redisportMerge, tmpDir
 }
 
@@ -324,5 +330,120 @@ func TestKVMergeScanCrossTable(t *testing.T) {
 		if len(a) != 20 {
 			t.Fatal("want 20 get ", len(a))
 		}
+	}
+}
+
+func TestHindexMergeSearch(t *testing.T) {
+	c := getMergeTestConn(t)
+	defer c.Close()
+
+	ns := "default"
+	table := "test_hashindex"
+	indexField := "test_f"
+	sc := &node.SchemaChange{
+		Type:       node.SchemaChangeAddHsetIndex,
+		Table:      table,
+		SchemaData: nil,
+	}
+	hindex := &common.HsetIndexSchema{
+		Name:       "hindex_test",
+		IndexField: indexField,
+		ValueType:  common.Int32V,
+		State:      common.InitIndex,
+	}
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+	time.Sleep(time.Second)
+
+	sc.Type = node.SchemaChangeUpdateHsetIndex
+	hindex.State = common.BuildingIndex
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+
+	time.Sleep(time.Second)
+
+	hindex.State = common.ReadyIndex
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+
+	time.Sleep(time.Second)
+	for i := 0; i < 20; i++ {
+		_, err := c.Do("hset", ns+":"+table+":"+fmt.Sprintf("%d", i), "test_f", []byte(fmt.Sprintf("%d", i)))
+		assert.Nil(t, err)
+		_, err = c.Do("hset", ns+":"+table+":"+fmt.Sprintf("%d", i), "test_f2", []byte(fmt.Sprintf("%d", i+20)))
+		assert.Nil(t, err)
+	}
+
+	ay, err := goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\""))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 1, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hgetall", "$"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 2, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+	fvs, err := goredis.Strings(ay[1], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 4, len(fvs))
+	assert.Equal(t, "test_f", fvs[0])
+	assert.Equal(t, "1", fvs[1])
+	assert.Equal(t, "test_f2", fvs[2])
+	assert.Equal(t, "21", fvs[3])
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hget", "$", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 2, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+	assert.Equal(t, []byte("21"), ay[1].([]byte))
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hmget", "$", "test_f", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 2, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+	vv, err := goredis.Strings(ay[1], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(vv))
+	assert.Equal(t, "1", vv[0])
+	assert.Equal(t, "21", vv[1])
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f>1\""))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 18, len(ay))
+	for _, v := range ay {
+		iv, _ := strconv.Atoi(string(v.([]byte)))
+		assert.True(t, iv > 1)
+	}
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f>1\"", "hget", "$", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 18*2, len(ay))
+	for i := 0; i < len(ay)-1; i = i + 2 {
+		iv, _ := strconv.Atoi(string(ay[i].([]byte)))
+		assert.True(t, iv > 1)
+		f2iv, _ := strconv.Atoi(string(ay[i+1].([]byte)))
+		assert.Equal(t, iv+20, f2iv)
+	}
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f>1 and test_f<10\""))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 8, len(ay))
+	for _, v := range ay {
+		iv, _ := strconv.Atoi(string(v.([]byte)))
+		assert.True(t, iv > 1)
+		assert.True(t, iv < 10)
 	}
 }

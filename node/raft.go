@@ -891,24 +891,38 @@ func (self memberSorter) Len() int {
 	return len(self)
 }
 
-func (rc *raftNode) GetMembers() []*common.MemberInfo {
+func (rc *raftNode) GetMembersAndLeader() ([]*common.MemberInfo, *common.MemberInfo) {
 	rc.memMutex.Lock()
+	l := rc.Lead()
+	var lm *common.MemberInfo
 	mems := make(memberSorter, 0, len(rc.members))
-	for id, m := range rc.members {
-		m.ID = id
-		mems = append(mems, m)
+	for _, m := range rc.members {
+		tmp := *m
+		mems = append(mems, &tmp)
+		if tmp.ID == l {
+			lm = &tmp
+		}
 	}
 	rc.memMutex.Unlock()
 	sort.Sort(memberSorter(mems))
+	return mems, lm
+}
+
+func (rc *raftNode) GetMembers() []*common.MemberInfo {
+	mems, _ := rc.GetMembersAndLeader()
 	return mems
 }
 
 func (rc *raftNode) GetLeadMember() *common.MemberInfo {
+	var tmp common.MemberInfo
 	rc.memMutex.Lock()
 	m, ok := rc.members[rc.Lead()]
+	if ok {
+		tmp = *m
+	}
 	rc.memMutex.Unlock()
 	if ok {
-		return m
+		return &tmp
 	}
 	return nil
 }
@@ -985,6 +999,11 @@ func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 	case <-stopC:
 		return
 	}
+}
+
+func (rc *raftNode) Debugf(f string, args ...interface{}) {
+	msg := fmt.Sprintf(f, args...)
+	nodeLog.DebugDepth(1, fmt.Sprintf("%v: %s", rc.Descrp(), msg))
 }
 
 func (rc *raftNode) Infof(f string, args ...interface{}) {

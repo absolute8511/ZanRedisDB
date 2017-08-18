@@ -12,6 +12,7 @@
 		RequestHeader
 		InternalRaftRequest
 		BatchInternalRaftRequest
+		SchemaChange
 */
 package node
 
@@ -27,6 +28,42 @@ import github_com_gogo_protobuf_proto "github.com/gogo/protobuf/proto"
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
 var _ = math.Inf
+
+type SchemaChangeType int32
+
+const (
+	SchemaChangeAddHsetIndex    SchemaChangeType = 0
+	SchemaChangeUpdateHsetIndex SchemaChangeType = 1
+	SchemaChangeDeleteHsetIndex SchemaChangeType = 2
+)
+
+var SchemaChangeType_name = map[int32]string{
+	0: "SchemaChangeAddHsetIndex",
+	1: "SchemaChangeUpdateHsetIndex",
+	2: "SchemaChangeDeleteHsetIndex",
+}
+var SchemaChangeType_value = map[string]int32{
+	"SchemaChangeAddHsetIndex":    0,
+	"SchemaChangeUpdateHsetIndex": 1,
+	"SchemaChangeDeleteHsetIndex": 2,
+}
+
+func (x SchemaChangeType) Enum() *SchemaChangeType {
+	p := new(SchemaChangeType)
+	*p = x
+	return p
+}
+func (x SchemaChangeType) String() string {
+	return proto.EnumName(SchemaChangeType_name, int32(x))
+}
+func (x *SchemaChangeType) UnmarshalJSON(data []byte) error {
+	value, err := proto.UnmarshalJSONEnum(SchemaChangeType_value, data, "SchemaChangeType")
+	if err != nil {
+		return err
+	}
+	*x = SchemaChangeType(value)
+	return nil
+}
 
 type RequestHeader struct {
 	ID               uint64 `protobuf:"varint,1,opt" json:"ID"`
@@ -59,7 +96,19 @@ func (m *BatchInternalRaftRequest) Reset()         { *m = BatchInternalRaftReque
 func (m *BatchInternalRaftRequest) String() string { return proto.CompactTextString(m) }
 func (*BatchInternalRaftRequest) ProtoMessage()    {}
 
+type SchemaChange struct {
+	Type             SchemaChangeType `protobuf:"varint,1,opt,enum=node.SchemaChangeType" json:"Type"`
+	Table            string           `protobuf:"bytes,2,opt" json:"Table"`
+	SchemaData       []byte           `protobuf:"bytes,3,opt" json:"SchemaData"`
+	XXX_unrecognized []byte           `json:"-"`
+}
+
+func (m *SchemaChange) Reset()         { *m = SchemaChange{} }
+func (m *SchemaChange) String() string { return proto.CompactTextString(m) }
+func (*SchemaChange) ProtoMessage()    {}
+
 func init() {
+	proto.RegisterEnum("node.SchemaChangeType", SchemaChangeType_name, SchemaChangeType_value)
 }
 func (m *RequestHeader) Unmarshal(data []byte) error {
 	l := len(data)
@@ -321,6 +370,107 @@ func (m *BatchInternalRaftRequest) Unmarshal(data []byte) error {
 	}
 	return nil
 }
+func (m *SchemaChange) Unmarshal(data []byte) error {
+	l := len(data)
+	index := 0
+	for index < l {
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if index >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := data[index]
+			index++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Type", wireType)
+			}
+			for shift := uint(0); ; shift += 7 {
+				if index >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[index]
+				index++
+				m.Type |= (SchemaChangeType(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Table", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if index >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[index]
+				index++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			postIndex := index + int(stringLen)
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Table = string(data[index:postIndex])
+			index = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SchemaData", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if index >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[index]
+				index++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			postIndex := index + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SchemaData = append([]byte{}, data[index:postIndex]...)
+			index = postIndex
+		default:
+			var sizeOfWire int
+			for {
+				sizeOfWire++
+				wire >>= 7
+				if wire == 0 {
+					break
+				}
+			}
+			index -= sizeOfWire
+			skippy, err := github_com_gogo_protobuf_proto.Skip(data[index:])
+			if err != nil {
+				return err
+			}
+			if (index + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, data[index:index+skippy]...)
+			index += skippy
+		}
+	}
+	return nil
+}
 func (m *RequestHeader) Size() (n int) {
 	var l int
 	_ = l
@@ -359,6 +509,22 @@ func (m *BatchInternalRaftRequest) Size() (n int) {
 			l = e.Size()
 			n += 1 + l + sovRaftInternal(uint64(l))
 		}
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
+func (m *SchemaChange) Size() (n int) {
+	var l int
+	_ = l
+	n += 1 + sovRaftInternal(uint64(m.Type))
+	l = len(m.Table)
+	n += 1 + l + sovRaftInternal(uint64(l))
+	if m.SchemaData != nil {
+		l = len(m.SchemaData)
+		n += 1 + l + sovRaftInternal(uint64(l))
 	}
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
@@ -475,6 +641,40 @@ func (m *BatchInternalRaftRequest) MarshalTo(data []byte) (n int, err error) {
 			}
 			i += n
 		}
+	}
+	if m.XXX_unrecognized != nil {
+		i += copy(data[i:], m.XXX_unrecognized)
+	}
+	return i, nil
+}
+
+func (m *SchemaChange) Marshal() (data []byte, err error) {
+	size := m.Size()
+	data = make([]byte, size)
+	n, err := m.MarshalTo(data)
+	if err != nil {
+		return nil, err
+	}
+	return data[:n], nil
+}
+
+func (m *SchemaChange) MarshalTo(data []byte) (n int, err error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	data[i] = 0x8
+	i++
+	i = encodeVarintRaftInternal(data, i, uint64(m.Type))
+	data[i] = 0x12
+	i++
+	i = encodeVarintRaftInternal(data, i, uint64(len(m.Table)))
+	i += copy(data[i:], m.Table)
+	if m.SchemaData != nil {
+		data[i] = 0x1a
+		i++
+		i = encodeVarintRaftInternal(data, i, uint64(len(m.SchemaData)))
+		i += copy(data[i:], m.SchemaData)
 	}
 	if m.XXX_unrecognized != nil {
 		i += copy(data[i:], m.XXX_unrecognized)

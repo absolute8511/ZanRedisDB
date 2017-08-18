@@ -53,15 +53,14 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.Replicator = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	nsConf.ExpirationPolicy = "consistency_deletion"
 	kv := NewServer(kvOpts)
-	nsNode, err := kv.InitKVNamespace(1, nsConf, false)
-	if err != nil {
+	if _, err := kv.InitKVNamespace(1, nsConf, false); err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}
 
 	kv.Start()
 	time.Sleep(time.Second)
-	nsNode.StartTTLChecker()
 	return kv, redisport, tmpDir
 }
 
@@ -252,7 +251,7 @@ func TestKVBatch(t *testing.T) {
 		node.SetLogLevel(int(common.LOG_DETAIL))
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
@@ -1919,11 +1918,11 @@ func TestZSetLex(t *testing.T) {
 func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 	a, err := goredis.Strings(ay, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 
 	if len(a) != len(values) {
-		t.Fatal(fmt.Sprintf("len %d != %d", len(a), len(values)))
+		t.Error(fmt.Sprintf("len %d != %d", len(a), len(values)))
 	}
 	for i, v := range a {
 		vv := fmt.Sprintf("%v", values[i])
@@ -1945,7 +1944,7 @@ func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 
 func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"", tp, "count", 5)); err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
 		//} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNDZOQT09Ow==" {

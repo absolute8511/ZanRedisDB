@@ -7,6 +7,7 @@ option (gogoproto.marshaler_all) = true;
 option (gogoproto.sizer_all) = true;
 option (gogoproto.unmarshaler_all) = true;
 option (gogoproto.goproto_getters_all) = false;
+option (gogoproto.goproto_enum_prefix_all) = false;
 
 message RequestHeader {
     uint64 ID = 1 [(gogoproto.nullable) = false]; 
@@ -22,4 +23,16 @@ message InternalRaftRequest {
 message BatchInternalRaftRequest {
     int32 req_num = 1 [(gogoproto.nullable) = false];
     repeated InternalRaftRequest reqs = 2;
+}
+
+enum SchemaChangeType {
+    SchemaChangeAddHsetIndex = 0;
+    SchemaChangeUpdateHsetIndex = 1;
+    SchemaChangeDeleteHsetIndex = 2;
+}
+
+message SchemaChange {
+    SchemaChangeType Type = 1[(gogoproto.nullable) = false];
+    string Table = 2[(gogoproto.nullable) = false];
+    bytes SchemaData = 3[(gogoproto.nullable) = false];
 }

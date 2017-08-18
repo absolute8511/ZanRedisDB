@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	. "github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	node "github.com/absolute8511/ZanRedisDB/node"
 	"net"
 	"path/filepath"
 	"sort"
@@ -14,11 +11,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/common"
+	node "github.com/absolute8511/ZanRedisDB/node"
 )
 
 var (
 	MaxRetryWait         = time.Second * 3
-	ErrNamespaceNotReady = NewCoordErr("namespace node is not ready", CoordLocalErr)
+	ErrNamespaceNotReady = cluster.NewCoordErr("namespace node is not ready", cluster.CoordLocalErr)
 	ErrNamespaceInvalid  = errors.New("namespace name is invalid")
 	ErrNamespaceNotFound = errors.New("namespace is not found")
 )
@@ -40,12 +41,22 @@ func GetNamespacePartitionBasePath(rootPath string, namespace string, partition 
 	return filepath.Join(rootPath, namespace)
 }
 
+type PartitionList []cluster.PartitionMetaInfo
+
+func (pl PartitionList) Len() int { return len(pl) }
+func (pl PartitionList) Less(i, j int) bool {
+	return pl[i].Partition < pl[j].Partition
+}
+func (pl PartitionList) Swap(i, j int) {
+	pl[i], pl[j] = pl[j], pl[i]
+}
+
 type DataCoordinator struct {
 	clusterKey       string
-	register         DataNodeRegister
+	register         cluster.DataNodeRegister
 	pdMutex          sync.Mutex
-	pdLeader         NodeInfo
-	myNode           NodeInfo
+	pdLeader         cluster.NodeInfo
+	myNode           cluster.NodeInfo
 	stopChan         chan struct{}
 	tryCheckUnsynced chan bool
 	wg               sync.WaitGroup
@@ -54,7 +65,7 @@ type DataCoordinator struct {
 	localNSMgr       *node.NamespaceMgr
 }
 
-func NewDataCoordinator(cluster string, nodeInfo *NodeInfo, nsMgr *node.NamespaceMgr) *DataCoordinator {
+func NewDataCoordinator(cluster string, nodeInfo *cluster.NodeInfo, nsMgr *node.NamespaceMgr) *DataCoordinator {
 	coord := &DataCoordinator{
 		clusterKey:       cluster,
 		register:         nil,
@@ -67,90 +78,90 @@ func NewDataCoordinator(cluster string, nodeInfo *NodeInfo, nsMgr *node.Namespac
 	return coord
 }
 
-func (self *DataCoordinator) GetMyID() string {
-	return self.myNode.GetID()
+func (dc *DataCoordinator) GetMyID() string {
+	return dc.myNode.GetID()
 }
 
-func (self *DataCoordinator) GetMyRegID() uint64 {
-	return self.myNode.RegID
+func (dc *DataCoordinator) GetMyRegID() uint64 {
+	return dc.myNode.RegID
 }
 
-func (self *DataCoordinator) SetRegister(l DataNodeRegister) error {
-	self.register = l
-	if self.register != nil {
-		self.register.InitClusterID(self.clusterKey)
-		if self.myNode.RegID <= 0 {
+func (dc *DataCoordinator) SetRegister(l cluster.DataNodeRegister) error {
+	dc.register = l
+	if dc.register != nil {
+		dc.register.InitClusterID(dc.clusterKey)
+		if dc.myNode.RegID <= 0 {
 			var err error
-			self.myNode.RegID, err = self.register.NewRegisterNodeID()
+			dc.myNode.RegID, err = dc.register.NewRegisterNodeID()
 			if err != nil {
-				CoordLog().Errorf("failed to init node register id: %v", err)
+				cluster.CoordLog().Errorf("failed to init node register id: %v", err)
 				return err
 			}
-			err = self.localNSMgr.SaveMachineRegID(self.myNode.RegID)
+			err = dc.localNSMgr.SaveMachineRegID(dc.myNode.RegID)
 			if err != nil {
-				CoordLog().Errorf("failed to save register id: %v", err)
+				cluster.CoordLog().Errorf("failed to save register id: %v", err)
 				return err
 			}
 		}
-		self.myNode.ID = GenNodeID(&self.myNode, "datanode")
-		CoordLog().Infof("node start with register id: %v", self.myNode.RegID)
+		dc.myNode.ID = cluster.GenNodeID(&dc.myNode, "datanode")
+		cluster.CoordLog().Infof("node start with register id: %v", dc.myNode.RegID)
 	}
 	return nil
 }
 
-func (self *DataCoordinator) Start() error {
-	if self.register != nil {
-		if self.myNode.RegID <= 0 {
-			CoordLog().Errorf("invalid register id: %v", self.myNode.RegID)
+func (dc *DataCoordinator) Start() error {
+	if dc.register != nil {
+		if dc.myNode.RegID <= 0 {
+			cluster.CoordLog().Errorf("invalid register id: %v", dc.myNode.RegID)
 			return errors.New("invalid register id for data node")
 		}
-		err := self.register.Register(&self.myNode)
+		err := dc.register.Register(&dc.myNode)
 		if err != nil {
-			CoordLog().Warningf("failed to register coordinator: %v", err)
+			cluster.CoordLog().Warningf("failed to register coordinator: %v", err)
 			return err
 		}
 	}
-	if self.localNSMgr != nil {
-		self.localNSMgr.Start()
+	if dc.localNSMgr != nil {
+		dc.localNSMgr.Start()
 	}
-	self.wg.Add(1)
-	go self.watchPD()
+	dc.wg.Add(1)
+	go dc.watchPD()
 
-	err := self.loadLocalNamespaceData()
+	err := dc.loadLocalNamespaceData()
 	if err != nil {
-		close(self.stopChan)
+		close(dc.stopChan)
 		return err
 	}
 
-	self.wg.Add(1)
-	go self.checkForUnsyncedNamespaces()
+	dc.wg.Add(1)
+	go dc.checkForUnsyncedNamespaces()
 	return nil
 }
 
-func (self *DataCoordinator) Stop() {
-	if !atomic.CompareAndSwapInt32(&self.stopping, 0, 1) {
+func (dc *DataCoordinator) Stop() {
+	if !atomic.CompareAndSwapInt32(&dc.stopping, 0, 1) {
 		return
 	}
-	self.prepareLeavingCluster()
-	close(self.stopChan)
-	self.wg.Wait()
+	dc.prepareLeavingCluster()
+	close(dc.stopChan)
+	dc.wg.Wait()
 }
 
-func (self *DataCoordinator) GetCurrentPD() NodeInfo {
-	self.pdMutex.Lock()
-	defer self.pdMutex.Unlock()
-	return self.pdLeader
+func (dc *DataCoordinator) GetCurrentPD() cluster.NodeInfo {
+	dc.pdMutex.Lock()
+	defer dc.pdMutex.Unlock()
+	return dc.pdLeader
 }
 
-func (self *DataCoordinator) GetAllPDNodes() ([]NodeInfo, error) {
-	return self.register.GetAllPDNodes()
+func (dc *DataCoordinator) GetAllPDNodes() ([]cluster.NodeInfo, error) {
+	return dc.register.GetAllPDNodes()
 }
 
-func (self *DataCoordinator) watchPD() {
-	defer self.wg.Done()
-	leaderChan := make(chan *NodeInfo, 1)
-	if self.register != nil {
-		go self.register.WatchPDLeader(leaderChan, self.stopChan)
+func (dc *DataCoordinator) watchPD() {
+	defer dc.wg.Done()
+	leaderChan := make(chan *cluster.NodeInfo, 1)
+	if dc.register != nil {
+		go dc.register.WatchPDLeader(leaderChan, dc.stopChan)
 	} else {
 		return
 	}
@@ -160,45 +171,35 @@ func (self *DataCoordinator) watchPD() {
 			if !ok {
 				return
 			}
-			self.pdMutex.Lock()
-			if n.GetID() != self.pdLeader.GetID() {
-				CoordLog().Infof("pd leader changed from %v to %v", self.pdLeader, n)
-				self.pdLeader = *n
+			dc.pdMutex.Lock()
+			if n.GetID() != dc.pdLeader.GetID() {
+				cluster.CoordLog().Infof("pd leader changed from %v to %v", dc.pdLeader, n)
+				dc.pdLeader = *n
 			}
-			self.pdMutex.Unlock()
+			dc.pdMutex.Unlock()
 		}
 	}
 }
 
-func (self *DataCoordinator) checkLocalNamespaceMagicCode(nsInfo *PartitionMetaInfo, tryFix bool) error {
+func (dc *DataCoordinator) checkLocalNamespaceMagicCode(nsInfo *cluster.PartitionMetaInfo, tryFix bool) error {
 	if nsInfo.MagicCode <= 0 {
 		return nil
 	}
-	err := self.localNSMgr.CheckMagicCode(nsInfo.GetDesp(), nsInfo.MagicCode, tryFix)
+	err := dc.localNSMgr.CheckMagicCode(nsInfo.GetDesp(), nsInfo.MagicCode, tryFix)
 	if err != nil {
-		CoordLog().Infof("namespace %v check magic code error: %v", nsInfo.GetDesp(), err)
+		cluster.CoordLog().Infof("namespace %v check magic code error: %v", nsInfo.GetDesp(), err)
 		return err
 	}
 	return nil
 }
 
-type PartitionList []PartitionMetaInfo
-
-func (self PartitionList) Len() int { return len(self) }
-func (self PartitionList) Less(i, j int) bool {
-	return self[i].Partition < self[j].Partition
-}
-func (self PartitionList) Swap(i, j int) {
-	self[i], self[j] = self[j], self[i]
-}
-
-func (self *DataCoordinator) loadLocalNamespaceData() error {
-	if self.localNSMgr == nil {
+func (dc *DataCoordinator) loadLocalNamespaceData() error {
+	if dc.localNSMgr == nil {
 		return nil
 	}
-	namespaceMap, _, err := self.register.GetAllNamespaces()
+	namespaceMap, _, err := dc.register.GetAllNamespaces()
 	if err != nil {
-		if err == ErrKeyNotFound {
+		if err == cluster.ErrKeyNotFound {
 			return nil
 		}
 		return err
@@ -211,48 +212,48 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 		}
 		sort.Sort(sortedParts)
 		for _, nsInfo := range sortedParts {
-			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
-			shouldLoad := self.isNamespaceShouldStart(nsInfo)
+			localNamespace := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+			shouldLoad := dc.isNamespaceShouldStart(nsInfo)
 			if !shouldLoad {
 				if len(nsInfo.GetISR()) >= nsInfo.Replica && localNamespace != nil {
-					self.removeLocalNamespaceFromRaft(localNamespace, false)
+					dc.removeLocalNamespaceFromRaft(localNamespace, false)
 				}
 				continue
 			}
 			if localNamespace != nil {
 				// already loaded
-				joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace, false)
-				if joinErr != nil && joinErr != ErrNamespaceConfInvalid {
+				joinErr := dc.ensureJoinNamespaceGroup(nsInfo, localNamespace, false)
+				if joinErr != nil && joinErr != cluster.ErrNamespaceConfInvalid {
 					// we ensure join group as order for partitions
 					break
 				}
 				continue
 			}
-			CoordLog().Infof("loading namespace: %v", nsInfo.GetDesp())
+			cluster.CoordLog().Infof("loading namespace: %v", nsInfo.GetDesp())
 			if namespaceName == "" {
 				continue
 			}
-			checkErr := self.checkLocalNamespaceMagicCode(&nsInfo, true)
+			checkErr := dc.checkLocalNamespaceMagicCode(&nsInfo, true)
 			if checkErr != nil {
-				CoordLog().Errorf("failed to check namespace :%v, err:%v", nsInfo.GetDesp(), checkErr)
+				cluster.CoordLog().Errorf("failed to check namespace :%v, err:%v", nsInfo.GetDesp(), checkErr)
 				continue
 			}
 
-			localNamespace, coordErr := self.updateLocalNamespace(&nsInfo, false)
+			localNamespace, coordErr := dc.updateLocalNamespace(&nsInfo, false)
 			if coordErr != nil {
-				CoordLog().Errorf("failed to init/update local namespace %v: %v", nsInfo.GetDesp(), coordErr)
+				cluster.CoordLog().Errorf("failed to init/update local namespace %v: %v", nsInfo.GetDesp(), coordErr)
 				continue
 			}
 
 			dyConf := &node.NamespaceDynamicConf{}
 			localNamespace.SetDynamicInfo(*dyConf)
-			localErr := self.checkAndFixLocalNamespaceData(&nsInfo, localNamespace)
+			localErr := dc.checkAndFixLocalNamespaceData(&nsInfo, localNamespace)
 			if localErr != nil {
-				CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)
+				cluster.CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)
 				localNamespace.SetDataFixState(true)
 			}
-			joinErr := self.ensureJoinNamespaceGroup(nsInfo, localNamespace, true)
-			if joinErr != nil && joinErr != ErrNamespaceConfInvalid {
+			joinErr := dc.ensureJoinNamespaceGroup(nsInfo, localNamespace, true)
+			if joinErr != nil && joinErr != cluster.ErrNamespaceConfInvalid {
 				// we ensure join group as order for partitions
 				break
 			}
@@ -261,19 +262,19 @@ func (self *DataCoordinator) loadLocalNamespaceData() error {
 	return nil
 }
 
-func (self *DataCoordinator) isMeInRaftGroup(nsInfo *PartitionMetaInfo) (bool, error) {
+func (dc *DataCoordinator) isMeInRaftGroup(nsInfo *cluster.PartitionMetaInfo) (bool, error) {
 	var lastErr error
 	for _, remoteNode := range nsInfo.GetISR() {
-		if remoteNode == self.GetMyID() {
+		if remoteNode == dc.GetMyID() {
 			continue
 		}
-		nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+		nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(remoteNode)
 		var rsp []*common.MemberInfo
 		code, err := common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
 			nil, time.Second*3, &rsp)
 		if err != nil {
-			CoordLog().Infof("failed to get members from %v for namespace: %v, %v", nip, nsInfo.GetDesp(), err)
+			cluster.CoordLog().Infof("failed to get members from %v for namespace: %v, %v", nip, nsInfo.GetDesp(), err)
 			if code == 404 {
 				lastErr = ErrNamespaceNotFound
 			} else {
@@ -283,8 +284,8 @@ func (self *DataCoordinator) isMeInRaftGroup(nsInfo *PartitionMetaInfo) (bool, e
 		}
 
 		for _, m := range rsp {
-			if m.NodeID == self.GetMyRegID() && m.ID == nsInfo.RaftIDs[self.GetMyID()] {
-				CoordLog().Infof("from %v for namespace: %v, node is still in raft: %v", nip, nsInfo.GetDesp(), m)
+			if m.NodeID == dc.GetMyRegID() && m.ID == nsInfo.RaftIDs[dc.GetMyID()] {
+				cluster.CoordLog().Infof("from %v for namespace: %v, node is still in raft: %v", nip, nsInfo.GetDesp(), m)
 				return true, nil
 			}
 		}
@@ -292,41 +293,41 @@ func (self *DataCoordinator) isMeInRaftGroup(nsInfo *PartitionMetaInfo) (bool, e
 	return false, lastErr
 }
 
-func (self *DataCoordinator) isNamespaceShouldStart(nsInfo PartitionMetaInfo) bool {
+func (dc *DataCoordinator) isNamespaceShouldStart(nsInfo cluster.PartitionMetaInfo) bool {
 	// it may happen that the node marked as removing can not be removed because
 	// the raft group has not enough quorum to do the proposal to change the configure.
 	// In this way we need start the removing node to join the raft group and then
 	// the leader can remove the node from the raft group, and then we can safely remove
 	// the removing node finally
-	shouldLoad := FindSlice(nsInfo.RaftNodes, self.GetMyID()) != -1
+	shouldLoad := cluster.FindSlice(nsInfo.RaftNodes, dc.GetMyID()) != -1
 	if !shouldLoad {
 		return false
 	}
-	rm, ok := nsInfo.Removings[self.GetMyID()]
+	rm, ok := nsInfo.Removings[dc.GetMyID()]
 	if !ok {
 		return true
 	}
-	if rm.RemoveReplicaID != nsInfo.RaftIDs[self.GetMyID()] {
+	if rm.RemoveReplicaID != nsInfo.RaftIDs[dc.GetMyID()] {
 		return true
 	}
 
-	inRaft, err := self.isMeInRaftGroup(&nsInfo)
+	inRaft, err := dc.isMeInRaftGroup(&nsInfo)
 	if inRaft || err == ErrNamespaceNotFound {
-		CoordLog().Infof("removing node %v-%v should join namespace %v since still in raft",
-			self.GetMyID(), rm.RemoveReplicaID, nsInfo.GetDesp())
+		cluster.CoordLog().Infof("removing node %v-%v should join namespace %v since still in raft",
+			dc.GetMyID(), rm.RemoveReplicaID, nsInfo.GetDesp())
 		return true
 	}
 	return false
 }
 
-func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, localNamespace *node.NamespaceNode) bool {
+func (dc *DataCoordinator) isNamespaceShouldStop(nsInfo cluster.PartitionMetaInfo, localNamespace *node.NamespaceNode) bool {
 	// removing node can stop local raft only when all the other members
 	// are notified to remove this node
 	// Mostly, the remove node proposal will handle the raft node stop, however
 	// there are some situations to be checked here.
 	inMeta := false
 	for _, nid := range nsInfo.RaftNodes {
-		if nid == self.GetMyID() {
+		if nid == dc.GetMyID() {
 			replicaID := nsInfo.RaftIDs[nid]
 			if replicaID == localNamespace.GetRaftID() {
 				inMeta = true
@@ -336,19 +337,19 @@ func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, loc
 	}
 	var rmID uint64
 	if inMeta {
-		rm, ok := nsInfo.Removings[self.GetMyID()]
+		rm, ok := nsInfo.Removings[dc.GetMyID()]
 		if !ok {
 			return false
 		}
 		rmID = rm.RemoveReplicaID
-		if rm.RemoveReplicaID != nsInfo.RaftIDs[self.GetMyID()] {
+		if rm.RemoveReplicaID != nsInfo.RaftIDs[dc.GetMyID()] {
 			return false
 		}
 	} else {
-		CoordLog().Infof("no any meta info for this namespace: %v", nsInfo.GetDesp(), localNamespace.GetRaftID())
+		cluster.CoordLog().Infof("no any meta info for this namespace: %v", nsInfo.GetDesp(), localNamespace.GetRaftID())
 	}
 
-	inRaft, err := self.isMeInRaftGroup(&nsInfo)
+	inRaft, err := dc.isMeInRaftGroup(&nsInfo)
 	if inRaft || err != nil {
 		return false
 	}
@@ -358,60 +359,60 @@ func (self *DataCoordinator) isNamespaceShouldStop(nsInfo PartitionMetaInfo, loc
 			return false
 		}
 	}
-	CoordLog().Infof("removing node %v-%v should stop namespace %v (replica %v) since not in any raft group anymore",
-		self.GetMyID(), rmID, nsInfo.GetDesp(), localNamespace.GetRaftID())
+	cluster.CoordLog().Infof("removing node %v-%v should stop namespace %v (replica %v) since not in any raft group anymore",
+		dc.GetMyID(), rmID, nsInfo.GetDesp(), localNamespace.GetRaftID())
 	return true
 }
 
-func (self *DataCoordinator) checkAndFixLocalNamespaceData(nsInfo *PartitionMetaInfo, localNamespace *node.NamespaceNode) error {
+func (dc *DataCoordinator) checkAndFixLocalNamespaceData(nsInfo *cluster.PartitionMetaInfo, localNamespace *node.NamespaceNode) error {
 	return nil
 }
 
-func (self *DataCoordinator) addNamespaceRaftMember(nsInfo *PartitionMetaInfo, m *common.MemberInfo) {
+func (dc *DataCoordinator) addNamespaceRaftMember(nsInfo *cluster.PartitionMetaInfo, m *common.MemberInfo) {
 	for nid, removing := range nsInfo.Removings {
-		if m.ID == removing.RemoveReplicaID && m.NodeID == ExtractRegIDFromGenID(nid) {
-			CoordLog().Infof("raft member %v is marked as removing in meta: %v, ignore add raft member", m, nsInfo.Removings)
+		if m.ID == removing.RemoveReplicaID && m.NodeID == cluster.ExtractRegIDFromGenID(nid) {
+			cluster.CoordLog().Infof("raft member %v is marked as removing in meta: %v, ignore add raft member", m, nsInfo.Removings)
 			return
 		}
 	}
-	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+	nsNode := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
-		CoordLog().Infof("namespace %v not found while add member", nsInfo.GetDesp())
+		cluster.CoordLog().Infof("namespace %v not found while add member", nsInfo.GetDesp())
 		return
 	}
 	err := nsNode.Node.ProposeAddMember(*m)
 	if err != nil {
-		CoordLog().Infof("%v propose add %v failed: %v", nsInfo.GetDesp(), m, err)
+		cluster.CoordLog().Infof("%v propose add %v failed: %v", nsInfo.GetDesp(), m, err)
 	} else {
-		CoordLog().Infof("namespace %v propose add member %v", nsInfo.GetDesp(), m)
+		cluster.CoordLog().Infof("namespace %v propose add member %v", nsInfo.GetDesp(), m)
 	}
 }
 
-func (self *DataCoordinator) removeNamespaceRaftMember(nsInfo *PartitionMetaInfo, m *common.MemberInfo) {
-	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+func (dc *DataCoordinator) removeNamespaceRaftMember(nsInfo *cluster.PartitionMetaInfo, m *common.MemberInfo) {
+	nsNode := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
-		CoordLog().Infof("namespace %v not found while remove member", nsInfo.GetDesp())
+		cluster.CoordLog().Infof("namespace %v not found while remove member", nsInfo.GetDesp())
 		return
 	}
 
 	err := nsNode.Node.ProposeRemoveMember(*m)
 	if err != nil {
-		CoordLog().Infof("propose remove %v failed: %v", m, err)
+		cluster.CoordLog().Infof("propose remove %v failed: %v", m, err)
 	} else {
-		CoordLog().Infof("namespace %v propose remove member %v", nsInfo.GetDesp(), m)
+		cluster.CoordLog().Infof("namespace %v propose remove member %v", nsInfo.GetDesp(), m)
 	}
 }
 
-func (self *DataCoordinator) getNamespaceRaftMembers(nsInfo *PartitionMetaInfo) []*common.MemberInfo {
-	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+func (dc *DataCoordinator) getNamespaceRaftMembers(nsInfo *cluster.PartitionMetaInfo) []*common.MemberInfo {
+	nsNode := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
 		return nil
 	}
 	return nsNode.Node.GetMembers()
 }
 
-func (self *DataCoordinator) getNamespaceRaftLeader(nsInfo *PartitionMetaInfo) uint64 {
-	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+func (dc *DataCoordinator) getNamespaceRaftLeader(nsInfo *cluster.PartitionMetaInfo) uint64 {
+	nsNode := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
 		return 0
 	}
@@ -422,99 +423,126 @@ func (self *DataCoordinator) getNamespaceRaftLeader(nsInfo *PartitionMetaInfo) u
 	return m.NodeID
 }
 
-func (self *DataCoordinator) transferMyNamespaceLeader(nsInfo *PartitionMetaInfo, nid string) {
-	nsNode := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+func (dc *DataCoordinator) transferMyNamespaceLeader(nsInfo *cluster.PartitionMetaInfo, nid string) {
+	nsNode := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
 		return
 	}
 	toRaftID, ok := nsInfo.RaftIDs[nid]
 	if !ok {
-		CoordLog().Warningf("transfer namespace %v leader to %v failed for missing raft id: %v",
+		cluster.CoordLog().Warningf("transfer namespace %v leader to %v failed for missing raft id: %v",
 			nsInfo.GetDesp(), nid, nsInfo.RaftIDs)
 		return
 	}
-	CoordLog().Infof("begin transfer namespace %v leader to %v", nsInfo.GetDesp(), nid)
-	err := nsNode.TransferMyLeader(ExtractRegIDFromGenID(nid), toRaftID)
+	cluster.CoordLog().Infof("begin transfer namespace %v leader to %v", nsInfo.GetDesp(), nid)
+	err := nsNode.TransferMyLeader(cluster.ExtractRegIDFromGenID(nid), toRaftID)
 	if err != nil {
-		CoordLog().Infof("failed to transfer namespace %v leader to %v: %v", nsInfo.GetDesp(), nid, err)
+		cluster.CoordLog().Infof("failed to transfer namespace %v leader to %v: %v", nsInfo.GetDesp(), nid, err)
 	}
 }
 
-func (self *DataCoordinator) checkForUnsyncedNamespaces() {
+func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 	ticker := time.NewTicker(time.Minute * 5)
-	defer self.wg.Done()
+	defer dc.wg.Done()
 	type pendingRemoveInfo struct {
 		ts time.Time
 		m  common.MemberInfo
 	}
 	pendingRemovings := make(map[string]map[uint64]pendingRemoveInfo)
 	doWork := func() {
-		if atomic.LoadInt32(&self.stopping) == 1 {
+		if atomic.LoadInt32(&dc.stopping) == 1 {
 			return
 		}
-		CoordLog().Debugf("check for namespace sync...")
+		cluster.CoordLog().Debugf("check for namespace sync...")
 		// try load local namespace if any namespace raft group changed
-		self.loadLocalNamespaceData()
+		dc.loadLocalNamespaceData()
 
 		// check local namespaces with cluster to remove the unneed data
-		tmpChecks := self.localNSMgr.GetNamespaces()
+		tmpChecks := dc.localNSMgr.GetNamespaces()
+		allIndexSchemas := make(map[string]map[string]*common.IndexSchema)
+		allNamespaces, _, err := dc.register.GetAllNamespaces()
+		if err != nil {
+			return
+		}
+		for ns, parts := range allNamespaces {
+			tableSchemas := make(map[string]*common.IndexSchema)
+			schemas, err := dc.register.GetNamespaceSchemas(ns)
+			if err != nil {
+				if err != cluster.ErrKeyNotFound {
+					cluster.CoordLog().Infof("get schema info failed: %v", err)
+				}
+				continue
+			}
+			if len(parts) == 0 || len(parts) != parts[0].PartitionNum {
+				continue
+			}
+			for table, schemaData := range schemas {
+				var indexes common.IndexSchema
+				err := json.Unmarshal(schemaData.Schema, &indexes)
+				if err != nil {
+					cluster.CoordLog().Infof("unmarshal schema data failed: %v", err)
+					continue
+				}
+				tableSchemas[table] = &indexes
+			}
+			allIndexSchemas[ns] = tableSchemas
+		}
 		for name, localNamespace := range tmpChecks {
 			namespace, pid := common.GetNamespaceAndPartition(name)
 			if namespace == "" {
-				CoordLog().Warningf("namespace invalid: %v", name)
+				cluster.CoordLog().Warningf("namespace invalid: %v", name)
 				continue
 			}
-			namespaceMeta, err := self.register.GetNamespacePartInfo(namespace, pid)
+			namespaceMeta, err := dc.register.GetNamespacePartInfo(namespace, pid)
 			if err != nil {
-				if err == ErrKeyNotFound {
-					CoordLog().Infof("the namespace should be clean since not found in register: %v", name)
-					_, err = self.register.GetNamespaceMetaInfo(namespace)
-					if err == ErrKeyNotFound {
-						self.removeLocalNamespaceFromRaft(localNamespace, true)
-						self.forceRemoveLocalNamespace(localNamespace)
+				if err == cluster.ErrKeyNotFound {
+					cluster.CoordLog().Infof("the namespace should be clean since not found in register: %v", name)
+					_, err = dc.register.GetNamespaceMetaInfo(namespace)
+					if err == cluster.ErrKeyNotFound {
+						dc.forceRemoveLocalNamespace(localNamespace)
 					}
 				}
-				CoordLog().Infof("got namespace %v meta failed: %v", name, err)
-				go self.tryCheckNamespaces()
+				cluster.CoordLog().Infof("got namespace %v meta failed: %v", name, err)
+				go dc.tryCheckNamespaces()
 				continue
 			}
-			if self.isNamespaceShouldStop(*namespaceMeta, localNamespace) {
-				self.forceRemoveLocalNamespace(localNamespace)
+			if dc.isNamespaceShouldStop(*namespaceMeta, localNamespace) {
+				dc.forceRemoveLocalNamespace(localNamespace)
 				continue
 			}
-			leader := self.getNamespaceRaftLeader(namespaceMeta)
+			leader := dc.getNamespaceRaftLeader(namespaceMeta)
 			if leader == 0 {
 				continue
 			}
 			isrList := namespaceMeta.GetISR()
 			localRID := localNamespace.GetRaftID()
 
-			if localRID != namespaceMeta.RaftIDs[self.myNode.GetID()] {
+			if localRID != namespaceMeta.RaftIDs[dc.myNode.GetID()] {
 				if len(isrList) > 0 {
-					CoordLog().Infof("the namespace should be clean : %v", namespaceMeta)
-					self.removeLocalNamespaceFromRaft(localNamespace, true)
+					cluster.CoordLog().Infof("the namespace should be clean : %v", namespaceMeta)
+					dc.removeLocalNamespaceFromRaft(localNamespace, true)
 				}
 				continue
 			}
 			// only leader check the follower status
-			if leader != self.GetMyRegID() || len(isrList) == 0 {
+			if leader != dc.GetMyRegID() || len(isrList) == 0 {
 				continue
 			}
 			isReplicasEnough := len(isrList) >= namespaceMeta.Replica
-			members := self.getNamespaceRaftMembers(namespaceMeta)
+			members := dc.getNamespaceRaftMembers(namespaceMeta)
 			if len(members) < namespaceMeta.Replica {
 				isReplicasEnough = false
 			}
 
-			if FindSlice(isrList, self.GetMyID()) == -1 {
-				CoordLog().Infof("namespace %v leader is not in isr: %v, maybe removing",
+			if cluster.FindSlice(isrList, dc.GetMyID()) == -1 {
+				cluster.CoordLog().Infof("namespace %v leader is not in isr: %v, maybe removing",
 					namespaceMeta.GetDesp(), isrList)
 				if time.Now().UnixNano()-localNamespace.GetLastLeaderChangedTime() > time.Minute.Nanoseconds() {
-					self.transferMyNamespaceLeader(namespaceMeta, isrList[0])
+					dc.transferMyNamespaceLeader(namespaceMeta, isrList[0])
 				}
 				continue
 			}
-			if isReplicasEnough && isrList[0] != self.GetMyID() {
+			if isReplicasEnough && isrList[0] != dc.GetMyID() {
 				// the raft leader check if I am the expected sharding leader,
 				// if not, try to transfer the leader to expected node. We need do this
 				// because we should make all the sharding leaders balanced on
@@ -522,7 +550,7 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 				// avoid transfer while some node is leaving, so wait enough time to
 				// allow node leaving
 				if time.Now().UnixNano()-localNamespace.GetLastLeaderChangedTime() > time.Minute.Nanoseconds() {
-					self.transferMyNamespaceLeader(namespaceMeta, isrList[0])
+					dc.transferMyNamespaceLeader(namespaceMeta, isrList[0])
 				}
 			} else {
 				// check if any replica is not joined to members
@@ -535,31 +563,33 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					for _, m := range members {
 						if m.ID == rid {
 							found = true
-							if m.NodeID != ExtractRegIDFromGenID(nid) {
-								CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
+							if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
+								cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
 							}
 							break
 						}
 					}
 					if !found {
 						anyWaitingJoin = true
-						CoordLog().Infof("namespace %v new node still waiting join raft : %v, %v", namespaceMeta.GetDesp(), rid, nid)
+						cluster.CoordLog().Infof("namespace %v new node still waiting join raft : %v, %v", namespaceMeta.GetDesp(), rid, nid)
 					}
 				}
 				if anyWaitingJoin || len(members) < len(isrList) {
-					go self.tryCheckNamespaces()
+					go dc.tryCheckNamespaces()
 					continue
 				}
+				isFullStable := true
 				// the members is more than replica, we need to remove the member that is not necessary anymore
 				pendings, ok := pendingRemovings[namespaceMeta.GetDesp()]
 				if !ok {
 					pendings = make(map[uint64]pendingRemoveInfo)
 					pendingRemovings[namespaceMeta.GetDesp()] = pendings
+					isFullStable = false
 				}
-				newestReplicaInfo, err := self.register.GetRemoteNamespaceReplicaInfo(namespaceMeta.Name, namespaceMeta.Partition)
+				newestReplicaInfo, err := dc.register.GetRemoteNamespaceReplicaInfo(namespaceMeta.Name, namespaceMeta.Partition)
 				if err != nil {
-					if err != ErrKeyNotFound {
-						go self.tryCheckNamespaces()
+					if err != cluster.ErrKeyNotFound {
+						go dc.tryCheckNamespaces()
 					}
 					delete(pendingRemovings, namespaceMeta.GetDesp())
 					continue
@@ -570,14 +600,15 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 					for nid, rid := range newestReplicaInfo.RaftIDs {
 						if m.ID == rid {
 							found = true
-							if m.NodeID != ExtractRegIDFromGenID(nid) {
-								CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
+							if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
+								cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
 							}
 							break
 						}
 					}
 					if !found {
-						CoordLog().Infof("raft member %v not found in meta: %v", m, newestReplicaInfo.RaftNodes)
+						isFullStable = false
+						cluster.CoordLog().Infof("raft member %v not found in meta: %v", m, newestReplicaInfo.RaftNodes)
 						// here we do not remove other member immediately from raft
 						// it may happen while the namespace info in the register is not updated due to network lag
 						// so the new added node (add by api) may not in the meta info
@@ -588,8 +619,8 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 									m:  *m,
 								}
 							} else if time.Since(pendRemove.ts) > time.Minute {
-								CoordLog().Infof("pending removing member %v finally removed since not in meta", pendRemove)
-								self.removeNamespaceRaftMember(namespaceMeta, m)
+								cluster.CoordLog().Infof("pending removing member %v finally removed since not in meta", pendRemove)
+								dc.removeNamespaceRaftMember(namespaceMeta, m)
 							}
 						} else {
 							pendings[m.ID] = pendingRemoveInfo{
@@ -597,81 +628,89 @@ func (self *DataCoordinator) checkForUnsyncedNamespaces() {
 								m:  *m,
 							}
 						}
-						go self.tryCheckNamespaces()
+						go dc.tryCheckNamespaces()
 					} else {
 						delete(pendings, m.ID)
 						for nid, removing := range newestReplicaInfo.Removings {
-							if m.ID == removing.RemoveReplicaID && m.NodeID == ExtractRegIDFromGenID(nid) {
-								CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
-								self.removeNamespaceRaftMember(namespaceMeta, m)
+							isFullStable = false
+							if m.ID == removing.RemoveReplicaID && m.NodeID == cluster.ExtractRegIDFromGenID(nid) {
+								cluster.CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
+								dc.removeNamespaceRaftMember(namespaceMeta, m)
 							}
 						}
 					}
 				}
+				if isFullStable {
+					indexSchemas, ok := allIndexSchemas[namespace]
+					if ok {
+						dc.doSyncSchemaInfo(localNamespace, indexSchemas)
+					}
+				}
+
 			}
 		}
 	}
 
-	nsChangedChan := self.register.GetNamespacesNotifyChan()
+	nsChangedChan := dc.register.GetNamespacesNotifyChan()
 	for {
 		select {
-		case <-self.stopChan:
+		case <-dc.stopChan:
 			return
-		case <-self.tryCheckUnsynced:
+		case <-dc.tryCheckUnsynced:
 			doWork()
 		case <-ticker.C:
 			doWork()
 		case <-nsChangedChan:
-			CoordLog().Infof("trigger check by namespace changed")
+			cluster.CoordLog().Infof("trigger check by namespace changed")
 			doWork()
 		}
 	}
 }
 
-func (self *DataCoordinator) forceRemoveLocalNamespace(localNamespace *node.NamespaceNode) {
+func (dc *DataCoordinator) forceRemoveLocalNamespace(localNamespace *node.NamespaceNode) {
 	err := localNamespace.Destroy()
 	if err != nil {
-		CoordLog().Infof("failed to force remove local data: %v", err)
+		cluster.CoordLog().Infof("failed to force remove local data: %v", err)
 	}
 }
 
-func (self *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.NamespaceNode, removeFromRaft bool) *CoordErr {
+func (dc *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.NamespaceNode, removeFromRaft bool) *cluster.CoordErr {
 	if removeFromRaft {
 		if !localNamespace.IsReady() {
 			return ErrNamespaceNotReady
 		}
 		m := localNamespace.Node.GetLocalMemberInfo()
-		CoordLog().Infof("propose remove %v from namespace : %v", m.ID, m.GroupName)
+		cluster.CoordLog().Infof("propose remove %v from namespace : %v", m.ID, m.GroupName)
 
 		localErr := localNamespace.Node.ProposeRemoveMember(*m)
 		if localErr != nil {
-			CoordLog().Infof("propose remove self %v failed : %v", m, localErr)
-			return &CoordErr{ErrMsg: localErr.Error(), ErrCode: RpcCommonErr, ErrType: CoordLocalErr}
+			cluster.CoordLog().Infof("propose remove dc %v failed : %v", m, localErr)
+			return &cluster.CoordErr{ErrMsg: localErr.Error(), ErrCode: cluster.RpcCommonErr, ErrType: cluster.CoordLocalErr}
 		}
 	} else {
 		if localNamespace == nil {
-			return ErrNamespaceNotCreated
+			return cluster.ErrNamespaceNotCreated
 		}
 		localNamespace.Close()
 	}
 	return nil
 }
 
-func (self *DataCoordinator) getRaftAddrForNode(nid string) (string, *CoordErr) {
-	node, err := self.register.GetNodeInfo(nid)
+func (dc *DataCoordinator) getRaftAddrForNode(nid string) (string, *cluster.CoordErr) {
+	node, err := dc.register.GetNodeInfo(nid)
 	if err != nil {
-		return "", &CoordErr{ErrMsg: err.Error(), ErrCode: RpcNoErr, ErrType: CoordRegisterErr}
+		return "", &cluster.CoordErr{ErrMsg: err.Error(), ErrCode: cluster.RpcNoErr, ErrType: cluster.CoordRegisterErr}
 	}
 	return node.RaftTransportAddr, nil
 }
 
-func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*node.NamespaceConfig, *CoordErr) {
-	raftID, ok := nsInfo.RaftIDs[self.GetMyID()]
+func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInfo) (*node.NamespaceConfig, *cluster.CoordErr) {
+	raftID, ok := nsInfo.RaftIDs[dc.GetMyID()]
 	if !ok {
-		CoordLog().Warningf("namespace %v has no raft id for local: %v", nsInfo.GetDesp(), nsInfo)
-		return nil, ErrNamespaceConfInvalid
+		cluster.CoordLog().Warningf("namespace %v has no raft id for local: %v", nsInfo.GetDesp(), nsInfo)
+		return nil, cluster.ErrNamespaceConfInvalid
 	}
-	var err *CoordErr
+	var err *cluster.CoordErr
 	nsConf := node.NewNSConfig()
 	nsConf.BaseName = nsInfo.Name
 	nsConf.Name = nsInfo.GetDesp()
@@ -679,6 +718,9 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.PartitionNum = nsInfo.PartitionNum
 	nsConf.Replicator = nsInfo.Replica
 	nsConf.OptimizedFsync = nsInfo.OptimizedFsync
+	if nsInfo.ExpirationPolicy != "" {
+		nsConf.ExpirationPolicy = nsInfo.ExpirationPolicy
+	}
 	if nsInfo.SnapCount > 100 {
 		nsConf.SnapCount = nsInfo.SnapCount
 		nsConf.SnapCatchup = nsInfo.SnapCount / 4
@@ -687,87 +729,87 @@ func (self *DataCoordinator) prepareNamespaceConf(nsInfo *PartitionMetaInfo) (*n
 	nsConf.RaftGroupConf.SeedNodes = make([]node.ReplicaInfo, 0)
 	for _, nid := range nsInfo.GetISR() {
 		var rinfo node.ReplicaInfo
-		if nid == self.GetMyID() {
-			rinfo.NodeID = self.GetMyRegID()
+		if nid == dc.GetMyID() {
+			rinfo.NodeID = dc.GetMyRegID()
 			rinfo.ReplicaID = raftID
-			rinfo.RaftAddr = self.myNode.RaftTransportAddr
+			rinfo.RaftAddr = dc.myNode.RaftTransportAddr
 		} else {
-			rinfo.NodeID = ExtractRegIDFromGenID(nid)
+			rinfo.NodeID = cluster.ExtractRegIDFromGenID(nid)
 			rid, ok := nsInfo.RaftIDs[nid]
 			if !ok {
-				CoordLog().Infof("can not found raft id for node: %v, %v", nid, nsInfo.RaftIDs)
+				cluster.CoordLog().Infof("can not found raft id for node: %v, %v", nid, nsInfo.RaftIDs)
 				continue
 			}
 			rinfo.ReplicaID = rid
-			rinfo.RaftAddr, err = self.getRaftAddrForNode(nid)
+			rinfo.RaftAddr, err = dc.getRaftAddrForNode(nid)
 			if err != nil {
-				CoordLog().Infof("can not found raft address for node: %v, %v", nid, err)
+				cluster.CoordLog().Infof("can not found raft address for node: %v, %v", nid, err)
 				continue
 			}
 		}
 		nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, rinfo)
 	}
 	if len(nsConf.RaftGroupConf.SeedNodes) == 0 {
-		CoordLog().Warningf("can not found any seed nodes for namespace: %v", nsInfo)
-		return nil, ErrNamespaceConfInvalid
+		cluster.CoordLog().Warningf("can not found any seed nodes for namespace: %v", nsInfo)
+		return nil, cluster.ErrNamespaceConfInvalid
 	}
 	return nsConf, nil
 }
 
-func (self *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *PartitionMetaInfo,
+func (dc *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *cluster.PartitionMetaInfo,
 	localNamespace *node.NamespaceNode, remoteNode string) error {
 	var m common.MemberInfo
 	m.ID = raftID
-	m.NodeID = self.GetMyRegID()
+	m.NodeID = dc.GetMyRegID()
 	m.GroupID = uint64(nsInfo.MinGID) + uint64(nsInfo.Partition)
 	m.GroupName = nsInfo.GetDesp()
 	localNamespace.Node.FillMyMemberInfo(&m)
-	CoordLog().Infof("request to %v for join member: %v", remoteNode, m)
-	if remoteNode == self.GetMyID() {
+	cluster.CoordLog().Infof("request to %v for join member: %v", remoteNode, m)
+	if remoteNode == dc.GetMyID() {
 		return nil
 	}
-	nip, _, _, httpPort := ExtractNodeInfoFromID(remoteNode)
+	nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(remoteNode)
 	d, _ := json.Marshal(m)
 	_, err := common.APIRequest("POST",
 		"http://"+net.JoinHostPort(nip, httpPort)+common.APIAddNode,
 		bytes.NewReader(d), time.Second*3, nil)
 	if err != nil {
-		CoordLog().Infof("failed to request join namespace: %v", err)
+		cluster.CoordLog().Infof("failed to request join namespace: %v", err)
 		return err
 	}
 	return nil
 }
 
-func (self *DataCoordinator) tryCheckNamespaces() {
+func (dc *DataCoordinator) tryCheckNamespaces() {
 	time.Sleep(time.Second)
 	select {
-	case self.tryCheckUnsynced <- true:
+	case dc.tryCheckUnsynced <- true:
 	default:
 	}
 }
 
-func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
-	localNamespace *node.NamespaceNode, firstLoad bool) *CoordErr {
+func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMetaInfo,
+	localNamespace *node.NamespaceNode, firstLoad bool) *cluster.CoordErr {
 
-	rm, ok := nsInfo.Removings[self.GetMyID()]
+	rm, ok := nsInfo.Removings[dc.GetMyID()]
 	if ok {
 		// for removing node, we just restart local raft node and
 		// wait sync from raft leader.
 		// For the node not in the raft we will remove this node later so
 		// no need request join again.
-		if rm.RemoveReplicaID == nsInfo.RaftIDs[self.GetMyID()] {
-			CoordLog().Infof("no need request join for removing node: %v, %v", nsInfo.GetDesp(), nsInfo.Removings)
+		if rm.RemoveReplicaID == nsInfo.RaftIDs[dc.GetMyID()] {
+			cluster.CoordLog().Infof("no need request join for removing node: %v, %v", nsInfo.GetDesp(), nsInfo.Removings)
 			return nil
 		}
 	}
 
 	// check if in local raft group
-	myRunning := atomic.AddInt32(&self.catchupRunning, 1)
-	defer atomic.AddInt32(&self.catchupRunning, -1)
+	myRunning := atomic.AddInt32(&dc.catchupRunning, 1)
+	defer atomic.AddInt32(&dc.catchupRunning, -1)
 	if myRunning > MAX_RAFT_JOIN_RUNNING {
-		CoordLog().Infof("catching too much running: %v", myRunning)
-		self.tryCheckNamespaces()
-		return ErrCatchupRunningBusy
+		cluster.CoordLog().Infof("catching too much running: %v", myRunning)
+		dc.tryCheckNamespaces()
+		return cluster.ErrCatchupRunningBusy
 	}
 
 	dyConf := &node.NamespaceDynamicConf{}
@@ -776,13 +818,13 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 		// clean local data
 	}
 	localNamespace.SetDataFixState(false)
-	raftID, ok := nsInfo.RaftIDs[self.GetMyID()]
+	raftID, ok := nsInfo.RaftIDs[dc.GetMyID()]
 	if !ok {
-		CoordLog().Warningf("namespace %v failed to get raft id %v while check join", nsInfo.GetDesp(),
+		cluster.CoordLog().Warningf("namespace %v failed to get raft id %v while check join", nsInfo.GetDesp(),
 			nsInfo.RaftIDs)
-		return ErrNamespaceConfInvalid
+		return cluster.ErrNamespaceConfInvalid
 	}
-	var joinErr *CoordErr
+	var joinErr *cluster.CoordErr
 	retry := 0
 	startCheck := time.Now()
 	for time.Since(startCheck) < time.Second*30 {
@@ -791,13 +833,13 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 		alreadyJoined := false
 		for _, m := range mems {
 			memsMap[m.NodeID] = m
-			if m.NodeID == self.GetMyRegID() &&
+			if m.NodeID == dc.GetMyRegID() &&
 				m.GroupName == nsInfo.GetDesp() &&
 				m.ID == raftID {
 				if len(mems) > len(nsInfo.GetISR())/2 {
 					alreadyJoined = true
 				} else {
-					CoordLog().Infof("namespace %v is in the small raft group %v, need join large group:%v",
+					cluster.CoordLog().Infof("namespace %v is in the small raft group %v, need join large group:%v",
 						nsInfo.GetDesp(), mems, nsInfo.RaftNodes)
 				}
 			}
@@ -807,15 +849,15 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 				joinErr = nil
 				break
 			}
-			CoordLog().Infof("namespace %v still waiting raft synced", nsInfo.GetDesp())
+			cluster.CoordLog().Infof("namespace %v still waiting raft synced", nsInfo.GetDesp())
 			select {
-			case <-self.stopChan:
-				return ErrNamespaceExiting
+			case <-dc.stopChan:
+				return cluster.ErrNamespaceExiting
 			case <-time.After(time.Second / 2):
 			}
-			joinErr = ErrNamespaceWaitingSync
+			joinErr = cluster.ErrNamespaceWaitingSync
 		} else {
-			joinErr = ErrNamespaceWaitingSync
+			joinErr = cluster.ErrNamespaceWaitingSync
 			var remote string
 			cnt := 0
 			isr := nsInfo.GetISR()
@@ -826,44 +868,44 @@ func (self *DataCoordinator) ensureJoinNamespaceGroup(nsInfo PartitionMetaInfo,
 				remote = isr[retry%len(isr)]
 				retry++
 				cnt++
-				if remote == self.GetMyID() {
+				if remote == dc.GetMyID() {
 					continue
 				}
-				if _, ok := memsMap[ExtractRegIDFromGenID(remote)]; !ok {
+				if _, ok := memsMap[cluster.ExtractRegIDFromGenID(remote)]; !ok {
 					break
 				}
 			}
 			time.Sleep(time.Millisecond * 100)
-			if !self.isNamespaceShouldStart(nsInfo) {
-				return ErrNamespaceExiting
+			if !dc.isNamespaceShouldStart(nsInfo) {
+				return cluster.ErrNamespaceExiting
 			}
-			self.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
+			dc.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
 			select {
-			case <-self.stopChan:
-				return ErrNamespaceExiting
+			case <-dc.stopChan:
+				return cluster.ErrNamespaceExiting
 			case <-time.After(time.Second / 2):
 			}
 		}
 	}
 	if joinErr != nil {
-		self.tryCheckNamespaces()
-		CoordLog().Infof("local namespace join failed: %v, retry later: %v", joinErr, nsInfo.GetDesp())
+		dc.tryCheckNamespaces()
+		cluster.CoordLog().Infof("local namespace join failed: %v, retry later: %v", joinErr, nsInfo.GetDesp())
 	} else if retry > 0 {
-		CoordLog().Infof("local namespace join done: %v", nsInfo.GetDesp())
+		cluster.CoordLog().Infof("local namespace join done: %v", nsInfo.GetDesp())
 	}
 	return joinErr
 }
 
-func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo, forceStandaloneCluster bool) (*node.NamespaceNode, *CoordErr) {
+func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInfo, forceStandaloneCluster bool) (*node.NamespaceNode, *cluster.CoordErr) {
 	// check namespace exist and prepare on local.
-	raftID, ok := nsInfo.RaftIDs[self.GetMyID()]
+	raftID, ok := nsInfo.RaftIDs[dc.GetMyID()]
 	if !ok {
-		CoordLog().Warningf("namespace %v has no raft id for local", nsInfo.GetDesp(), nsInfo.RaftIDs)
-		return nil, ErrNamespaceConfInvalid
+		cluster.CoordLog().Warningf("namespace %v has no raft id for local", nsInfo.GetDesp(), nsInfo.RaftIDs)
+		return nil, cluster.ErrNamespaceConfInvalid
 	}
-	nsConf, err := self.prepareNamespaceConf(nsInfo)
+	nsConf, err := dc.prepareNamespaceConf(nsInfo)
 	if err != nil {
-		CoordLog().Warningf("prepare join namespace %v failed: %v", nsInfo.GetDesp(), err)
+		cluster.CoordLog().Warningf("prepare join namespace %v failed: %v", nsInfo.GetDesp(), err)
 		return nil, err
 	}
 
@@ -872,85 +914,85 @@ func (self *DataCoordinator) updateLocalNamespace(nsInfo *PartitionMetaInfo, for
 	// if something wrong while disaster, we need re-init cluster but that
 	// should be used by setting manual flag for re-init
 	join := true
-	if len(nsInfo.GetISR()) > 0 && nsInfo.GetISR()[0] == self.GetMyID() {
-		nid, epoch, err := self.register.GetNamespaceLeader(nsInfo.Name, nsInfo.Partition)
+	if len(nsInfo.GetISR()) > 0 && nsInfo.GetISR()[0] == dc.GetMyID() {
+		nid, epoch, err := dc.register.GetNamespaceLeader(nsInfo.Name, nsInfo.Partition)
 		if err != nil {
-			if err != ErrKeyNotFound {
-				go self.tryCheckNamespaces()
-				return nil, ErrRegisterServiceUnstable
+			if err != cluster.ErrKeyNotFound {
+				go dc.tryCheckNamespaces()
+				return nil, cluster.ErrRegisterServiceUnstable
 			}
 		}
 		if nid == "" && epoch == 0 {
 			join = false
-			CoordLog().Infof("my node will create new cluster for namespace: %v since first init: %v",
+			cluster.CoordLog().Infof("my node will create new cluster for namespace: %v since first init: %v",
 				nsInfo.GetDesp(), nsConf)
 		}
 	}
 	if forceStandaloneCluster {
 		join = false
 	}
-	localNode, _ := self.localNSMgr.InitNamespaceNode(nsConf, raftID, join)
+	localNode, localErr := dc.localNSMgr.InitNamespaceNode(nsConf, raftID, join)
 	if localNode != nil {
 		if checkErr := localNode.CheckRaftConf(raftID, nsConf); checkErr != nil {
-			CoordLog().Infof("local namespace %v mismatch with the new raft config removing: %v", nsInfo.GetDesp(), checkErr)
-			return nil, &CoordErr{ErrMsg: checkErr.Error(), ErrCode: RpcNoErr, ErrType: CoordLocalErr}
+			cluster.CoordLog().Infof("local namespace %v mismatch with the new raft config removing: %v", nsInfo.GetDesp(), checkErr)
+			return nil, &cluster.CoordErr{ErrMsg: checkErr.Error(), ErrCode: cluster.RpcNoErr, ErrType: cluster.CoordLocalErr}
 		}
 	}
 	if localNode == nil {
-		CoordLog().Warningf("local namespace %v init failed", nsInfo.GetDesp())
-		return nil, ErrLocalInitNamespaceFailed
+		cluster.CoordLog().Warningf("local namespace %v init failed: %v", nsInfo.GetDesp(), localErr)
+		return nil, cluster.ErrLocalInitNamespaceFailed
 	}
 
-	localErr := localNode.SetMagicCode(nsInfo.MagicCode)
+	localErr = localNode.SetMagicCode(nsInfo.MagicCode)
 	if localErr != nil {
-		CoordLog().Warningf("local namespace %v init magic code failed: %v", nsInfo.GetDesp(), localErr)
-		return localNode, ErrLocalInitNamespaceFailed
+		cluster.CoordLog().Warningf("local namespace %v init magic code failed: %v", nsInfo.GetDesp(), localErr)
+		return localNode, cluster.ErrLocalInitNamespaceFailed
 	}
 	dyConf := &node.NamespaceDynamicConf{}
 	localNode.SetDynamicInfo(*dyConf)
 	if err := localNode.Start(forceStandaloneCluster); err != nil {
-		return nil, ErrLocalInitNamespaceFailed
+		return nil, cluster.ErrLocalInitNamespaceFailed
 	}
 	return localNode, nil
 }
 
-func (self *DataCoordinator) RestartAsStandalone(fullNamespace string) error {
+func (dc *DataCoordinator) RestartAsStandalone(fullNamespace string) error {
 	namespace, pid := common.GetNamespaceAndPartition(fullNamespace)
 	if namespace == "" {
-		CoordLog().Warningf("namespace invalid: %v", fullNamespace)
+		cluster.CoordLog().Warningf("namespace invalid: %v", fullNamespace)
 		return ErrNamespaceInvalid
 	}
-	nsInfo, err := self.register.GetNamespacePartInfo(namespace, pid)
+	nsInfo, err := dc.register.GetNamespacePartInfo(namespace, pid)
 	if err != nil {
 		return err
 	}
 
-	localNs := self.localNSMgr.GetNamespaceNode(fullNamespace)
+	localNs := dc.localNSMgr.GetNamespaceNode(fullNamespace)
 	if localNs == nil {
 		return ErrNamespaceNotFound
 	}
-	CoordLog().Warningf("namespace %v restart as standalone cluster", fullNamespace)
+	cluster.CoordLog().Warningf("namespace %v restart as standalone cluster", fullNamespace)
 	localNs.Close()
-	_, coordErr := self.updateLocalNamespace(nsInfo, true)
+	_, coordErr := dc.updateLocalNamespace(nsInfo, true)
 	if coordErr != nil {
 		return coordErr.ToErrorType()
 	}
 	return nil
 }
 
-func (self *DataCoordinator) GetSnapshotSyncInfo(fullNamespace string) ([]common.SnapshotSyncInfo, error) {
+func (dc *DataCoordinator) GetSnapshotSyncInfo(fullNamespace string) ([]common.SnapshotSyncInfo, error) {
 	namespace, pid := common.GetNamespaceAndPartition(fullNamespace)
 	if namespace == "" {
-		CoordLog().Warningf("namespace invalid: %v", fullNamespace)
+		cluster.CoordLog().Warningf("namespace invalid: %v", fullNamespace)
 		return nil, ErrNamespaceInvalid
 	}
-	nsInfo, err := self.register.GetNamespacePartInfo(namespace, pid)
+	nsInfo, err := dc.register.GetNamespacePartInfo(namespace, pid)
 	if err != nil {
 		return nil, err
 	}
 	var ssiList []common.SnapshotSyncInfo
 	for _, nid := range nsInfo.GetISR() {
-		node, err := self.register.GetNodeInfo(nid)
+		node, err := dc.register.GetNodeInfo(nid)
 		if err != nil {
 			continue
 		}
@@ -966,37 +1008,37 @@ func (self *DataCoordinator) GetSnapshotSyncInfo(fullNamespace string) ([]common
 	return ssiList, nil
 }
 
-func (self *DataCoordinator) IsRemovingMember(m common.MemberInfo) (bool, error) {
+func (dc *DataCoordinator) IsRemovingMember(m common.MemberInfo) (bool, error) {
 	namespace, pid := common.GetNamespaceAndPartition(m.GroupName)
 	if namespace == "" {
-		CoordLog().Warningf("namespace invalid: %v", m.GroupName)
+		cluster.CoordLog().Warningf("namespace invalid: %v", m.GroupName)
 		return false, ErrNamespaceInvalid
 	}
-	nsInfo, err := self.register.GetNamespacePartInfo(namespace, pid)
+	nsInfo, err := dc.register.GetNamespacePartInfo(namespace, pid)
 	if err != nil {
-		if err == ErrKeyNotFound {
+		if err == cluster.ErrKeyNotFound {
 			return true, nil
 		}
 		return false, err
 	}
 
 	for nid, rm := range nsInfo.Removings {
-		if rm.RemoveReplicaID == m.ID && ExtractRegIDFromGenID(nid) == m.NodeID {
+		if rm.RemoveReplicaID == m.ID && cluster.ExtractRegIDFromGenID(nid) == m.NodeID {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (self *DataCoordinator) GetNamespaceLeader(fullNS string) (uint64, int64, error) {
+func (dc *DataCoordinator) GetNamespaceLeader(fullNS string) (uint64, int64, error) {
 	namespace, pid := common.GetNamespaceAndPartition(fullNS)
 	if namespace == "" {
-		CoordLog().Warningf("namespace invalid: %v", fullNS)
+		cluster.CoordLog().Warningf("namespace invalid: %v", fullNS)
 		return 0, 0, ErrNamespaceInvalid
 	}
-	nid, epoch, err := self.register.GetNamespaceLeader(namespace, pid)
+	nid, epoch, err := dc.register.GetNamespaceLeader(namespace, pid)
 	if err != nil {
-		if err == ErrKeyNotFound {
+		if err == cluster.ErrKeyNotFound {
 			return 0, 0, nil
 		}
 		return 0, 0, err
@@ -1004,92 +1046,92 @@ func (self *DataCoordinator) GetNamespaceLeader(fullNS string) (uint64, int64, e
 	if nid == "" {
 		return 0, int64(epoch), nil
 	}
-	regID := ExtractRegIDFromGenID(nid)
+	regID := cluster.ExtractRegIDFromGenID(nid)
 	return regID, int64(epoch), nil
 }
 
-func (self *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error) {
+func (dc *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error) {
 	namespace, pid := common.GetNamespaceAndPartition(fullNS)
 	if namespace == "" {
-		CoordLog().Warningf("namespace invalid: %v", fullNS)
+		cluster.CoordLog().Warningf("namespace invalid: %v", fullNS)
 		return 0, ErrNamespaceInvalid
 	}
-	var rl RealLeader
-	rl.Leader = self.GetMyID()
-	epoch, err := self.register.UpdateNamespaceLeader(namespace, pid, rl, EpochType(oldEpoch))
+	var rl cluster.RealLeader
+	rl.Leader = dc.GetMyID()
+	epoch, err := dc.register.UpdateNamespaceLeader(namespace, pid, rl, cluster.EpochType(oldEpoch))
 	return int64(epoch), err
 }
 
 // before shutdown, we transfer the leader to others to reduce
 // the unavailable time.
-func (self *DataCoordinator) prepareLeavingCluster() {
-	CoordLog().Infof("I am prepare leaving the cluster.")
-	allNamespaces, _, _ := self.register.GetAllNamespaces()
+func (dc *DataCoordinator) prepareLeavingCluster() {
+	cluster.CoordLog().Infof("I am prepare leaving the cluster.")
+	allNamespaces, _, _ := dc.register.GetAllNamespaces()
 	for _, nsParts := range allNamespaces {
 		for _, nsInfo := range nsParts {
-			if FindSlice(nsInfo.RaftNodes, self.myNode.GetID()) == -1 {
+			if cluster.FindSlice(nsInfo.RaftNodes, dc.myNode.GetID()) == -1 {
 				continue
 			}
-			localNamespace := self.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
+			localNamespace := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 			if localNamespace == nil {
 				continue
 			}
 			// only leader check the follower status
-			leader := self.getNamespaceRaftLeader(nsInfo.GetCopy())
-			if leader != self.GetMyRegID() {
+			leader := dc.getNamespaceRaftLeader(nsInfo.GetCopy())
+			if leader != dc.GetMyRegID() {
 				continue
 			}
 			for _, newLeader := range nsInfo.GetISR() {
-				if newLeader == self.GetMyID() {
+				if newLeader == dc.GetMyID() {
 					continue
 				}
-				self.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader)
+				dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader)
 				break
 			}
 		}
 	}
-	if self.register != nil {
-		atomic.StoreInt32(&self.stopping, 1)
-		self.register.Unregister(&self.myNode)
-		self.register.Stop()
+	if dc.register != nil {
+		atomic.StoreInt32(&dc.stopping, 1)
+		dc.register.Unregister(&dc.myNode)
+		dc.register.Stop()
 	}
 
-	CoordLog().Infof("prepare leaving finished.")
-	self.localNSMgr.Stop()
+	cluster.CoordLog().Infof("prepare leaving finished.")
+	dc.localNSMgr.Stop()
 }
 
-func (self *DataCoordinator) Stats(namespace string, part int) *CoordStats {
-	s := &CoordStats{}
-	s.NsCoordStats = make([]NamespaceCoordStat, 0)
+func (dc *DataCoordinator) Stats(namespace string, part int) *cluster.CoordStats {
+	s := &cluster.CoordStats{}
+	s.NsCoordStats = make([]cluster.NamespaceCoordStat, 0)
 	if len(namespace) > 0 {
-		meta, err := self.register.GetNamespaceMetaInfo(namespace)
+		meta, err := dc.register.GetNamespaceMetaInfo(namespace)
 		if err != nil {
-			CoordLog().Infof("failed to get namespace info: %v", err)
+			cluster.CoordLog().Infof("failed to get namespace info: %v", err)
 			return s
 		}
 		if part >= 0 {
-			nsInfo, err := self.register.GetNamespacePartInfo(namespace, part)
+			nsInfo, err := dc.register.GetNamespacePartInfo(namespace, part)
 			if err != nil {
 			} else {
-				var stat NamespaceCoordStat
+				var stat cluster.NamespaceCoordStat
 				stat.Name = namespace
 				stat.Partition = part
 				for _, nid := range nsInfo.RaftNodes {
-					stat.ISRStats = append(stat.ISRStats, ISRStat{HostName: "", NodeID: nid})
+					stat.ISRStats = append(stat.ISRStats, cluster.ISRStat{HostName: "", NodeID: nid})
 				}
 				s.NsCoordStats = append(s.NsCoordStats, stat)
 			}
 		} else {
 			for i := 0; i < meta.PartitionNum; i++ {
-				nsInfo, err := self.register.GetNamespacePartInfo(namespace, part)
+				nsInfo, err := dc.register.GetNamespacePartInfo(namespace, part)
 				if err != nil {
 					continue
 				}
-				var stat NamespaceCoordStat
+				var stat cluster.NamespaceCoordStat
 				stat.Name = namespace
 				stat.Partition = nsInfo.Partition
 				for _, nid := range nsInfo.RaftNodes {
-					stat.ISRStats = append(stat.ISRStats, ISRStat{HostName: "", NodeID: nid})
+					stat.ISRStats = append(stat.ISRStats, cluster.ISRStat{HostName: "", NodeID: nid})
 				}
 				s.NsCoordStats = append(s.NsCoordStats, stat)
 			}

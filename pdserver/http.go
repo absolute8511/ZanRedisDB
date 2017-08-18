@@ -1,7 +1,9 @@
 package pdserver
 
 import (
+	"encoding/json"
 	"errors"
+	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
@@ -59,41 +61,43 @@ func GetValidReplicator(r string) (int, error) {
 	return 0, errors.New("INVALID_REPLICATOR")
 }
 
-func (self *Server) initHttpHandler() {
+func (s *Server) initHttpHandler() {
 	log := common.HttpLog(sLog, common.LOG_INFO)
 	debugLog := common.HttpLog(sLog, common.LOG_DEBUG)
 	router := httprouter.New()
-	router.Handle("GET", "/ping", common.Decorate(self.pingHandler, common.PlainText))
-	router.Handle("GET", "/info", common.Decorate(self.getInfo, common.V1))
-	router.Handle("GET", "/namespaces", common.Decorate(self.getNamespaces, common.V1))
-	router.Handle("GET", "/datanodes", common.Decorate(self.getDataNodes, common.V1))
-	router.Handle("GET", "/listpd", common.Decorate(self.listPDNodes, common.V1))
-	router.Handle("GET", "/query/:namespace", common.Decorate(self.doQueryNamespace, debugLog, common.V1))
+	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
+	router.Handle("GET", "/info", common.Decorate(s.getInfo, common.V1))
+	router.Handle("GET", "/namespaces", common.Decorate(s.getNamespaces, common.V1))
+	router.Handle("GET", "/datanodes", common.Decorate(s.getDataNodes, common.V1))
+	router.Handle("GET", "/listpd", common.Decorate(s.listPDNodes, common.V1))
+	router.Handle("GET", "/query/:namespace", common.Decorate(s.doQueryNamespace, debugLog, common.V1))
 
 	// cluster prefix url means only handled by leader of pd
-	router.Handle("GET", "/cluster/stats", common.Decorate(self.doClusterStats, common.V1))
-	router.Handle("POST", "/cluster/pd/tombstone", common.Decorate(self.doClusterTombstonePD, log, common.V1))
-	router.Handle("POST", "/cluster/node/remove", common.Decorate(self.doClusterRemoveDataNode, log, common.V1))
-	router.Handle("POST", "/cluster/upgrade/begin", common.Decorate(self.doClusterBeginUpgrade, log, common.V1))
-	router.Handle("POST", "/cluster/upgrade/done", common.Decorate(self.doClusterFinishUpgrade, log, common.V1))
-	router.Handle("POST", "/cluster/namespace/create", common.Decorate(self.doCreateNamespace, log, common.V1))
-	router.Handle("POST", "/cluster/namespace/delete", common.Decorate(self.doDeleteNamespace, log, common.V1))
-	router.Handle("POST", "/cluster/namespace/meta/update", common.Decorate(self.doUpdateNamespaceMeta, log, common.V1))
-	router.Handle("POST", "/stable/nodenum", common.Decorate(self.doSetStableNodeNum, log, common.V1))
+	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
+	router.Handle("POST", "/cluster/pd/tombstone", common.Decorate(s.doClusterTombstonePD, log, common.V1))
+	router.Handle("POST", "/cluster/node/remove", common.Decorate(s.doClusterRemoveDataNode, log, common.V1))
+	router.Handle("POST", "/cluster/upgrade/begin", common.Decorate(s.doClusterBeginUpgrade, log, common.V1))
+	router.Handle("POST", "/cluster/upgrade/done", common.Decorate(s.doClusterFinishUpgrade, log, common.V1))
+	router.Handle("POST", "/cluster/namespace/create", common.Decorate(s.doCreateNamespace, log, common.V1))
+	router.Handle("DELETE", "/cluster/namespace/delete", common.Decorate(s.doDeleteNamespace, log, common.V1))
+	router.Handle("POST", "/cluster/schema/index/add", common.Decorate(s.doAddIndexSchema, log, common.V1))
+	router.Handle("DELETE", "/cluster/schema/index/del", common.Decorate(s.doDelIndexSchema, log, common.V1))
+	router.Handle("POST", "/cluster/namespace/meta/update", common.Decorate(s.doUpdateNamespaceMeta, log, common.V1))
+	router.Handle("POST", "/stable/nodenum", common.Decorate(s.doSetStableNodeNum, log, common.V1))
 
-	router.Handle("POST", "/loglevel/set", common.Decorate(self.doSetLogLevel, log, common.V1))
-	self.router = router
+	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
+	s.router = router
 }
 
-func (self *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	self.router.ServeHTTP(w, req)
+func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	s.router.ServeHTTP(w, req)
 }
 
-func (self *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	return "OK", nil
 }
 
-func (self *Server) getInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) getInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	return struct {
 		Version string `json:"version"`
 	}{
@@ -101,8 +105,8 @@ func (self *Server) getInfo(w http.ResponseWriter, req *http.Request, ps httprou
 	}, nil
 }
 
-func (self *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	namespaces, _, err := self.pdCoord.GetAllNamespaces()
+func (s *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	namespaces, _, err := s.pdCoord.GetAllNamespaces()
 	if err != nil {
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
@@ -115,9 +119,9 @@ func (self *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps h
 	}, nil
 }
 
-func (self *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	nodes := make([]*node, 0)
-	dns, _ := self.pdCoord.GetAllDataNodes()
+	dns, epoch := s.pdCoord.GetAllDataNodes()
 	for _, n := range dns {
 		dn := &node{
 			BroadcastAddress: n.NodeIP,
@@ -128,31 +132,34 @@ func (self *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps ht
 		}
 		nodes = append(nodes, dn)
 	}
+	if len(nodes) == 0 {
+		sLog.Infof("no data nodes found: %v, %v", dns, epoch)
+	}
 	return map[string]interface{}{
 		"nodes": nodes,
 	}, nil
 }
 
-func (self *Server) listPDNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	nodes, err := self.pdCoord.GetAllPDNodes()
+func (s *Server) listPDNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	nodes, err := s.pdCoord.GetAllPDNodes()
 	if err != nil {
 		sLog.Infof("list error: %v", err)
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
 	filteredNodes := nodes[:0]
 	for _, n := range nodes {
-		if !self.IsTombstonePDNode(n.GetID()) {
+		if !s.IsTombstonePDNode(n.GetID()) {
 			filteredNodes = append(filteredNodes, n)
 		}
 	}
-	leader := self.pdCoord.GetPDLeader()
+	leader := s.pdCoord.GetPDLeader()
 	return map[string]interface{}{
 		"pdnodes":  filteredNodes,
 		"pdleader": leader,
 	}, nil
 }
 
-func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	if ns == "" {
 		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
@@ -164,7 +171,7 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 	epoch := reqParams.Get("epoch")
 	disableCache := reqParams.Get("disable_cache")
 
-	namespaces, curEpoch, err := self.pdCoord.GetAllNamespaces()
+	namespaces, curEpoch, err := s.pdCoord.GetAllNamespaces()
 	if err != nil {
 		if len(namespaces) == 0 || disableCache == "true" {
 			return nil, common.HttpErr{Code: 500, Text: err.Error()}
@@ -178,7 +185,7 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 	if epoch == strconv.FormatInt(curEpoch, 10) {
 		return nil, common.HttpErr{Code: 304, Text: "cluster namespaces unchanged"}
 	}
-	dns, _ := self.pdCoord.GetAllDataNodes()
+	dns, _ := s.pdCoord.GetAllDataNodes()
 	partNodes := make(map[int]PartitionNodeInfo)
 
 	pnum := 0
@@ -218,13 +225,13 @@ func (self *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, p
 	}, nil
 }
 
-func (self *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	stable := false
-	if !self.pdCoord.IsMineLeader() {
+	if !s.pdCoord.IsMineLeader() {
 		sLog.Infof("request from remote %v should request to leader", req.RemoteAddr)
 		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
 	}
-	stable = self.pdCoord.IsClusterStable()
+	stable = s.pdCoord.IsClusterStable()
 
 	return struct {
 		Stable bool `json:"stable"`
@@ -233,7 +240,7 @@ func (self *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps 
 	}, nil
 }
 
-func (self *Server) doClusterTombstonePD(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doClusterTombstonePD(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
@@ -245,14 +252,14 @@ func (self *Server) doClusterTombstonePD(w http.ResponseWriter, req *http.Reques
 	}
 	restore := reqParams.Get("restore")
 	if restore != "" {
-		deleted := self.DelTombstonePDNode(node)
+		deleted := s.DelTombstonePDNode(node)
 		if deleted {
 			return nil, nil
 		} else {
 			return nil, common.HttpErr{Code: 404, Text: "node id not found"}
 		}
 	}
-	nodes, err := self.pdCoord.GetAllPDNodes()
+	nodes, err := s.pdCoord.GetAllPDNodes()
 	if err != nil {
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
@@ -267,42 +274,42 @@ func (self *Server) doClusterTombstonePD(w http.ResponseWriter, req *http.Reques
 	if peer.GetID() == "" {
 		return nil, common.HttpErr{Code: 404, Text: "node id not found"}
 	} else {
-		self.TombstonePDNode(peer.GetID(), peer)
+		s.TombstonePDNode(peer.GetID(), peer)
 	}
 	return nil, nil
 }
 
-func (self *Server) doClusterRemoveDataNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doClusterRemoveDataNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
 	nid := reqParams.Get("remove_node")
 
-	err = self.pdCoord.MarkNodeAsRemoving(nid)
+	err = s.pdCoord.MarkNodeAsRemoving(nid)
 	if err != nil {
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
 	return nil, nil
 }
 
-func (self *Server) doClusterBeginUpgrade(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	err := self.pdCoord.SetClusterUpgradeState(true)
+func (s *Server) doClusterBeginUpgrade(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SetClusterUpgradeState(true)
 	if err != nil {
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
 	return nil, nil
 }
 
-func (self *Server) doClusterFinishUpgrade(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	err := self.pdCoord.SetClusterUpgradeState(false)
+func (s *Server) doClusterFinishUpgrade(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SetClusterUpgradeState(false)
 	if err != nil {
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
 	return nil, nil
 }
 
-func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
@@ -337,19 +344,28 @@ func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, 
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_REPLICATOR"}
 	}
+
+	expPolicy := reqParams.Get("expiration_policy")
+	if expPolicy == "" {
+		expPolicy = common.DefaultExpirationPolicy
+	} else if _, err := common.StringToExpirationPolicy(expPolicy); err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_EXPIRATION_POLICY"}
+	}
+
 	tagStr := reqParams.Get("tags")
 	var tagList []string
 	if tagStr != "" {
 		tagList = strings.Split(tagStr, ",")
 	}
 
-	if !self.pdCoord.IsMineLeader() {
+	if !s.pdCoord.IsMineLeader() {
 		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
 	}
 	var meta cluster.NamespaceMetaInfo
 	meta.PartitionNum = pnum
 	meta.Replica = replicator
 	meta.EngType = engType
+	meta.ExpirationPolicy = expPolicy
 	meta.Tags = make(map[string]bool)
 	for _, tag := range tagList {
 		if strings.TrimSpace(tag) != "" {
@@ -357,7 +373,7 @@ func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, 
 		}
 	}
 
-	err = self.pdCoord.CreateNamespace(ns, meta)
+	err = s.pdCoord.CreateNamespace(ns, meta)
 	if err != nil {
 		sLog.Infof("create namespace failed: %v, %v", ns, err)
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
@@ -365,7 +381,7 @@ func (self *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, 
 	return nil, nil
 }
 
-func (self *Server) doDeleteNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doDeleteNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
@@ -385,7 +401,7 @@ func (self *Server) doDeleteNamespace(w http.ResponseWriter, req *http.Request, 
 	}
 
 	sLog.Infof("deleting (%s) with partition %v ", name, partStr)
-	err = self.pdCoord.DeleteNamespace(name, partStr)
+	err = s.pdCoord.DeleteNamespace(name, partStr)
 	if err != nil {
 		sLog.Infof("deleting (%s) with partition %v failed : %v", name, partStr, err)
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
@@ -393,7 +409,7 @@ func (self *Server) doDeleteNamespace(w http.ResponseWriter, req *http.Request, 
 	return nil, nil
 }
 
-func (self *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doAddIndexSchema(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
@@ -407,6 +423,112 @@ func (self *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Reque
 	if !common.IsValidNamespaceName(ns) {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
 	}
+	table := reqParams.Get("table")
+
+	if table == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_TABLE_NAME"}
+	}
+	if !s.pdCoord.IsMineLeader() {
+		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
+	}
+
+	indexType := reqParams.Get("indextype")
+	if indexType == "" {
+		sLog.Infof("missing index type: %v, %v", ns, table)
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_TYPE"}
+	}
+	if indexType == "hash_secondary" {
+		data, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			sLog.Infof("read schema body error: %v, %v, %v", ns, table, err)
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+		}
+		var meta common.HsetIndexSchema
+		err = json.Unmarshal(data, &meta)
+		if err != nil {
+			sLog.Infof("schema body unmarshal error: %v, %v, %v", ns, table, err)
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+		}
+		sLog.Infof("add hash index : %v, %v", ns, meta)
+		err = s.pdCoord.AddHIndexSchema(ns, table, &meta)
+		if err != nil {
+			sLog.Infof("add hash index failed: %v, %v", ns, err)
+			return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		}
+	} else if indexType == "json_secondary" {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	} else {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	}
+
+	return nil, nil
+}
+
+func (s *Server) doDelIndexSchema(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	ns := reqParams.Get("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
+	}
+
+	if !common.IsValidNamespaceName(ns) {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
+	}
+	table := reqParams.Get("table")
+
+	if table == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_TABLE_NAME"}
+	}
+	if !s.pdCoord.IsMineLeader() {
+		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
+	}
+
+	indexType := reqParams.Get("indextype")
+	if indexType == "" {
+		sLog.Infof("del index missing type: %v", ns)
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_TYPE"}
+	}
+	indexName := reqParams.Get("indexname")
+	if indexName == "" {
+		sLog.Infof("del index missing name: %v", ns)
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_INDEX_NAME"}
+	}
+
+	if indexType == "hash_secondary" {
+		sLog.Infof("del hash index : %v, %v", ns, indexName)
+		err = s.pdCoord.DelHIndexSchema(ns, table, indexName)
+		if err != nil {
+			sLog.Infof("del hash index failed: %v, %v", ns, err)
+			return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		}
+	} else if indexType == "json_secondary" {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	} else {
+		return nil, common.HttpErr{Code: 400, Text: "unsupported index type"}
+	}
+
+	return nil, nil
+}
+
+func (s *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	ns := reqParams.Get("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
+	}
+
+	if !common.IsValidNamespaceName(ns) {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
+	}
+
 	replicatorStr := reqParams.Get("replicator")
 	replicator := -1
 	if replicatorStr != "" {
@@ -426,22 +548,24 @@ func (self *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
-	if !self.pdCoord.IsMineLeader() {
+	if !s.pdCoord.IsMineLeader() {
 		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
 	}
-	err = self.pdCoord.ChangeNamespaceMetaParam(ns, replicator, optimizeFsyncStr, snapCount)
+	err = s.pdCoord.ChangeNamespaceMetaParam(ns, replicator, optimizeFsyncStr, snapCount)
 	if err != nil {
 		sLog.Infof("update namespace meta failed: %v, %v", ns, err)
 		return nil, common.HttpErr{Code: 400, Text: err.Error()}
 	}
 	return nil, nil
+
 }
 
-func (self *Server) doSetStableNodeNum(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doSetStableNodeNum(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
 	}
+
 	numStr := reqParams.Get("number")
 	if numStr == "" {
 		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NUMBER"}
@@ -450,14 +574,15 @@ func (self *Server) doSetStableNodeNum(w http.ResponseWriter, req *http.Request,
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "BAD_ARG_STRING"}
 	}
-	err = self.pdCoord.SetClusterStableNodeNum(num)
+	err = s.pdCoord.SetClusterStableNodeNum(num)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: err.Error()}
 	}
+
 	return nil, nil
 }
 
-func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
@@ -475,37 +600,37 @@ func (self *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps h
 	return nil, nil
 }
 
-func (self *Server) IsTombstonePDNode(nid string) bool {
-	self.dataMutex.Lock()
-	_, ok := self.tombstonePDNodes[nid]
-	self.dataMutex.Unlock()
+func (s *Server) IsTombstonePDNode(nid string) bool {
+	s.dataMutex.Lock()
+	_, ok := s.tombstonePDNodes[nid]
+	s.dataMutex.Unlock()
 	return ok
 }
 
-func (self *Server) TombstonePDNode(nid string, n cluster.NodeInfo) {
-	self.dataMutex.Lock()
-	self.tombstonePDNodes[nid] = true
-	self.dataMutex.Unlock()
+func (s *Server) TombstonePDNode(nid string, n cluster.NodeInfo) {
+	s.dataMutex.Lock()
+	s.tombstonePDNodes[nid] = true
+	s.dataMutex.Unlock()
 }
 
-func (self *Server) DelTombstonePDNode(nid string) bool {
-	self.dataMutex.Lock()
-	_, ok := self.tombstonePDNodes[nid]
+func (s *Server) DelTombstonePDNode(nid string) bool {
+	s.dataMutex.Lock()
+	_, ok := s.tombstonePDNodes[nid]
 	if ok {
-		delete(self.tombstonePDNodes, nid)
+		delete(s.tombstonePDNodes, nid)
 	}
-	self.dataMutex.Unlock()
+	s.dataMutex.Unlock()
 	return ok
 }
 
-func (self *Server) serveHttpAPI(addr string, stopC <-chan struct{}) {
-	if self.conf.ProfilePort != "" {
-		go http.ListenAndServe(":"+self.conf.ProfilePort, nil)
+func (s *Server) serveHttpAPI(addr string, stopC <-chan struct{}) {
+	if s.conf.ProfilePort != "" {
+		go http.ListenAndServe(":"+s.conf.ProfilePort, nil)
 	}
-	self.initHttpHandler()
+	s.initHttpHandler()
 	srv := http.Server{
 		Addr:    addr,
-		Handler: self,
+		Handler: s,
 	}
 	l, err := common.NewStoppableListener(srv.Addr, stopC)
 	if err != nil {

@@ -1,17 +1,18 @@
 package node
 
 import (
-	"github.com/absolute8511/redcon"
 	"strconv"
+
+	"github.com/absolute8511/redcon"
 )
 
-func (self *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
 	index, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		conn.WriteError("Invalid index: " + err.Error())
 		return
 	}
-	val, err := self.store.LIndex(cmd.Args[1], index)
+	val, err := nd.store.LIndex(cmd.Args[1], index)
 	if err != nil || val == nil {
 		conn.WriteNull()
 	} else {
@@ -19,8 +20,8 @@ func (self *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) llenCommand(conn redcon.Conn, cmd redcon.Command) {
-	n, err := self.store.LLen(cmd.Args[1])
+func (nd *KVNode) llenCommand(conn redcon.Conn, cmd redcon.Command) {
+	n, err := nd.store.LLen(cmd.Args[1])
 	if err != nil {
 		conn.WriteError("Err: " + err.Error())
 		return
@@ -28,7 +29,7 @@ func (self *KVNode) llenCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteInt64(n)
 }
 
-func (self *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 4 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
@@ -44,7 +45,7 @@ func (self *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 
-	vlist, err := self.store.LRange(cmd.Args[1], start, end)
+	vlist, err := nd.store.LRange(cmd.Args[1], start, end)
 	if err != nil {
 		conn.WriteError("Err: " + err.Error())
 		return
@@ -55,7 +56,7 @@ func (self *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (self *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.([]byte)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -65,7 +66,7 @@ func (self *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	conn.WriteBulk(rsp)
 }
 
-func (self *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.(int64)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -75,7 +76,7 @@ func (self *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command, v interfa
 	conn.WriteInt64(rsp)
 }
 
-func (self *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 4 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
@@ -85,7 +86,7 @@ func (self *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("Invalid index: " + err.Error())
 		return
 	}
-	_, _, ok := rebuildFirstKeyAndPropose(self, conn, cmd)
+	_, _, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
 	if !ok {
 		return
 	}
@@ -93,7 +94,7 @@ func (self *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 4 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
@@ -109,7 +110,7 @@ func (self *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 
-	_, _, ok := rebuildFirstKeyAndPropose(self, conn, cmd)
+	_, _, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
 	if !ok {
 		return
 	}
@@ -117,7 +118,7 @@ func (self *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteString("OK")
 }
 
-func (self *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.([]byte)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -127,7 +128,7 @@ func (self *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	conn.WriteBulk(rsp)
 }
 
-func (self *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.(int64)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -137,7 +138,7 @@ func (self *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command, v interfa
 	conn.WriteInt64(rsp)
 }
 
-func (self *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	rsp, ok := v.(int64)
 	if !ok {
 		conn.WriteError("Invalid response type")
@@ -150,24 +151,24 @@ func (self *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interf
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (self *KVNode) localLpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.LPop(cmd.Args[1])
+func (nd *KVNode) localLpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.LPop(cmd.Args[1])
 }
 
-func (self *KVNode) localLpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.LPush(cmd.Args[1], cmd.Args[2:]...)
+func (nd *KVNode) localLpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.LPush(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localLsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localLsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	index, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
 	}
 
-	return nil, self.store.LSet(cmd.Args[1], index, cmd.Args[3])
+	return nil, nd.store.LSet(cmd.Args[1], index, cmd.Args[3])
 }
 
-func (self *KVNode) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (nd *KVNode) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	start, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
@@ -177,17 +178,29 @@ func (self *KVNode) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}
 		return nil, err
 	}
 
-	return nil, self.store.LTrim(cmd.Args[1], start, stop)
+	return nil, nd.store.LTrim(cmd.Args[1], start, stop)
 }
 
-func (self *KVNode) localRpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.RPop(cmd.Args[1])
+func (nd *KVNode) localRpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.RPop(cmd.Args[1])
 }
 
-func (self *KVNode) localRpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.RPush(cmd.Args[1], cmd.Args[2:]...)
+func (nd *KVNode) localRpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.RPush(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (self *KVNode) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return self.store.LClear(cmd.Args[1])
+func (nd *KVNode) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nd.store.LClear(cmd.Args[1])
+}
+
+func (nd *KVNode) localLMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	var count int64
+	for _, lkey := range cmd.Args[1:] {
+		if _, err := nd.store.LClear(lkey); err != nil {
+			return count, err
+		} else {
+			count++
+		}
+	}
+	return count, nil
 }

@@ -295,7 +295,7 @@ func (db *RockDB) zSetItem(key []byte, score int64, member []byte, wb *gorocksdb
 	if score <= MinScore || score >= MaxScore {
 		return 0, errScoreOverflow
 	}
-	var exists int64 = 0
+	var exists int64
 	ek, err := convertRedisKeyToDBZSetKey(key, member)
 	if err != nil {
 		return 0, err
@@ -375,7 +375,7 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 	wb := db.wb
 	wb.Clear()
 
-	var num int64 = 0
+	var num int64
 	for i := 0; i < len(args); i++ {
 		score := args[i].Score
 		member := args[i].Member
@@ -429,7 +429,7 @@ func (db *RockDB) ZCard(key []byte) (int64, error) {
 }
 
 func (db *RockDB) ZScore(key []byte, member []byte) (int64, error) {
-	var score int64 = InvalidScore
+	score := InvalidScore
 
 	k, err := convertRedisKeyToDBZSetKey(key, member)
 	if err != nil {
@@ -499,7 +499,7 @@ func (db *RockDB) ZIncrBy(key []byte, delta int64, member []byte) (int64, error)
 
 	ek := zEncodeSetKey(table, rk, member)
 
-	var oldScore int64 = 0
+	var oldScore int64
 	v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 	if err != nil {
 		return InvalidScore, err
@@ -550,7 +550,7 @@ func (db *RockDB) ZCount(key []byte, min int64, max int64) (int64, error) {
 		return 0, err
 	}
 
-	var n int64 = 0
+	var n int64
 	for ; it.Valid(); it.Next() {
 		n++
 	}
@@ -594,7 +594,7 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 			}
 			defer rit.Close()
 
-			var lastKey []byte = nil
+			var lastKey []byte
 			var n int64 = 0
 
 			for ; rit.Valid(); rit.Next() {
@@ -777,6 +777,19 @@ func (db *RockDB) ZMclear(keys ...[]byte) (int64, error) {
 
 	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	return int64(len(keys)), err
+}
+
+func (db *RockDB) zMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
+	if len(keys) > MAX_BATCH_NUM {
+		return errTooMuchBatchSize
+	}
+	for _, key := range keys {
+		if _, err := db.zRemRange(key, MinScore, MaxScore, 0, -1, wb); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (db *RockDB) ZRange(key []byte, start int, stop int) ([]common.ScorePair, error) {

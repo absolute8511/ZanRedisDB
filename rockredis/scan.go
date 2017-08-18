@@ -67,7 +67,7 @@ func getCommonDataType(dataType byte) (common.DataType, error) {
 }
 func buildMatchRegexp(match string) (glob.Glob, error) {
 	var err error
-	var r glob.Glob = nil
+	var r glob.Glob
 
 	if len(match) > 0 {
 		if r, err = glob.Compile(match); err != nil {
