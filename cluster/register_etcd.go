@@ -118,6 +118,7 @@ type EtcdRegister struct {
 	ifNamespaceChanged   int32
 	watchNamespaceStopCh chan bool
 	nsChangedChan        chan struct{}
+	triggerScanCh        chan struct{}
 }
 
 func NewEtcdRegister(host string) *EtcdRegister {
@@ -128,6 +129,7 @@ func NewEtcdRegister(host string) *EtcdRegister {
 		client:               client,
 		ifNamespaceChanged:   1,
 		nsChangedChan:        make(chan struct{}, 3),
+		triggerScanCh:        make(chan struct{}, 3),
 	}
 	return r
 }
@@ -212,6 +214,10 @@ func (etcdReg *EtcdRegister) refreshNamespaces() {
 		select {
 		case <-etcdReg.watchNamespaceStopCh:
 			return
+		case <-etcdReg.triggerScanCh:
+			if atomic.LoadInt32(&etcdReg.ifNamespaceChanged) == 1 {
+				etcdReg.scanNamespaces()
+			}
 		case <-ticker.C:
 			if atomic.LoadInt32(&etcdReg.ifNamespaceChanged) == 1 {
 				etcdReg.scanNamespaces()
@@ -254,6 +260,10 @@ func (etcdReg *EtcdRegister) watchNamespaces() {
 		}
 		coordLog.Debugf("namespace changed.")
 		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+		select {
+		case etcdReg.triggerScanCh <- struct{}{}:
+		default:
+		}
 		select {
 		case etcdReg.nsChangedChan <- struct{}{}:
 		default:
