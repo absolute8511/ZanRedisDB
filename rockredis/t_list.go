@@ -235,6 +235,9 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 	if err != nil {
 		return 0, err
 	}
+	if dbLog.Level() >= common.LOG_DETAIL {
+		dbLog.Debugf("lpush %v list %v meta : %v, %v, %v", whereSeq, string(key), headSeq, tailSeq, size)
+	}
 
 	pushCnt := len(args)
 	if pushCnt == 0 {
@@ -281,7 +284,8 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 
 	_, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
 	if dbLog.Level() >= common.LOG_DETAIL {
-		dbLog.Debugf("lpush %v list %v meta updated to: %v, %v, %v", whereSeq, string(key), headSeq, tailSeq, size)
+		dbLog.Debugf("lpush %v list %v meta updated to: %v, %v", whereSeq,
+			string(key), headSeq, tailSeq)
 	}
 	if err != nil {
 		db.fixListKey(key)
@@ -328,7 +332,10 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 
 	itemKey := lEncodeListKey(table, rk, seq)
 	value, err = db.eng.GetBytesNoLock(db.defaultReadOpts, itemKey)
-	if err != nil {
+	// nil value means not exist
+	// empty value should be ""
+	// since we pop should success if size is not zero, we need fix this
+	if err != nil || value == nil {
 		dbLog.Warningf("list %v pop error: %v, meta: %v, %v, %v", string(key), err,
 			seq, headSeq, tailSeq)
 		db.fixListKey(key)

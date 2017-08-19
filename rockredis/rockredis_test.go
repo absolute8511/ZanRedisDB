@@ -2,14 +2,15 @@ package rockredis
 
 import (
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/stretchr/testify/assert"
 )
 
 func getTestDBNoTableCounter(t *testing.T) *RockDB {
@@ -31,6 +32,9 @@ func getTestDB(t *testing.T) *RockDB {
 	assert.Nil(t, err)
 	testDB, err := OpenRockDB(cfg)
 	assert.Nil(t, err)
+	if testing.Verbose() {
+		SetLogLevel(int32(4))
+	}
 	return testDB
 }
 
