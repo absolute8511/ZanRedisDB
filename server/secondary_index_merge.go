@@ -3,6 +3,7 @@ package server
 import (
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/redcon"
 )
 
@@ -29,8 +30,8 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 	}
 
 	// TODO: maybe sort search results by field from all partitions
-	postCmdResults := make([]interface{}, 0)
-	pkResults := make([][]byte, 0)
+	postCmdResults := make([]common.HIndexRespWithValues, 0)
+	pkResults := make([]rockredis.HIndexResp, 0)
 	var table string
 	for _, res := range result {
 		if err, ok := res.(error); ok {
@@ -51,7 +52,7 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 			return
 		}
 		if postCmd == "" {
-			pkList, ok := realRes.Rets.([][]byte)
+			pkList, ok := realRes.Rets.([]rockredis.HIndexResp)
 			if !ok {
 				sLog.Infof("invalid response for search : %v, cmd: %v", res, string(cmd.Raw))
 				conn.WriteError("Invalid response type : Err handle command " + string(cmd.Args[0]))
@@ -60,7 +61,7 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 			// only return hash keys
 			pkResults = append(pkResults, pkList...)
 		} else {
-			realList, ok := realRes.Rets.([]interface{})
+			realList, ok := realRes.Rets.([]common.HIndexRespWithValues)
 			if !ok {
 				sLog.Infof("invalid response for search : %v, cmd: %v", res, string(cmd.Raw))
 				conn.WriteError("Invalid response type : Err handle command " + string(cmd.Args[0]))
@@ -70,74 +71,37 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 		}
 	}
 	switch postCmd {
-	case "hget":
-		conn.WriteArray(len(postCmdResults) * 2)
+	case "hget", "hmget", "hgetall":
+		conn.WriteArray(len(postCmdResults) * 3)
 		for _, res := range postCmdResults {
-			realRes, ok := res.(common.KVRecord)
-			if !ok {
-				conn.WriteNull()
-				conn.WriteNull()
+			if len(res.PKey) > len(table) && string(res.PKey[:len(table)]) == table {
+				conn.WriteBulk(res.PKey[len(table)+1:])
 			} else {
-				if len(realRes.Key) > len(table) {
-					conn.WriteBulk(realRes.Key[len(table)+1:])
-				} else {
-					conn.WriteBulk(realRes.Key)
-				}
-				conn.WriteBulk(realRes.Value)
+				conn.WriteBulk(res.PKey)
 			}
-		}
-	case "hmget":
-		conn.WriteArray(len(postCmdResults) * 2)
-		for _, res := range postCmdResults {
-			realRes, ok := res.(common.KVals)
-			if !ok {
-				conn.WriteNull()
+			conn.WriteBulk(res.IndexV)
+			if len(res.HsetValues) == 0 {
 				conn.WriteNull()
 			} else {
-				if len(realRes.PK) > len(table) {
-					conn.WriteBulk(realRes.PK[len(table)+1:])
+				if postCmd == "hget" {
+					conn.WriteBulk(res.HsetValues[0])
 				} else {
-					conn.WriteBulk(realRes.PK)
-				}
-				conn.WriteArray(len(realRes.Vals))
-				for _, v := range realRes.Vals {
-					conn.WriteBulk(v)
-				}
-			}
-		}
-	case "hgetall":
-		conn.WriteArray(len(postCmdResults) * 2)
-		for _, res := range postCmdResults {
-			realRes, ok := res.(common.KFVals)
-			if !ok {
-				conn.WriteNull()
-				conn.WriteNull()
-			} else {
-				if len(realRes.PK) > len(table) {
-					conn.WriteBulk(realRes.PK[len(table)+1:])
-				} else {
-					conn.WriteBulk(realRes.PK)
-				}
-
-				conn.WriteArray(len(realRes.Vals) * 2)
-				for _, v := range realRes.Vals {
-					if v.Err != nil {
-						conn.WriteNull()
-					} else {
-						conn.WriteBulk(v.Rec.Key)
-						conn.WriteBulk(v.Rec.Value)
+					conn.WriteArray(len(res.HsetValues))
+					for _, v := range res.HsetValues {
+						conn.WriteBulk(v)
 					}
 				}
 			}
 		}
 	case "":
-		conn.WriteArray(len(pkResults))
+		conn.WriteArray(len(pkResults) * 2)
 		for _, v := range pkResults {
-			if len(v) > len(table) {
-				conn.WriteBulk(v[len(table)+1:])
+			if len(v.PKey) > len(table) && string(v.PKey[:len(table)]) == table {
+				conn.WriteBulk(v.PKey[len(table)+1:])
 			} else {
-				conn.WriteBulk(v)
+				conn.WriteBulk(v.PKey)
 			}
+			conn.WriteBulk(v.IndexValue)
 		}
 	default:
 		conn.WriteError(common.ErrInvalidArgs.Error())

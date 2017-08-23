@@ -3,9 +3,10 @@ package rockredis
 import (
 	"encoding/binary"
 	"errors"
+	"strconv"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
-	"strconv"
 )
 
 const (
@@ -345,7 +346,7 @@ func (self *RockDB) hsetIndexRemoveRec(pk []byte, field []byte, value []byte, wb
 }
 
 // search return the hash keys for matching field value
-func (db *RockDB) HsetIndexSearch(table []byte, field []byte, cond *IndexCondition, countOnly bool) (int64, [][]byte, error) {
+func (db *RockDB) HsetIndexSearch(table []byte, field []byte, cond *IndexCondition, countOnly bool) (int64, []HIndexResp, error) {
 	hindex, err := db.getIndexer().GetHsetIndex(string(table), string(field))
 	if err != nil {
 		return 0, nil, err
@@ -369,14 +370,19 @@ type IndexCondition struct {
 	Limit        int
 }
 
+type HIndexResp struct {
+	PKey       []byte
+	IndexValue []byte
+}
+
 type HsetIndex struct {
 	Table []byte
 	HsetIndexInfo
 }
 
-func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly bool) (int64, [][]byte, error) {
+func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly bool) (int64, []HIndexResp, error) {
 	var n int64
-	pkList := make([][]byte, 0, 32)
+	pkList := make([]HIndexResp, 0, 32)
 	var min []byte
 	var max []byte
 	rt := common.RangeClose
@@ -442,13 +448,16 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 			continue
 		}
 		var pk []byte
+		var iv []byte
 		if self.Unique == 1 {
 			pk = it.Value()
 		} else {
 			if self.ValueType == Int64V || self.ValueType == Int32V {
-				_, _, _, pk, err = decodeHsetIndexNumberKey(it.Key())
+				var nv int64
+				_, _, nv, pk, err = decodeHsetIndexNumberKey(it.Key())
+				iv = FormatInt64ToSlice(nv)
 			} else if self.ValueType == StringV {
-				_, _, _, pk, err = decodeHsetIndexStringKey(it.Key())
+				_, _, iv, pk, err = decodeHsetIndexStringKey(it.Key())
 			} else {
 				continue
 			}
@@ -456,7 +465,7 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 				continue
 			}
 		}
-		pkList = append(pkList, pk)
+		pkList = append(pkList, HIndexResp{PKey: pk, IndexValue: iv})
 	}
 	it.Close()
 	return n, pkList, nil

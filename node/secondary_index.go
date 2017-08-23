@@ -136,7 +136,7 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 		if len(postCmdArgs) < 2 {
 			return nil, common.ErrInvalidArgs
 		}
-		rets := make([]interface{}, 0, len(pkList))
+		rets := make([]common.HIndexRespWithValues, 0, len(pkList))
 		cmdName := string(postCmdArgs[0])
 		switch cmdName {
 		case "hget":
@@ -144,34 +144,35 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 				return nil, common.ErrInvalidArgs
 			}
 			for _, pk := range pkList {
-				v, err := nd.store.HGet(pk, postCmdArgs[2])
+				v, err := nd.store.HGet(pk.PKey, postCmdArgs[2])
 				if err != nil {
 					continue
 				}
-				rets = append(rets, common.KVRecord{pk, v})
+				vv := [][]byte{v}
+				rets = append(rets, common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv})
 			}
 		case "hmget":
 			if len(postCmdArgs) < 3 {
 				return nil, common.ErrInvalidArgs
 			}
 			for _, pk := range pkList {
-				vals, err := nd.store.HMget(pk, postCmdArgs[2:]...)
+				vals, err := nd.store.HMget(pk.PKey, postCmdArgs[2:]...)
 				if err != nil {
 					continue
 				}
-				rets = append(rets, common.KVals{pk, vals})
+				rets = append(rets, common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vals})
 			}
 		case "hgetall":
 			for _, pk := range pkList {
-				n, valCh, err := nd.store.HGetAll(pk)
+				_, valCh, err := nd.store.HGetAll(pk.PKey)
 				if err != nil {
 					continue
 				}
-				fvs := make([]common.KVRecordRet, 0, n)
+				vv := [][]byte{}
 				for v := range valCh {
-					fvs = append(fvs, v)
+					vv = append(vv, v.Rec.Key, v.Rec.Value)
 				}
-				rets = append(rets, common.KFVals{pk, fvs})
+				rets = append(rets, common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv})
 			}
 		default:
 			return nil, common.ErrNotSupport

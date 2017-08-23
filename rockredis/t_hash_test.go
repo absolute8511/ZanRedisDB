@@ -1,6 +1,7 @@
 package rockredis
 
 import (
+	"bytes"
 	"os"
 	"strconv"
 	"testing"
@@ -470,38 +471,44 @@ func TestHashIndexStringV(t *testing.T) {
 	cnt, pkList, err := db.HsetIndexSearch(hindex.Table, hindex.IndexField, condAll, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList), int(cnt))
-	assert.Equal(t, inputPKList, pkList)
+	for i := 0; i < len(inputPKList); i++ {
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condEqual, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, int(cnt))
-	assert.Equal(t, inputPKList[0], pkList[0])
+	assert.Equal(t, inputPKList[0], pkList[0].PKey)
+	assert.Equal(t, inputFVList[0], pkList[0].IndexValue)
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLess, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i], pkList[i])
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		assert.Equal(t, 1, bytes.Compare(condLess.EndKey, pkList[i].IndexValue))
 	}
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLessEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList), int(cnt))
 	for i := 0; i < len(inputPKList); i++ {
-		assert.Equal(t, inputPKList[i], pkList[i])
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		comp := bytes.Compare(condLess.EndKey, pkList[i].IndexValue)
+		assert.True(t, comp == 1 || comp == 0)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGt, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList), int(cnt))
 	for i := 0; i < len(inputPKList); i++ {
-		assert.Equal(t, inputPKList[i], pkList[i])
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
 	}
 
 	db.wb.Clear()
@@ -515,27 +522,27 @@ func TestHashIndexStringV(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-2, int(cnt))
 	for i := 0; i < len(inputPKList)-2; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLessEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGt, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 }
 
@@ -629,39 +636,42 @@ func TestHashIndexInt64V(t *testing.T) {
 	cnt, pkList, err := db.HsetIndexSearch(hindex.Table, hindex.IndexField, condAll, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList), int(cnt))
-	assert.Equal(t, inputPKList, pkList)
+	for i := 0; i < len(inputPKList); i++ {
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+	}
 	t.Log(pkList)
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condEqual, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, int(cnt))
-	assert.Equal(t, inputPKList[0], pkList[0])
+	assert.Equal(t, inputPKList[0], pkList[0].PKey)
+	assert.Equal(t, inputFVList[0], pkList[0].IndexValue)
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLess, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i], pkList[i])
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
 	}
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLessEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList), int(cnt))
 	for i := 0; i < len(inputPKList); i++ {
-		assert.Equal(t, inputPKList[i], pkList[i])
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGt, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList), int(cnt))
 	for i := 0; i < len(inputPKList); i++ {
-		assert.Equal(t, inputPKList[i], pkList[i])
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
 	}
 
 	db.wb.Clear()
@@ -675,27 +685,27 @@ func TestHashIndexInt64V(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-2, int(cnt))
 	for i := 0; i < len(inputPKList)-2; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLessEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGt, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 
 	cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
-		assert.Equal(t, inputPKList[i+1], pkList[i])
+		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
 	}
 }
 
@@ -764,7 +774,8 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 1, int(cnt))
 	assert.Equal(t, 1, len(pkList))
-	assert.Equal(t, inputPKList[1], pkList[0])
+	assert.Equal(t, inputPKList[1], pkList[0].PKey)
+	assert.Equal(t, condEqual2.StartKey, pkList[0].IndexValue)
 	// update field to new and check index update
 	db.HSet(0, inputPKList[1], intIndex.IndexField, []byte("5"))
 
@@ -782,7 +793,8 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	cnt, pkList5, err := db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual5, false)
 	assert.Equal(t, 1, int(cnt))
 	assert.Equal(t, 1, len(pkList5))
-	assert.Equal(t, pkList[0], pkList5[0])
+	assert.Equal(t, pkList[0].PKey, pkList5[0].PKey)
+	assert.Equal(t, condEqual5.StartKey, pkList5[0].IndexValue)
 
 	cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condAll, false)
 	assert.Nil(t, err)
@@ -804,7 +816,8 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	cnt, pkList6, err := db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual6, false)
 	assert.Equal(t, 1, int(cnt))
 	assert.Equal(t, 1, len(pkList6))
-	assert.Equal(t, pkList[0], pkList6[0])
+	assert.Equal(t, pkList[0].PKey, pkList6[0].PKey)
+	assert.Equal(t, condEqual6.StartKey, pkList6[0].IndexValue)
 
 	// hmset test
 	// hdel
@@ -837,7 +850,7 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 1, int(cnt))
 	assert.Equal(t, 1, len(pkList))
-	assert.Equal(t, inputPKList[0], pkList[0])
+	assert.Equal(t, inputPKList[0], pkList[0].PKey)
 
 	db.HDel(inputPKList[0], stringIndex.IndexField)
 	cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condEqual0, false)

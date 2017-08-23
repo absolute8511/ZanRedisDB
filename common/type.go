@@ -337,6 +337,12 @@ func (s *HsetIndexSchema) IsValidNewSchema() bool {
 	return s.Name != "" && s.IndexField != "" && s.ValueType < MaxVT && s.State < MaxIndexState
 }
 
+type HIndexRespWithValues struct {
+	PKey       []byte
+	IndexV     []byte
+	HsetValues [][]byte
+}
+
 type JsonIndexSchema struct {
 	State IndexState `json:"state"`
 }
