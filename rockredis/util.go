@@ -11,15 +11,8 @@ import (
 var errIntNumber = errors.New("invalid integer")
 
 func Int64(v []byte, err error) (int64, error) {
-	if err != nil {
-		return 0, err
-	} else if v == nil || len(v) == 0 {
-		return 0, nil
-	} else if len(v) != 8 {
-		return 0, errIntNumber
-	}
-
-	return int64(binary.BigEndian.Uint64(v)), nil
+	n, err := Uint64(v, err)
+	return int64(n), err
 }
 
 func Uint64(v []byte, err error) (uint64, error) {

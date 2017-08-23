@@ -327,17 +327,17 @@ func encodeFullScanKey(storeDataType byte, table, key, cursor []byte) ([]byte, e
 		newKey = append(newKey, key...)
 		return encodeKVKey(newKey), nil
 	case ListType:
-		var seq uint64
+		var seq int64
 		var err error
 		if cursor == nil {
-			seq = 0
+			seq = listMinSeq
 		} else {
-			seq, err = Uint64(cursor, nil)
+			seq, err = Int64(cursor, nil)
 			if err != nil {
 				return nil, err
 			}
 		}
-		return lEncodeListKey(table, key, int64(seq)), nil
+		return lEncodeListKey(table, key, seq), nil
 	case HashType:
 		return hEncodeHashKey(table, key, cursor), nil
 	case ZSetType:
