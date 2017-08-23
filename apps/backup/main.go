@@ -414,7 +414,6 @@ func zbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 		return nil
 	})
-
 }
 
 func backup(t string) {
@@ -436,7 +435,6 @@ func backup(t string) {
 	defer client.Stop()
 
 	ch := make(chan interface{})
-	//go client.Backup(t, *table, ch)
 	go client.DoFullScanChannel(t, *table, ch)
 	path := fmt.Sprintf("%s/%s:%s:%s:%s.db", *dataDir, t, time.Now().Format("2006-01-02"), *ns, *table)
 	var file *os.File
@@ -545,7 +543,7 @@ func main() {
 	f, err := os.Stat(*dataDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			err = os.Mkdir(*dataDir, 0777)
+			err = os.Mkdir(*dataDir, 0755)
 			if err != nil {
 				fmt.Println("create path error. ", err)
 				return
