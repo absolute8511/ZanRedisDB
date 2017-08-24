@@ -99,7 +99,7 @@ func checkParameter() {
 	}
 }
 
-type writeFunc func(key []byte, item []interface{}, length int, file *os.File) error
+type writeFunc func(key []byte, item []interface{}, file *os.File) error
 
 func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 	n, err := file.Write(tp)
@@ -112,11 +112,15 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 		return
 	}
 
+	totalCnt := int64(0)
+	start := time.Now()
+	defer func() {
+		fmt.Printf("total backuped %v, cost time: %v\n", totalCnt, time.Since(start))
+	}()
 	for c := range ch {
 		v := c.([]interface{})
 		length := len(v)
 		for i := 0; i < length; i++ {
-			time.Sleep(tm)
 			item := v[i].([]interface{})
 			lenBuf := make([]byte, 4)
 			key := item[0].([]byte)
@@ -143,9 +147,16 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 				return
 			}
 			length := len(item)
-			err = f(key, item[1:length], length, file)
+			err = f(key, item[1:length], file)
 			if err != nil {
 				break
+			}
+			totalCnt++
+			if totalCnt%100 == 0 {
+				time.Sleep(tm * 100)
+			}
+			if totalCnt%10000 == 0 {
+				fmt.Printf("current backuped %v\n", totalCnt)
 			}
 		}
 	}
@@ -153,7 +164,7 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 
 func kvbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{0}
-	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, file *os.File) error {
 		lenBuf := make([]byte, 4)
 		value := item[0].([]byte)
 		valLen := len(value)
@@ -183,9 +194,9 @@ func kvbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func hbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{1}
-	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length))
+		binary.BigEndian.PutUint32(lenBuf, uint32(len(item)))
 		n, err := file.Write(lenBuf)
 
 		if err != nil {
@@ -194,11 +205,12 @@ func hbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 		}
 
 		if n != 4 {
-			fmt.Printf("write field-value count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n", *ns, *table, string(key), length, n)
+			fmt.Printf("write field-value count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n",
+				*ns, *table, string(key), len(item), n)
 			return errWriteLen
 		}
 
-		for i := 0; i < length; i++ {
+		for i := 0; i < len(item); i++ {
 			fv := item[i].([]interface{})
 			field := fv[0].([]byte)
 			fieldLen := len(field)
@@ -254,9 +266,9 @@ func hbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func lbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{2}
-	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length))
+		binary.BigEndian.PutUint32(lenBuf, uint32(len(item)))
 		n, err := file.Write(lenBuf)
 
 		if err != nil {
@@ -265,11 +277,12 @@ func lbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 		}
 
 		if n != 4 {
-			fmt.Printf("write list count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n", *ns, *table, string(key), length, n)
+			fmt.Printf("write list count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n",
+				*ns, *table, string(key), len(item), n)
 			return errWriteLen
 		}
 
-		for i := 0; i < length; i++ {
+		for i := 0; i < len(item); i++ {
 			value := item[i].([]byte)
 			valLen := len(value)
 			binary.BigEndian.PutUint32(lenBuf, uint32(valLen))
@@ -301,9 +314,9 @@ func lbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func sbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{3}
-	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length))
+		binary.BigEndian.PutUint32(lenBuf, uint32(len(item)))
 		n, err := file.Write(lenBuf)
 
 		if err != nil {
@@ -312,11 +325,11 @@ func sbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 		}
 
 		if n != 4 {
-			fmt.Printf("write member count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n", *ns, *table, string(key), length, n)
+			fmt.Printf("write member count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n", *ns, *table, string(key), len(item), n)
 			return errWriteLen
 		}
 
-		for i := 0; i < length; i++ {
+		for i := 0; i < len(item); i++ {
 			member := item[i].([]byte)
 			memberLen := len(member)
 			binary.BigEndian.PutUint32(lenBuf, uint32(memberLen))
@@ -348,9 +361,9 @@ func sbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 
 func zbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{4}
-	backupCommon(tp, ch, file, func(key []byte, item []interface{}, length int, file *os.File) error {
+	backupCommon(tp, ch, file, func(key []byte, item []interface{}, file *os.File) error {
 		lenBuf := make([]byte, 4)
-		binary.BigEndian.PutUint32(lenBuf, uint32(length))
+		binary.BigEndian.PutUint32(lenBuf, uint32(len(item)))
 		n, err := file.Write(lenBuf)
 
 		if err != nil {
@@ -359,11 +372,12 @@ func zbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 		}
 
 		if n != 4 {
-			fmt.Printf("write member-score count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n", *ns, *table, string(key), length, n)
+			fmt.Printf("write member-score count length error. [ns=%s, table=%s, key=%s, count=%d, len=%d]\n",
+				*ns, *table, string(key), len(item), n)
 			return errWriteLen
 		}
 
-		for i := 0; i < length; i++ {
+		for i := 0; i < len(item); i++ {
 			ms := item[i].([]interface{})
 			member := ms[0].([]byte)
 			memberLen := len(member)
@@ -452,7 +466,10 @@ func backup(t string) {
 		return
 	}
 
-	defer file.Close()
+	defer func() {
+		file.Sync()
+		file.Close()
+	}()
 	n, err := file.WriteString(MAGIC)
 	if err != nil {
 		fmt.Println("write magic error, ", err)
