@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -146,8 +147,7 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 				fmt.Printf("write key length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
 				return
 			}
-			length := len(item)
-			err = f(key, item[1:length], file)
+			err = f(key, item[1:], file)
 			if err != nil {
 				break
 			}
@@ -448,9 +448,10 @@ func backup(t string) {
 	client.Start()
 	defer client.Stop()
 
-	ch := make(chan interface{})
-	go client.DoFullScanChannel(t, *table, ch)
-	path := fmt.Sprintf("%s/%s:%s:%s:%s.db", *dataDir, t, time.Now().Format("2006-01-02"), *ns, *table)
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	ch := client.DoFullScanChannel(t, *table, stopCh)
+	path := path.Join(*dataDir, fmt.Sprintf("%s:%s:%s:%s.db", t, time.Now().Format("2006-01-02"), *ns, *table))
 	var file *os.File
 	_, err := os.Stat(path)
 	if err != nil {

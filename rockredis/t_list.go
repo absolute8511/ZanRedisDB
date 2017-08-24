@@ -200,14 +200,15 @@ func (db *RockDB) fixListKey(key []byte) {
 		dbLog.Infof("list %v no need to fix since empty", string(key))
 		return
 	}
-	_, err = db.lSetMeta(metaKey, fixedHead, fixedTail, db.wb)
-	if err != nil {
-		return
-	}
 	if cnt == 0 {
 		db.wb.Delete(metaKey)
 		table, _, _ := extractTableFromRedisKey(key)
 		db.IncrTableKeyCount(table, -1, db.wb)
+	} else {
+		_, err = db.lSetMeta(metaKey, fixedHead, fixedTail, db.wb)
+		if err != nil {
+			return
+		}
 	}
 	dbLog.Infof("list %v fixed to %v, %v, cnt: %v", string(key), fixedHead, fixedTail, cnt)
 	db.eng.Write(db.defaultWriteOpts, db.wb)
