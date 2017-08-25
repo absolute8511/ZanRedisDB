@@ -2,3 +2,4 @@
 .godeps
 .DS_Store
 .vscode
+build/*
