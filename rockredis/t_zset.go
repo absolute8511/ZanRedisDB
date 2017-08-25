@@ -635,6 +635,7 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 	if err != nil {
 		return 0, err
 	}
+	defer it.Close()
 	num := int64(0)
 	for ; it.Valid(); it.Next() {
 		sk := it.RefKey()
@@ -649,7 +650,6 @@ func (db *RockDB) zRemRange(key []byte, min int64, max int64, offset int,
 			num++
 		}
 	}
-	it.Close()
 
 	if newNum, err := db.zIncrSize(key, -num, wb); err != nil {
 		return 0, err

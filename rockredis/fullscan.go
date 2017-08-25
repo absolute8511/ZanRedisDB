@@ -197,6 +197,7 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 	if err != nil {
 		return buildErrFullScanResult(err, common.NONE)
 	}
+	defer it.Close()
 
 	var result []interface{}
 	var item []interface{}

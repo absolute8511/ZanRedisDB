@@ -442,6 +442,7 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 	if err != nil {
 		return n, nil, err
 	}
+	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		n++
 		if countOnly {
@@ -467,7 +468,6 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 		}
 		pkList = append(pkList, HIndexResp{PKey: pk, IndexValue: iv})
 	}
-	it.Close()
 	return n, pkList, nil
 }
 
