@@ -1,4 +1,5 @@
 github.com/absolute8511/glog
+github.com/absolute8511/go-zanredisdb
 github.com/absolute8511/xlock2
 github.com/coreos/etcd         dd0d5902177b6336b8cf344e6cbf1962b5981dde
 github.com/coreos/go-etcd/etcd
