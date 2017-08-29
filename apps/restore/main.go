@@ -60,7 +60,6 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 	var err error
 	var total uint64
 	var existed uint64
-	defer log.Printf("restore finished. [total=%d, existed=%d]\n", total, existed)
 	for {
 		n, err = file.Read(lenBuf)
 		if err != nil {
@@ -126,7 +125,7 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 			break
 		}
 		if val == 0 {
-			log.Printf("key is already exsits in kv.[key=%s]\n", string(key))
+			//log.Printf("key is already exsits in kv.[key=%s]\n", string(key))
 			existed++
 		}
 		total++
@@ -137,9 +136,10 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 			fmt.Print(".")
 		}
 		if total%10000 == 0 {
-			fmt.Printf("%d", total)
+			fmt.Printf("%d(%d)", total, existed)
 		}
 	}
+	log.Printf("restore finished. [total=%d, existed=%d]\n", total, existed)
 }
 
 func hrestore(file *os.File, client *sdk.ZanRedisClient) {
