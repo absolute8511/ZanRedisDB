@@ -881,7 +881,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 										nd.w.Trigger(rid, batchReqRspList[idx])
 									}
 								}
-								if batchCost >= time.Second {
+								if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
 									nd.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
 										cmdName, len(batchReqIDList), batchCost)
 								}
@@ -902,7 +902,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 							} else {
 								v, err := h(cmd, req.Header.Timestamp)
 								cmdCost := time.Since(cmdStart)
-								if cmdCost >= time.Second {
+								if cmdCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && cmdCost > time.Millisecond*100) {
 									nd.rn.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 								}
 								nd.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
@@ -929,7 +929,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 									nd.w.Trigger(rid, nil)
 								}
 							}
-							if batchCost >= time.Second {
+							if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
 								nd.rn.Infof("slow batch write command batch: %v, cost: %v",
 									len(batchReqIDList), batchCost)
 							}
