@@ -41,7 +41,7 @@ const (
 	RedisReq        int8 = 0
 	HTTPReq         int8 = 1
 	SchemaChangeReq int8 = 2
-	proposeTimeout       = time.Second * 10
+	proposeTimeout       = time.Second * 4
 	maxBatchCmdNum       = 500
 )
 
@@ -491,7 +491,7 @@ func (nd *KVNode) handleProposeReq() {
 			cancel()
 			cost := (time.Now().UnixNano() - start) / 1000 / 1000 / 1000
 			if cost >= int64(proposeTimeout.Seconds())/2 {
-				nd.rn.Infof("slow for batch: %v, %v", len(reqList.Reqs), cost)
+				nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
 			}
 			reqList.Reqs = reqList.Reqs[:0]
 			lastReq = nil
@@ -970,7 +970,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 				}
 				cost := time.Since(start)
 				if cost >= proposeTimeout/2 {
-					nd.rn.Infof("slow for batch write db: %v, %v", len(reqList.Reqs), cost)
+					nd.rn.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
 				}
 			}
 		case raftpb.EntryConfChange:
