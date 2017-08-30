@@ -333,12 +333,12 @@ func TestKVMergeScanCrossTable(t *testing.T) {
 	}
 }
 
-func TestHindexMergeSearch(t *testing.T) {
+func TestStrHindexMergeSearch(t *testing.T) {
 	c := getMergeTestConn(t)
 	defer c.Close()
 
 	ns := "default"
-	table := "test_hashindex"
+	table := "test_strhashindex"
 	indexField := "test_f"
 	sc := &node.SchemaChange{
 		Type:       node.SchemaChangeAddHsetIndex,
@@ -346,9 +346,9 @@ func TestHindexMergeSearch(t *testing.T) {
 		SchemaData: nil,
 	}
 	hindex := &common.HsetIndexSchema{
-		Name:       "hindex_test",
+		Name:       "strhindex_test",
 		IndexField: indexField,
-		ValueType:  common.Int32V,
+		ValueType:  common.StringV,
 		State:      common.InitIndex,
 	}
 	sc.SchemaData, _ = json.Marshal(hindex)
@@ -430,6 +430,127 @@ func TestHindexMergeSearch(t *testing.T) {
 		assert.True(t, iv > 1)
 	}
 
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f>2\"", "hget", "$", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	// for string, the order should be "0, 1, 10, 11, ..., 19, 2, 3, 4....."
+	assert.Equal(t, 7*3, len(ay))
+	for i := 0; i < len(ay)-1; i = i + 3 {
+		iv, _ := strconv.Atoi(string(ay[i].([]byte)))
+		assert.True(t, iv > 2)
+		iv, _ = strconv.Atoi(string(ay[i+1].([]byte)))
+		assert.True(t, iv > 2)
+		f2iv, _ := strconv.Atoi(string(ay[i+2].([]byte)))
+		assert.Equal(t, iv+20, f2iv)
+	}
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f>1 and test_f<11\""))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 1*2, len(ay))
+	assert.Equal(t, "10", string(ay[0].([]byte)))
+	assert.Equal(t, "10", string(ay[1].([]byte)))
+}
+
+func TestIntHindexMergeSearch(t *testing.T) {
+	c := getMergeTestConn(t)
+	defer c.Close()
+
+	ns := "default"
+	table := "test_inthashindex"
+	indexField := "test_f"
+	sc := &node.SchemaChange{
+		Type:       node.SchemaChangeAddHsetIndex,
+		Table:      table,
+		SchemaData: nil,
+	}
+	hindex := &common.HsetIndexSchema{
+		Name:       "inthindex_test",
+		IndexField: indexField,
+		ValueType:  common.Int32V,
+		State:      common.InitIndex,
+	}
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+	time.Sleep(time.Second)
+
+	sc.Type = node.SchemaChangeUpdateHsetIndex
+	hindex.State = common.BuildingIndex
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+
+	time.Sleep(time.Second)
+
+	hindex.State = common.ReadyIndex
+	sc.SchemaData, _ = json.Marshal(hindex)
+	for _, nsNode := range testNamespaces {
+		nsNode.Node.ProposeChangeTableSchema(table, sc)
+	}
+
+	time.Sleep(time.Second)
+	for i := 0; i < 20; i++ {
+		_, err := c.Do("hset", ns+":"+table+":"+fmt.Sprintf("%d", i), "test_f", []byte(fmt.Sprintf("%d", i)))
+		assert.Nil(t, err)
+		_, err = c.Do("hset", ns+":"+table+":"+fmt.Sprintf("%d", i), "test_f2", []byte(fmt.Sprintf("%d", i+20)))
+		assert.Nil(t, err)
+	}
+
+	ay, err := goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\""))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 2, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+	assert.Equal(t, int64(1), ay[1].(int64))
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hgetall", "$"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 3, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+	assert.Equal(t, int64(1), ay[1].(int64))
+	fvs, err := goredis.Strings(ay[2], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 4, len(fvs))
+	assert.Equal(t, "test_f", fvs[0])
+	assert.Equal(t, "1", fvs[1])
+	assert.Equal(t, "test_f2", fvs[2])
+	assert.Equal(t, "21", fvs[3])
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hget", "$", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 3, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+	assert.Equal(t, int64(1), ay[1].(int64))
+	assert.Equal(t, []byte("21"), ay[2].([]byte))
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f=1\"", "hmget", "$", "test_f", "test_f2"))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 3, len(ay))
+	assert.Equal(t, []byte("1"), ay[0].([]byte))
+	assert.Equal(t, int64(1), ay[1].(int64))
+	vv, err := goredis.Strings(ay[2], nil)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(vv))
+	assert.Equal(t, "1", vv[0])
+	assert.Equal(t, "21", vv[1])
+
+	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f>1\""))
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 18*2, len(ay))
+	for i := 0; i < len(ay)-1; i = i + 2 {
+		iv, _ := strconv.Atoi(string(ay[i].([]byte)))
+		assert.True(t, iv > 1)
+		nv, _ := ay[i+1].(int64)
+		assert.True(t, nv > 1)
+	}
+
 	ay, err = goredis.Values(c.Do("hidx.from", ns+":"+table, "where", "\"test_f>1\"", "hget", "$", "test_f2"))
 	assert.Nil(t, err)
 	t.Log(ay)
@@ -437,8 +558,8 @@ func TestHindexMergeSearch(t *testing.T) {
 	for i := 0; i < len(ay)-1; i = i + 3 {
 		iv, _ := strconv.Atoi(string(ay[i].([]byte)))
 		assert.True(t, iv > 1)
-		iv, _ = strconv.Atoi(string(ay[i+1].([]byte)))
-		assert.True(t, iv > 1)
+		nv, _ := ay[i+1].(int64)
+		assert.True(t, nv > 1)
 		f2iv, _ := strconv.Atoi(string(ay[i+2].([]byte)))
 		assert.Equal(t, iv+20, f2iv)
 	}
@@ -447,9 +568,12 @@ func TestHindexMergeSearch(t *testing.T) {
 	assert.Nil(t, err)
 	t.Log(ay)
 	assert.Equal(t, 8*2, len(ay))
-	for _, v := range ay {
-		iv, _ := strconv.Atoi(string(v.([]byte)))
+	for i := 0; i < len(ay)-1; i = i + 2 {
+		iv, _ := strconv.Atoi(string(ay[i].([]byte)))
 		assert.True(t, iv > 1)
 		assert.True(t, iv < 10)
+		nv, _ := ay[i+1].(int64)
+		assert.True(t, nv > 1)
+		assert.True(t, nv < 10)
 	}
 }

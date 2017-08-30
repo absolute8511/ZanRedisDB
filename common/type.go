@@ -1,6 +1,7 @@
 package common
 
 import (
+	"container/heap"
 	"errors"
 	"strings"
 
@@ -339,8 +340,72 @@ func (s *HsetIndexSchema) IsValidNewSchema() bool {
 
 type HIndexRespWithValues struct {
 	PKey       []byte
-	IndexV     []byte
+	IndexV     interface{}
 	HsetValues [][]byte
+	index      int
+}
+
+type SearchResultHeap []*HIndexRespWithValues
+
+func (sh SearchResultHeap) Len() int { return len(sh) }
+func (sh SearchResultHeap) Less(i, j int) bool {
+	var rightV int64
+	switch realV := sh[i].IndexV.(type) {
+	case []byte:
+		comp := bytes.Compare(realV, sh[j].IndexV.([]byte))
+		if comp == 0 {
+			return bytes.Compare(sh[i].PKey, sh[j].PKey) == -1
+		}
+		return comp == -1
+	case int:
+		rightV = int64(sh[j].IndexV.(int))
+		leftV := int64(realV)
+		if rightV == leftV {
+			return bytes.Compare(sh[i].PKey, sh[j].PKey) == -1
+		}
+		return leftV < rightV
+	case int32:
+		rightV = int64(sh[j].IndexV.(int32))
+		leftV := int64(realV)
+		if rightV == leftV {
+			return bytes.Compare(sh[i].PKey, sh[j].PKey) == -1
+		}
+		return leftV < rightV
+	case int64:
+		rightV = int64(sh[j].IndexV.(int64))
+		leftV := int64(realV)
+		if rightV == leftV {
+			return bytes.Compare(sh[i].PKey, sh[j].PKey) == -1
+		}
+		return leftV < rightV
+	}
+	return false
+}
+
+func (sh SearchResultHeap) Swap(i, j int) {
+	sh[i], sh[j] = sh[j], sh[i]
+	sh[i].index = i
+	sh[j].index = j
+}
+
+func (sh *SearchResultHeap) Push(x interface{}) {
+	n := len(*sh)
+	v := x.(*HIndexRespWithValues)
+	v.index = n
+	*sh = append(*sh, v)
+}
+
+func (sh *SearchResultHeap) Pop() interface{} {
+	old := *sh
+	n := len(old)
+	v := old[n-1]
+	v.index = -1
+	*sh = old[0 : n-1]
+	return v
+}
+
+func (sh *SearchResultHeap) update(item *HIndexRespWithValues) {
+	heap.Fix(sh, item.index)
 }
 
 type JsonIndexSchema struct {

@@ -12,7 +12,7 @@ import (
 
 type HindexSearchResults struct {
 	Table string
-	Rets  interface{}
+	Rets  []common.HIndexRespWithValues
 }
 
 func parseSingleCond(condData []byte, indexCond *rockredis.IndexCondition) ([]byte, error) {
@@ -49,6 +49,7 @@ func parseSingleCond(condData []byte, indexCond *rockredis.IndexCondition) ([]by
 	return field, nil
 }
 
+// TODO: handle string index value which may contains ">, =, <, and" words
 func parseIndexQueryWhere(whereData []byte) ([]byte, *rockredis.IndexCondition, error) {
 	whereData = bytes.Trim(whereData, "\"")
 	andConds := bytes.SplitN(whereData, []byte("and"), 2)
@@ -125,18 +126,18 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 		args = args[3:]
 	}
 	nd.rn.Debugf("table %v parsing where condition result: %v, field: %v", string(table), cond, string(field))
-	_, pkList, err := nd.store.HsetIndexSearch(table, field, cond, false)
+	vt, _, pkList, err := nd.store.HsetIndexSearch(table, field, cond, false)
 	if err != nil {
 		nd.rn.Infof("search %v, %v error: %v", string(table), string(field), err)
 		return nil, err
 	}
 	nd.rn.Debugf("search result count: %v", len(pkList))
+	rets := make([]common.HIndexRespWithValues, 0, len(pkList))
 	if len(args) > 0 {
 		postCmdArgs := args
 		if len(postCmdArgs) < 2 {
 			return nil, common.ErrInvalidArgs
 		}
-		rets := make([]common.HIndexRespWithValues, 0, len(pkList))
 		cmdName := string(postCmdArgs[0])
 		switch cmdName {
 		case "hget":
@@ -149,7 +150,11 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 					continue
 				}
 				vv := [][]byte{v}
-				rets = append(rets, common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv})
+				rspV := common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv}
+				if vt == rockredis.Int64V || vt == rockredis.Int32V {
+					rspV.IndexV = pk.IndexIntValue
+				}
+				rets = append(rets, rspV)
 			}
 		case "hmget":
 			if len(postCmdArgs) < 3 {
@@ -160,7 +165,11 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 				if err != nil {
 					continue
 				}
-				rets = append(rets, common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vals})
+				rspV := common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vals}
+				if vt == rockredis.Int64V || vt == rockredis.Int32V {
+					rspV.IndexV = pk.IndexIntValue
+				}
+				rets = append(rets, rspV)
 			}
 		case "hgetall":
 			for _, pk := range pkList {
@@ -172,13 +181,24 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 				for v := range valCh {
 					vv = append(vv, v.Rec.Key, v.Rec.Value)
 				}
-				rets = append(rets, common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv})
+				rspV := common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv}
+				if vt == rockredis.Int64V || vt == rockredis.Int32V {
+					rspV.IndexV = pk.IndexIntValue
+				}
+				rets = append(rets, rspV)
 			}
 		default:
 			return nil, common.ErrNotSupport
 		}
 		return &HindexSearchResults{Table: string(table), Rets: rets}, nil
 	} else {
-		return &HindexSearchResults{Table: string(table), Rets: pkList}, nil
+		for _, pk := range pkList {
+			rspV := common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue}
+			if vt == rockredis.Int64V || vt == rockredis.Int32V {
+				rspV.IndexV = pk.IndexIntValue
+			}
+			rets = append(rets, rspV)
+		}
+		return &HindexSearchResults{Table: string(table), Rets: rets}, nil
 	}
 }

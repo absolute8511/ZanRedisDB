@@ -19,12 +19,14 @@ var (
 	ErrIndexNotExist       = errors.New("index not exist")
 	ErrIndexDeleted        = errors.New("index is deleted")
 	ErrIndexValueNotNumber = errors.New("invalid value for number")
+	ErrIndexValueType      = errors.New("invalid index value type")
 	errHsetIndexKey        = errors.New("invalid hset index key")
 	emptyValue             = []byte("")
 )
 
-func encodeHsetIndexNumberKey(table []byte, indexName []byte, indexValue int64, pk []byte) []byte {
-	tmpkey := make([]byte, 2+2+len(table)+1+2+len(indexName)+1+8+1+len(pk))
+func encodeHsetIndexNumberKey(table []byte, indexName []byte,
+	indexValue int64, pk []byte, stopKey bool) ([]byte, error) {
+	tmpkey := make([]byte, 2+2+len(table)+1+2+len(indexName)+1)
 	pos := 0
 	tmpkey[pos] = IndexDataType
 	pos++
@@ -45,17 +47,18 @@ func encodeHsetIndexNumberKey(table []byte, indexName []byte, indexValue int64, 
 	pos += len(indexName)
 	tmpkey[pos] = hindexStartSep
 	pos++
-	copy(tmpkey[pos:], PutInt64(indexValue))
-	pos += 8
-	tmpkey[pos] = hindexStartSep
-	pos++
-	copy(tmpkey[pos:], pk)
-
-	return tmpkey
+	var err error
+	sep := int32(hindexStartSep)
+	if stopKey {
+		sep = int32(hindexStartSep + 1)
+	}
+	tmpkey, err = EncodeKey(tmpkey[:pos], indexValue, sep, pk)
+	return tmpkey, err
 }
 
-func encodeHsetIndexStringKey(table []byte, indexName []byte, indexValue []byte, pk []byte) []byte {
-	tmpkey := make([]byte, 2+2+len(table)+1+2+len(indexName)+1+2+len(indexValue)+1+len(pk))
+func encodeHsetIndexStringKey(table []byte, indexName []byte,
+	indexValue []byte, pk []byte, stopKey bool) ([]byte, error) {
+	tmpkey := make([]byte, 2+2+len(table)+1+2+len(indexName)+1)
 	pos := 0
 	tmpkey[pos] = IndexDataType
 	pos++
@@ -73,19 +76,18 @@ func encodeHsetIndexStringKey(table []byte, indexName []byte, indexValue []byte,
 	pos += len(indexName)
 	tmpkey[pos] = hindexStartSep
 	pos++
-	binary.BigEndian.PutUint16(tmpkey[pos:], uint16(len(indexValue)))
-	pos += 2
-	copy(tmpkey[pos:], indexValue)
-	pos += len(indexValue)
-	tmpkey[pos] = hindexStartSep
-	pos++
-	copy(tmpkey[pos:], pk)
-	return tmpkey
+	var err error
+	sep := int32(hindexStartSep)
+	if stopKey {
+		sep = int32(hindexStartSep + 1)
+	}
+	tmpkey, err = EncodeKey(tmpkey[:pos], indexValue, sep, pk)
+	return tmpkey, err
 }
 
 func decodeHsetIndexNumberKey(rawKey []byte) ([]byte, []byte, int64, []byte, error) {
 	pos := 0
-	if len(rawKey) < pos+2+2+1+2+1+8+1 {
+	if len(rawKey) < pos+2+2+1+2+1 {
 		return nil, nil, 0, nil, errHsetIndexKey
 	}
 	if rawKey[0] != IndexDataType || rawKey[1] != hsetIndexDataType {
@@ -115,21 +117,23 @@ func decodeHsetIndexNumberKey(rawKey []byte) ([]byte, []byte, int64, []byte, err
 		return nil, nil, 0, nil, errHsetIndexKey
 	}
 	pos++
-	indexValueLen := 8
-	if len(rawKey) < indexValueLen+pos+1 {
-		return nil, nil, 0, nil, errHsetIndexKey
+	rets, err := Decode(rawKey[pos:], 3)
+	if err != nil {
+		return table, indexName, 0, nil, err
 	}
-	indexValue := rawKey[pos : pos+indexValueLen]
-	pos += indexValueLen
-
-	iv, err := Int64(indexValue, nil)
-
-	if rawKey[pos] != hindexStartSep {
-		return nil, nil, 0, nil, errHsetIndexKey
+	iv, ok := rets[0].(int64)
+	if !ok {
+		return table, indexName, 0, nil, ErrIndexValueType
 	}
-	pos++
-	pk := rawKey[pos:]
-
+	pk, ok := rets[2].([]byte)
+	if !ok {
+		//for unique index, no pk key in index key
+		if rets[2] == nil {
+			pk = nil
+		} else {
+			return table, indexName, 0, nil, ErrIndexValueType
+		}
+	}
 	return table, indexName, iv, pk, err
 }
 
@@ -165,20 +169,23 @@ func decodeHsetIndexStringKey(rawKey []byte) ([]byte, []byte, []byte, []byte, er
 		return nil, nil, nil, nil, errHsetIndexKey
 	}
 	pos++
-	indexValueLen := int(binary.BigEndian.Uint16(rawKey[pos:]))
-	pos += 2
-	if len(rawKey) < indexValueLen+pos+1 {
-		return nil, nil, nil, nil, errHsetIndexKey
-	}
-	indexValue := rawKey[pos : pos+indexValueLen]
-	pos += indexValueLen
 
-	if rawKey[pos] != hindexStartSep {
-		return nil, nil, nil, nil, errHsetIndexKey
+	rets, err := Decode(rawKey[pos:], 3)
+	if err != nil {
+		return table, indexName, nil, nil, err
 	}
-	pos++
-	pk := rawKey[pos:]
-
+	indexValue, ok := rets[0].([]byte)
+	if !ok {
+		return table, indexName, nil, nil, ErrIndexValueType
+	}
+	pk, ok := rets[2].([]byte)
+	if !ok {
+		if rets[2] == nil {
+			pk = nil
+		} else {
+			return table, indexName, nil, nil, ErrIndexValueType
+		}
+	}
 	return table, indexName, indexValue, pk, nil
 }
 
@@ -210,44 +217,64 @@ func encodeHsetIndexStopKey(table []byte, indexName []byte) []byte {
 	return k
 }
 
-func encodeHsetIndexNumberStartKey(table []byte, indexName []byte, indexValue int64) []byte {
-	return encodeHsetIndexNumberKey(table, indexName, indexValue, nil)
+func encodeHsetIndexNumberStartKey(table []byte, indexName []byte, indexValue int64) ([]byte, error) {
+	return encodeHsetIndexNumberKey(table, indexName, indexValue, nil, false)
 }
 
-func encodeHsetIndexNumberStopKey(table []byte, indexName []byte, indexValue int64) []byte {
-	k := encodeHsetIndexNumberKey(table, indexName, indexValue, nil)
-	k[len(k)-1] = k[len(k)-1] + 1
-	return k
+func encodeHsetIndexNumberStopKey(table []byte, indexName []byte, indexValue int64) ([]byte, error) {
+	k, err := encodeHsetIndexNumberKey(table, indexName, indexValue, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
 }
 
-func encodeHsetIndexStringStartKey(table []byte, indexName []byte, indexValue []byte) []byte {
-	return encodeHsetIndexStringKey(table, indexName, indexValue, nil)
+func encodeHsetIndexStringStartKey(table []byte, indexName []byte, indexValue []byte) ([]byte, error) {
+	return encodeHsetIndexStringKey(table, indexName, indexValue, nil, false)
 }
 
-func encodeHsetIndexStringStopKey(table []byte, indexName []byte, indexValue []byte) []byte {
-	k := encodeHsetIndexStringKey(table, indexName, indexValue, nil)
-	k[len(k)-1] = k[len(k)-1] + 1
-	return k
+func encodeHsetIndexStringStopKey(table []byte, indexName []byte, indexValue []byte) ([]byte, error) {
+	k, err := encodeHsetIndexStringKey(table, indexName, indexValue, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
 }
 
-func hsetIndexAddNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, pkvalue []byte, wb *gorocksdb.WriteBatch) {
-	dbkey := encodeHsetIndexNumberKey(table, indexName, indexValue, pk)
+func hsetIndexAddNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, pkvalue []byte, wb *gorocksdb.WriteBatch) error {
+	dbkey, err := encodeHsetIndexNumberKey(table, indexName, indexValue, pk, false)
+	if err != nil {
+		return err
+	}
 	wb.Put(dbkey, pkvalue)
+	return nil
 }
 
-func hsetIndexRemoveNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, wb *gorocksdb.WriteBatch) {
-	dbkey := encodeHsetIndexNumberKey(table, indexName, indexValue, pk)
+func hsetIndexRemoveNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, wb *gorocksdb.WriteBatch) error {
+	dbkey, err := encodeHsetIndexNumberKey(table, indexName, indexValue, pk, false)
+	if err != nil {
+		return err
+	}
 	wb.Delete(dbkey)
+	return nil
 }
 
-func hsetIndexAddStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, pkvalue []byte, wb *gorocksdb.WriteBatch) {
-	dbkey := encodeHsetIndexStringKey(table, indexName, indexValue, pk)
+func hsetIndexAddStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, pkvalue []byte, wb *gorocksdb.WriteBatch) error {
+	dbkey, err := encodeHsetIndexStringKey(table, indexName, indexValue, pk, false)
+	if err != nil {
+		return err
+	}
 	wb.Put(dbkey, pkvalue)
+	return nil
 }
 
-func hsetIndexRemoveStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, wb *gorocksdb.WriteBatch) {
-	dbkey := encodeHsetIndexStringKey(table, indexName, indexValue, pk)
+func hsetIndexRemoveStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, wb *gorocksdb.WriteBatch) error {
+	dbkey, err := encodeHsetIndexStringKey(table, indexName, indexValue, pk, false)
+	if err != nil {
+		return err
+	}
 	wb.Delete(dbkey)
+	return nil
 }
 
 func (db *RockDB) hsetIndexAddFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb *gorocksdb.WriteBatch) error {
@@ -346,16 +373,17 @@ func (self *RockDB) hsetIndexRemoveRec(pk []byte, field []byte, value []byte, wb
 }
 
 // search return the hash keys for matching field value
-func (db *RockDB) HsetIndexSearch(table []byte, field []byte, cond *IndexCondition, countOnly bool) (int64, []HIndexResp, error) {
+func (db *RockDB) HsetIndexSearch(table []byte, field []byte, cond *IndexCondition, countOnly bool) (IndexPropertyDType, int64, []HIndexResp, error) {
 	hindex, err := db.getIndexer().GetHsetIndex(string(table), string(field))
 	if err != nil {
-		return 0, nil, err
+		return 0, 0, nil, err
 	}
 	if hindex.State == DeletedIndex {
-		return 0, nil, ErrIndexDeleted
+		return hindex.ValueType, 0, nil, ErrIndexDeleted
 	}
 
-	return hindex.SearchRec(db, cond, countOnly)
+	n, ret, err := hindex.SearchRec(db, cond, countOnly)
+	return hindex.ValueType, n, ret, err
 }
 
 // TODO: handle IN, LIKE, NOT equal condition in future
@@ -371,8 +399,9 @@ type IndexCondition struct {
 }
 
 type HIndexResp struct {
-	PKey       []byte
-	IndexValue []byte
+	PKey          []byte
+	IndexValue    []byte
+	IndexIntValue int64
 }
 
 type HsetIndex struct {
@@ -401,7 +430,10 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 			if !cond.IncludeStart {
 				sn++
 			}
-			min = encodeHsetIndexNumberStartKey(self.Table, self.Name, sn)
+			min, err = encodeHsetIndexNumberStartKey(self.Table, self.Name, sn)
+			if err != nil {
+				return n, nil, err
+			}
 		}
 		if cond.EndKey != nil {
 			en, err := strconv.ParseInt(string(cond.EndKey), 10, 64)
@@ -411,7 +443,10 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 			if !cond.IncludeEnd {
 				en--
 			}
-			max = encodeHsetIndexNumberStopKey(self.Table, self.Name, en)
+			max, err = encodeHsetIndexNumberStopKey(self.Table, self.Name, en)
+			if err != nil {
+				return n, nil, err
+			}
 		}
 	} else if self.ValueType == StringV {
 		isLOpen := cond.StartKey != nil && !cond.IncludeStart
@@ -423,20 +458,36 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 		} else if isLOpen {
 			rt = common.RangeLOpen
 		}
+		var err error
 		if cond.StartKey != nil {
 			if (rt & common.RangeLOpen) > 0 {
-				min = encodeHsetIndexStringStopKey(self.Table, self.Name, cond.StartKey)
+				min, err = encodeHsetIndexStringStopKey(self.Table, self.Name, cond.StartKey)
+				if err != nil {
+					return n, nil, err
+				}
 			} else {
-				min = encodeHsetIndexStringStartKey(self.Table, self.Name, cond.StartKey)
+				min, err = encodeHsetIndexStringStartKey(self.Table, self.Name, cond.StartKey)
+				if err != nil {
+					return n, nil, err
+				}
 			}
 		}
 		if cond.EndKey != nil {
 			if (rt & common.RangeROpen) > 0 {
-				max = encodeHsetIndexStringStartKey(self.Table, self.Name, cond.EndKey)
+				max, err = encodeHsetIndexStringStartKey(self.Table, self.Name, cond.EndKey)
+				if err != nil {
+					return n, nil, err
+				}
 			} else {
-				max = encodeHsetIndexStringStopKey(self.Table, self.Name, cond.EndKey)
+				max, err = encodeHsetIndexStringStopKey(self.Table, self.Name, cond.EndKey)
+				if err != nil {
+					return n, nil, err
+				}
 			}
 		}
+	}
+	if dbLog.Level() >= common.LOG_DEBUG {
+		dbLog.Debugf("begin search index: %v-%v-%v, %v~%v", string(self.Table), string(self.Name), string(self.IndexField), min, max)
 	}
 	it, err := NewDBRangeLimitIterator(db.eng, min, max, rt, cond.Offset, cond.Limit, false)
 	if err != nil {
@@ -450,23 +501,24 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 		}
 		var pk []byte
 		var iv []byte
+		var nv int64
+		if self.ValueType == Int64V || self.ValueType == Int32V {
+			_, _, nv, pk, err = decodeHsetIndexNumberKey(it.Key())
+		} else if self.ValueType == StringV {
+			_, _, iv, pk, err = decodeHsetIndexStringKey(it.Key())
+		} else {
+			continue
+		}
+		if err != nil {
+			continue
+		}
 		if self.Unique == 1 {
 			pk = it.Value()
-		} else {
-			if self.ValueType == Int64V || self.ValueType == Int32V {
-				var nv int64
-				_, _, nv, pk, err = decodeHsetIndexNumberKey(it.Key())
-				iv = FormatInt64ToSlice(nv)
-			} else if self.ValueType == StringV {
-				_, _, iv, pk, err = decodeHsetIndexStringKey(it.Key())
-			} else {
-				continue
-			}
-			if err != nil {
-				continue
-			}
 		}
-		pkList = append(pkList, HIndexResp{PKey: pk, IndexValue: iv})
+		if dbLog.Level() > common.LOG_DETAIL {
+			dbLog.Debugf("matched index: %v, %v, %v", it.Key(), string(pk), string(iv))
+		}
+		pkList = append(pkList, HIndexResp{PKey: pk, IndexValue: iv, IndexIntValue: nv})
 	}
 	return n, pkList, nil
 }

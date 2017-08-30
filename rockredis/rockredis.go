@@ -493,7 +493,7 @@ func (r *RockDB) backupLoop() {
 					dbLog.Infof("checkpoint exist: %v, remove it", rsp.backupDir)
 					os.RemoveAll(rsp.backupDir)
 				}
-				time.AfterFunc(time.Second*2, func() {
+				time.AfterFunc(time.Millisecond*10, func() {
 					close(rsp.started)
 				})
 				err = ck.Save(rsp.backupDir)
