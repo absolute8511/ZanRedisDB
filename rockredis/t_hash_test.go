@@ -404,14 +404,22 @@ func TestHashIndexStringV(t *testing.T) {
 	err := db.indexMgr.AddHsetIndex(db, &hindex)
 	assert.Nil(t, err)
 
-	inputPKList := make([][]byte, 0, 3)
-	inputPKList = append(inputPKList, []byte("test:key1"))
-	inputPKList = append(inputPKList, []byte("test:key2"))
-	inputPKList = append(inputPKList, []byte("test:key3"))
-	inputFVList := make([][]byte, 0, 3)
+	pkCnt := 20
+	inputPKList := make([][]byte, 0, pkCnt)
+	inputFVList := make([][]byte, 0, pkCnt)
+	// 0, 1, 10, 11, 12, ..., 19, 2, 3, 4, ..., 9
+	inputFVList = append(inputFVList, []byte("fv0"))
 	inputFVList = append(inputFVList, []byte("fv1"))
-	inputFVList = append(inputFVList, []byte("fv2"))
-	inputFVList = append(inputFVList, []byte("fv3"))
+	for i := 10; i < 20; i++ {
+		inputFVList = append(inputFVList, []byte("fv"+strconv.Itoa(i)))
+	}
+	for i := 2; i < 10; i++ {
+		inputFVList = append(inputFVList, []byte("fv"+strconv.Itoa(i)))
+	}
+
+	for i := 0; i < pkCnt; i++ {
+		inputPKList = append(inputPKList, []byte("test:key"+strconv.Itoa(i)))
+	}
 	db.wb.Clear()
 	for i, pk := range inputPKList {
 		err = db.hsetIndexAddRec(pk, hindex.IndexField, inputFVList[i], db.wb)
@@ -451,7 +459,14 @@ func TestHashIndexStringV(t *testing.T) {
 		Offset:       0,
 		Limit:        -1,
 	}
-
+	condLessMid := &IndexCondition{
+		StartKey:     nil,
+		IncludeStart: false,
+		EndKey:       inputFVList[len(inputFVList)/2],
+		IncludeEnd:   false,
+		Offset:       0,
+		Limit:        -1,
+	}
 	condGt := &IndexCondition{
 		StartKey:     inputFVList[0],
 		IncludeStart: false,
@@ -462,6 +477,14 @@ func TestHashIndexStringV(t *testing.T) {
 	}
 	condGtEq := &IndexCondition{
 		StartKey:     inputFVList[0],
+		IncludeStart: true,
+		EndKey:       nil,
+		IncludeEnd:   false,
+		Offset:       0,
+		Limit:        -1,
+	}
+	condGtMidEq := &IndexCondition{
+		StartKey:     inputFVList[len(inputFVList)/2],
 		IncludeStart: true,
 		EndKey:       nil,
 		IncludeEnd:   false,
@@ -505,6 +528,7 @@ func TestHashIndexStringV(t *testing.T) {
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
 		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
+		assert.Equal(t, -1, bytes.Compare(condGt.StartKey, pkList[i].IndexValue))
 	}
 
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtEq, false)
@@ -512,6 +536,26 @@ func TestHashIndexStringV(t *testing.T) {
 	assert.Equal(t, len(inputPKList), int(cnt))
 	for i := 0; i < len(inputPKList); i++ {
 		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		comp := bytes.Compare(condLess.StartKey, pkList[i].IndexValue)
+		assert.True(t, comp == -1 || comp == 0)
+	}
+
+	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLessMid, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList)/2, int(cnt))
+	for i := 0; i < len(inputPKList)/2; i++ {
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		comp := bytes.Compare(condLessMid.EndKey, pkList[i].IndexValue)
+		assert.True(t, comp == 1)
+	}
+
+	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtMidEq, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList)/2, int(cnt))
+	for i := 0; i < len(inputPKList)/2; i++ {
+		assert.Equal(t, inputPKList[i+len(inputPKList)/2], pkList[i].PKey)
+		comp := bytes.Compare(condGtMidEq.StartKey, pkList[i].IndexValue)
+		assert.True(t, comp == -1 || comp == 0)
 	}
 
 	db.wb.Clear()
@@ -573,18 +617,17 @@ func TestHashIndexInt64V(t *testing.T) {
 	err := db.indexMgr.AddHsetIndex(db, &hindex)
 	assert.Nil(t, err)
 
-	inputPKList := make([][]byte, 0, 3)
-	inputPKList = append(inputPKList, []byte("test:key1"))
-	inputPKList = append(inputPKList, []byte("test:key2"))
-	inputPKList = append(inputPKList, []byte("test:key3"))
-	inputFVList := make([][]byte, 0, 3)
-	inputFVList = append(inputFVList, []byte("1"))
-	inputFVList = append(inputFVList, []byte("2"))
-	inputFVList = append(inputFVList, []byte("11"))
-	inputFVIntList := make([]int64, 0, 3)
-	inputFVIntList = append(inputFVIntList, 1)
-	inputFVIntList = append(inputFVIntList, 2)
-	inputFVIntList = append(inputFVIntList, 11)
+	pkCnt := 20
+	inputPKList := make([][]byte, 0, pkCnt)
+	inputFVList := make([][]byte, 0, pkCnt)
+	inputFVIntList := make([]int64, 0, pkCnt)
+
+	for i := 0; i < pkCnt; i++ {
+		inputPKList = append(inputPKList, []byte("test:key"+strconv.Itoa(i)))
+		inputFVList = append(inputFVList, []byte(strconv.Itoa(i)))
+		inputFVIntList = append(inputFVIntList, int64(i))
+	}
+
 	db.wb.Clear()
 	for i, pk := range inputPKList {
 		db.hsetIndexAddRec(pk, hindex.IndexField, inputFVList[i], db.wb)
@@ -622,7 +665,14 @@ func TestHashIndexInt64V(t *testing.T) {
 		Offset:       0,
 		Limit:        -1,
 	}
-
+	condLessMid := &IndexCondition{
+		StartKey:     nil,
+		IncludeStart: false,
+		EndKey:       inputFVList[len(inputFVList)/2],
+		IncludeEnd:   false,
+		Offset:       0,
+		Limit:        -1,
+	}
 	condGt := &IndexCondition{
 		StartKey:     inputFVList[0],
 		IncludeStart: false,
@@ -633,6 +683,14 @@ func TestHashIndexInt64V(t *testing.T) {
 	}
 	condGtEq := &IndexCondition{
 		StartKey:     inputFVList[0],
+		IncludeStart: true,
+		EndKey:       nil,
+		IncludeEnd:   false,
+		Offset:       0,
+		Limit:        -1,
+	}
+	condGtMidEq := &IndexCondition{
+		StartKey:     inputFVList[len(inputFVList)/2],
 		IncludeStart: true,
 		EndKey:       nil,
 		IncludeEnd:   false,
@@ -659,12 +717,21 @@ func TestHashIndexInt64V(t *testing.T) {
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
 		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		assert.True(t, pkList[i].IndexIntValue < inputFVIntList[pkCnt-1])
 	}
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLessEq, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList), int(cnt))
 	for i := 0; i < len(inputPKList); i++ {
 		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		assert.True(t, pkList[i].IndexIntValue <= inputFVIntList[pkCnt-1])
+	}
+	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condLessMid, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList)/2, int(cnt))
+	for i := 0; i < len(inputPKList)/2; i++ {
+		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		assert.True(t, pkList[i].IndexIntValue < inputFVIntList[pkCnt/2])
 	}
 
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGt, false)
@@ -672,6 +739,7 @@ func TestHashIndexInt64V(t *testing.T) {
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 	for i := 0; i < len(inputPKList)-1; i++ {
 		assert.Equal(t, inputPKList[i+1], pkList[i].PKey)
+		assert.True(t, pkList[i].IndexIntValue > inputFVIntList[0])
 	}
 
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtEq, false)
@@ -679,6 +747,14 @@ func TestHashIndexInt64V(t *testing.T) {
 	assert.Equal(t, len(inputPKList), int(cnt))
 	for i := 0; i < len(inputPKList); i++ {
 		assert.Equal(t, inputPKList[i], pkList[i].PKey)
+		assert.True(t, pkList[i].IndexIntValue >= inputFVIntList[0])
+	}
+	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condGtMidEq, false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(inputPKList)/2, int(cnt))
+	for i := 0; i < len(inputPKList)/2; i++ {
+		assert.Equal(t, inputPKList[i+pkCnt/2], pkList[i].PKey)
+		assert.True(t, pkList[i].IndexIntValue >= inputFVIntList[pkCnt/2])
 	}
 
 	db.wb.Clear()
