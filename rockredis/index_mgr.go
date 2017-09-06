@@ -20,6 +20,8 @@ var (
 )
 
 type JsonIndex struct {
+	Table []byte
+	HsetIndexInfo
 }
 
 type TableIndexContainer struct {
@@ -70,6 +72,18 @@ func (self *TableIndexContainer) unmarshalHsetIndexes(table []byte, data []byte)
 	}
 	dbLog.Infof("load hash index: %v", indexList.String())
 	return nil
+}
+
+func (self *TableIndexContainer) GetJsonIndexNoLock(path string) *JsonIndex {
+	// TODO: path need to be converted to canonical form
+	index, ok := self.jsonIndexes[path]
+	if !ok {
+		return nil
+	}
+	if index.State == InitIndex {
+		return nil
+	}
+	return index
 }
 
 type IndexMgr struct {

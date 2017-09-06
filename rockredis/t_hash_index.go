@@ -52,7 +52,7 @@ func encodeHsetIndexNumberKey(table []byte, indexName []byte,
 	if stopKey {
 		sep = int32(hindexStartSep + 1)
 	}
-	tmpkey, err = EncodeKey(tmpkey[:pos], indexValue, sep, pk)
+	tmpkey, err = EncodeMemCmpKey(tmpkey[:pos], indexValue, sep, pk)
 	return tmpkey, err
 }
 
@@ -81,7 +81,7 @@ func encodeHsetIndexStringKey(table []byte, indexName []byte,
 	if stopKey {
 		sep = int32(hindexStartSep + 1)
 	}
-	tmpkey, err = EncodeKey(tmpkey[:pos], indexValue, sep, pk)
+	tmpkey, err = EncodeMemCmpKey(tmpkey[:pos], indexValue, sep, pk)
 	return tmpkey, err
 }
 

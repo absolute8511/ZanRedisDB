@@ -28,6 +28,8 @@ const (
 func memcmpEncode(b []byte, vals []interface{}) ([]byte, error) {
 	for _, val := range vals {
 		switch realVal := val.(type) {
+		case byte:
+			b = encodeInt64(b, int64(realVal))
 		case int8:
 			b = encodeInt64(b, int64(realVal))
 		case int16:
@@ -65,7 +67,7 @@ func encodeInt64(b []byte, v int64) []byte {
 
 // EncodeKey appends the encoded values to byte slice b, returns the appended
 // slice. It guarantees the encoded value is in ascending order for comparison.
-func EncodeKey(b []byte, v ...interface{}) ([]byte, error) {
+func EncodeMemCmpKey(b []byte, v ...interface{}) ([]byte, error) {
 	return memcmpEncode(b, v)
 }
 

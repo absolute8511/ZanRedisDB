@@ -232,8 +232,6 @@ func (db *RockDB) HSet(ts int64, key []byte, field []byte, value []byte) (int64,
 		return 0, err
 	}
 
-	db.wb.Clear()
-
 	tableIndexes := db.indexMgr.GetTableIndexes(string(table))
 	var hindex *HsetIndex
 	if tableIndexes != nil {
@@ -241,6 +239,7 @@ func (db *RockDB) HSet(ts int64, key []byte, field []byte, value []byte) (int64,
 		defer tableIndexes.Unlock()
 		hindex = tableIndexes.GetHIndexNoLock(string(field))
 	}
+	db.wb.Clear()
 
 	created, err := db.hSetField(ts, key, field, value, db.wb, hindex)
 	if err != nil {
@@ -262,12 +261,12 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	if err != nil {
 		return err
 	}
-	db.wb.Clear()
 	tableIndexes := db.indexMgr.GetTableIndexes(string(table))
 	if tableIndexes != nil {
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
 	}
+	db.wb.Clear()
 
 	var num int64
 	var value []byte
@@ -368,14 +367,14 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		return 0, err
 	}
 
-	db.wb.Clear()
-	wb := db.wb
 	tableIndexes := db.indexMgr.GetTableIndexes(string(table))
 	if tableIndexes != nil {
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
 	}
 
+	db.wb.Clear()
+	wb := db.wb
 	var ek []byte
 	var oldV []byte
 
@@ -546,8 +545,6 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 		return 0, err
 	}
 
-	wb := db.wb
-	wb.Clear()
 	var ek []byte
 
 	ek, err = convertRedisKeyToDBHKey(key, field)
@@ -562,6 +559,8 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 		defer tableIndexes.Unlock()
 		hindex = tableIndexes.GetHIndexNoLock(string(field))
 	}
+	wb := db.wb
+	wb.Clear()
 
 	var n int64
 	oldV, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
