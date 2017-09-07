@@ -331,6 +331,9 @@ func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaI
 
 	etcdReg.nsMutex.Lock()
 	etcdReg.allNamespaceInfos = nsInfos
+	if maxEpoch != etcdReg.nsEpoch {
+		coordLog.Infof("ns epoch changed from %v to : %v ", etcdReg.nsEpoch, maxEpoch)
+	}
 	etcdReg.nsEpoch = maxEpoch
 	etcdReg.nsMutex.Unlock()
 
