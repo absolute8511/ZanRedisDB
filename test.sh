@@ -1,8 +1,16 @@
 #!/bin/bash
 set -e
+echo "" > coverage.txt
 
 GOMAXPROCS=1 go test -tags=embed -timeout 900s `go list ./... | grep -v pdserver`
 GOMAXPROCS=4 go test -tags=embed -timeout 900s -race `go list ./... | grep -v pdserver`
+for d in $(go list ./... | grep -v pdserver | grep -v vendor); do 
+    GOMAXPROCS=4 go test -tags=embed -timeout 900s -race -coverprofile=coverage.txt -covermode=atomic $d
+    if [ -f profile.out ]; then
+        cat profile.out >> coverage.txt
+        rm profile.out
+    fi
+done
 
 # no tests, but a build is something
 for dir in $(find apps tools -maxdepth 1 -type d) ; do
