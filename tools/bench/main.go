@@ -151,7 +151,6 @@ func benchSet() {
 		}
 		if index < *valueSize {
 			copy(value[index:], tmp)
-			index += len(tmp)
 		}
 		if *valueSize > len(magicIdentify) {
 			copy(value[len(value)-len(magicIdentify):], magicIdentify)
@@ -193,7 +192,6 @@ func benchSetEx() {
 		}
 		if index < *valueSize {
 			copy(value[index:], tmp)
-			index += len(tmp)
 		}
 		if *valueSize > len(magicIdentify) {
 			copy(value[len(value)-len(magicIdentify):], magicIdentify)
@@ -467,12 +465,10 @@ func main() {
 
 	if *number <= 0 {
 		panic("invalid number")
-		return
 	}
 
 	if *clients <= 0 || *number < *clients {
 		panic("invalid client number")
-		return
 	}
 
 	loop = *number / *clients

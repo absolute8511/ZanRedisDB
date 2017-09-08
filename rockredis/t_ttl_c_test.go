@@ -324,7 +324,7 @@ type TExpiredDataBuffer struct {
 func (buff *TExpiredDataBuffer) Write(dt common.DataType, key []byte) error {
 	buff.expiredCount += 1
 	if kt, ok := buff.kTypeMap[string(key)]; !ok {
-		buff.t.Fatalf("unknown expired key", string(key))
+		buff.t.Fatalf("unknown expired key: %v", string(key))
 	} else if dataType2CommonType(kt) != dt {
 		buff.t.Fatalf("mismatched key-type, %s - %d, should be [%s - %d]", string(key), dt, string(key), dataType2CommonType(kt))
 	} else {

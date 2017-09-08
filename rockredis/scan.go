@@ -201,7 +201,7 @@ func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
 	return db.scanGenericUseBuffer(storeDataType, key, count, match, nil)
 }
 
-// for specail data scan
+// for special data scan
 func buildSpecificDataScanKeyRange(storeDataType byte, key []byte, cursor []byte) (minKey []byte, maxKey []byte, err error) {
 	if minKey, err = encodeSpecificDataScanMinKey(storeDataType, key, cursor); err != nil {
 		return
@@ -225,7 +225,7 @@ func encodeSpecificDataScanMaxKey(storeDataType byte, key []byte, cursor []byte)
 	if err != nil {
 		return nil, err
 	}
-	// here, the last byte is the start seperator, set it to stop seperator
+	// here, the last byte is the start separator, set it to stop separator
 	k[len(k)-1] = k[len(k)-1] + 1
 	return k, nil
 }

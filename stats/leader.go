@@ -42,10 +42,7 @@ func (ls *PeersStats) JSON() []byte {
 		Peers: ls.Peers,
 	}
 	ls.Unlock()
-	b, err := json.Marshal(stats)
-	// TODO(jonboulle): appropriate error handling?
-	if err != nil {
-	}
+	b, _ := json.Marshal(stats)
 	return b
 }
 

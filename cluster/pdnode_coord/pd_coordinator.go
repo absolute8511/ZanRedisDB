@@ -343,7 +343,7 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 				removingNodes[nid] = removeState
 			}
 			pdCoord.nodesMutex.RUnlock()
-			// remove state: marked -> pending -> data_transfered -> done
+			// remove state: marked -> pending -> data_transferred -> done
 			if len(removingNodes) == 0 {
 				continue
 			}
@@ -375,12 +375,12 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							newInfo, err := pdCoord.dpm.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 								nodeNameList)
 							if err != nil {
-								cluster.CoordLog().Infof("namespace %v data on node %v transfered failed, waiting next time", namespaceInfo.GetDesp(), nid)
+								cluster.CoordLog().Infof("namespace %v data on node %v transferred failed, waiting next time", namespaceInfo.GetDesp(), nid)
 								continue
 							} else if newInfo != nil {
 								namespaceInfo = *newInfo
 							}
-							cluster.CoordLog().Infof("namespace %v data on node %v transfered success", namespaceInfo.GetDesp(), nid)
+							cluster.CoordLog().Infof("namespace %v data on node %v transferred success", namespaceInfo.GetDesp(), nid)
 							anyStateChanged = true
 						}
 						err := pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
@@ -390,11 +390,11 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 					}
 					if !anyPending {
 						anyStateChanged = true
-						cluster.CoordLog().Infof("node %v data has been transfered, it can be removed from cluster: state: %v", nid, removingNodes[nid])
-						if removingNodes[nid] != "data_transfered" && removingNodes[nid] != "done" {
-							removingNodes[nid] = "data_transfered"
+						cluster.CoordLog().Infof("node %v data has been transferred, it can be removed from cluster: state: %v", nid, removingNodes[nid])
+						if removingNodes[nid] != "data_transferred" && removingNodes[nid] != "done" {
+							removingNodes[nid] = "data_transferred"
 						} else {
-							if removingNodes[nid] == "data_transfered" {
+							if removingNodes[nid] == "data_transferred" {
 								removingNodes[nid] = "done"
 							} else if removingNodes[nid] == "done" {
 								pdCoord.nodesMutex.Lock()

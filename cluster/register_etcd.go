@@ -1196,8 +1196,6 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 			return nil
 		}
 	}
-
-	return nil
 }
 
 func (etcdReg *DNEtcdRegister) getDataNodePathFromID(nid string) string {

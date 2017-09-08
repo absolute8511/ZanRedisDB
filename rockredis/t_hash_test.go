@@ -380,12 +380,15 @@ func TestHashIndexBuildAndClean(t *testing.T) {
 	}
 
 	cnt, _, err = deletedIndex1.SearchRec(db, condAll, false)
+	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
 
 	cnt, _, err = deletedIndex2.SearchRec(db, condAll, false)
+	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
 
 	cnt, _, err = deletedIndex3.SearchRec(db, condAll, false)
+	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
 }
 

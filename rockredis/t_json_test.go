@@ -95,6 +95,7 @@ func TestJsonArray(t *testing.T) {
 	ret := gjson.Get(r, "#")
 	assert.Equal(t, int64(4), ret.Int())
 	r, err = sjson.SetRaw(r, "2.3.-1", "31")
+	assert.Nil(t, err)
 	t.Log(r)
 	ret = gjson.Get(r, "2.3.0")
 	assert.Equal(t, int64(31), ret.Int())
