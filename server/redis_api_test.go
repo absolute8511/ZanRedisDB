@@ -2193,3 +2193,185 @@ func TestZSetScan(t *testing.T) {
 		checkScanValues(t, ay[1], "a", 1, "b", 2)
 	}
 }
+
+func TestJson(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:jsonapi_a"
+	//n, err := goredis.Int(c.Do("jkeyexists", key))
+	//assert.Nil(t, err)
+	//assert.Equal(t, int(0), n)
+
+	strRet, err := goredis.String(c.Do("json.set", key, ".a", `"str"`))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", strRet)
+
+	strRets, err := goredis.Strings(c.Do("json.get", key, ".a"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "str", strRets[0])
+
+	strRet, err = goredis.String(c.Do("json.set", key, "1", "3"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", strRet)
+
+	strRets, err = goredis.Strings(c.Do("json.get", key, ""))
+	assert.Nil(t, err)
+	t.Log(strRets)
+	assert.Equal(t, 1, len(strRets))
+	assert.True(t, strRets[0] != "")
+
+	strRets, err = goredis.Strings(c.Do("json.get", key, "1"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	t.Log(strRets)
+	assert.Equal(t, "3", strRets[0])
+
+	n, err := goredis.Int(c.Do("json.objlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, n)
+	strRets, err = goredis.Strings(c.Do("json.objkeys", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(strRets))
+	for _, s := range strRets {
+		assert.True(t, s == "a" || s == "1")
+	}
+	c.Do("json.del", key, "1")
+	strRets, err = goredis.Strings(c.Do("json.get", key, "1"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "", strRets[0])
+
+	n, err = goredis.Int(c.Do("json.objlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+	strRets, err = goredis.Strings(c.Do("json.objkeys", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	for _, s := range strRets {
+		assert.True(t, s == "a")
+	}
+
+	c.Do("json.del", key, "a")
+	strRets, err = goredis.Strings(c.Do("json.get", key, ".a"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "", strRets[0])
+
+	n, err = goredis.Int(c.Do("json.objlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	strRets, err = goredis.Strings(c.Do("json.objkeys", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(strRets))
+}
+
+func TestJsonArrayOp(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:json_arrayop_d"
+	_, err := c.Do("json.set", key, "", `[1, 2]`)
+	assert.Nil(t, err)
+	n, err := goredis.Int(c.Do("json.arrappend", key, ".", `{"3":[]}`))
+	assert.Nil(t, err)
+	assert.Equal(t, 3, n)
+
+	n, err = goredis.Int(c.Do("json.arrappend", key, ".", "4", "5"))
+	assert.Nil(t, err)
+	assert.Equal(t, 5, n)
+
+	n, err = goredis.Int(c.Do("json.arrlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 5, n)
+
+	n, err = goredis.Int(c.Do("json.arrappend", key, "2.3", "33", "34"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, n)
+
+	n, err = goredis.Int(c.Do("json.arrlen", key, "2.3"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, n)
+
+	poped, err := goredis.String(c.Do("json.arrpop", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "5", poped)
+
+	poped, err = goredis.String(c.Do("json.arrpop", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "4", poped)
+
+	n, err = goredis.Int(c.Do("json.arrlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 3, n)
+
+	poped, err = goredis.String(c.Do("json.arrpop", key, "2.3"))
+	assert.Nil(t, err)
+	assert.Equal(t, "34", poped)
+
+	n, err = goredis.Int(c.Do("json.arrlen", key, "2.3"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+
+	poped, err = goredis.String(c.Do("json.arrpop", key))
+	assert.Nil(t, err)
+	assert.Equal(t, `{"3":[33]}`, poped)
+
+	n, err = goredis.Int(c.Do("json.arrlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, n)
+
+	poped, err = goredis.String(c.Do("json.arrpop", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "2", poped)
+	poped, err = goredis.String(c.Do("json.arrpop", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1", poped)
+
+	n, err = goredis.Int(c.Do("json.arrlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+
+	poped, err = goredis.String(c.Do("json.arrpop", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "", poped)
+}
+
+func TestJsonErrorParams(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:json_err_param"
+	if _, err := c.Do("json.set", key); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("json.get", key); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("json.del", key); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("json.arrylen"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("json.arrappend", key, "a"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("json.arrpop"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("json.objkeys"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("json.objlen"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+}

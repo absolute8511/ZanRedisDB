@@ -119,7 +119,15 @@ func wrapReadCommandKSubkeySubkey(f common.CommandFunc) common.CommandFunc {
 }
 
 func wrapReadCommandKAnySubkey(f common.CommandFunc) common.CommandFunc {
+	return wrapReadCommandKAnySubkeyN(f, 0)
+}
+
+func wrapReadCommandKAnySubkeyN(f common.CommandFunc, minSubLen int) common.CommandFunc {
 	return func(conn redcon.Conn, cmd redcon.Command) {
+		if len(cmd.Args) < 2+minSubLen {
+			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+			return
+		}
 		_, key, err := common.ExtractNamesapce(cmd.Args[1])
 		if err != nil {
 			conn.WriteError(err.Error())
@@ -232,8 +240,12 @@ func wrapWriteCommandKSubkeySubkey(kvn *KVNode, f common.CommandRspFunc) common.
 	}
 }
 
-func wrapWriteCommandKAnySubkey(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
+func wrapWriteCommandKAnySubkey(kvn *KVNode, f common.CommandRspFunc, minSubKeyLen int) common.CommandFunc {
 	return func(conn redcon.Conn, cmd redcon.Command) {
+		if len(cmd.Args) < 2+minSubKeyLen {
+			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
+			return
+		}
 		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
 		if !ok {
 			return
