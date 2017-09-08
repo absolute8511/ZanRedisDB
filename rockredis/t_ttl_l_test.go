@@ -75,9 +75,9 @@ func TestHashTTL_L(t *testing.T) {
 	}
 
 	hash_val := []common.KVRecord{
-		common.KVRecord{Key: []byte("field0"), Value: []byte("value0")},
-		common.KVRecord{Key: []byte("field1"), Value: []byte("value1")},
-		common.KVRecord{Key: []byte("field2"), Value: []byte("value2")},
+		{Key: []byte("field0"), Value: []byte("value0")},
+		{Key: []byte("field1"), Value: []byte("value1")},
+		{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
 	if err := db.HMset(0, hash_key, hash_val...); err != nil {
@@ -194,10 +194,10 @@ func TestZSetTTL_L(t *testing.T) {
 	}
 
 	members := []common.ScorePair{
-		common.ScorePair{Member: []byte("member1"), Score: 10},
-		common.ScorePair{Member: []byte("member2"), Score: 20},
-		common.ScorePair{Member: []byte("member3"), Score: 30},
-		common.ScorePair{Member: []byte("member4"), Score: 40},
+		{Member: []byte("member1"), Score: 10},
+		{Member: []byte("member2"), Score: 20},
+		{Member: []byte("member3"), Score: 30},
+		{Member: []byte("member4"), Score: 40},
 	}
 
 	if _, err := db.ZAdd(zset_key, members...); err != nil {
@@ -255,9 +255,9 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 		case HashType:
 			t_hash_key := []byte("test_checker_local_hash_key")
 			t_hash_val := []common.KVRecord{
-				common.KVRecord{Key: []byte("field0"), Value: []byte("value0")},
-				common.KVRecord{Key: []byte("field1"), Value: []byte("value1")},
-				common.KVRecord{Key: []byte("field2"), Value: []byte("value2")},
+				{Key: []byte("field0"), Value: []byte("value0")},
+				{Key: []byte("field1"), Value: []byte("value1")},
+				{Key: []byte("field2"), Value: []byte("value2")},
 			}
 			db.HMset(0, t_hash_key, t_hash_val...)
 
@@ -269,10 +269,10 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 		case ZSetType:
 			t_zset_key := []byte("test_checker_local_zset_key")
 			members := []common.ScorePair{
-				common.ScorePair{Member: []byte("member1"), Score: 11},
-				common.ScorePair{Member: []byte("member2"), Score: 22},
-				common.ScorePair{Member: []byte("member3"), Score: 33},
-				common.ScorePair{Member: []byte("member4"), Score: 44},
+				{Member: []byte("member1"), Score: 11},
+				{Member: []byte("member2"), Score: 22},
+				{Member: []byte("member3"), Score: 33},
+				{Member: []byte("member4"), Score: 44},
 			}
 
 			db.ZAdd(t_zset_key, members...)

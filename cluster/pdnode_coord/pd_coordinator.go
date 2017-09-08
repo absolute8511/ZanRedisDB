@@ -209,7 +209,7 @@ func (pdCoord *PDCoordinator) getCurrentNodes(tags map[string]bool) map[string]c
 				continue
 			}
 			filtered := false
-			for tag, _ := range tags {
+			for tag := range tags {
 				if _, ok := n.Tags[tag]; !ok {
 					filtered = true
 					break
@@ -243,7 +243,7 @@ func (pdCoord *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]bool) (ma
 				continue
 			}
 			filtered := false
-			for tag, _ := range tags {
+			for tag := range tags {
 				if _, ok := n.Tags[tag]; !ok {
 					filtered = true
 					break
@@ -357,7 +357,7 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 			if err != nil {
 				continue
 			}
-			for nid, _ := range removingNodes {
+			for nid := range removingNodes {
 				anyPending := false
 				cluster.CoordLog().Infof("handle removing node %v ", nid)
 				// only check the namespace with one replica left
@@ -592,7 +592,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 					// migrate only one at once to reduce the migrate traffic
 					atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 					for _, parts := range waitingMigrateNamespace {
-						for pid, _ := range parts {
+						for pid := range parts {
 							parts[pid].Add(time.Second)
 						}
 					}

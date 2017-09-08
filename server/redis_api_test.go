@@ -1150,7 +1150,7 @@ func TestListLPushRPop(t *testing.T) {
 
 	start := time.Now()
 	var wg sync.WaitGroup
-	for i, _ := range klist {
+	for i := range klist {
 		connPushList[i] = getTestConn(t)
 		connPopList[i] = getTestConn(t)
 		wg.Add(2)

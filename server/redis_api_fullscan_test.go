@@ -109,7 +109,7 @@ func checkKVFullScanValues(t *testing.T, ay interface{}, values map[string]strin
 
 	var equalCount, totalCount int
 
-	for idx, _ := range a {
+	for idx := range a {
 		item := a[idx].([]interface{})
 		if len(item) != 2 {
 			t.Fatal("item length is not 2. len:", len(item))
@@ -141,7 +141,7 @@ func checkHashFullScanValues(t *testing.T, ay interface{}, values map[string]map
 
 	var equalCount, totalCount int
 
-	for idx, _ := range a {
+	for idx := range a {
 		item := a[idx].([]interface{})
 		length := len(item)
 		totalCount += length - 1
@@ -180,7 +180,7 @@ func checkListOrSetFullScanValues(t *testing.T, ay interface{}, values map[strin
 
 	var equalCount, totalCount int
 
-	for idx, _ := range a {
+	for idx := range a {
 		item := a[idx].([]interface{})
 		if len(item) < 2 {
 			t.Fatal("item length is less than 2. len:", len(item))
@@ -220,7 +220,7 @@ func checkZSetFullScanValues(t *testing.T, ay interface{}, values map[string]map
 
 	var equalCount, totalCount int
 
-	for idx, _ := range a {
+	for idx := range a {
 		item := a[idx].([]interface{})
 		length := len(item)
 		totalCount += length - 1

@@ -445,7 +445,7 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 							dbLog.Infof("rebuild index for table %v error %v ", buildTable, err)
 							return true, err
 						}
-						for i, _ := range fields {
+						for i := range fields {
 							err = tmpHsetIndexes[i].UpdateRec(nil, values[i], pk, wb)
 							if err != nil {
 								dbLog.Infof("rebuild index for table %v error %v ", buildTable, err)

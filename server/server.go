@@ -286,7 +286,7 @@ func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc
 		}
 	} else {
 		cmds = make(map[string]redcon.Command)
-		for k, _ := range nodes {
+		for k := range nodes {
 			newCmd := common.DeepCopyCmd(cmd)
 			cmds[k] = newCmd
 		}

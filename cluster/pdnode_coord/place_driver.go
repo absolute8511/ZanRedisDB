@@ -507,7 +507,7 @@ func (dp *DataPlacement) getRebalancedNamespacePartitions(ns string,
 	// p9       l       x        f     x-f
 	// p10     x-f      x       f-l     f
 	nodeNameList := make(SortableStrings, 0, len(currentNodes))
-	for nid, _ := range currentNodes {
+	for nid := range currentNodes {
 		nodeNameList = append(nodeNameList, nid)
 	}
 	return dp.getRebalancedPartitionsFromNameList(ns, partitionNum, replica, nodeNameList)

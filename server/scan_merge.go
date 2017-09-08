@@ -184,7 +184,7 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 					realR := r.([]interface{})
 					length := len(realR)
 					conn.WriteArray(length)
-					for idx, _ := range realR {
+					for idx := range realR {
 						v := realR[idx].([]byte)
 						conn.WriteBulk(v)
 					}
@@ -273,13 +273,13 @@ func (s *Server) doScanNodesFilter(key []byte, namespace string, cmd redcon.Comm
 		return nil, err
 	}
 	if len(nsMap) == 0 {
-		for k, _ := range nodes {
+		for k := range nodes {
 			newCmd := common.DeepCopyCmd(cmd)
 			cmds[k] = newCmd
 		}
 		return cmds, nil
 	}
-	for k, _ := range nodes {
+	for k := range nodes {
 		if cursor, ok := nsMap[k]; !ok {
 			delete(nodes, k)
 		} else {

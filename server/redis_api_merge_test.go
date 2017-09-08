@@ -120,7 +120,7 @@ func checkMergeScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 	equalCount := 0
 
 	for _, v := range a {
-		for j, _ := range values {
+		for j := range values {
 			if string(v) == fmt.Sprintf("%v", values[j]) {
 				equalCount++
 			}

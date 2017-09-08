@@ -111,7 +111,7 @@ func (s *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps http
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}
 	nameList := make([]string, 0, len(namespaces))
-	for ns, _ := range namespaces {
+	for ns := range namespaces {
 		nameList = append(nameList, ns)
 	}
 	return map[string]interface{}{

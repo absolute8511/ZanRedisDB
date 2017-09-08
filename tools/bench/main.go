@@ -85,7 +85,7 @@ func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) err
 			t2 := time.Now()
 			d := t2.Sub(lastTime)
 			num := int64(0)
-			for i, _ := range currentNumList {
+			for i := range currentNumList {
 				num += atomic.LoadInt64(&currentNumList[i])
 			}
 			if num <= lastNum {

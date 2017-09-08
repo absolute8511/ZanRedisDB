@@ -471,7 +471,7 @@ func (db *RockDB) JObjKeys(key []byte, path []byte) ([]string, error) {
 	}
 	kvs := jsonData.Map()
 	keys := make([]string, 0, len(kvs))
-	for k, _ := range kvs {
+	for k := range kvs {
 		keys = append(keys, k)
 	}
 	return keys, nil

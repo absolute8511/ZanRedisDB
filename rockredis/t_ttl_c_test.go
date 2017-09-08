@@ -105,9 +105,9 @@ func TestHashTTL_C(t *testing.T) {
 	}
 
 	hash_val := []common.KVRecord{
-		common.KVRecord{Key: []byte("field0"), Value: []byte("value0")},
-		common.KVRecord{Key: []byte("field1"), Value: []byte("value1")},
-		common.KVRecord{Key: []byte("field2"), Value: []byte("value2")},
+		{Key: []byte("field0"), Value: []byte("value0")},
+		{Key: []byte("field1"), Value: []byte("value1")},
+		{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
 	if err := db.HMset(0, hash_key, hash_val...); err != nil {
@@ -278,10 +278,10 @@ func TestZSetTTL_C(t *testing.T) {
 	}
 
 	members := []common.ScorePair{
-		common.ScorePair{Member: []byte("member1"), Score: 10},
-		common.ScorePair{Member: []byte("member2"), Score: 20},
-		common.ScorePair{Member: []byte("member3"), Score: 30},
-		common.ScorePair{Member: []byte("member4"), Score: 40},
+		{Member: []byte("member1"), Score: 10},
+		{Member: []byte("member2"), Score: 20},
+		{Member: []byte("member3"), Score: 30},
+		{Member: []byte("member4"), Score: 40},
 	}
 
 	if _, err := db.ZAdd(zset_key, members...); err != nil {
