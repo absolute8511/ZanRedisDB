@@ -5,7 +5,7 @@ echo "" > coverage.txt
 GOMAXPROCS=1 go test -tags=embed -timeout 900s `go list ./... | grep -v pdserver`
 GOMAXPROCS=4 go test -tags=embed -timeout 900s -race `go list ./... | grep -v pdserver`
 for d in $(go list ./... | grep -v pdserver | grep -v vendor); do 
-    GOMAXPROCS=4 go test -tags=embed -timeout 900s -race -coverprofile=coverage.txt -covermode=atomic $d
+    GOMAXPROCS=4 go test -tags=embed -timeout 900s -race -coverprofile=profile.out -covermode=atomic $d
     if [ -f profile.out ]; then
         cat profile.out >> coverage.txt
         rm profile.out
