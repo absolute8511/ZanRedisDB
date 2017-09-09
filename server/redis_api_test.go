@@ -109,7 +109,7 @@ func TestKV(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	if ok, err := goredis.String(c.Do("setex", keyExpire, 2, "hello world")); err != nil {
+	if ok, err := goredis.String(c.Do("setex", keyExpire, 1, "hello world")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
 		t.Fatal(ok)
@@ -123,9 +123,9 @@ func TestKV(t *testing.T) {
 	time.Sleep(time.Second * 4)
 	if v, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
 		if err == nil && v == "hello world" {
-			time.Sleep(time.Second * 8)
+			time.Sleep(time.Second * 16)
 			if v, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
-				t.Fatalf("get expired key error: %v, %v", v, err)
+				t.Fatalf("expired key should be expired: %v, %v", v, err)
 			}
 		} else {
 			t.Fatalf("get expired key error: %v, %v", v, err)
@@ -298,7 +298,7 @@ func TestKVBatch(t *testing.T) {
 				t.Fatal(v)
 			}
 
-			if ok, err := goredis.String(c.Do("setex", keyExpire, 2, "hello world")); err != nil {
+			if ok, err := goredis.String(c.Do("setex", keyExpire, 1, "hello world")); err != nil {
 				t.Fatal(err)
 			} else if ok != OK {
 				t.Fatal(ok)
@@ -361,9 +361,9 @@ func TestKVBatch(t *testing.T) {
 			time.Sleep(time.Second * 4)
 			if v, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
 				if err == nil && v == "hello world" {
-					time.Sleep(time.Second * 8)
+					time.Sleep(time.Second * 16)
 					if v, err := goredis.String(c.Do("get", keyExpire)); err != goredis.ErrNil {
-						t.Fatalf("get expired key error: %v, %v", v, err)
+						t.Fatalf("expired key should be expired: %v, %v", v, err)
 					}
 				} else {
 					t.Fatalf("get expired key error: %v, %v", v, err)
