@@ -26,6 +26,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(true, "hclear", wrapWriteCommandK(nd, nd.hclearCommand))
 	// for json
 	nd.router.Register(false, "json.get", wrapReadCommandKSubkeySubkey(nd.jsonGetCommand))
+	nd.router.Register(false, "json.keyexists", wrapReadCommandK(nd.jsonKeyExistsCommand))
 	// get the same path from several json keys
 	nd.router.Register(false, "json.mkget", nd.jsonmkGetCommand)
 	nd.router.Register(false, "json.type", wrapReadCommandKSubkey(nd.jsonTypeCommand))

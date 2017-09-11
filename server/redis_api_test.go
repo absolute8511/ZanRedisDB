@@ -2199,13 +2199,17 @@ func TestJson(t *testing.T) {
 	defer c.Close()
 
 	key := "default:test:jsonapi_a"
-	//n, err := goredis.Int(c.Do("jkeyexists", key))
-	//assert.Nil(t, err)
-	//assert.Equal(t, int(0), n)
+	n, err := goredis.Int(c.Do("json.keyexists", key))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
 
 	strRet, err := goredis.String(c.Do("json.set", key, ".a", `"str"`))
 	assert.Nil(t, err)
 	assert.Equal(t, "OK", strRet)
+
+	n, err = goredis.Int(c.Do("json.keyexists", key))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
 
 	strRets, err := goredis.Strings(c.Do("json.get", key, ".a"))
 	assert.Nil(t, err)
@@ -2221,6 +2225,13 @@ func TestJson(t *testing.T) {
 	t.Log(strRets)
 	assert.Equal(t, 1, len(strRets))
 	assert.True(t, strRets[0] != "")
+	t.Log(strRets[0])
+	assert.True(t, strRets[0] == `{"a":"str","1":3}` || (strRets[0] == `{"1":3,"a":"str"}`))
+
+	strRets, err = goredis.Strings(c.Do("json.get", key, "a"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "str", strRets[0])
 
 	strRets, err = goredis.Strings(c.Do("json.get", key, "1"))
 	assert.Nil(t, err)
@@ -2228,7 +2239,14 @@ func TestJson(t *testing.T) {
 	t.Log(strRets)
 	assert.Equal(t, "3", strRets[0])
 
-	n, err := goredis.Int(c.Do("json.objlen", key))
+	strRets, err = goredis.Strings(c.Do("json.get", key, "1", "a"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(strRets))
+	t.Log(strRets)
+	assert.Equal(t, "3", strRets[0])
+	assert.Equal(t, "str", strRets[1])
+
+	n, err = goredis.Int(c.Do("json.objlen", key))
 	assert.Nil(t, err)
 	assert.Equal(t, 2, n)
 	strRets, err = goredis.Strings(c.Do("json.objkeys", key))
@@ -2265,6 +2283,81 @@ func TestJson(t *testing.T) {
 	strRets, err = goredis.Strings(c.Do("json.objkeys", key))
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(strRets))
+}
+
+func TestJsonInvalidJson(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:jsonapi_invalid"
+
+	strRet, err := goredis.String(c.Do("json.set", key, ".a", `"str"`))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", strRet)
+
+	strRet, err = goredis.String(c.Do("json.set", key, "1", "3"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", strRet)
+
+	_, err = c.Do("json.set", key, "2", "invalid_str")
+	assert.NotNil(t, err)
+}
+
+func TestJsonSetComplexJson(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:jsonapi_complex"
+
+	strRet, err := goredis.String(c.Do("json.set", key, "", `{
+        "address": {
+            "street": "2 Avenue",
+            "zipcode": "10075",
+            "building": "1480",
+            "coord": [-73.9557413, 40.7720266]
+        },
+        "borough": "Manhattan",
+        "cuisine": "Italian",
+        "grades": [
+            {
+                "date": "2014-10-01",
+                "grade": "A",
+                "score": 11
+            },
+            {
+                "date": "2014-01-16",
+                "grade": "B",
+                "score": 17
+            }
+        ],
+        "name": "Vella",
+        "restaurant_id": "41704620"
+	}`))
+
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", strRet)
+	strRets, err := goredis.Strings(c.Do("json.get", key, "borough"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "Manhattan", strRets[0])
+	strRets, err = goredis.Strings(c.Do("json.get", key, "address.zipcode"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "10075", strRets[0])
+	strRets, err = goredis.Strings(c.Do("json.get", key, "grades.0.score"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "11", strRets[0])
+	c.Do("json.set", key, "cuisine", `"American"`)
+	c.Do("json.set", key, "address.street", `"East 31st Street"`)
+	strRets, err = goredis.Strings(c.Do("json.get", key, "cuisine"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "American", strRets[0])
+	strRets, err = goredis.Strings(c.Do("json.get", key, "address.street"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "East 31st Street", strRets[0])
 }
 
 func TestJsonArrayOp(t *testing.T) {

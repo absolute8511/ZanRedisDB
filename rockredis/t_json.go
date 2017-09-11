@@ -13,6 +13,7 @@ import (
 var (
 	jSep                = byte(':')
 	errJsonPathNotArray = errors.New("json path is not array")
+	errInvalidJsonValue = errors.New("invalid json value")
 )
 
 func checkJsonValueSize(value []byte) error {
@@ -105,7 +106,8 @@ func (db *RockDB) getOldJson(table []byte, rk []byte) ([]byte, []byte, bool, err
 
 func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, error) {
 	if !gjson.Valid(string(value)) {
-		return 0, errors.New("invalid json value")
+		dbLog.Debugf("invalid json: %v", string(value))
+		return 0, errInvalidJsonValue
 	}
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
@@ -136,7 +138,8 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 		return 0, err
 	}
 	if !gjson.Valid(string(oldV)) {
-		return 0, err
+		dbLog.Infof("invalid json: %v", string(value))
+		return 0, errInvalidJsonValue
 	}
 	// TODO: update index for path
 	_ = index
@@ -194,7 +197,7 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 		return err
 	}
 	if !gjson.Valid(string(oldV)) {
-		return err
+		return errInvalidJsonValue
 	}
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)
@@ -330,7 +333,7 @@ func (db *RockDB) JArrayAppend(ts int64, key []byte, path []byte, jsons ...[]byt
 		return 0, err
 	}
 	if !gjson.Valid(string(oldV)) {
-		return 0, err
+		return 0, errInvalidJsonValue
 	}
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)

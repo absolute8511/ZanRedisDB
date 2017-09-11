@@ -84,6 +84,32 @@ func TestJsonGetSet(t *testing.T) {
 	assert.Equal(t, 2, len(rets[2].Array()))
 }
 
+func TestValidJson(t *testing.T) {
+	assert.True(t, gjson.Valid(`{
+        "address": {
+            "street": "2 Avenue",
+            "zipcode": "10075",
+            "building": "1480",
+            "coord": [-73.9557413, 40.7720266]
+        },
+        "borough": "Manhattan",
+        "cuisine": "Italian",
+        "grades": [
+            {
+                "date": "2014-10-01",
+                "grade": "A",
+                "score": 11
+            },
+            {
+                "date": "2014-01-16",
+                "grade": "B",
+                "score": 17
+            }
+        ],
+        "name": "Vella",
+        "restaurant_id": "41704620"
+    }`))
+}
 func TestJsonArray(t *testing.T) {
 	r := `[1, 2]`
 	r, err := sjson.SetRaw(r, "-1", `{"3":[]}`)

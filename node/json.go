@@ -27,6 +27,19 @@ func (nd *KVNode) jsonGetCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (nd *KVNode) jsonKeyExistsCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) < 2 {
+		conn.WriteError(common.ErrInvalidArgs.Error())
+		return
+	}
+	n, err := nd.store.JKeyExists(cmd.Args[1])
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteInt64(n)
+}
+
 func (nd *KVNode) jsonmkGetCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) < 3 {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
