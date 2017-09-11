@@ -74,10 +74,6 @@ func (nd *KVNode) hmsetCommand(conn redcon.Conn, cmd redcon.Command, v interface
 	conn.WriteString("OK")
 }
 
-func (nd *KVNode) hsetnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
 func (nd *KVNode) hdelCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)

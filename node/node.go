@@ -1157,3 +1157,5 @@ func (nd *KVNode) ReportSnapshot(id uint64, gp raftpb.Group, status raft.Snapsho
 func (nd *KVNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 	return nd.rn.SaveDBFrom(r, msg)
 }
+
+func (nd *KVNode) IsPeerRemoved(peerID uint64) bool { return false }

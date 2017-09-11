@@ -29,7 +29,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "json.keyexists", wrapReadCommandK(nd.jsonKeyExistsCommand))
 	// get the same path from several json keys
 	nd.router.Register(false, "json.mkget", nd.jsonmkGetCommand)
-	nd.router.Register(false, "json.type", wrapReadCommandKSubkey(nd.jsonTypeCommand))
+	nd.router.Register(false, "json.type", wrapReadCommandKAnySubkey(nd.jsonTypeCommand))
 	nd.router.Register(false, "json.arrlen", wrapReadCommandKAnySubkey(nd.jsonArrayLenCommand))
 	nd.router.Register(false, "json.objkeys", wrapReadCommandKAnySubkey(nd.jsonObjKeysCommand))
 	nd.router.Register(false, "json.objlen", wrapReadCommandKAnySubkey(nd.jsonObjLenCommand))
