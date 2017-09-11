@@ -79,7 +79,7 @@ based on this golang sdk if you want use the redis client in other language.
   - [ ] Geo
   - [x] Expires
   - [ ] HyperLogLog
-  - [ ] Json
+  - [x] Json
 * Distributed system
   - [x] Raft based replication
   - [x] Partitions
@@ -97,7 +97,7 @@ based on this golang sdk if you want use the redis client in other language.
 * Client 
   - [x] High available for redis commands (Retry on fail)
   - [ ] Extand redis commands to support index and search
-  - [ ] Extand redis commands for advance scan
+  - [x] Extand redis commands for advance scan
 * Others (maybe)
   - [ ] Support configure for Column storage friendly for OLAP
   - [ ] BoltDB as storage engine (read/range optimize)
