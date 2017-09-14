@@ -150,7 +150,7 @@ func hEncodeStopKey(table []byte, key []byte) []byte {
 }
 
 // return if we create the new field or override it
-func (db *RockDB) hSetField(ts int64, hkey []byte, field []byte, value []byte,
+func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, value []byte,
 	wb *gorocksdb.WriteBatch, hindex *HsetIndex) (int64, error) {
 	table, rk, err := extractTableFromRedisKey(hkey)
 
@@ -168,7 +168,7 @@ func (db *RockDB) hSetField(ts int64, hkey []byte, field []byte, value []byte,
 	var oldV []byte
 	if oldV, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, ek); oldV != nil {
 		created = 0
-		if bytes.Equal(oldV, value) {
+		if checkNX || bytes.Equal(oldV, value) {
 			return created, nil
 		}
 	} else {
@@ -178,7 +178,6 @@ func (db *RockDB) hSetField(ts int64, hkey []byte, field []byte, value []byte,
 			db.IncrTableKeyCount(table, 1, wb)
 		}
 	}
-	//	fmt.Println("###", ek)
 	wb.Put(ek, value)
 
 	if hindex != nil {
@@ -222,7 +221,7 @@ func (db *RockDB) hIncrSize(hkey []byte, delta int64, wb *gorocksdb.WriteBatch) 
 	return size, nil
 }
 
-func (db *RockDB) HSet(ts int64, key []byte, field []byte, value []byte) (int64, error) {
+func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value []byte) (int64, error) {
 	if err := checkValueSize(value); err != nil {
 		return 0, err
 	}
@@ -241,7 +240,7 @@ func (db *RockDB) HSet(ts int64, key []byte, field []byte, value []byte) (int64,
 	}
 	db.wb.Clear()
 
-	created, err := db.hSetField(ts, key, field, value, db.wb, hindex)
+	created, err := db.hSetField(ts, checkNX, key, field, value, db.wb, hindex)
 	if err != nil {
 		return 0, err
 	}
@@ -573,7 +572,7 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 
 	n += delta
 
-	_, err = db.hSetField(ts, key, field, FormatInt64ToSlice(n), wb, hindex)
+	_, err = db.hSetField(ts, false, key, field, FormatInt64ToSlice(n), wb, hindex)
 	if err != nil {
 		return 0, err
 	}

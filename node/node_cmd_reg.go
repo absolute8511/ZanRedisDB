@@ -20,6 +20,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "hmget", wrapReadCommandKSubkeySubkey(nd.hmgetCommand))
 	nd.router.Register(false, "hlen", wrapReadCommandK(nd.hlenCommand))
 	nd.router.Register(true, "hset", wrapWriteCommandKSubkeyV(nd, nd.hsetCommand))
+	nd.router.Register(true, "hsetnx", wrapWriteCommandKSubkeyV(nd, nd.hsetnxCommand))
 	nd.router.Register(true, "hmset", wrapWriteCommandKSubkeyVSubkeyV(nd, nd.hmsetCommand))
 	nd.router.Register(true, "hdel", wrapWriteCommandKSubkeySubkey(nd, nd.hdelCommand))
 	nd.router.Register(true, "hincrby", wrapWriteCommandKSubkeyV(nd, nd.hincrbyCommand))
@@ -117,6 +118,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterInternal("plset", nd.localPlsetCommand)
 	// hash
 	nd.router.RegisterInternal("hset", nd.localHSetCommand)
+	nd.router.RegisterInternal("hsetnx", nd.localHSetNXCommand)
 	nd.router.RegisterInternal("hmset", nd.localHMsetCommand)
 	nd.router.RegisterInternal("hdel", nd.localHDelCommand)
 	nd.router.RegisterInternal("hincrby", nd.localHIncrbyCommand)

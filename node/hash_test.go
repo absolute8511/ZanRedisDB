@@ -26,6 +26,7 @@ func TestKVNode_hashCommand(t *testing.T) {
 		{"hexists", buildCommand([][]byte{[]byte("hexists"), testKey, testField})},
 		{"hlen", buildCommand([][]byte{[]byte("hlen"), testKey})},
 		{"hset", buildCommand([][]byte{[]byte("hset"), testKey, testField, testKeyValue})},
+		{"hsetnx", buildCommand([][]byte{[]byte("hsetnx"), testKey, testField, testKeyValue})},
 		{"hmset", buildCommand([][]byte{[]byte("hmset"), testKey, testField, testKeyValue, testField2, testKey2Value})},
 		{"hdel", buildCommand([][]byte{[]byte("hdel"), testKey, testField})},
 		{"hincrby", buildCommand([][]byte{[]byte("hincrby"), testKey, testField2, []byte("1")})},

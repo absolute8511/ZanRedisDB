@@ -457,22 +457,17 @@ func TestHash(t *testing.T) {
 	defer c.Close()
 
 	key := "default:test:hasha"
-	//if n, err := goredis.Int(c.Do("hkeyexists", key)); err != nil {
-	//	t.Fatal(err)
-	//} else if n != 0 {
-	//	t.Fatal(n)
-	//}
 
 	if n, err := goredis.Int(c.Do("hset", key, 1, 0)); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
-	//if n, err := goredis.Int(c.Do("hkeyexists", key)); err != nil {
-	//	t.Fatal(err)
-	//} else if n != 1 {
-	//	t.Fatal(n)
-	//}
+	if n, err := goredis.Int(c.Do("hsetnx", key, 1, 0)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
 
 	if n, err := goredis.Int(c.Do("hexists", key, 1)); err != nil {
 		t.Fatal(err)

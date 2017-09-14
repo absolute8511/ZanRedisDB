@@ -70,6 +70,14 @@ func (nd *KVNode) hsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{
 	}
 }
 
+func (nd *KVNode) hsetnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
 func (nd *KVNode) hmsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
 }
@@ -102,7 +110,12 @@ func (nd *KVNode) hclearCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
 func (nd *KVNode) localHSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := nd.store.HSet(ts, cmd.Args[1], cmd.Args[2], cmd.Args[3])
+	v, err := nd.store.HSet(ts, false, cmd.Args[1], cmd.Args[2], cmd.Args[3])
+	return v, err
+}
+
+func (nd *KVNode) localHSetNXCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := nd.store.HSet(ts, true, cmd.Args[1], cmd.Args[2], cmd.Args[3])
 	return v, err
 }
 

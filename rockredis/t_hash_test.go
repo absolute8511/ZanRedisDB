@@ -41,13 +41,13 @@ func TestDBHash(t *testing.T) {
 
 	key := []byte("test:testdb_hash_a")
 
-	if n, err := db.HSet(0, key, []byte("a"), []byte("hello world 1")); err != nil {
+	if n, err := db.HSet(0, false, key, []byte("a"), []byte("hello world 1")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
 
-	if n, err := db.HSet(0, key, []byte("b"), []byte("hello world 2")); err != nil {
+	if n, err := db.HSet(0, false, key, []byte("b"), []byte("hello world 2")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -119,6 +119,27 @@ func TestDBHash(t *testing.T) {
 	if string(results[1].Rec.Value) != "hello world 2" {
 		t.Error(results)
 	}
+
+	if n, err := db.HSet(0, true, key, []byte("b"), []byte("hello world changed nx")); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	v2, _ = db.HGet(key, []byte("b"))
+	if string(v2) != "hello world 2" {
+		t.Error(v2)
+	}
+
+	if n, err := db.HSet(0, true, key, []byte("c"), []byte("hello world c")); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+
+	v3, _ := db.HGet(key, []byte("c"))
+	if string(v3) != "hello world c" {
+		t.Error(v3)
+	}
 }
 
 func TestHashKeyExists(t *testing.T) {
@@ -134,7 +155,7 @@ func TestHashKeyExists(t *testing.T) {
 		t.Fatal("invalid value ", v)
 	}
 
-	if _, err := db.HSet(0, key, []byte("hello"), []byte("world")); err != nil {
+	if _, err := db.HSet(0, false, key, []byte("hello"), []byte("world")); err != nil {
 		t.Fatal(err.Error())
 	}
 
@@ -145,7 +166,7 @@ func TestHashKeyExists(t *testing.T) {
 	if v != 1 {
 		t.Fatal("invalid value ", v)
 	}
-	if _, err := db.HSet(0, key, []byte("hello2"), []byte("world2")); err != nil {
+	if _, err := db.HSet(0, false, key, []byte("hello2"), []byte("world2")); err != nil {
 		t.Fatal(err.Error())
 	}
 	db.HDel(key, []byte("hello"))
@@ -171,7 +192,7 @@ func TestHashKeyIncrBy(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 	key := []byte("test:hkey_incr_test")
-	if _, err := db.HSet(0, key, []byte("hello"), []byte("0")); err != nil {
+	if _, err := db.HSet(0, false, key, []byte("hello"), []byte("0")); err != nil {
 		t.Fatal(err.Error())
 	}
 
@@ -252,11 +273,11 @@ func TestHashIndexBuildAndClean(t *testing.T) {
 	hindex.ValueType = StringV
 
 	key := []byte(string(hindex.Table) + ":testdb_hash_a")
-	db.HSet(0, key, hindex.IndexField, []byte("1"))
+	db.HSet(0, false, key, hindex.IndexField, []byte("1"))
 	key = []byte(string(hindex.Table) + ":testdb_hash_b")
-	db.HSet(0, key, hindex.IndexField, []byte("2"))
+	db.HSet(0, false, key, hindex.IndexField, []byte("2"))
 	key = []byte(string(hindex.Table) + ":testdb_hash_c")
-	db.HSet(0, key, hindex.IndexField, []byte("2"))
+	db.HSet(0, false, key, hindex.IndexField, []byte("2"))
 
 	err := db.indexMgr.AddHsetIndex(db, &hindex)
 	assert.Nil(t, err)
@@ -308,20 +329,20 @@ func TestHashIndexBuildAndClean(t *testing.T) {
 	assert.Nil(t, err)
 
 	key = []byte(string(hindex2.Table) + ":testdb_hash_a")
-	db.HSet(0, key, hindex2.IndexField, []byte("1"))
+	db.HSet(0, false, key, hindex2.IndexField, []byte("1"))
 	key = []byte(string(hindex2.Table) + ":testdb_hash_b")
-	db.HSet(0, key, hindex2.IndexField, []byte("2"))
+	db.HSet(0, false, key, hindex2.IndexField, []byte("2"))
 	key = []byte(string(hindex2.Table) + ":testdb_hash_c")
-	db.HSet(0, key, hindex2.IndexField, []byte("2"))
+	db.HSet(0, false, key, hindex2.IndexField, []byte("2"))
 
 	key = []byte(string(hindex3.Table) + ":testdb_hash_a")
-	db.HSet(0, key, hindex3.IndexField, []byte("1"))
+	db.HSet(0, false, key, hindex3.IndexField, []byte("1"))
 	key = []byte(string(hindex3.Table) + ":testdb_hash_b")
-	db.HSet(0, key, hindex3.IndexField, []byte("2"))
+	db.HSet(0, false, key, hindex3.IndexField, []byte("2"))
 	key = []byte(string(hindex3.Table) + ":testdb_hash_c")
-	db.HSet(0, key, hindex3.IndexField, []byte("2"))
+	db.HSet(0, false, key, hindex3.IndexField, []byte("2"))
 	key = []byte(string(hindex3.Table) + ":testdb_hash_d")
-	db.HSet(0, key, hindex3.IndexField, []byte("3"))
+	db.HSet(0, false, key, hindex3.IndexField, []byte("3"))
 
 	err = db.indexMgr.UpdateHsetIndexState(db, string(hindex2.Table), string(hindex2.IndexField), BuildingIndex)
 	assert.Nil(t, err)
@@ -832,7 +853,7 @@ func TestHashUpdateWithIndex(t *testing.T) {
 
 	for i, key := range inputPKList {
 		v := strconv.Itoa(i + 1)
-		db.HSet(0, key, intIndex.IndexField, []byte(v))
+		db.HSet(0, false, key, intIndex.IndexField, []byte(v))
 	}
 
 	condAll := &IndexCondition{
@@ -863,7 +884,7 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Equal(t, inputPKList[1], pkList[0].PKey)
 	assert.Equal(t, int64(2), pkList[0].IndexIntValue)
 	// update field to new and check index update
-	db.HSet(0, inputPKList[1], intIndex.IndexField, []byte("5"))
+	db.HSet(0, false, inputPKList[1], intIndex.IndexField, []byte("5"))
 
 	_, cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condEqual2, false)
 	assert.Nil(t, err)
