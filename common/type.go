@@ -408,13 +408,13 @@ func (sh *SearchResultHeap) update(item *HIndexRespWithValues) {
 	heap.Fix(sh, item.index)
 }
 
-type JsonIndexSchema struct {
+type JSONIndexSchema struct {
 	State IndexState `json:"state"`
 }
 
 type IndexSchema struct {
 	HsetIndexes []*HsetIndexSchema `json:"hset_indexes"`
-	JsonIndexes []*JsonIndexSchema `json:"json_indexes"`
+	JSONIndexes []*JSONIndexSchema `json:"json_indexes"`
 }
 
 type ExpiredDataBuffer interface {

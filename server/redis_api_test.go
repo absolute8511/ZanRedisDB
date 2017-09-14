@@ -2189,7 +2189,7 @@ func TestZSetScan(t *testing.T) {
 	}
 }
 
-func TestJson(t *testing.T) {
+func TestJSON(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -2280,7 +2280,7 @@ func TestJson(t *testing.T) {
 	assert.Equal(t, 0, len(strRets))
 }
 
-func TestJsonInvalidJson(t *testing.T) {
+func TestJSONInvalidJSON(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -2298,7 +2298,7 @@ func TestJsonInvalidJson(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestJsonSetComplexJson(t *testing.T) {
+func TestJSONSetComplexJSON(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -2355,7 +2355,7 @@ func TestJsonSetComplexJson(t *testing.T) {
 	assert.Equal(t, "East 31st Street", strRets[0])
 }
 
-func TestJsonArrayOp(t *testing.T) {
+func TestJSONArrayOp(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -2426,7 +2426,7 @@ func TestJsonArrayOp(t *testing.T) {
 	assert.Equal(t, "", poped)
 }
 
-func TestJsonErrorParams(t *testing.T) {
+func TestJSONErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 

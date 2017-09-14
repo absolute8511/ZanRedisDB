@@ -11,25 +11,25 @@ import (
 func TestKVNode_jsonCommand(t *testing.T) {
 	nd, dataDir, stopC := getTestKVNode(t)
 	testKey := []byte("default:test:1")
-	testJsonField := []byte("1")
-	testJsonFieldValue := []byte("1")
+	testJSONField := []byte("1")
+	testJSONFieldValue := []byte("1")
 
 	tests := []struct {
 		name string
 		args redcon.Command
 	}{
-		{"json.get", buildCommand([][]byte{[]byte("json.get"), testKey, testJsonField})},
+		{"json.get", buildCommand([][]byte{[]byte("json.get"), testKey, testJSONField})},
 		{"json.keyexists", buildCommand([][]byte{[]byte("json.keyexists"), testKey})},
-		{"json.mkget", buildCommand([][]byte{[]byte("json.mkget"), testKey, testJsonField})},
+		{"json.mkget", buildCommand([][]byte{[]byte("json.mkget"), testKey, testJSONField})},
 		{"json.type", buildCommand([][]byte{[]byte("json.type"), testKey})},
-		{"json.type", buildCommand([][]byte{[]byte("json.type"), testKey, testJsonField})},
-		{"json.arrlen", buildCommand([][]byte{[]byte("json.arrlen"), testKey, testJsonField})},
+		{"json.type", buildCommand([][]byte{[]byte("json.type"), testKey, testJSONField})},
+		{"json.arrlen", buildCommand([][]byte{[]byte("json.arrlen"), testKey, testJSONField})},
 		{"json.objkeys", buildCommand([][]byte{[]byte("json.objkeys"), testKey})},
 		{"json.objlen", buildCommand([][]byte{[]byte("json.objlen"), testKey})},
-		{"json.set", buildCommand([][]byte{[]byte("json.set"), testKey, testJsonField, testJsonFieldValue})},
-		{"json.del", buildCommand([][]byte{[]byte("json.del"), testKey, testJsonField})},
-		{"json.arrappend", buildCommand([][]byte{[]byte("json.arrappend"), testKey, testJsonField, testJsonFieldValue})},
-		{"json.arrpop", buildCommand([][]byte{[]byte("json.arrpop"), testKey, testJsonField})},
+		{"json.set", buildCommand([][]byte{[]byte("json.set"), testKey, testJSONField, testJSONFieldValue})},
+		{"json.del", buildCommand([][]byte{[]byte("json.del"), testKey, testJSONField})},
+		{"json.arrappend", buildCommand([][]byte{[]byte("json.arrappend"), testKey, testJSONField, testJSONFieldValue})},
+		{"json.arrpop", buildCommand([][]byte{[]byte("json.arrpop"), testKey, testJSONField})},
 	}
 	defer os.RemoveAll(dataDir)
 	defer nd.Stop()

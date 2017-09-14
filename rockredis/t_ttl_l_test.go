@@ -16,7 +16,7 @@ func TestKVTTL_L(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdb_ttl_kv_l")
+	key1 := []byte("test:testdbTTL_kv_l")
 	var ttl1 int64 = rand.Int63()
 
 	if v, err := db.Expire(key1, ttl1); err != nil {
@@ -65,38 +65,38 @@ func TestHashTTL_L(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	hash_key := []byte("test:testdb_ttl_hash_l")
-	var hash_ttl int64 = rand.Int63()
+	hashKey := []byte("test:testdbTTL_hash_l")
+	var hashTTL int64 = rand.Int63()
 
-	if v, err := db.HExpire(hash_key, hash_ttl); err != nil {
+	if v, err := db.HExpire(hashKey, hashTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist hash key != 0")
 	}
 
-	hash_val := []common.KVRecord{
+	hashVal := []common.KVRecord{
 		{Key: []byte("field0"), Value: []byte("value0")},
 		{Key: []byte("field1"), Value: []byte("value1")},
 		{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
-	if err := db.HMset(0, hash_key, hash_val...); err != nil {
+	if err := db.HMset(0, hashKey, hashVal...); err != nil {
 		t.Fatal(err)
 	}
 
-	if v, err := db.HExpire(hash_key, hash_ttl); err != nil {
+	if v, err := db.HExpire(hashKey, hashTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from hexpire != 1")
 	}
 
-	if v, err := db.HashTtl(hash_key); err != nil {
+	if v, err := db.HashTtl(hashKey); err != nil {
 		t.Fatal(err)
 	} else if v != -1 {
 		t.Fatal("return value from HashTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.HPersist(hash_key); err != nil {
+	if v, err := db.HPersist(hashKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from HPersist of  LocalDeletion Policy != 0")
@@ -108,33 +108,33 @@ func TestListTTL_L(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	list_key := []byte("test:testdb_ttl_list_l")
-	var list_ttl int64 = rand.Int63()
+	listKey := []byte("test:testdbTTL_list_l")
+	var listTTL int64 = rand.Int63()
 
-	if v, err := db.LExpire(list_key, list_ttl); err != nil {
+	if v, err := db.LExpire(listKey, listTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist list key != 0")
 	}
 
-	if _, err := db.LPush(list_key, []byte("this"), []byte("is"), []byte("list"),
+	if _, err := db.LPush(listKey, []byte("this"), []byte("is"), []byte("list"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}
 
-	if v, err := db.LExpire(list_key, list_ttl); err != nil {
+	if v, err := db.LExpire(listKey, listTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from lexpire != 1")
 	}
 
-	if v, err := db.ListTtl(list_key); err != nil {
+	if v, err := db.ListTtl(listKey); err != nil {
 		t.Fatal(err)
 	} else if v != -1 {
 		t.Fatal("return value from ListTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.LPersist(list_key); err != nil {
+	if v, err := db.LPersist(listKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from LPersist of LocalDeletion Policy != 0")
@@ -146,33 +146,33 @@ func TestSetTTL_L(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	set_key := []byte("test:testdb_ttl_set_l")
-	var set_ttl int64 = rand.Int63()
+	setKey := []byte("test:testdbTTL_set_l")
+	var setTTL int64 = rand.Int63()
 
-	if v, err := db.SExpire(set_key, set_ttl); err != nil {
+	if v, err := db.SExpire(setKey, setTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist set key != 0")
 	}
 
-	if _, err := db.SAdd(set_key, []byte("this"), []byte("is"), []byte("set"),
+	if _, err := db.SAdd(setKey, []byte("this"), []byte("is"), []byte("set"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}
 
-	if v, err := db.SExpire(set_key, set_ttl); err != nil {
+	if v, err := db.SExpire(setKey, setTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from sexpire != 1")
 	}
 
-	if v, err := db.SetTtl(set_key); err != nil {
+	if v, err := db.SetTtl(setKey); err != nil {
 		t.Fatal(err)
 	} else if v != -1 {
 		t.Fatal("return value from SetTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.SPersist(set_key); err != nil {
+	if v, err := db.SPersist(setKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from SPersist of LocalDeletion Policy != 0")
@@ -184,10 +184,10 @@ func TestZSetTTL_L(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	zset_key := []byte("test:testdb_ttl_zset_l")
-	var zset_ttl int64 = rand.Int63()
+	zsetKey := []byte("test:testdbTTL_zset_l")
+	var zsetTTL int64 = rand.Int63()
 
-	if v, err := db.ZExpire(zset_key, zset_ttl); err != nil {
+	if v, err := db.ZExpire(zsetKey, zsetTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist zset key != 0")
@@ -200,23 +200,23 @@ func TestZSetTTL_L(t *testing.T) {
 		{Member: []byte("member4"), Score: 40},
 	}
 
-	if _, err := db.ZAdd(zset_key, members...); err != nil {
+	if _, err := db.ZAdd(zsetKey, members...); err != nil {
 		t.Fatal(err)
 	}
 
-	if v, err := db.ZExpire(zset_key, zset_ttl); err != nil {
+	if v, err := db.ZExpire(zsetKey, zsetTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from zexpire != 1")
 	}
 
-	if v, err := db.ZSetTtl(zset_key); err != nil {
+	if v, err := db.ZSetTtl(zsetKey); err != nil {
 		t.Fatal(err)
 	} else if v != -1 {
 		t.Fatal("return value from ZSetTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.ZPersist(zset_key); err != nil {
+	if v, err := db.ZPersist(zsetKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from ZPersist of LocalDeletion Policy != 0")
@@ -245,29 +245,29 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 		kTypeMap[key] = dataType
 		switch dataType {
 		case KVType:
-			db.KVSet(0, []byte("test_checker_local_kv_key"), []byte("test_checker_local_kv_value"))
+			db.KVSet(0, []byte("test_checker_local_kvKey"), []byte("test_checker_local_kvValue"))
 
 		case ListType:
-			t_list_key := []byte("test_checker_local_list_key")
-			db.LPush(t_list_key, []byte("this"), []byte("is"), []byte("list"),
+			tListKey := []byte("test_checker_local_listKey")
+			db.LPush(tListKey, []byte("this"), []byte("is"), []byte("list"),
 				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
 
 		case HashType:
-			t_hash_key := []byte("test_checker_local_hash_key")
-			t_hash_val := []common.KVRecord{
+			tHashKey := []byte("test_checker_local_hashKey")
+			tHashVal := []common.KVRecord{
 				{Key: []byte("field0"), Value: []byte("value0")},
 				{Key: []byte("field1"), Value: []byte("value1")},
 				{Key: []byte("field2"), Value: []byte("value2")},
 			}
-			db.HMset(0, t_hash_key, t_hash_val...)
+			db.HMset(0, tHashKey, tHashVal...)
 
 		case SetType:
-			t_set_key := []byte("test_checker_local_set_key")
-			db.SAdd(t_set_key, []byte("this"), []byte("is"), []byte("set"),
+			tSetKey := []byte("test_checker_local_setKey")
+			db.SAdd(tSetKey, []byte("this"), []byte("is"), []byte("set"),
 				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
 
 		case ZSetType:
-			t_zset_key := []byte("test_checker_local_zset_key")
+			tZsetKey := []byte("test_checker_local_zsetKey")
 			members := []common.ScorePair{
 				{Member: []byte("member1"), Score: 11},
 				{Member: []byte("member2"), Score: 22},
@@ -275,7 +275,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 				{Member: []byte("member4"), Score: 44},
 			}
 
-			db.ZAdd(t_zset_key, members...)
+			db.ZAdd(tZsetKey, members...)
 		}
 
 		if err := db.expire(dataType, []byte(key), 8); err != nil {

@@ -125,10 +125,10 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterInternal("hclear", nd.localHclearCommand)
 	nd.router.RegisterInternal("hmclear", nd.localHMClearCommand)
 	// for json
-	nd.router.RegisterInternal("json.set", nd.localJsonSetCommand)
-	nd.router.RegisterInternal("json.del", nd.localJsonDelCommand)
-	nd.router.RegisterInternal("json.arrappend", nd.localJsonArrayAppendCommand)
-	nd.router.RegisterInternal("json.arrpop", nd.localJsonArrayPopCommand)
+	nd.router.RegisterInternal("json.set", nd.localJSONSetCommand)
+	nd.router.RegisterInternal("json.del", nd.localJSONDelCommand)
+	nd.router.RegisterInternal("json.arrappend", nd.localJSONArrayAppendCommand)
+	nd.router.RegisterInternal("json.arrpop", nd.localJSONArrayPopCommand)
 	// list
 	nd.router.RegisterInternal("lfixkey", nd.localLfixkeyCommand)
 	nd.router.RegisterInternal("lpop", nd.localLpopCommand)

@@ -19,7 +19,7 @@ var (
 	buildIndexBlock = 1000
 )
 
-type JsonIndex struct {
+type JSONIndex struct {
 	Table []byte
 	HsetIndexInfo
 }
@@ -28,18 +28,18 @@ type TableIndexContainer struct {
 	sync.RWMutex
 	// field -> index name, to convert "secondaryindex.select * from table where field = xxx" to scan(/hindex/table/indexname/xxx)
 	hsetIndexes map[string]*HsetIndex
-	jsonIndexes map[string]*JsonIndex
+	jsonIndexes map[string]*JSONIndex
 }
 
 func NewIndexContainer() *TableIndexContainer {
 	return &TableIndexContainer{
 		hsetIndexes: make(map[string]*HsetIndex),
-		jsonIndexes: make(map[string]*JsonIndex),
+		jsonIndexes: make(map[string]*JSONIndex),
 	}
 }
 
-func (self *TableIndexContainer) GetHIndexNoLock(field string) *HsetIndex {
-	index, ok := self.hsetIndexes[field]
+func (tic *TableIndexContainer) GetHIndexNoLock(field string) *HsetIndex {
+	index, ok := tic.hsetIndexes[field]
 	if !ok {
 		return nil
 	}
@@ -49,34 +49,34 @@ func (self *TableIndexContainer) GetHIndexNoLock(field string) *HsetIndex {
 	return index
 }
 
-func (self *TableIndexContainer) marshalHsetIndexes() ([]byte, error) {
+func (tic *TableIndexContainer) marshalHsetIndexes() ([]byte, error) {
 	var indexList HsetIndexList
-	for _, v := range self.hsetIndexes {
+	for _, v := range tic.hsetIndexes {
 		indexList.HsetIndexes = append(indexList.HsetIndexes, v.HsetIndexInfo)
 	}
 	return indexList.Marshal()
 }
 
-func (self *TableIndexContainer) unmarshalHsetIndexes(table []byte, data []byte) error {
+func (tic *TableIndexContainer) unmarshalHsetIndexes(table []byte, data []byte) error {
 	var indexList HsetIndexList
 	err := indexList.Unmarshal(data)
 	if err != nil {
 		return err
 	}
-	self.hsetIndexes = make(map[string]*HsetIndex)
+	tic.hsetIndexes = make(map[string]*HsetIndex)
 	for _, v := range indexList.HsetIndexes {
 		var hi HsetIndex
 		hi.HsetIndexInfo = v
 		hi.Table = table
-		self.hsetIndexes[string(v.IndexField)] = &hi
+		tic.hsetIndexes[string(v.IndexField)] = &hi
 	}
 	dbLog.Infof("load hash index: %v", indexList.String())
 	return nil
 }
 
-func (self *TableIndexContainer) GetJsonIndexNoLock(path string) *JsonIndex {
+func (tic *TableIndexContainer) GetJSONIndexNoLock(path string) *JSONIndex {
 	// TODO: path need to be converted to canonical form
-	index, ok := self.jsonIndexes[path]
+	index, ok := tic.jsonIndexes[path]
 	if !ok {
 		return nil
 	}
@@ -101,15 +101,15 @@ func NewIndexMgr() *IndexMgr {
 	}
 }
 
-func (self *IndexMgr) GetAllIndexSchemaInfo(db *RockDB) (map[string]*common.IndexSchema, error) {
-	self.RLock()
-	defer self.RUnlock()
-	isClosed := self.closeChan == nil
+func (im *IndexMgr) GetAllIndexSchemaInfo(db *RockDB) (map[string]*common.IndexSchema, error) {
+	im.RLock()
+	defer im.RUnlock()
+	isClosed := im.closeChan == nil
 	if isClosed {
 		return nil, ErrIndexClosed
 	}
 	schemas := make(map[string]*common.IndexSchema)
-	for name, t := range self.tableIndexes {
+	for name, t := range im.tableIndexes {
 		var schema common.IndexSchema
 		t.RLock()
 		for _, v := range t.hsetIndexes {
@@ -123,7 +123,7 @@ func (self *IndexMgr) GetAllIndexSchemaInfo(db *RockDB) (map[string]*common.Inde
 			})
 		}
 		//for _, v := range t.jsonIndexes {
-		//	schema.JsonIndexes = append(schema.JsonIndexes, common.JsonIndexSchema{})
+		//	schema.JSONIndexes = append(schema.JSONIndexes, common.JSONIndexSchema{})
 		//}
 		t.RUnlock()
 		schemas[name] = &schema
@@ -131,16 +131,16 @@ func (self *IndexMgr) GetAllIndexSchemaInfo(db *RockDB) (map[string]*common.Inde
 	return schemas, nil
 }
 
-func (self *IndexMgr) GetIndexSchemaInfo(db *RockDB, table string) (*common.IndexSchema, error) {
-	self.RLock()
-	defer self.RUnlock()
-	isClosed := self.closeChan == nil
+func (im *IndexMgr) GetIndexSchemaInfo(db *RockDB, table string) (*common.IndexSchema, error) {
+	im.RLock()
+	defer im.RUnlock()
+	isClosed := im.closeChan == nil
 	if isClosed {
 		return nil, ErrIndexClosed
 	}
 
 	var schema common.IndexSchema
-	t, ok := self.tableIndexes[table]
+	t, ok := im.tableIndexes[table]
 	if !ok {
 		return nil, ErrIndexTableNotExist
 	}
@@ -156,13 +156,13 @@ func (self *IndexMgr) GetIndexSchemaInfo(db *RockDB, table string) (*common.Inde
 		})
 	}
 	//for _, v := range t.jsonIndexes {
-	//	schema.JsonIndexes = append(schema.JsonIndexes, common.JsonIndexSchema{})
+	//	schema.JSONIndexes = append(schema.JSONIndexes, common.JSONIndexSchema{})
 	//}
 	t.RUnlock()
 	return &schema, nil
 }
 
-func (self *IndexMgr) LoadIndexes(db *RockDB) error {
+func (im *IndexMgr) LoadIndexes(db *RockDB) error {
 	dbLog.Infof("begin loading indexes...")
 	defer dbLog.Infof("finish load indexes.")
 	tables := db.GetHsetIndexTables()
@@ -183,57 +183,57 @@ func (self *IndexMgr) LoadIndexes(db *RockDB) error {
 			return err
 		}
 		dbLog.Infof("table %v load %v hash indexes", string(t), len(indexes.hsetIndexes))
-		self.Lock()
-		self.tableIndexes[string(t)] = indexes
-		self.Unlock()
+		im.Lock()
+		im.tableIndexes[string(t)] = indexes
+		im.Unlock()
 	}
 
-	self.Lock()
-	if self.closeChan != nil {
+	im.Lock()
+	if im.closeChan != nil {
 		select {
-		case <-self.closeChan:
+		case <-im.closeChan:
 		default:
-			close(self.closeChan)
+			close(im.closeChan)
 		}
 	}
-	self.closeChan = make(chan struct{})
-	self.wg.Add(1)
+	im.closeChan = make(chan struct{})
+	im.wg.Add(1)
 	go func(stopC chan struct{}) {
-		defer self.wg.Done()
-		self.buildIndexes(db, stopC)
-	}(self.closeChan)
-	self.Unlock()
+		defer im.wg.Done()
+		im.buildIndexes(db, stopC)
+	}(im.closeChan)
+	im.Unlock()
 	select {
-	case self.indexBuildChan <- 1:
+	case im.indexBuildChan <- 1:
 	default:
 	}
 	return nil
 }
 
-func (self *IndexMgr) Close() {
+func (im *IndexMgr) Close() {
 	dbLog.Infof("closing index manager")
-	self.Lock()
-	self.tableIndexes = make(map[string]*TableIndexContainer)
-	if self.closeChan != nil {
+	im.Lock()
+	im.tableIndexes = make(map[string]*TableIndexContainer)
+	if im.closeChan != nil {
 		select {
-		case <-self.closeChan:
+		case <-im.closeChan:
 		default:
-			close(self.closeChan)
+			close(im.closeChan)
 		}
 	}
-	self.Unlock()
-	self.wg.Wait()
+	im.Unlock()
+	im.wg.Wait()
 	dbLog.Infof("index manager closed")
 }
 
-func (self *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
-	self.Lock()
-	indexes, ok := self.tableIndexes[string(hindex.Table)]
+func (im *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
+	im.Lock()
+	indexes, ok := im.tableIndexes[string(hindex.Table)]
 	if !ok {
 		indexes = NewIndexContainer()
-		self.tableIndexes[string(hindex.Table)] = indexes
+		im.tableIndexes[string(hindex.Table)] = indexes
 	}
-	self.Unlock()
+	im.Unlock()
 	indexes.Lock()
 	defer indexes.Unlock()
 	_, ok = indexes.hsetIndexes[string(hindex.IndexField)]
@@ -256,11 +256,11 @@ func (self *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
 	return err
 }
 
-func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field string, state IndexState) error {
-	self.RLock()
-	isClosed := self.closeChan == nil
-	indexes, ok := self.tableIndexes[table]
-	self.RUnlock()
+func (im *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field string, state IndexState) error {
+	im.RLock()
+	isClosed := im.closeChan == nil
+	indexes, ok := im.tableIndexes[table]
+	im.RUnlock()
 	if !ok {
 		return ErrIndexTableNotExist
 	}
@@ -291,19 +291,19 @@ func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field strin
 	}
 	dbLog.Infof("table %v hash index %v state updated from %v to %v", table, field, oldState, state)
 	if index.State == DeletedIndex {
-		self.wg.Add(1)
+		im.wg.Add(1)
 		go func() {
-			defer self.wg.Done()
-			err := index.cleanAll(db, self.closeChan)
+			defer im.wg.Done()
+			err := index.cleanAll(db, im.closeChan)
 			if err != nil {
 				dbLog.Infof("failed to clean index: %v", err)
 			} else {
-				self.deleteHsetIndex(db, string(index.Table), string(index.IndexField))
+				im.deleteHsetIndex(db, string(index.Table), string(index.IndexField))
 			}
 		}()
 	} else if index.State == BuildingIndex {
 		select {
-		case self.indexBuildChan <- 1:
+		case im.indexBuildChan <- 1:
 		default:
 		}
 	}
@@ -312,10 +312,10 @@ func (self *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field strin
 }
 
 // ensure mark index as deleted, and clean in background before delete the index
-func (self *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) error {
-	self.Lock()
-	indexes, ok := self.tableIndexes[table]
-	self.Unlock()
+func (im *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) error {
+	im.Lock()
+	indexes, ok := im.tableIndexes[table]
+	im.Unlock()
 	if !ok {
 		return ErrIndexTableNotExist
 	}
@@ -341,22 +341,22 @@ func (self *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) er
 	return nil
 }
 
-func (self *IndexMgr) GetTableIndexes(table string) *TableIndexContainer {
-	self.RLock()
-	indexes, ok := self.tableIndexes[table]
-	self.RUnlock()
+func (im *IndexMgr) GetTableIndexes(table string) *TableIndexContainer {
+	im.RLock()
+	indexes, ok := im.tableIndexes[table]
+	im.RUnlock()
 	if !ok {
 		return nil
 	}
 	return indexes
 }
 
-func (self *IndexMgr) GetHsetIndex(table string, field string) (*HsetIndex, error) {
-	self.RLock()
-	indexes, ok := self.tableIndexes[table]
-	self.RUnlock()
+func (im *IndexMgr) GetHsetIndex(table string, field string) (*HsetIndex, error) {
+	im.RLock()
+	indexes, ok := im.tableIndexes[table]
+	im.RUnlock()
 	if !ok {
-		dbLog.Infof("current index %v", self.tableIndexes)
+		dbLog.Infof("current index %v", im.tableIndexes)
 		return nil, ErrIndexTableNotExist
 	}
 
@@ -370,21 +370,21 @@ func (self *IndexMgr) GetHsetIndex(table string, field string) (*HsetIndex, erro
 	return index, nil
 }
 
-func (self *IndexMgr) buildIndexes(db *RockDB, stopChan chan struct{}) {
+func (im *IndexMgr) buildIndexes(db *RockDB, stopChan chan struct{}) {
 	for {
 		select {
-		case <-self.indexBuildChan:
-			self.dobuildIndexes(db, stopChan)
+		case <-im.indexBuildChan:
+			im.dobuildIndexes(db, stopChan)
 		case <-stopChan:
 			return
 		}
 	}
 }
 
-func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
+func (im *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 	var buildWg sync.WaitGroup
-	self.Lock()
-	for table, v := range self.tableIndexes {
+	im.Lock()
+	for table, v := range im.tableIndexes {
 		tmpHsetIndexes := make([]*HsetIndex, 0)
 		v.RLock()
 		for _, hindex := range v.hsetIndexes {
@@ -487,7 +487,7 @@ func (self *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 			}
 		}(table, v)
 	}
-	self.Unlock()
+	im.Unlock()
 
 	buildWg.Wait()
 }

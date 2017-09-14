@@ -9,7 +9,7 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-func TestJsonGetSet(t *testing.T) {
+func TestJSONGetSet(t *testing.T) {
 	r, err := sjson.Set("{}", "1", "1v")
 	assert.Nil(t, err)
 	t.Log(r)
@@ -84,7 +84,7 @@ func TestJsonGetSet(t *testing.T) {
 	assert.Equal(t, 2, len(rets[2].Array()))
 }
 
-func TestValidJson(t *testing.T) {
+func TestValidJSON(t *testing.T) {
 	assert.True(t, gjson.Valid(`{
         "address": {
             "street": "2 Avenue",
@@ -110,7 +110,7 @@ func TestValidJson(t *testing.T) {
         "restaurant_id": "41704620"
     }`))
 }
-func TestJsonArray(t *testing.T) {
+func TestJSONArray(t *testing.T) {
 	r := `[1, 2]`
 	r, err := sjson.SetRaw(r, "-1", `{"3":[]}`)
 	assert.Nil(t, err)
@@ -127,18 +127,18 @@ func TestJsonArray(t *testing.T) {
 	assert.Equal(t, int64(31), ret.Int())
 }
 
-func TestJsonCodec(t *testing.T) {
+func TestJSONCodec(t *testing.T) {
 	table := []byte("test")
 	key := []byte("key")
-	ek, err := encodeJsonKey(table, key)
+	ek, err := encodeJSONKey(table, key)
 	assert.Nil(t, err)
-	tt, k, err := decodeJsonKey(ek)
+	tt, k, err := decodeJSONKey(ek)
 	assert.Nil(t, err)
 	assert.Equal(t, table, tt)
 	assert.Equal(t, key, k)
 }
 
-func TestDBJson(t *testing.T) {
+func TestDBJSON(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -219,7 +219,7 @@ func TestDBJson(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestJsonKeyExists(t *testing.T) {
+func TestJSONKeyExists(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -247,7 +247,7 @@ func TestJsonKeyExists(t *testing.T) {
 	assert.Equal(t, int64(0), v)
 }
 
-func TestDBJsonKeyDelete(t *testing.T) {
+func TestDBJSONKeyDelete(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -272,7 +272,7 @@ func TestDBJsonKeyDelete(t *testing.T) {
 	assert.Equal(t, int64(0), n)
 }
 
-func TestDBJsonKeyArrayOp(t *testing.T) {
+func TestDBJSONKeyArrayOp(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -284,7 +284,7 @@ func TestDBJsonKeyArrayOp(t *testing.T) {
 
 	_, err = db.JArrayAppend(0, key, []byte("a"), []byte("1"))
 	assert.NotNil(t, err)
-	assert.Equal(t, errJsonPathNotArray.Error(), err.Error())
+	assert.Equal(t, errJSONPathNotArray.Error(), err.Error())
 
 	n, err = db.JArrayLen(key, []byte(""))
 	assert.Nil(t, err)
@@ -313,7 +313,7 @@ func TestDBJsonKeyArrayOp(t *testing.T) {
 	assert.Equal(t, "4", poped)
 	poped, err = db.JArrayPop(0, key, []byte("a"))
 	assert.NotNil(t, err)
-	assert.Equal(t, errJsonPathNotArray.Error(), err.Error())
+	assert.Equal(t, errJSONPathNotArray.Error(), err.Error())
 
 	n, err = db.JArrayAppend(0, key, []byte("b"), []byte("true"), []byte(`"str"`), []byte(`"10"`))
 	assert.Nil(t, err)

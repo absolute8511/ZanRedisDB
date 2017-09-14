@@ -120,7 +120,7 @@ func (pdCoord *PDCoordinator) doSchemaCheck() {
 				default:
 				}
 			}
-			for _, jsonIndex := range indexes.JsonIndexes {
+			for _, jsonIndex := range indexes.JSONIndexes {
 				_ = jsonIndex
 			}
 

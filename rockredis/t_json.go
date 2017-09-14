@@ -12,11 +12,11 @@ import (
 
 var (
 	jSep                = byte(':')
-	errJsonPathNotArray = errors.New("json path is not array")
-	errInvalidJsonValue = errors.New("invalid json value")
+	errJSONPathNotArray = errors.New("json path is not array")
+	errInvalidJSONValue = errors.New("invalid json value")
 )
 
-func checkJsonValueSize(value []byte) error {
+func checkJSONValueSize(value []byte) error {
 	if len(value) > MaxValueSize*2 {
 		return errValueSize
 	}
@@ -24,7 +24,7 @@ func checkJsonValueSize(value []byte) error {
 	return nil
 }
 
-func convertJsonPath(path []byte) string {
+func convertJSONPath(path []byte) string {
 	if path == nil {
 		return ""
 	}
@@ -37,7 +37,7 @@ func convertJsonPath(path []byte) string {
 	return jpath
 }
 
-func encodeJsonKey(table []byte, key []byte) ([]byte, error) {
+func encodeJSONKey(table []byte, key []byte) ([]byte, error) {
 	ek := make([]byte, 1)
 	pos := 0
 	ek[pos] = JSONType
@@ -47,7 +47,7 @@ func encodeJsonKey(table []byte, key []byte) ([]byte, error) {
 	return ek, err
 }
 
-func decodeJsonKey(ek []byte) ([]byte, []byte, error) {
+func decodeJSONKey(ek []byte) ([]byte, []byte, error) {
 	pos := 0
 	if pos+1 > len(ek) || ek[pos] != JSONType {
 		return nil, nil, errKVKey
@@ -63,11 +63,11 @@ func decodeJsonKey(ek []byte) ([]byte, []byte, error) {
 	return table, rk, nil
 }
 
-func encodeJsonStartKey(table []byte) ([]byte, error) {
-	return encodeJsonKey(table, nil)
+func encodeJSONStartKey(table []byte) ([]byte, error) {
+	return encodeJSONKey(table, nil)
 }
 
-func encodeJsonStopKey(table []byte, key []byte) []byte {
+func encodeJSONStopKey(table []byte, key []byte) []byte {
 	ek := make([]byte, 1)
 	pos := 0
 	ek[pos] = JSONType
@@ -83,11 +83,11 @@ func (db *RockDB) jSetPath(jdata []byte, path string, value []byte) ([]byte, err
 	return sjson.SetRawBytes(jdata, path, value)
 }
 
-func (db *RockDB) getOldJson(table []byte, rk []byte) ([]byte, []byte, bool, error) {
+func (db *RockDB) getOldJSON(table []byte, rk []byte) ([]byte, []byte, bool, error) {
 	if err := checkKeySize(rk); err != nil {
 		return nil, nil, false, err
 	}
-	ek, err := encodeJsonKey(table, rk)
+	ek, err := encodeJSONKey(table, rk)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -107,7 +107,7 @@ func (db *RockDB) getOldJson(table []byte, rk []byte) ([]byte, []byte, bool, err
 func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, error) {
 	if !gjson.Valid(string(value)) {
 		dbLog.Debugf("invalid json: %v", string(value))
-		return 0, errInvalidJsonValue
+		return 0, errInvalidJSONValue
 	}
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
@@ -116,30 +116,30 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 
 	// index lock should before any db read or write since it may be changed by indexing
 	tableIndexes := db.indexMgr.GetTableIndexes(string(table))
-	var index *JsonIndex
+	var index *JSONIndex
 	if tableIndexes != nil {
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
-		index = tableIndexes.GetJsonIndexNoLock(string(path))
+		index = tableIndexes.GetJSONIndexNoLock(string(path))
 	}
 
-	ek, oldV, isExist, err := db.getOldJson(table, rk)
+	ek, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return 0, err
 	}
 
 	db.wb.Clear()
-	oldV, err = db.jSetPath(oldV, convertJsonPath(path), value)
+	oldV, err = db.jSetPath(oldV, convertJSONPath(path), value)
 	if err != nil {
 		return 0, err
 	}
 	// json value can be two times large since it can be read partially.
-	if err := checkJsonValueSize(oldV); err != nil {
+	if err := checkJSONValueSize(oldV); err != nil {
 		return 0, err
 	}
 	if !gjson.Valid(string(oldV)) {
 		dbLog.Infof("invalid json: %v", string(value))
-		return 0, errInvalidJsonValue
+		return 0, errInvalidJSONValue
 	}
 	// TODO: update index for path
 	_ = index
@@ -173,7 +173,7 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 		defer tableIndexes.Unlock()
 	}
 
-	ek, oldV, isExist, err := db.getOldJson(table, rk)
+	ek, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return err
 	}
@@ -182,9 +182,9 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 
 	for i := 0; i < len(args); i++ {
 		path := args[i].Key
-		oldV, err = db.jSetPath(oldV, convertJsonPath(path), args[i].Value)
+		oldV, err = db.jSetPath(oldV, convertJSONPath(path), args[i].Value)
 		if tableIndexes != nil {
-			if index := tableIndexes.GetJsonIndexNoLock(string(path)); index != nil {
+			if index := tableIndexes.GetJSONIndexNoLock(string(path)); index != nil {
 				//oldPathV := gjson.GetBytes(oldV, string(path))
 				//err = index.UpdateRec(oldPathV, args[i].Value, key, db.wb)
 				//if err != nil {
@@ -193,11 +193,11 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 			}
 		}
 	}
-	if err := checkJsonValueSize(oldV); err != nil {
+	if err := checkJSONValueSize(oldV); err != nil {
 		return err
 	}
 	if !gjson.Valid(string(oldV)) {
-		return errInvalidJsonValue
+		return errInvalidJSONValue
 	}
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)
@@ -218,13 +218,13 @@ func (db *RockDB) JGet(key []byte, paths ...[]byte) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, oldV, _, err := db.getOldJson(table, rk)
+	_, oldV, _, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return nil, err
 	}
 	tmp := make([]string, len(paths))
 	for i, path := range paths {
-		tmp[i] = convertJsonPath(path)
+		tmp[i] = convertJSONPath(path)
 	}
 	rets := gjson.GetManyBytes(oldV, tmp...)
 	for i := 0; i < len(tmp); i++ {
@@ -248,7 +248,7 @@ func (db *RockDB) JDel(ts int64, key []byte, path []byte) (int64, error) {
 		defer tableIndexes.Unlock()
 	}
 
-	ek, oldV, isExist, err := db.getOldJson(table, rk)
+	ek, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return 0, err
 	}
@@ -256,7 +256,7 @@ func (db *RockDB) JDel(ts int64, key []byte, path []byte) (int64, error) {
 		return 0, nil
 	}
 
-	jpath := convertJsonPath(path)
+	jpath := convertJSONPath(path)
 	db.wb.Clear()
 	if jpath == "" {
 		// delete whole json
@@ -284,7 +284,7 @@ func (db *RockDB) JKeyExists(key []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	sk, _ := encodeJsonKey(table, rk)
+	sk, _ := encodeJSONKey(table, rk)
 	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
 	if v != nil && err == nil {
 		return 1, nil
@@ -302,18 +302,18 @@ func (db *RockDB) JArrayAppend(ts int64, key []byte, path []byte, jsons ...[]byt
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
 	}
-	ek, oldV, isExist, err := db.getOldJson(table, rk)
+	ek, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return 0, err
 	}
-	jpath := convertJsonPath(path)
+	jpath := convertJSONPath(path)
 	oldPath := gjson.GetBytes(oldV, jpath)
 	if jpath == "" {
 		oldPath = gjson.ParseBytes(oldV)
 	}
 	arrySize := 0
 	if oldPath.Exists() && !oldPath.IsArray() {
-		return 0, errJsonPathNotArray
+		return 0, errJSONPathNotArray
 	}
 	arrySize = len(oldPath.Array())
 	if jpath == "" {
@@ -329,11 +329,11 @@ func (db *RockDB) JArrayAppend(ts int64, key []byte, path []byte, jsons ...[]byt
 		arrySize++
 	}
 	db.wb.Clear()
-	if err := checkJsonValueSize(oldV); err != nil {
+	if err := checkJSONValueSize(oldV); err != nil {
 		return 0, err
 	}
 	if !gjson.Valid(string(oldV)) {
-		return 0, errInvalidJsonValue
+		return 0, errInvalidJSONValue
 	}
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)
@@ -355,28 +355,28 @@ func (db *RockDB) JArrayPop(ts int64, key []byte, path []byte) (string, error) {
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
 	}
-	ek, oldV, isExist, err := db.getOldJson(table, rk)
+	ek, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return "", err
 	}
 	if !isExist {
 		return "", nil
 	}
-	jpath := convertJsonPath(path)
-	var oldJson gjson.Result
+	jpath := convertJSONPath(path)
+	var oldJSON gjson.Result
 	if jpath == "" {
-		oldJson = gjson.ParseBytes(oldV)
+		oldJSON = gjson.ParseBytes(oldV)
 	} else {
-		oldJson = gjson.GetBytes(oldV, jpath)
+		oldJSON = gjson.GetBytes(oldV, jpath)
 	}
-	if !oldJson.Exists() {
+	if !oldJSON.Exists() {
 		return "", nil
 	}
-	if !oldJson.IsArray() {
-		dbLog.Infof("pop not array: %v, %v", oldV, oldJson)
-		return "", errJsonPathNotArray
+	if !oldJSON.IsArray() {
+		dbLog.Infof("pop not array: %v, %v", oldV, oldJSON)
+		return "", errJSONPathNotArray
 	}
-	arrySize := len(oldJson.Array())
+	arrySize := len(oldJSON.Array())
 	if arrySize == 0 {
 		return "", nil
 	}
@@ -385,7 +385,7 @@ func (db *RockDB) JArrayPop(ts int64, key []byte, path []byte) (string, error) {
 	} else {
 		jpath += ".-1"
 	}
-	poped := oldJson.Array()[arrySize-1].String()
+	poped := oldJSON.Array()[arrySize-1].String()
 	oldV, err = sjson.DeleteBytes(oldV, jpath)
 	if err != nil {
 		return "", err
@@ -403,14 +403,14 @@ func (db *RockDB) JArrayLen(key []byte, path []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	_, oldV, isExist, err := db.getOldJson(table, rk)
+	_, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return 0, err
 	}
 	if !isExist {
 		return 0, nil
 	}
-	jpath := convertJsonPath(path)
+	jpath := convertJSONPath(path)
 	var jsonData gjson.Result
 	if jpath == "" {
 		jsonData = gjson.ParseBytes(oldV)
@@ -429,14 +429,14 @@ func (db *RockDB) JObjLen(key []byte, path []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	_, oldV, isExist, err := db.getOldJson(table, rk)
+	_, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return 0, err
 	}
 	if !isExist {
 		return 0, nil
 	}
-	jpath := convertJsonPath(path)
+	jpath := convertJSONPath(path)
 	var jsonData gjson.Result
 	if jpath == "" {
 		jsonData = gjson.ParseBytes(oldV)
@@ -455,14 +455,14 @@ func (db *RockDB) JObjKeys(key []byte, path []byte) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, oldV, isExist, err := db.getOldJson(table, rk)
+	_, oldV, isExist, err := db.getOldJSON(table, rk)
 	if err != nil {
 		return nil, err
 	}
 	if !isExist {
 		return nil, nil
 	}
-	jpath := convertJsonPath(path)
+	jpath := convertJSONPath(path)
 	var jsonData gjson.Result
 	if jpath == "" {
 		jsonData = gjson.ParseBytes(oldV)

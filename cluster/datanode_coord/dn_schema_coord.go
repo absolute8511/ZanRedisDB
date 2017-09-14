@@ -85,7 +85,7 @@ func (dc *DataCoordinator) doSyncSchemaInfo(localNamespace *node.NamespaceNode,
 				}
 			}
 		}
-		for _, jsonIndex := range tindexes.JsonIndexes {
+		for _, jsonIndex := range tindexes.JSONIndexes {
 			_ = jsonIndex
 		}
 	}

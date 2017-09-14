@@ -79,7 +79,7 @@ based on this golang sdk if you want use the redis client in other language.
   - [ ] Geo
   - [x] Expires
   - [ ] HyperLogLog
-  - [x] Json
+  - [x] JSON
 * Distributed system
   - [x] Raft based replication
   - [x] Partitions
