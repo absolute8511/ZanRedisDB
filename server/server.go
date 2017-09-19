@@ -66,7 +66,7 @@ func NewServer(conf ServerConfig) *Server {
 		conf.ElectionTick = 5
 	}
 	if conf.MaxScanJob <= 0 {
-		conf.MaxScanJob = common.MAX_SCAN_JOB
+		conf.MaxScanJob = int32(common.MAX_SCAN_JOB)
 	}
 	if conf.ProfilePort == 0 {
 		conf.ProfilePort = 7666

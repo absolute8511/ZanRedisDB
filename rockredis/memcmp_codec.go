@@ -22,6 +22,8 @@ const (
 	NilFlag   byte = 0
 	bytesFlag byte = 1
 	intFlag   byte = 3
+	uintFlag  byte = 4
+	floatFlag byte = 5
 	maxFlag   byte = 250
 )
 
@@ -44,6 +46,12 @@ func memcmpEncode(b []byte, vals []interface{}) ([]byte, error) {
 			b = encodeBytes(b, []byte(realVal))
 		case []byte:
 			b = encodeBytes(b, realVal)
+		case float32:
+			b = append(b, floatFlag)
+			b = EncodeFloat(b, float64(realVal))
+		case float64:
+			b = append(b, floatFlag)
+			b = EncodeFloat(b, float64(realVal))
 		case nil:
 			b = append(b, NilFlag)
 		default:
@@ -117,6 +125,10 @@ func DecodeOne(b []byte) (remain []byte, d interface{}, err error) {
 		var v int64
 		b, v, err = DecodeInt(b)
 		d = v
+	case floatFlag:
+		var v float64
+		b, v, err = DecodeFloat(b)
+		d = v
 	case bytesFlag:
 		var v []byte
 		b, v, err = DecodeBytes(b)
@@ -149,7 +161,7 @@ func peek(b []byte) (length int, err error) {
 	var l int
 	switch flag {
 	case NilFlag:
-	case intFlag:
+	case intFlag, floatFlag:
 		l = 8
 	case bytesFlag:
 		l, err = peekBytes(b, false)

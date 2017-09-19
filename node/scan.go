@@ -308,7 +308,7 @@ func (nd *KVNode) zscanCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteArray(len(ay) * 2)
 	for _, v := range ay {
 		conn.WriteBulk(v.Member)
-		conn.WriteBulk([]byte(strconv.FormatInt(v.Score, 10)))
+		conn.WriteBulk([]byte(strconv.FormatFloat(v.Score, 'g', -1, 64)))
 	}
 	return
 }

@@ -1470,6 +1470,133 @@ func TestZSet(t *testing.T) {
 
 }
 
+func TestZSetInfScore(t *testing.T) {
+	//TODO: test +inf , -inf score
+}
+
+func TestZSetFloat64Score(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:myzset_float"
+
+	if n, err := goredis.Int(c.Do("zadd", key, 3, "a", 3, "b")); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zcard", key)); err != nil {
+		t.Fatal(n)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zadd", key, 3.1, "a", 3.2, "b")); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zcard", key)); err != nil {
+		t.Fatal(n)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zadd", key, 3.3, "c", 3.4, "d")); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zcard", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 4 {
+		t.Fatal(n)
+	}
+
+	if s, err := goredis.Float64(c.Do("zscore", key, "c")); err != nil {
+		t.Fatal(err)
+	} else if s != 3.3 {
+		t.Fatal(s)
+	}
+
+	if n, err := goredis.Int(c.Do("zrem", key, "d", "e")); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zcard", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Float64(c.Do("zincrby", key, 4, "c")); err != nil {
+		t.Fatal(err)
+	} else if n != 7.3 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Float64(c.Do("zincrby", key, -4, "c")); err != nil {
+		t.Fatal(err)
+	} else if n != 3.3 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Float64(c.Do("zincrby", key, 3.4, "d")); err != nil {
+		t.Fatal(err)
+	} else if n != 3.4 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("zrank", key, "a")); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("zrevrank", key, "b")); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("zrank", key, "c")); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("zrank", key, "d")); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zrevrank", key, "a")); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zcard", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 4 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zrem", key, "a", "b", "c", "d")); err != nil {
+		t.Fatal(err)
+	} else if n != 4 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("zcard", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+}
+
 func TestZSetCount(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
@@ -1839,7 +1966,7 @@ func TestZsetErrorParams(t *testing.T) {
 		t.Fatalf("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zadd", key, "0.1", "a"); err == nil {
+	if _, err := c.Do("zadd", key, "0.1a", "a"); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
 
@@ -1863,20 +1990,12 @@ func TestZsetErrorParams(t *testing.T) {
 		t.Fatalf("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("zincrby", key, 0.1, "a"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
-
 	//zcount
 	if _, err := c.Do("zcount", key); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
 
 	if _, err := c.Do("zcount", key, "-inf", "=inf"); err == nil {
-		t.Fatalf("invalid err of %v", err)
-	}
-
-	if _, err := c.Do("zcount", key, 0.1, 0.1); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
 

@@ -279,6 +279,9 @@ func (nd *KVNode) handleProposeReq() {
 	var reqList BatchInternalRaftRequest
 	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
 	var lastReq *internalReq
+	// TODO: combine pipeline and batch to improve performance
+	//lastReqList := make([]*internalReq, 0, 1024)
+
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -332,6 +335,7 @@ func (nd *KVNode) handleProposeReq() {
 			start := lastReq.reqData.Header.Timestamp
 			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout*2)
 			nd.rn.node.Propose(ctx, buffer)
+			//lastReqList = append(lastReqList, lastReq)
 			select {
 			case <-lastReq.done:
 			case <-ctx.Done():

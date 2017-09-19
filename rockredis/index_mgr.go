@@ -292,6 +292,7 @@ func (im *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field string,
 	dbLog.Infof("table %v hash index %v state updated from %v to %v", table, field, oldState, state)
 	if index.State == DeletedIndex {
 		im.wg.Add(1)
+		// TODO: avoid cleanAll twice
 		go func() {
 			defer im.wg.Done()
 			err := index.cleanAll(db, im.closeChan)

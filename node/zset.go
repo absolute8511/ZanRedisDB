@@ -14,12 +14,12 @@ var (
 	errInvalidRange = errors.New("Invalid range string")
 )
 
-func getScoreRange(left []byte, right []byte) (int64, int64, error) {
+func getScoreRange(left []byte, right []byte) (float64, float64, error) {
 	if len(left) == 0 || len(right) == 0 {
 		return 0, 0, errInvalidRange
 	}
-	var leftRange int64
-	var rightRange int64
+	var leftRange float64
+	var rightRange float64
 	var err error
 	isLOpen := false
 	rangeD := left
@@ -30,7 +30,7 @@ func getScoreRange(left []byte, right []byte) (int64, int64, error) {
 			isLOpen = true
 			rangeD = left[1:]
 		}
-		leftRange, err = strconv.ParseInt(string(rangeD), 10, 64)
+		leftRange, err = strconv.ParseFloat(string(rangeD), 64)
 		if err != nil {
 			return leftRange, rightRange, err
 		}
@@ -50,7 +50,7 @@ func getScoreRange(left []byte, right []byte) (int64, int64, error) {
 			isROpen = true
 			rangeD = right[1:]
 		}
-		rightRange, err = strconv.ParseInt(string(rangeD), 10, 64)
+		rightRange, err = strconv.ParseFloat(string(rangeD), 64)
 		if err != nil {
 			return leftRange, rightRange, err
 		}
@@ -114,7 +114,7 @@ func (nd *KVNode) zscoreCommand(conn redcon.Conn, cmd redcon.Command) {
 	if err != nil {
 		conn.WriteNull()
 	} else {
-		conn.WriteBulk([]byte(strconv.FormatInt(val, 10)))
+		conn.WriteBulk([]byte(strconv.FormatFloat(val, 'g', -1, 64)))
 	}
 }
 
@@ -201,7 +201,7 @@ func (nd *KVNode) zrangeFunc(conn redcon.Conn, cmd redcon.Command, reverse bool)
 	for _, d := range vlist {
 		conn.WriteBulk(d.Member)
 		if needScore {
-			conn.WriteBulkString(strconv.FormatInt(d.Score, 10))
+			conn.WriteBulkString(strconv.FormatFloat(d.Score, 'g', -1, 64))
 		}
 	}
 }
@@ -257,8 +257,8 @@ func (nd *KVNode) zrangebyscoreFunc(conn redcon.Conn, cmd redcon.Command, revers
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	var min int64
-	var max int64
+	var min float64
+	var max float64
 	var err error
 	if !reverse {
 		min, max, err = getScoreRange(cmd.Args[2], cmd.Args[3])
@@ -312,7 +312,7 @@ func (nd *KVNode) zrangebyscoreFunc(conn redcon.Conn, cmd redcon.Command, revers
 	for _, d := range vlist {
 		conn.WriteBulk(d.Member)
 		if needScore {
-			conn.WriteBulkString(strconv.FormatInt(d.Score, 10))
+			conn.WriteBulkString(strconv.FormatFloat(d.Score, 'g', -1, 64))
 		}
 	}
 }
@@ -379,7 +379,7 @@ func (nd *KVNode) zincrbyCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	_, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
+	_, err := strconv.ParseFloat(string(cmd.Args[2]), 64)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -389,9 +389,9 @@ func (nd *KVNode) zincrbyCommand(conn redcon.Conn, cmd redcon.Command) {
 	if !ok {
 		return
 	}
-	rsp, ok := v.(int64)
+	rsp, ok := v.(float64)
 	if ok {
-		conn.WriteBulkString(strconv.FormatInt(rsp, 10))
+		conn.WriteBulkString(strconv.FormatFloat(rsp, 'g', -1, 64))
 	} else {
 		conn.WriteError(errInvalidResponse.Error())
 	}
@@ -493,7 +493,7 @@ func (nd *KVNode) zclearCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
 	mlist := make([]common.ScorePair, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
-		s, err := strconv.ParseInt(string(args[i]), 10, 64)
+		s, err := strconv.ParseFloat(string(args[i]), 64)
 		if err != nil {
 			return nil, err
 		}
@@ -516,7 +516,7 @@ func (nd *KVNode) localZaddCommand(cmd redcon.Command, ts int64) (interface{}, e
 }
 
 func (nd *KVNode) localZincrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	delta, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
+	delta, err := strconv.ParseFloat(string(cmd.Args[2]), 64)
 	if err != nil {
 		return nil, err
 	}

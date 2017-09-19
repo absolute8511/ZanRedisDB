@@ -163,13 +163,13 @@ func (db *RockDB) zsetFullScan(key []byte, count int,
 		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
 			var t, k, m []byte
 			var err error
-			var s int64
+			var s float64
 			if t, k, m, err = zDecodeSetKey(it.Key()); err != nil {
 				return nil, err
 			} else if r != nil && !r.Match(string(k)) {
 				return nil, errNotMatch
 			} else {
-				s, err = Int64(it.Value(), nil)
+				s, err = Float64(it.Value(), nil)
 				if err != nil {
 					return nil, err
 				}

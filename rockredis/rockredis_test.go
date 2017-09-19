@@ -341,9 +341,9 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 				t.Fatal("key should has table prefix " + string(k))
 			}
 			if string(m) == "test:a" {
-				assert.Equal(t, int64(1), s)
+				assert.Equal(t, float64(1), s)
 			} else if string(m) == "test:b" {
-				assert.Equal(t, int64(2), s)
+				assert.Equal(t, float64(2), s)
 			} else {
 				t.Fatal("scan field mismatch: " + string(m))
 			}
@@ -367,9 +367,9 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 				t.Fatal("key should has table prefix " + string(k))
 			}
 			if string(m) == "test2:a" {
-				assert.Equal(t, int64(1), s)
+				assert.Equal(t, float64(1), s)
 			} else if string(m) == "test2:b" {
-				assert.Equal(t, int64(2), s)
+				assert.Equal(t, float64(2), s)
 			} else {
 				t.Fatal("scan field mismatch: " + string(m))
 			}

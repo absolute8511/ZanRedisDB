@@ -3,6 +3,7 @@ package common
 import (
 	"container/heap"
 	"errors"
+	"math"
 	"strings"
 
 	"bytes"
@@ -137,12 +138,12 @@ type KFVals struct {
 	Vals []KVRecordRet
 }
 
-const (
-	MAX_BATCH_NUM       = 5000
-	MinScore      int64 = -1<<63 + 1
-	MaxScore      int64 = 1<<63 - 1
-	InvalidScore  int64 = -1 << 63
-	MAX_SCAN_JOB        = 10
+var (
+	MAX_BATCH_NUM         = 5000
+	MinScore      float64 = math.Inf(-1)
+	MaxScore      float64 = math.Inf(1)
+	InvalidScore  int64   = -1 << 63
+	MAX_SCAN_JOB          = 10
 )
 
 const (
@@ -164,7 +165,7 @@ func ExtractTable(rawKey []byte) ([]byte, []byte, error) {
 }
 
 type ScorePair struct {
-	Score  int64
+	Score  float64
 	Member []byte
 }
 

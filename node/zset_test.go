@@ -62,6 +62,6 @@ func TestKVNode_zsetCommand(t *testing.T) {
 		c.Reset()
 		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
 		handler(c, cmd.args)
-		assert.Nil(t, c.GetError())
+		assert.Nil(t, c.GetError(), cmd.name)
 	}
 }

@@ -3,12 +3,14 @@ package rockredis
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"strconv"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 var errIntNumber = errors.New("invalid integer")
+var errFloat64Number = errors.New("invalid float64")
 
 func Int64(v []byte, err error) (int64, error) {
 	n, err := Uint64(v, err)
@@ -35,6 +37,26 @@ func PutInt64(v int64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, uint64(v))
 	return b
+}
+
+func PutFloat64(v float64) []byte {
+	b := make([]byte, 8)
+	bits := math.Float64bits(v)
+	binary.BigEndian.PutUint64(b, bits)
+	return b
+}
+
+func Float64(v []byte, err error) (float64, error) {
+	var fv float64
+	if err != nil {
+		return fv, err
+	} else if v == nil || len(v) == 0 {
+		return fv, nil
+	} else if len(v) != 8 {
+		return fv, errFloat64Number
+	}
+	bits := binary.BigEndian.Uint64(v)
+	return math.Float64frombits(bits), nil
 }
 
 func StrInt64(v []byte, err error) (int64, error) {

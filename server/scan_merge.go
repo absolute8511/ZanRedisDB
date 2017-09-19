@@ -205,7 +205,7 @@ func (s *Server) doMergeFullScan(conn redcon.Conn, cmd redcon.Command) {
 						v := realR[i].(common.ScorePair)
 						conn.WriteArray(2)
 						conn.WriteBulk(v.Member)
-						conn.WriteBulk([]byte(strconv.FormatInt(v.Score, 10)))
+						conn.WriteBulk([]byte(strconv.FormatFloat(v.Score, 'g', -1, 64)))
 					}
 				}
 			}

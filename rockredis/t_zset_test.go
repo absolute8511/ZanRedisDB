@@ -2,10 +2,11 @@ package rockredis
 
 import (
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 const (
@@ -17,7 +18,7 @@ func bin(sz string) []byte {
 }
 
 func pair(memb string, score int) common.ScorePair {
-	return common.ScorePair{Score: int64(score), Member: bin(memb)}
+	return common.ScorePair{Score: float64(score), Member: bin(memb)}
 }
 
 func TestZSetCodec(t *testing.T) {
@@ -88,7 +89,7 @@ func TestDBZSet(t *testing.T) {
 		t.Fatal(s)
 	}
 
-	if s, err := db.ZScore(key, bin("zzz")); err != errScoreMiss || s != InvalidScore {
+	if s, err := db.ZScore(key, bin("zzz")); err != errScoreMiss {
 		t.Fatal(fmt.Sprintf("s=[%d] err=[%s]", s, err))
 	}
 
@@ -217,7 +218,7 @@ func TestZSetOrder(t *testing.T) {
 	if datas, _ := db.ZRange(key, 0, endPos); len(datas) != 6 {
 		t.Fatal(len(datas))
 	} else {
-		scores := []int64{0, 1, 2, 5, 6, 999}
+		scores := []float64{0, 1, 2, 5, 6, 999}
 		for i := 0; i < len(datas); i++ {
 			if datas[i].Score != scores[i] {
 				t.Fatal(fmt.Sprintf("[%d]=%d", i, datas[i]))

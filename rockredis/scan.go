@@ -357,7 +357,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 			continue
 		}
 
-		score, err := Int64(it.Value(), nil)
+		score, err := Float64(it.Value(), nil)
 		if err != nil {
 			return nil, err
 		}
