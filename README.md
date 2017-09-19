@@ -1,5 +1,6 @@
 # ZanRedisDB
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/3288ed77f27c4f8a998e35ef936edc6f)](https://www.codacy.com/app/cool8511/ZanRedisDB?utm_source=github.com&utm_medium=referral&utm_content=absolute8511/ZanRedisDB&utm_campaign=badger)
 [![Build Status](https://travis-ci.org/absolute8511/ZanRedisDB.svg?branch=master)](https://travis-ci.org/absolute8511/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/absolute8511/ZanRedisDB.svg)](https://github.com/absolute8511/ZanRedisDB/releases/latest) [![codecov](https://codecov.io/gh/absolute8511/ZanRedisDB/branch/master/graph/badge.svg)](https://codecov.io/gh/absolute8511/ZanRedisDB) [![Go Report Card](https://goreportcard.com/badge/github.com/absolute8511/ZanRedisDB)](https://goreportcard.com/report/github.com/absolute8511/ZanRedisDB)
 
 ## Build
