@@ -1472,6 +1472,7 @@ func TestZSet(t *testing.T) {
 
 func TestZSetInfScore(t *testing.T) {
 	//TODO: test +inf , -inf score
+	// TODO: test negative score
 }
 
 func TestZSetFloat64Score(t *testing.T) {
