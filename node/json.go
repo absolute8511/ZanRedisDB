@@ -63,6 +63,22 @@ func (nd *KVNode) jsonmkGetCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (nd *KVNode) jsonTypeCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) < 2 {
+		conn.WriteError(common.ErrInvalidArgs.Error())
+		return
+	}
+	var typeStr string
+	var err error
+	if len(cmd.Args) == 2 {
+		typeStr, err = nd.store.JType(cmd.Args[1], []byte(""))
+	} else {
+		typeStr, err = nd.store.JType(cmd.Args[1], cmd.Args[2])
+	}
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteString(typeStr)
 }
 
 func (nd *KVNode) jsonArrayLenCommand(conn redcon.Conn, cmd redcon.Command) {

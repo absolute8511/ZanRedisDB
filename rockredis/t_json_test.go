@@ -159,11 +159,21 @@ func TestDBJSON(t *testing.T) {
 	v1, err := db.JGet(key, []byte("a"))
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(v1))
+	typeStr, err := db.JType(key, []byte("a"))
+	assert.Nil(t, err)
+	assert.Equal(t, "string", typeStr)
+
 	v2, err := db.JGet(key, []byte("b"))
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(v2))
 	assert.Equal(t, "hello world 1", v1[0])
 	assert.Equal(t, "hello world 2", v2[0])
+	typeStr, err = db.JType(key, []byte("b"))
+	assert.Nil(t, err)
+	assert.Equal(t, "string", typeStr)
+	typeStr, err = db.JType(key, []byte("c"))
+	assert.Nil(t, err)
+	assert.Equal(t, "null", typeStr)
 
 	ay, err := db.JGet(key, []byte("a"), []byte("b"))
 	assert.Nil(t, err)
@@ -176,6 +186,9 @@ func TestDBJSON(t *testing.T) {
 	assert.Equal(t, 2, len(ay))
 	assert.Equal(t, "{\"b\":\"hello world 2\",\"a\":\"hello world 1\"}", ay[0])
 	assert.Equal(t, "hello world 1", ay[1])
+	typeStr, err = db.JType(key, []byte(""))
+	assert.Nil(t, err)
+	assert.Equal(t, "object", typeStr)
 
 	n, err = db.JSet(0, key, []byte("c"), []byte(ay[0]))
 	assert.Nil(t, err)
@@ -217,6 +230,10 @@ func TestDBJSON(t *testing.T) {
 	assert.True(t, ok)
 	_, ok = keysMap["b"]
 	assert.True(t, ok)
+
+	typeStr, err = db.JType(key, []byte("c"))
+	assert.Nil(t, err)
+	assert.Equal(t, "object", typeStr)
 }
 
 func TestJSONKeyExists(t *testing.T) {
@@ -293,6 +310,10 @@ func TestDBJSONKeyArrayOp(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
+	typeStr, err := db.JType(key, []byte(""))
+	assert.Nil(t, err)
+	assert.Equal(t, "object", typeStr)
+
 	n, err = db.JSet(0, key, []byte("b"), []byte(`[1, 2]`))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
@@ -300,6 +321,10 @@ func TestDBJSONKeyArrayOp(t *testing.T) {
 	n, err = db.JArrayLen(key, []byte("b"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(2), n)
+
+	typeStr, err = db.JType(key, []byte("b"))
+	assert.Nil(t, err)
+	assert.Equal(t, "array", typeStr)
 	// append, del, pop
 	n, err = db.JArrayAppend(0, key, []byte("b"), []byte("4"))
 	assert.Nil(t, err)

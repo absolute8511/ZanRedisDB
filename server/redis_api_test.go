@@ -2331,6 +2331,14 @@ func TestJSON(t *testing.T) {
 	assert.Equal(t, 1, len(strRets))
 	assert.Equal(t, "str", strRets[0])
 
+	typeStr, err := goredis.String(c.Do("json.type", key, ".a"))
+	assert.Nil(t, err)
+	assert.Equal(t, "string", typeStr)
+
+	typeStr, err = goredis.String(c.Do("json.type", key, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, "object", typeStr)
+
 	strRet, err = goredis.String(c.Do("json.set", key, "1", "3"))
 	assert.Nil(t, err)
 	assert.Equal(t, "OK", strRet)
@@ -2375,6 +2383,10 @@ func TestJSON(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(strRets))
 	assert.Equal(t, "", strRets[0])
+
+	typeStr, err = goredis.String(c.Do("json.type", key, "1"))
+	assert.Nil(t, err)
+	assert.Equal(t, "null", typeStr)
 
 	n, err = goredis.Int(c.Do("json.objlen", key))
 	assert.Nil(t, err)
@@ -2501,6 +2513,14 @@ func TestJSONArrayOp(t *testing.T) {
 	n, err = goredis.Int(c.Do("json.arrlen", key, "2.3"))
 	assert.Nil(t, err)
 	assert.Equal(t, 2, n)
+
+	typeStr, err := goredis.String(c.Do("json.type", key, "2.3"))
+	assert.Nil(t, err)
+	assert.Equal(t, "array", typeStr)
+
+	typeStr, err = goredis.String(c.Do("json.type", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "array", typeStr)
 
 	poped, err := goredis.String(c.Do("json.arrpop", key))
 	assert.Nil(t, err)

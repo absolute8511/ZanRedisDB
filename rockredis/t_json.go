@@ -213,6 +213,32 @@ func (db *RockDB) JMGet(path []byte, keys ...[]byte) ([]string, error) {
 	return nil, nil
 }
 
+func (db *RockDB) JType(key []byte, path []byte) (string, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return "", err
+	}
+	_, oldV, _, err := db.getOldJSON(table, rk)
+	if err != nil {
+		return "", err
+	}
+	jpath := convertJSONPath(path)
+	r := gjson.GetBytes(oldV, jpath)
+	if jpath == "" {
+		r = gjson.ParseBytes(oldV)
+	}
+	if !r.Exists() {
+		return "null", nil
+	}
+	if r.IsArray() {
+		return "array", nil
+	}
+	if r.IsObject() {
+		return "object", nil
+	}
+	return strings.ToLower(r.Type.String()), nil
+}
+
 func (db *RockDB) JGet(key []byte, paths ...[]byte) ([]string, error) {
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
