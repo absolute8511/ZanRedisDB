@@ -292,7 +292,6 @@ func (im *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field string,
 	dbLog.Infof("table %v hash index %v state updated from %v to %v", table, field, oldState, state)
 	if index.State == DeletedIndex {
 		im.wg.Add(1)
-		// TODO: avoid cleanAll twice
 		go func() {
 			defer im.wg.Done()
 			err := index.cleanAll(db, im.closeChan)
@@ -314,6 +313,8 @@ func (im *IndexMgr) UpdateHsetIndexState(db *RockDB, table string, field string,
 
 // ensure mark index as deleted, and clean in background before delete the index
 func (im *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) error {
+	// this delete may not run in raft loop
+	// so we should use new db write batch
 	im.Lock()
 	indexes, ok := im.tableIndexes[table]
 	im.Unlock()

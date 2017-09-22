@@ -234,8 +234,11 @@ func (db *RockDB) GetTableHsetIndexValue(table []byte) ([]byte, error) {
 }
 
 func (db *RockDB) SetTableHsetIndexValue(table []byte, value []byte) error {
+	// this may not run in raft loop
+	// so we should use new db write batch here
 	key := encodeTableIndexMetaKey(table, hsetIndexMeta)
-	db.wb.Clear()
-	db.wb.Put(key, value)
-	return db.eng.Write(db.defaultWriteOpts, db.wb)
+	wb := gorocksdb.NewWriteBatch()
+	defer wb.Destroy()
+	wb.Put(key, value)
+	return db.eng.Write(db.defaultWriteOpts, wb)
 }
