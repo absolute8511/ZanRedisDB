@@ -303,8 +303,12 @@ func (nd *KVNode) handleProposeReq() {
 		}
 	}()
 	for {
+		pc := nd.reqProposeC
+		if len(reqList.Reqs) >= 1000 {
+			pc = nil
+		}
 		select {
-		case r := <-nd.reqProposeC:
+		case r := <-pc:
 			reqList.Reqs = append(reqList.Reqs, &r.reqData)
 			lastReq = r
 		default:
@@ -351,6 +355,9 @@ func (nd *KVNode) handleProposeReq() {
 			cost := (time.Now().UnixNano() - start) / 1000 / 1000 / 1000
 			if cost >= int64(proposeTimeout.Seconds())/2 {
 				nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
+			}
+			for i := range reqList.Reqs {
+				reqList.Reqs[i] = nil
 			}
 			reqList.Reqs = reqList.Reqs[:0]
 			lastReq = nil
