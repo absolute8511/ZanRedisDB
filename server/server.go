@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/cluster"
@@ -251,7 +252,7 @@ func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (common.CommandF
 	if !ok {
 		return nil, cmd, common.ErrInvalidCommand
 	}
-	if !isWrite && !n.Node.IsLead() {
+	if !isWrite && !n.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 		// read only to leader to avoid stale read
 		// TODO: also read command can request the raft read index if not leader
 		return nil, cmd, node.ErrNamespaceNotLeader

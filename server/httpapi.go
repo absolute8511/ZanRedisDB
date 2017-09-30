@@ -20,6 +20,8 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
+var allowStaleRead int32
+
 type RaftStatus struct {
 	LeaderInfo *common.MemberInfo
 	Members    []*common.MemberInfo
@@ -211,6 +213,22 @@ func (s *Server) doSetCostLevel(w http.ResponseWriter, req *http.Request, ps htt
 	return nil, nil
 }
 
+func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	allowStr := reqParams.Get("allow")
+	if allowStr == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG"}
+	}
+	if allowStr == "true" {
+		atomic.StoreInt32(&allowStaleRead, int32(1))
+	} else {
+		atomic.StoreInt32(&allowStaleRead, int32(0))
+	}
+	return nil, nil
+}
 func (s *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -308,6 +326,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
 	router.Handle("POST", "/costlevel/set", common.Decorate(s.doSetCostLevel, log, common.V1))
+	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
