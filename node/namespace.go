@@ -458,6 +458,7 @@ func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
 		_, ok := nsm.kvNodes[ns]
 		if ok {
 			nodeLog.Infof("namespace deleted: %v-%v", ns, gid)
+			nsm.kvNodes[ns] = nil
 			delete(nsm.kvNodes, ns)
 			delete(nsm.groups, gid)
 		}

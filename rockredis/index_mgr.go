@@ -244,11 +244,13 @@ func (im *IndexMgr) AddHsetIndex(db *RockDB, hindex *HsetIndex) error {
 	indexes.hsetIndexes[string(hindex.IndexField)] = hindex
 	d, err := indexes.marshalHsetIndexes()
 	if err != nil {
+		indexes.hsetIndexes[string(hindex.IndexField)] = nil
 		delete(indexes.hsetIndexes, string(hindex.IndexField))
 		return err
 	}
 	err = db.SetTableHsetIndexValue(hindex.Table, d)
 	if err != nil {
+		indexes.hsetIndexes[string(hindex.IndexField)] = nil
 		delete(indexes.hsetIndexes, string(hindex.IndexField))
 		return err
 	}
@@ -331,6 +333,7 @@ func (im *IndexMgr) deleteHsetIndex(db *RockDB, table string, field string) erro
 	if hindex.State != DeletedIndex {
 		return ErrIndexDeleteNotInDeleted
 	}
+	indexes.hsetIndexes[field] = nil
 	delete(indexes.hsetIndexes, field)
 	d, err := indexes.marshalHsetIndexes()
 	if err != nil {

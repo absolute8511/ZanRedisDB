@@ -750,6 +750,7 @@ func (rc *raftNode) serveChannels() {
 		rc.wgAsync.Wait()
 		rc.node.Stop()
 		rc.persistStorage.Close()
+		rc.raftStorage = nil
 	}()
 
 	// event loop on raft state machine updates
