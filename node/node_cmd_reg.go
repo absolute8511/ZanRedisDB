@@ -102,6 +102,14 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "sscan", wrapReadCommandKAnySubkey(nd.sscanCommand))
 	nd.router.Register(false, "zscan", wrapReadCommandKAnySubkey(nd.zscanCommand))
 
+	// for geohash
+	nd.router.Register(true, "geoadd", nd.geoaddCommand)
+	nd.router.Register(false, "geohash", wrapReadCommandKAnySubkeyN(nd.geohashCommand, 1))
+	nd.router.Register(false, "geodist", wrapReadCommandKAnySubkey(nd.geodistCommand))
+	nd.router.Register(false, "geopos", wrapReadCommandKAnySubkeyN(nd.geoposCommand, 1))
+	nd.router.Register(false, "georadius", wrapReadCommandKAnySubkeyN(nd.geoRadiusCommand, 4))
+	nd.router.Register(false, "georadiusbymember", wrapReadCommandKAnySubkeyN(nd.geoRadiusByMemberCommand, 3))
+
 	//for cross mutil partion
 	nd.router.RegisterMerge("scan", wrapMergeCommand(nd.scanCommand))
 	nd.router.RegisterMerge("advscan", nd.advanceScanCommand)
