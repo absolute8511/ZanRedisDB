@@ -78,7 +78,7 @@ func NewServer(conf ServerConfig) *Server {
 		RedisPort:   strconv.Itoa(conf.RedisAPIPort),
 		HttpPort:    strconv.Itoa(conf.HttpAPIPort),
 		Version:     common.VerBinary,
-		Tags:        make(map[string]bool),
+		Tags:        make(map[string]interface{}),
 		DataRoot:    conf.DataDir,
 		RsyncModule: "zanredisdb",
 	}
@@ -102,8 +102,8 @@ func NewServer(conf ServerConfig) *Server {
 	}
 	conf.LocalRaftAddr = strings.Replace(conf.LocalRaftAddr, "0.0.0.0", myNode.NodeIP, 1)
 	myNode.RaftTransportAddr = conf.LocalRaftAddr
-	for _, tag := range conf.Tags {
-		myNode.Tags[tag] = true
+	for k, tag := range conf.Tags {
+		myNode.Tags[k] = tag
 	}
 	os.MkdirAll(conf.DataDir, common.DIR_PERM)
 

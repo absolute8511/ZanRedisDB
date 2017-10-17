@@ -358,5 +358,8 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 	rsp.Body.Close()
 }
 
+func TestClusterBalanceAcrossMultiDC(t *testing.T) {
+}
+
 func TestClusterRemoveNode(t *testing.T) {
 }

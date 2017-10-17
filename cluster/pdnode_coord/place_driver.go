@@ -53,6 +53,23 @@ func (h *IntHeap) Pop() interface{} {
 	return x
 }
 
+func getNodeNameList(currentNodes map[string]cluster.NodeInfo) []SortableStrings {
+	nodeNameMap := make(map[string]SortableStrings)
+	for nid, ninfo := range currentNodes {
+		dcInfo := ""
+		dc, ok := ninfo.Tags[cluster.DCInfoTag]
+		if ok {
+			dcInfo, ok = dc.(string)
+		}
+		nodeNameMap[dcInfo] = append(nodeNameMap[dcInfo], nid)
+	}
+	nodeNameList := make([]SortableStrings, 0, len(nodeNameMap))
+	for _, nodes := range nodeNameMap {
+		nodeNameList = append(nodeNameList, nodes)
+	}
+	return nodeNameList
+}
+
 type DataPlacement struct {
 	balanceInterval [2]int
 	pdCoord         *PDCoordinator
@@ -176,13 +193,13 @@ func (dp *DataPlacement) DoBalance(monitorChan chan struct{}) {
 }
 
 func (dp *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{}, namespaceInfo *cluster.PartitionMetaInfo,
-	nodeNameList []string) (*cluster.PartitionMetaInfo, error) {
+	nodeNameList []SortableStrings) (*cluster.PartitionMetaInfo, error) {
 	retry := 0
 	currentSelect := 0
 	namespaceName := namespaceInfo.Name
 	partitionID := namespaceInfo.Partition
 	// since we need add new catchup, we make the replica as replica+1
-	partitionNodes, coordErr := dp.getRebalancedPartitionsFromNameList(
+	partitionNodes, coordErr := getRebalancedPartitionsFromNameList(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica+1, nodeNameList)
@@ -262,7 +279,7 @@ func (dp *DataPlacement) allocNodeForNamespace(namespaceInfo *cluster.PartitionM
 		return nil, cluster.ErrRegisterServiceUnstable
 	}
 
-	partitionNodes, err := dp.getRebalancedNamespacePartitions(
+	partitionNodes, err := getRebalancedNamespacePartitions(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica, currentNodes)
@@ -300,7 +317,7 @@ func (dp *DataPlacement) checkNamespaceNodeConflict(namespaceInfo *cluster.Parti
 func (dp *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[string]cluster.NodeInfo,
 	replica int, partitionNum int, existPart map[int]*cluster.PartitionMetaInfo) ([]cluster.PartitionReplicaInfo, *cluster.CoordErr) {
 	replicaList := make([]cluster.PartitionReplicaInfo, partitionNum)
-	partitionNodes, err := dp.getRebalancedNamespacePartitions(
+	partitionNodes, err := getRebalancedNamespacePartitions(
 		ns,
 		partitionNum,
 		replica, currentNodes)
@@ -347,7 +364,6 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			namespaceList = append(namespaceList, p)
 		}
 	}
-	nodeNameList := make([]string, 0)
 	movedNamespace := ""
 	isAllBalanced = true
 	for _, namespaceInfo := range namespaceList {
@@ -370,12 +386,9 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			continue
 		}
 		currentNodes := dp.pdCoord.getCurrentNodes(namespaceInfo.Tags)
-		nodeNameList = nodeNameList[0:0]
-		for _, n := range currentNodes {
-			nodeNameList = append(nodeNameList, n.ID)
-		}
+		nodeNameList := getNodeNameList(currentNodes)
 
-		partitionNodes, err := dp.getRebalancedNamespacePartitions(
+		partitionNodes, err := getRebalancedNamespacePartitions(
 			namespaceInfo.Name,
 			namespaceInfo.PartitionNum,
 			namespaceInfo.Replica, currentNodes)
@@ -466,7 +479,7 @@ func (s SortableStrings) Swap(l, r int) {
 	s[l], s[r] = s[r], s[l]
 }
 
-func (dp *DataPlacement) getRebalancedNamespacePartitions(ns string,
+func getRebalancedNamespacePartitions(ns string,
 	partitionNum int, replica int,
 	currentNodes map[string]cluster.NodeInfo) ([][]string, *cluster.CoordErr) {
 	if len(currentNodes) < replica {
@@ -506,27 +519,46 @@ func (dp *DataPlacement) getRebalancedNamespacePartitions(ns string,
 	// p8       f       x       x-f     l
 	// p9       l       x        f     x-f
 	// p10     x-f      x       f-l     f
-	nodeNameList := make(SortableStrings, 0, len(currentNodes))
-	for nid := range currentNodes {
-		nodeNameList = append(nodeNameList, nid)
-	}
-	return dp.getRebalancedPartitionsFromNameList(ns, partitionNum, replica, nodeNameList)
+
+	// if there are several data centers, we sort them one by one as below
+	// nodeA1@dc1 nodeA2@dc2 nodeA3@dc3 nodeB1@dc1 nodeB2@dc2 nodeB3@dc3
+
+	nodeNameList := getNodeNameList(currentNodes)
+	return getRebalancedPartitionsFromNameList(ns, partitionNum, replica, nodeNameList)
 }
 
-func (dp *DataPlacement) getRebalancedPartitionsFromNameList(ns string,
+func getRebalancedPartitionsFromNameList(ns string,
 	partitionNum int, replica int,
-	nodeNameList SortableStrings) ([][]string, *cluster.CoordErr) {
-	if len(nodeNameList) < replica {
+	nodeNameList []SortableStrings) ([][]string, *cluster.CoordErr) {
+
+	var combined SortableStrings
+	totalCnt := 0
+	for idx, nList := range nodeNameList {
+		sort.Sort(nList)
+		nodeNameList[idx] = nList
+		totalCnt += len(nList)
+	}
+	if totalCnt < replica {
 		return nil, ErrNodeUnavailable
 	}
-	sort.Sort(nodeNameList)
+	idx := 0
+	for len(combined) < totalCnt {
+		nList := nodeNameList[idx%len(nodeNameList)]
+		if len(nList) == 0 {
+			idx++
+			continue
+		}
+		combined = append(combined, nList[0])
+		nodeNameList[idx%len(nodeNameList)] = nList[1:]
+		idx++
+	}
 	partitionNodes := make([][]string, partitionNum)
 	selectIndex := int(murmur3.Sum32([]byte(ns)))
 	for i := 0; i < partitionNum; i++ {
 		nlist := make([]string, replica)
 		partitionNodes[i] = nlist
 		for j := 0; j < replica; j++ {
-			nlist[j] = nodeNameList[(selectIndex+j)%len(nodeNameList)]
+			nlist[j] = combined[(selectIndex+j)%len(combined)]
 		}
 		selectIndex++
 	}
@@ -537,7 +569,7 @@ func (dp *DataPlacement) getRebalancedPartitionsFromNameList(ns string,
 func (dp *DataPlacement) decideUnwantedRaftNode(namespaceInfo *cluster.PartitionMetaInfo, currentNodes map[string]cluster.NodeInfo) string {
 	unwantedNode := ""
 	//remove the unwanted node in isr
-	partitionNodes, err := dp.getRebalancedNamespacePartitions(
+	partitionNodes, err := getRebalancedNamespacePartitions(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
 		namespaceInfo.Replica, currentNodes)

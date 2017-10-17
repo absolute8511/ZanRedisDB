@@ -21,6 +21,7 @@ type node struct {
 	RedisPort        string `json:"redis_port"`
 	HTTPPort         string `json:"http_port"`
 	Version          string `json:"version"`
+	DCInfo           string `json:"dc_info"`
 }
 
 type PartitionNodeInfo struct {
@@ -199,9 +200,14 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 			ip, _, redisPort, httpPort := cluster.ExtractNodeInfoFromID(nid)
 			hostname := ""
 			version := ""
+			dcInfo := ""
 			if ok {
 				hostname = n.Hostname
 				version = n.Version
+				dc, ok := n.Tags[cluster.DCInfoTag]
+				if ok {
+					dcInfo, ok = dc.(string)
+				}
 			}
 			dn := node{
 				BroadcastAddress: ip,
@@ -209,6 +215,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 				Version:          version,
 				RedisPort:        redisPort,
 				HTTPPort:         httpPort,
+				DCInfo:           dcInfo,
 			}
 			if nsInfo.GetRealLeader() == nid {
 				pn.Leader = dn
@@ -366,7 +373,7 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 	meta.Replica = replicator
 	meta.EngType = engType
 	meta.ExpirationPolicy = expPolicy
-	meta.Tags = make(map[string]bool)
+	meta.Tags = make(map[string]interface{})
 	for _, tag := range tagList {
 		if strings.TrimSpace(tag) != "" {
 			meta.Tags[strings.TrimSpace(tag)] = true

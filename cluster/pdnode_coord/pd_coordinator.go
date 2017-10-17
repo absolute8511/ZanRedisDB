@@ -199,7 +199,7 @@ func (pdCoord *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	}()
 }
 
-func (pdCoord *PDCoordinator) getCurrentNodes(tags map[string]bool) map[string]cluster.NodeInfo {
+func (pdCoord *PDCoordinator) getCurrentNodes(tags map[string]interface{}) map[string]cluster.NodeInfo {
 	pdCoord.nodesMutex.RLock()
 	currentNodes := pdCoord.dataNodes
 	if len(pdCoord.removingNodes) > 0 || len(tags) > 0 {
@@ -233,7 +233,7 @@ func (pdCoord *PDCoordinator) getCurrentNodesWithRemoving() (map[string]cluster.
 	return currentNodes, currentNodesEpoch
 }
 
-func (pdCoord *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]bool) (map[string]cluster.NodeInfo, int64) {
+func (pdCoord *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]interface{}) (map[string]cluster.NodeInfo, int64) {
 	pdCoord.nodesMutex.RLock()
 	currentNodes := pdCoord.dataNodes
 	if len(pdCoord.removingNodes) > 0 || len(tags) > 0 {
@@ -348,10 +348,7 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 				continue
 			}
 			currentNodes := pdCoord.getCurrentNodes(nil)
-			nodeNameList := make([]string, 0, len(currentNodes))
-			for _, s := range currentNodes {
-				nodeNameList = append(nodeNameList, s.ID)
-			}
+			nodeNameList := getNodeNameList(currentNodes)
 
 			allNamespaces, _, err := pdCoord.register.GetAllNamespaces()
 			if err != nil {

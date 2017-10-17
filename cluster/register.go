@@ -9,6 +9,7 @@ import (
 var (
 	ErrKeyAlreadyExist = errors.New("Key already exist")
 	ErrKeyNotFound     = errors.New("Key not found")
+	DCInfoTag          = "dc_info"
 )
 
 type EpochType int64
@@ -23,7 +24,7 @@ type NodeInfo struct {
 	RpcPort           string
 	RaftTransportAddr string
 	Version           string
-	Tags              map[string]bool
+	Tags              map[string]interface{}
 	DataRoot          string
 	RsyncModule       string
 	epoch             EpochType
@@ -56,7 +57,7 @@ type NamespaceMetaInfo struct {
 	EngType          string
 	OptimizedFsync   bool
 	SnapCount        int
-	Tags             map[string]bool
+	Tags             map[string]interface{}
 	ExpirationPolicy string
 }
 
