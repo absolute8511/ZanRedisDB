@@ -14,21 +14,9 @@
 # limitations under the License.
 
 site_name: ZanRedisDB Documentation
+docs_dir: doc
 edit_uri: edit/master/doc/
 #theme_dir: doc/theme
-markdown_extensions:
-  - admonition
-  - codehilite
-  - toc(permalink=true)
-  - pymdownx.betterem(smart_enable=all)
-  - pymdownx.caret
-  - pymdownx.critic
-  - pymdownx.inlinehilite
-  - pymdownx.mark
-  - pymdownx.smartsymbols
-  - pymdownx.superfences
-  - pymdownx.tasklist(custom_checkbox=true)
-  - pymdownx.tilde
 repo_name: 'absolute8511/ZanRedisDB'
 repo_url: 'https://github.com/absolute8511/ZanRedisDB'
 google_analytics:

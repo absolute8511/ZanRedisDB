@@ -88,6 +88,7 @@ based on this golang sdk if you want use the redis client in other language.
   - [x] Support namespace
   - [x] High available
   - [x] Distributed scan on table
+  - [x] Rackaware deployment used for across data center deployment
 * Searchable and Indexing
   - [ ] Secondary index support on Hash fields
   - [ ] Secondary index support for json kv
