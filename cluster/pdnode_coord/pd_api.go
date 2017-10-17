@@ -31,6 +31,7 @@ func (pdCoord *PDCoordinator) GetAllDataNodes() (map[string]cluster.NodeInfo, in
 	return pdCoord.getCurrentNodesWithRemoving()
 }
 
+// may return old cached data if register not available
 func (pdCoord *PDCoordinator) GetAllNamespaces() (map[string]map[int]cluster.PartitionMetaInfo, int64, error) {
 	ns, epoch, err := pdCoord.register.GetAllNamespaces()
 	return ns, int64(epoch), err
