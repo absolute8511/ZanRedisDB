@@ -124,12 +124,15 @@ func (s *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httpr
 	nodes := make([]*node, 0)
 	dns, epoch := s.pdCoord.GetAllDataNodes()
 	for _, n := range dns {
+		dc, _ := n.Tags[cluster.DCInfoTag]
+		dcInfo, _ := dc.(string)
 		dn := &node{
 			BroadcastAddress: n.NodeIP,
 			Hostname:         n.Hostname,
 			Version:          n.Version,
 			RedisPort:        n.RedisPort,
 			HTTPPort:         n.HttpPort,
+			DCInfo:           dcInfo,
 		}
 		nodes = append(nodes, dn)
 	}
