@@ -27,8 +27,9 @@ var (
 )
 
 const (
-	waitMigrateInterval          = time.Minute * 16
-	waitEmergencyMigrateInterval = time.Second * 60
+	waitMigrateInterval            = time.Minute * 16
+	waitEmergencyMigrateInterval   = time.Second * 60
+	waitRemoveRemovingNodeInterval = time.Minute * 5
 )
 
 type PDCoordinator struct {
@@ -788,7 +789,7 @@ func (pdCoord *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *cluster.P
 			rinfo.RemoveTime = time.Now().UnixNano()
 			continue
 		}
-		if time.Now().UnixNano()-rinfo.RemoveTime < 5*time.Minute.Nanoseconds() {
+		if time.Now().UnixNano()-rinfo.RemoveTime < waitRemoveRemovingNodeInterval.Nanoseconds() {
 			continue
 		}
 		inRaft, err := pdCoord.dpm.IsRaftNodeJoined(nsInfo, nid)
