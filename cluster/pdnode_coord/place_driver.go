@@ -393,7 +393,7 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 		}
 		currentNodes := dp.pdCoord.getCurrentNodes(namespaceInfo.Tags)
 		nodeNameList := getNodeNameList(currentNodes)
-		cluster.CoordLog().Infof("node name list: %v", nodeNameList)
+		cluster.CoordLog().Debugf("node name list: %v", nodeNameList)
 
 		partitionNodes, err := getRebalancedNamespacePartitions(
 			namespaceInfo.Name,
@@ -403,7 +403,7 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			isAllBalanced = false
 			continue
 		}
-		cluster.CoordLog().Infof("expected replicas : %v", partitionNodes)
+		cluster.CoordLog().Debugf("expected replicas : %v", partitionNodes)
 		moveNodes := make([]string, 0)
 		for _, nid := range namespaceInfo.GetISR() {
 			found := false
