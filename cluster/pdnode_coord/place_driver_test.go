@@ -8,16 +8,39 @@ import (
 )
 
 func TestClusterNodesPlacementAcrossDC(t *testing.T) {
-	dc1Nodes := SortableStrings{"11", "12", "13", "14", "15", "16"}
-	dc2Nodes := SortableStrings{"21", "22", "23", "24", "25", "26"}
+	nodes := make(map[string]cluster.NodeInfo)
 
-	nodeNameList := make([]SortableStrings, 0)
-	nodeNameList = append(nodeNameList, dc1Nodes, dc2Nodes)
+	dc1Nodes := SortableStrings{"11", "12", "13", "14", "15", "16"}
+	for _, nid := range dc1Nodes {
+		var n cluster.NodeInfo
+		n.ID = nid
+		n.Tags = make(map[string]interface{})
+		n.Tags[cluster.DCInfoTag] = "1"
+		nodes[nid] = n
+	}
+	dc2Nodes := SortableStrings{"21", "22", "23", "24", "25", "26"}
+	for _, nid := range dc2Nodes {
+		var n cluster.NodeInfo
+		n.ID = nid
+		n.Tags = make(map[string]interface{})
+		n.Tags[cluster.DCInfoTag] = "2"
+		nodes[nid] = n
+	}
+	nodeNameList := getNodeNameList(nodes)
+	assert.Equal(t, nodeNameList, getNodeNameList(nodes))
+	t.Log(nodeNameList)
 	placementNodes, err := getRebalancedPartitionsFromNameList("test",
 		8, 3, nodeNameList)
 	assert.Nil(t, err)
 	assert.Equal(t, 8, len(placementNodes))
 	t.Log(placementNodes)
+	t.Log(nodeNameList)
+
+	placementNodes2, err := getRebalancedPartitionsFromNameList("test",
+		8, 3, nodeNameList)
+	assert.Nil(t, err)
+	assert.Equal(t, placementNodes, placementNodes2)
+	t.Log(nodeNameList)
 
 	for _, v := range placementNodes {
 		assert.Equal(t, 3, len(v))
@@ -122,7 +145,7 @@ func TestClusterNodesPlacementAcrossDC(t *testing.T) {
 	dc1Nodes = SortableStrings{"11", "12", "13", "14", "15", "16"}
 	nodeNameList = make([]SortableStrings, 0)
 	nodeNameList = append(nodeNameList, dc1Nodes)
-	placementNodes2, err := getRebalancedPartitionsFromNameList("test",
+	placementNodes2, err = getRebalancedPartitionsFromNameList("test",
 		8, 3, nodeNameList)
 	t.Log(placementNodes2)
 	assert.Nil(t, err)

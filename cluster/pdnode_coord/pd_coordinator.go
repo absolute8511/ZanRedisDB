@@ -209,13 +209,26 @@ func (pdCoord *PDCoordinator) getCurrentNodes(tags map[string]interface{}) map[s
 				continue
 			}
 			filtered := false
-			for tag := range tags {
-				if _, ok := n.Tags[tag]; !ok {
+			for tag, tagV := range tags {
+				if nodeTagV, ok := n.Tags[tag]; !ok {
 					filtered = true
 					break
+				} else {
+					switch tag {
+					case cluster.DCInfoTag:
+						s1, _ := tagV.(string)
+						s2, _ := nodeTagV.(string)
+						// get only nodes in the same dc
+						if s1 != "" && s1 != s2 {
+							filtered = true
+							break
+						}
+					}
+
 				}
 			}
 			if filtered {
+				cluster.CoordLog().Infof("node %v is filtered while get nodes based on tags: %v", nid, tags)
 				continue
 			}
 			currentNodes[nid] = n

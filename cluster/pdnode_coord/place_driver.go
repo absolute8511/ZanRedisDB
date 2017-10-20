@@ -55,6 +55,7 @@ func (h *IntHeap) Pop() interface{} {
 
 func getNodeNameList(currentNodes map[string]cluster.NodeInfo) []SortableStrings {
 	nodeNameMap := make(map[string]SortableStrings)
+	dcInfoList := make(SortableStrings, 0)
 	for nid, ninfo := range currentNodes {
 		dcInfo := ""
 		dc, ok := ninfo.Tags[cluster.DCInfoTag]
@@ -63,9 +64,14 @@ func getNodeNameList(currentNodes map[string]cluster.NodeInfo) []SortableStrings
 		}
 		nodeNameMap[dcInfo] = append(nodeNameMap[dcInfo], nid)
 	}
+	for dcInfo, _ := range nodeNameMap {
+		dcInfoList = append(dcInfoList, dcInfo)
+	}
+	sort.Sort(dcInfoList)
 	nodeNameList := make([]SortableStrings, 0, len(nodeNameMap))
-	for _, nodes := range nodeNameMap {
-		nodeNameList = append(nodeNameList, nodes)
+	for _, dc := range dcInfoList {
+		sort.Sort(nodeNameMap[dc])
+		nodeNameList = append(nodeNameList, nodeNameMap[dc])
 	}
 	return nodeNameList
 }
@@ -387,6 +393,7 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 		}
 		currentNodes := dp.pdCoord.getCurrentNodes(namespaceInfo.Tags)
 		nodeNameList := getNodeNameList(currentNodes)
+		cluster.CoordLog().Infof("node name list: %v", nodeNameList)
 
 		partitionNodes, err := getRebalancedNamespacePartitions(
 			namespaceInfo.Name,
@@ -396,6 +403,7 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			isAllBalanced = false
 			continue
 		}
+		cluster.CoordLog().Infof("expected replicas : %v", partitionNodes)
 		moveNodes := make([]string, 0)
 		for _, nid := range namespaceInfo.GetISR() {
 			found := false
@@ -532,10 +540,14 @@ func getRebalancedPartitionsFromNameList(ns string,
 	nodeNameList []SortableStrings) ([][]string, *cluster.CoordErr) {
 
 	var combined SortableStrings
+	sortedNodeNameList := make([]SortableStrings, 0, len(nodeNameList))
+	for _, nList := range nodeNameList {
+		sortedNodeNameList = append(sortedNodeNameList, nList)
+	}
 	totalCnt := 0
-	for idx, nList := range nodeNameList {
+	for idx, nList := range sortedNodeNameList {
 		sort.Sort(nList)
-		nodeNameList[idx] = nList
+		sortedNodeNameList[idx] = nList
 		totalCnt += len(nList)
 	}
 	if totalCnt < replica {
@@ -543,13 +555,13 @@ func getRebalancedPartitionsFromNameList(ns string,
 	}
 	idx := 0
 	for len(combined) < totalCnt {
-		nList := nodeNameList[idx%len(nodeNameList)]
+		nList := sortedNodeNameList[idx%len(sortedNodeNameList)]
 		if len(nList) == 0 {
 			idx++
 			continue
 		}
 		combined = append(combined, nList[0])
-		nodeNameList[idx%len(nodeNameList)] = nList[1:]
+		sortedNodeNameList[idx%len(sortedNodeNameList)] = nList[1:]
 		idx++
 	}
 	partitionNodes := make([][]string, partitionNum)
