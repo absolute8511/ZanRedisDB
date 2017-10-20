@@ -783,6 +783,11 @@ func (pdCoord *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *cluster.P
 	nsInfo := origNSInfo.GetCopy()
 	changed := false
 	for nid, rinfo := range nsInfo.Removings {
+		if rinfo.RemoveTime == 0 {
+			// it may be zero while pd leader changed while node removing by old pd leader
+			rinfo.RemoveTime = time.Now().UnixNano()
+			continue
+		}
 		if time.Now().UnixNano()-rinfo.RemoveTime < 5*time.Minute.Nanoseconds() {
 			continue
 		}
