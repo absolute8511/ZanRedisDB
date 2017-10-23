@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -232,7 +233,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetBlockBasedTableFactory(bbto)
 
 	if cfg.RateBytesPerSec > 0 {
-		rateLimiter := gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec)
+		rateLimiter := gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec, 100*1000, 10)
 		opts.SetRateLimiter(rateLimiter)
 	}
 
@@ -499,7 +500,7 @@ func (r *RockDB) backupLoop() {
 				time.AfterFunc(time.Millisecond*10, func() {
 					close(rsp.started)
 				})
-				err = ck.Save(rsp.backupDir)
+				err = ck.Save(rsp.backupDir, math.MaxUint64)
 				r.checkpointDirLock.Unlock()
 				if err != nil {
 					dbLog.Infof("save checkpoint failed: %v", err)
