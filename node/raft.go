@@ -604,7 +604,8 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 		defer rc.wgAsync.Done()
 		data, err := sn.GetData()
 		if err != nil {
-			panic(err)
+			rc.Errorf("get snapshot data at index %d failed: %v", snapi, err)
+			return
 		}
 		rc.Infof("snapshot data : %v\n", string(data))
 		rc.Infof("create snapshot with conf : %v\n", confState)
@@ -614,10 +615,12 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 			if err == raft.ErrSnapOutOfDate {
 				return
 			}
-			panic(err)
+			rc.Errorf("create snapshot at index %d failed: %v", snapi, err)
+			return
 		}
 		if err := rc.persistStorage.SaveSnap(snap); err != nil {
-			panic(err)
+			rc.Errorf("save snapshot at index %v failed: %v", snap.Metadata, err)
+			return
 		}
 		rc.Infof("saved snapshot at index %d", snap.Metadata.Index)
 
@@ -629,7 +632,8 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 			if err == raft.ErrCompacted {
 				return
 			}
-			panic(err)
+			rc.Errorf("compact log at index %v failed: %v", compactIndex, err)
+			return
 		}
 		rc.Infof("compacted log at index %d", compactIndex)
 	}()

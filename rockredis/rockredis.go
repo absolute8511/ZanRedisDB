@@ -188,19 +188,20 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string) {
 
 type RockDB struct {
 	expiration
-	cfg              *RockConfig
-	eng              *gorocksdb.DB
-	dbOpts           *gorocksdb.Options
-	defaultWriteOpts *gorocksdb.WriteOptions
-	defaultReadOpts  *gorocksdb.ReadOptions
-	wb               *gorocksdb.WriteBatch
-	lruCache         *gorocksdb.Cache
-	quit             chan struct{}
-	wg               sync.WaitGroup
-	backupC          chan *BackupInfo
-	engOpened        int32
-	indexMgr         *IndexMgr
-	isBatching       int32
+	cfg               *RockConfig
+	eng               *gorocksdb.DB
+	dbOpts            *gorocksdb.Options
+	defaultWriteOpts  *gorocksdb.WriteOptions
+	defaultReadOpts   *gorocksdb.ReadOptions
+	wb                *gorocksdb.WriteBatch
+	lruCache          *gorocksdb.Cache
+	quit              chan struct{}
+	wg                sync.WaitGroup
+	backupC           chan *BackupInfo
+	engOpened         int32
+	indexMgr          *IndexMgr
+	isBatching        int32
+	checkpointDirLock sync.Mutex
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -488,6 +489,8 @@ func (r *RockDB) backupLoop() {
 					rsp.err = err
 					return
 				}
+
+				r.checkpointDirLock.Lock()
 				_, err = os.Stat(rsp.backupDir)
 				if !os.IsNotExist(err) {
 					dbLog.Infof("checkpoint exist: %v, remove it", rsp.backupDir)
@@ -497,6 +500,7 @@ func (r *RockDB) backupLoop() {
 					close(rsp.started)
 				})
 				err = ck.Save(rsp.backupDir)
+				r.checkpointDirLock.Unlock()
 				if err != nil {
 					dbLog.Infof("save checkpoint failed: %v", err)
 					rsp.err = err
@@ -529,9 +533,17 @@ func (r *RockDB) Backup(term uint64, index uint64) *BackupInfo {
 func (r *RockDB) IsLocalBackupOK(term uint64, index uint64) (bool, error) {
 	backupDir := r.GetBackupDir()
 	checkpointDir := GetCheckpointDir(term, index)
+	fullPath := path.Join(backupDir, checkpointDir)
+	_, err := os.Stat(fullPath)
+	if os.IsNotExist(err) {
+		dbLog.Infof("checkpoint not exist: %v", fullPath)
+		return false, err
+	}
+	r.checkpointDirLock.Lock()
+	defer r.checkpointDirLock.Unlock()
 	ro := *r.dbOpts
 	ro.SetCreateIfMissing(false)
-	db, err := gorocksdb.OpenDbForReadOnly(&ro, path.Join(backupDir, checkpointDir), false)
+	db, err := gorocksdb.OpenDbForReadOnly(&ro, fullPath, false)
 	if err != nil {
 		dbLog.Infof("checkpoint open failed: %v", err)
 		return false, err
