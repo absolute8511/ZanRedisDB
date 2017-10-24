@@ -432,7 +432,6 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 	var num int64 = 0
 	for ; it.Valid(); it.Next() {
 		rawk := it.RefKey()
-		wb.Delete(rawk)
 
 		if tableIndexes != nil {
 			_, _, field, _ := hDecodeHashKey(rawk)
@@ -447,7 +446,7 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 
 		num++
 	}
-
+	wb.DeleteRange(start, stop)
 	wb.Delete(sk)
 	return num
 }
@@ -456,7 +455,7 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	if err := checkKeySize(hkey); err != nil {
 		return 0, err
 	}
-	table, rk, err := extractTableFromRedisKey(hkey)
+	table, _, err := extractTableFromRedisKey(hkey)
 	if len(table) == 0 {
 		return 0, errTableName
 	}
@@ -472,15 +471,6 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 		return 0, err
 	}
 
-	if hlen > RANGE_DELETE_NUM {
-		var r gorocksdb.Range
-		sk := hEncodeSizeKey(hkey)
-		r.Start = hEncodeStartKey(table, rk)
-		r.Limit = hEncodeStopKey(table, rk)
-		db.eng.DeleteFilesInRange(r)
-		//db.eng.CompactRange(r)
-		db.eng.Delete(db.defaultWriteOpts, sk)
-	}
 	wb := db.wb
 	wb.Clear()
 	db.hDeleteAll(hkey, wb, tableIndexes)
@@ -502,7 +492,7 @@ func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
 	if err != nil {
 		return err
 	}
-	table, rk, err := extractTableFromRedisKey(hkey)
+	table, _, err := extractTableFromRedisKey(hkey)
 	if len(table) == 0 {
 		return errTableName
 	}
@@ -510,14 +500,6 @@ func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
 	if tableIndexes != nil {
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
-	}
-	if hlen > RANGE_DELETE_NUM {
-		var r gorocksdb.Range
-		sk := hEncodeSizeKey(hkey)
-		r.Start = hEncodeStartKey(table, rk)
-		r.Limit = hEncodeStopKey(table, rk)
-		db.eng.DeleteFilesInRange(r)
-		db.eng.Delete(db.defaultWriteOpts, sk)
 	}
 
 	db.hDeleteAll(hkey, wb, tableIndexes)

@@ -169,10 +169,10 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 		return 0
 	}
 	for ; it.Valid(); it.Next() {
-		wb.Delete(it.RefKey())
 		num++
 	}
 	it.Close()
+	wb.DeleteRange(start, stop)
 	if num > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 		db.delExpire(SetType, key, wb)

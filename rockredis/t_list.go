@@ -410,14 +410,11 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 	}
 
 	if start > 0 {
-		for i := int64(0); i < start; i++ {
-			wb.Delete(lEncodeListKey(table, rk, headSeq+i))
-		}
+		wb.DeleteRange(lEncodeListKey(table, rk, headSeq), lEncodeListKey(table, rk, headSeq+start))
 	}
 	if stop < int64(llen-1) {
-		for i := int64(stop + 1); i < llen; i++ {
-			wb.Delete(lEncodeListKey(table, rk, headSeq+i))
-		}
+		wb.DeleteRange(lEncodeListKey(table, rk, headSeq+int64(stop+1)),
+				lEncodeListKey(table, rk, headSeq+llen))
 	}
 
 	newLen, err := db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
@@ -478,10 +475,10 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 		tailSeq = trimStartSeq - 1
 	}
 
-	for trimSeq := trimStartSeq; trimSeq <= trimEndSeq; trimSeq++ {
-		itemKey := lEncodeListKey(table, rk, trimSeq)
-		wb.Delete(itemKey)
-	}
+	itemStartKey := lEncodeListKey(table, rk, trimStartSeq)
+	itemEndKey := lEncodeListKey(table, rk, trimEndSeq)
+	wb.DeleteRange(itemStartKey, itemEndKey)
+	wb.Delete(itemEndKey)
 
 	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
 	if err != nil {
@@ -522,24 +519,19 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	var num int64
 	startKey := lEncodeListKey(table, rk, headSeq)
 	stopKey := lEncodeListKey(table, rk, tailSeq)
-	if size > RANGE_DELETE_NUM {
-		var r gorocksdb.Range
-		r.Start = startKey
-		r.Limit = stopKey
-		db.eng.DeleteFilesInRange(r)
-		//db.eng.CompactRange(r)
-	}
 
 	rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
 	if err != nil {
 		return 0
 	}
 	for ; rit.Valid(); rit.Next() {
-		wb.Delete(rit.RefKey())
 		num++
 	}
 	rit.Close()
 	if size > 0 {
+		wb.DeleteRange(startKey, stopKey)
+		// delete range is [left, right), so we need delete end
+		wb.Delete(stopKey)
 		db.IncrTableKeyCount(table, -1, wb)
 	}
 
@@ -766,17 +758,11 @@ func (db *RockDB) LClear(key []byte) (int64, error) {
 	}
 	db.wb.Clear()
 	num := db.lDelete(key, db.wb)
-	err := db.eng.Write(db.defaultWriteOpts, db.wb)
-	if err != nil {
-		// TODO: log here , the list maybe corrupt
-	}
-
 	if num > 0 {
 		//delete the expire data related to the list key
-		db.wb.Clear()
 		db.delExpire(ListType, key, db.wb)
-		db.eng.Write(db.defaultWriteOpts, db.wb)
 	}
+	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	return num, err
 }
 

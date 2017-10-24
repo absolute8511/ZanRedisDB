@@ -578,43 +578,22 @@ func (self *HsetIndex) RemoveRec(value []byte, pk []byte, wb *gorocksdb.WriteBat
 }
 
 func (self *HsetIndex) cleanAll(db *RockDB, stopChan chan struct{}) error {
-	rt := common.RangeClose
 	min := encodeHsetIndexStartKey(self.Table, self.Name)
 	max := encodeHsetIndexStopKey(self.Table, self.Name)
-	var r gorocksdb.Range
-	r.Start = min
-	r.Limit = max
 
-	n := 0
 	dbLog.Infof("begin clean index: %v-%v-%v", string(self.Table), string(self.Name), string(self.IndexField))
 
-	db.eng.DeleteFilesInRange(r)
-	db.eng.CompactRange(r)
-
-	it, err := NewDBRangeIterator(db.eng, min, max, rt, false)
-	if err != nil {
-		return err
-	}
-	defer it.Close()
 	wb := gorocksdb.NewWriteBatch()
 	defer wb.Destroy()
-	for ; it.Valid(); it.Next() {
-		n++
-		if n%1000 == 0 {
-			select {
-			case <-stopChan:
-				return errDBClosed
-			default:
-			}
-		}
-		wb.Delete(it.RefKey())
-	}
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	wb.DeleteRange(min, max)
+	wb.Delete(max)
+
+	err := db.eng.Write(db.defaultWriteOpts, wb)
 	if err != nil {
 		dbLog.Infof("clean index %v, %v error: %v", string(self.Table), string(self.Name), err)
 	} else {
-		dbLog.Infof("clean index: %v-%v-%v done, scan number: %v", string(self.Table),
-			string(self.Name), string(self.IndexField), n)
+		dbLog.Infof("clean index: %v-%v-%v done, delete range: %v-%v", string(self.Table),
+			string(self.Name), string(self.IndexField), min, max)
 	}
 	return nil
 }

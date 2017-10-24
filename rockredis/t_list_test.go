@@ -110,6 +110,7 @@ func TestListTrim(t *testing.T) {
 		t.Fatal("wrong len:", l)
 	}
 
+	t.Logf("reinit list")
 	init()
 	err = db.LTrim(key, -3, -3)
 	if err != nil {
