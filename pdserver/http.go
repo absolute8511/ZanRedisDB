@@ -368,10 +368,15 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 		tagList = strings.Split(tagStr, ",")
 	}
 
+	var meta cluster.NamespaceMetaInfo
+	optimizedFsync := reqParams.Get("optimizedfsync")
+	if optimizedFsync == "" || optimizedFsync == "true"{
+		meta.OptimizedFsync = true
+	}
+
 	if !s.pdCoord.IsMineLeader() {
 		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
 	}
-	var meta cluster.NamespaceMetaInfo
 	meta.PartitionNum = pnum
 	meta.Replica = replicator
 	meta.EngType = engType
