@@ -310,6 +310,14 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 		return nil, err
 	}
 
+	sk := sEncodeSizeKey(key)
+	num, err := Int64(db.eng.GetBytes(db.defaultReadOpts, sk))
+	if err != nil {
+		return nil, err
+	}
+	if num > MAX_BATCH_NUM {
+		return nil, errTooMuchBatchSize
+	}
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
 		return nil, err
