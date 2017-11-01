@@ -19,7 +19,7 @@ $(BLDDIR)/restore:  $(wildcard apps/restore/*.go)
 
 $(BLDDIR)/%:
 	@mkdir -p $(dir $@)
-	go build -tags=embed ${GOFLAGS} -o $@ ./apps/$*
+	go build -i ${GOFLAGS} -o $@ ./apps/$*
 
 $(APPS): %: $(BLDDIR)/%
 

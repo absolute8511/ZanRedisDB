@@ -5,12 +5,25 @@
 
 ## Build
 
+Install the compress library
+<pre>
+yum install snappy-devel (for CentOS)
+apt-get install libsnappy1 libsnappy-dev (for Debian/Ubuntu)
+brew install snappy (for Mac)
+</pre>
+
+Build the rocksdb 
+<pre>
+git clone https://github.com/absolute8511/rocksdb.git
+cd rocksdb
+USE_SSE=1 make static_lib
+</pre>
+
 Install the dependency:
 <pre>
-go get github.com/absolute8511/c-rocksdb
-go get github.com/absolute8511/gorocksdb
-go get github.com/cockroachdb/c-lz4
-go get github.com/cockroachdb/c-snappy
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/absolute8511/gorocksdb
+
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy" go get github.com/absolute8511/gorocksdb (for MacOS)
 </pre>
 
 use the `gpm` to install other dependencies
@@ -19,12 +32,6 @@ wget https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm &
 gpm get
 </pre>
 
-Install the Snappy library
-<pre>
-yum install snappy-devel (for CentOS)
-apt-get install libsnappy-dev (for Debian/Ubuntu)
-brew install snappy (for Mac)
-</pre>
 
 Build zankv and placedriver from the source (only support go version 1.7.4+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>

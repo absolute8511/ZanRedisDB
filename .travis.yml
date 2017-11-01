@@ -18,12 +18,12 @@ addons:
 install:
   - export CXX="g++-4.9" CC="gcc-4.9"
   - sudo apt-get install libsnappy1 libsnappy-dev
+  - git clone https://github.com/absolute8511/rocksdb.git /tmp/rocksdb
+  - pushd /tmp/rocksdb && USE_SSE=1 make static_lib && popd
 script:
+  - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/absolute8511/gorocksdb 
   - curl -s https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm > gpm
   - chmod +x gpm
-  - go get github.com/absolute8511/c-rocksdb
-  - go get github.com/absolute8511/gorocksdb || true
-  - go get github.com/cockroachdb/c-lz4
   - ./gpm install || true
   - ./test.sh
 notifications:
