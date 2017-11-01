@@ -22,6 +22,7 @@ install:
   - pushd /tmp/rocksdb && USE_SSE=1 make static_lib && popd
 script:
   - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/absolute8511/gorocksdb 
+  - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go install -race github.com/absolute8511/gorocksdb 
   - curl -s https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm > gpm
   - chmod +x gpm
   - ./gpm install || true
