@@ -36,9 +36,8 @@ const (
 	SetType    byte = 29
 	SSizeType  byte = 30
 
-	JSONType    byte = 31
-	HLLType     byte = 32 // hyperloglog
-	GeoHashType byte = 33
+	JSONType byte = 31
+	HLLType  byte = 32 // hyperloglog
 
 	ColumnType byte = 38 // used for column store for OLAP
 
@@ -74,6 +73,8 @@ var (
 		ZScoreType: "zscore",
 		SetType:    "set",
 		SSizeType:  "ssize",
+		JSONType:   "json",
+		HLLType:    "hll",
 	}
 )
 

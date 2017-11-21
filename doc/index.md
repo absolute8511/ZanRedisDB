@@ -22,9 +22,9 @@
   - [x] List
   - [x] Set
   - [x] Sorted Set
-  - [ ] Geo
+  - [x] GeoHash
   - [x] Expires
-  - [ ] HyperLogLog
+  - [x] HyperLogLog
   - [x] JSON
 * Distributed system
   - [x] Raft based replication
