@@ -207,7 +207,13 @@ func (s *Server) Start() {
 		defer s.wg.Done()
 		s.serveRaft()
 	}()
-
+	s.wg.Add(1)
+	// redis api enable first, because there are many partitions, some partitions may recover first
+	// and become leader. In this way we need redis api enabled to allow r/w these partitions.
+	go func() {
+		defer s.wg.Done()
+		s.serveRedisAPI(s.conf.RedisAPIPort, s.stopC)
+	}()
 	if s.dataCoord != nil {
 		err := s.dataCoord.Start()
 		if err != nil {
@@ -217,13 +223,7 @@ func (s *Server) Start() {
 		s.nsMgr.Start()
 	}
 
-	// api server should disable the api request while starting until replay log finished and
-	// also while we recovery we need to disable api.
-	s.wg.Add(2)
-	go func() {
-		defer s.wg.Done()
-		s.serveRedisAPI(s.conf.RedisAPIPort, s.stopC)
-	}()
+	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.serveHttpAPI(s.conf.HttpAPIPort, s.stopC)

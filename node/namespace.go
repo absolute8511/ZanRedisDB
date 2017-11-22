@@ -29,7 +29,7 @@ var (
 	ErrNamespacePartitionNotFound = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not found")
 	ErrNamespaceNotLeader         = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not leader on the node")
 	ErrNamespaceNoLeader          = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace has no leader")
-	ErrRaftGroupNotReady          = errors.New("raft group not ready")
+	ErrRaftGroupNotReady          = errors.New("ERR_CLUSTER_CHANGED: raft group not ready")
 	errNamespaceConfInvalid       = errors.New("namespace config is invalid")
 )
 
@@ -294,6 +294,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		SnapCatchup:    conf.SnapCatchup,
 		Replicator:     conf.Replicator,
 		OptimizedFsync: conf.OptimizedFsync,
+		KeepWAL: nsm.machineConf.KeepWAL,
 	}
 	kv, err := NewKVNode(kvOpts, nsm.machineConf, raftConf, nsm.raftTransport,
 		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),
