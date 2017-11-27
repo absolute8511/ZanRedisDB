@@ -8,33 +8,33 @@ import (
 	"github.com/spaolacci/murmur3"
 
 	hll2 "github.com/absolute8511/hyperloglog"
-	hll "github.com/axiomhq/hyperloglog"
+	//hll "github.com/axiomhq/hyperloglog"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestHLLPerf(t *testing.T) {
-	hllp := hll.New14()
-	hasher64 := murmur3.New64()
-	for i := 0; i < 100000; i++ {
-		hasher64.Write([]byte(strconv.Itoa(i)))
-		hllp.InsertHash(hasher64.Sum64())
-		hasher64.Reset()
-	}
-	b, err := hllp.MarshalBinary()
-	t.Log(len(b))
-	//t.Log(hllp.Estimate())
-	//assert.True(t, false, "")
-	assert.Nil(t, err)
-	for i := 0; i < 100000; i++ {
-		hllp := hll.New14()
-		err = hllp.UnmarshalBinary(b)
-		hasher64.Write([]byte(strconv.Itoa(i)))
-		hllp.InsertHash(hasher64.Sum64())
-		hasher64.Reset()
-		//hllp.Estimate()
-		hllp.MarshalBinary()
-	}
-}
+// func TestHLLPerf(t *testing.T) {
+// 	hllp := hll.New14()
+// 	hasher64 := murmur3.New64()
+// 	for i := 0; i < 100000; i++ {
+// 		hasher64.Write([]byte(strconv.Itoa(i)))
+// 		hllp.InsertHash(hasher64.Sum64())
+// 		hasher64.Reset()
+// 	}
+// 	b, err := hllp.MarshalBinary()
+// 	t.Log(len(b))
+// 	//t.Log(hllp.Estimate())
+// 	//assert.True(t, false, "")
+// 	assert.Nil(t, err)
+// 	for i := 0; i < 100000; i++ {
+// 		hllp := hll.New14()
+// 		err = hllp.UnmarshalBinary(b)
+// 		hasher64.Write([]byte(strconv.Itoa(i)))
+// 		hllp.InsertHash(hasher64.Sum64())
+// 		hasher64.Reset()
+// 		//hllp.Estimate()
+// 		hllp.MarshalBinary()
+// 	}
+// }
 
 func TestHLLPlusPerf(t *testing.T) {
 	hllp, _ := hll2.NewPlus(14)
