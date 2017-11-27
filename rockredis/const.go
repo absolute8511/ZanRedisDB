@@ -37,7 +37,6 @@ const (
 	SSizeType  byte = 30
 
 	JSONType byte = 31
-	HLLType  byte = 32 // hyperloglog
 
 	ColumnType byte = 38 // used for column store for OLAP
 
@@ -74,7 +73,6 @@ var (
 		SetType:    "set",
 		SSizeType:  "ssize",
 		JSONType:   "json",
-		HLLType:    "hll",
 	}
 )
 

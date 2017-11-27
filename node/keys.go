@@ -77,6 +77,24 @@ func (nd *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface{}
 	}
 }
 
+func (nd *KVNode) pfaddCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
+// current we restrict the pfcount to single key to avoid merge,
+// since merge keys may across multi partitions on different nodes
+func (nd *KVNode) pfcountCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
@@ -108,4 +126,14 @@ func (nd *KVNode) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, e
 func (nd *KVNode) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	nd.store.DelKeys(cmd.Args[1:]...)
 	return int64(len(cmd.Args[1:])), nil
+}
+
+func (nd *KVNode) localPFCountCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := nd.store.PFCount(ts, cmd.Args[1:]...)
+	return v, err
+}
+
+func (nd *KVNode) localPFAddCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := nd.store.PFAdd(ts, cmd.Args[1], cmd.Args[2:]...)
+	return v, err
 }

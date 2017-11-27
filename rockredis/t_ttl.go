@@ -247,7 +247,7 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 	c.setNextCheckTime(nc, true)
 
 	checkCost := time.Since(checkStart).Nanoseconds() / 1000
-	if dbLog.Level() >= common.LOG_DEBUG || eCount > 100 || checkCost >= time.Second.Nanoseconds()/1000 {
+	if dbLog.Level() >= common.LOG_DEBUG || eCount > 10000 || checkCost >= time.Second.Nanoseconds() {
 		dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us", eCount, scanned, checkCost)
 	}
 

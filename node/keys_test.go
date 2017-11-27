@@ -149,6 +149,7 @@ func TestKVNode_kvCommand(t *testing.T) {
 	testKeyValue := []byte("1")
 	testKey2 := []byte("default:test:2")
 	testKey2Value := []byte("2")
+	testPFKey := []byte("default:test:pf1")
 	tests := []struct {
 		name string
 		args redcon.Command
@@ -165,6 +166,8 @@ func TestKVNode_kvCommand(t *testing.T) {
 		{"get", buildCommand([][]byte{[]byte("get"), testKey})},
 		{"mget", buildCommand([][]byte{[]byte("mget"), testKey, testKey2})},
 		{"exists", buildCommand([][]byte{[]byte("exists"), testKey})},
+		{"pfadd", buildCommand([][]byte{[]byte("pfadd"), testPFKey, testKeyValue})},
+		{"pfcount", buildCommand([][]byte{[]byte("pfcount"), testPFKey})},
 	}
 	defer os.RemoveAll(dataDir)
 	defer nd.Stop()

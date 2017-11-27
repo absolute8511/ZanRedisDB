@@ -452,6 +452,54 @@ func TestKVErrorParams(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
+func TestPFOp(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key1 := "default:test:pf_a"
+	cnt, err := goredis.Int64(c.Do("pfcount", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), cnt)
+
+	// first init with no element
+	cnt, err = goredis.Int64(c.Do("pfadd", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), cnt)
+
+	cnt, err = goredis.Int64(c.Do("pfadd", key1, 1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), cnt)
+	cnt, err = goredis.Int64(c.Do("pfadd", key1, 1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), cnt)
+
+	// test pfadd with no element on exist key
+	cnt, err = goredis.Int64(c.Do("pfadd", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), cnt)
+
+	cnt, err = goredis.Int64(c.Do("pfadd", key1, 1, 2, 3))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), cnt)
+
+	cnt, err = goredis.Int64(c.Do("pfcount", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), cnt)
+}
+
+func TestPFOpErrorParams(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key1 := "default:test:pf_erra"
+	key2 := "default:test:pf_errb"
+	_, err := c.Do("pfadd")
+	assert.NotNil(t, err)
+
+	_, err = c.Do("pfcount", key1, key2)
+	assert.NotNil(t, err)
+}
+
 func TestHash(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
