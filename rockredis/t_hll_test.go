@@ -111,19 +111,15 @@ func TestDBHLLOp(t *testing.T) {
 	assert.Nil(t, err)
 	t.Log(v3)
 	assert.True(t, v3 <= v11+v22, "merged count should not great than add")
-	totalCnt := 100000
+	totalCnt := MAX_BATCH_NUM * 10
 	elems := make([][]byte, totalCnt)
-	elems2 := make([][]byte, totalCnt)
 	for i := 0; i < totalCnt; i++ {
 		elems[i] = []byte(strconv.Itoa(i))
-		elems2[i] = []byte(strconv.Itoa(i + totalCnt))
 	}
 	ret, err = db.PFAdd(0, key1, elems...)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), ret)
-	ret, err = db.PFAdd(0, key2, elems2...)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(1), ret)
+	totalCnt = totalCnt * 2
 	for i := 0; i < totalCnt; i++ {
 		db.PFAdd(0, key1, []byte(strconv.Itoa(i)))
 		db.PFAdd(0, key2, []byte(strconv.Itoa(i+totalCnt)))
