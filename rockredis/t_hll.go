@@ -63,30 +63,29 @@ func (db *RockDB) PFCount(ts int64, keys ...[]byte) (int64, error) {
 		cnt := binary.BigEndian.Uint64(fkv[pos : pos+8])
 		if cnt&0x8000000000000000 == 0 {
 			return int64(cnt), nil
-		} else {
-			switch hllType {
-			case hllPlusDefault:
-				// recompute
-				hllp, _ := hll.NewPlus(hllPrecision)
-				err := hllp.GobDecode(fkv[pos+8:])
-				if err != nil {
-					return 0, err
-				}
-				cnt = hllp.Count()
-				if cnt&0x8000000000000000 != 0 {
-					return 0, errHLLCountOverflow
-				}
-				binary.BigEndian.PutUint64(fkv[pos:pos+8], cnt)
-				tsBuf := PutInt64(ts)
-				fkv = append(fkv, tsBuf...)
-				db.wb.Clear()
-				db.wb.Put(firstKey, fkv)
-				err = db.eng.Write(db.defaultWriteOpts, db.wb)
-				return int64(cnt), err
-			default:
-				// unknown hll type
-				return 0, errInvalidHLLData
+		}
+		switch hllType {
+		case hllPlusDefault:
+			// recompute
+			hllp, _ := hll.NewPlus(hllPrecision)
+			err := hllp.GobDecode(fkv[pos+8:])
+			if err != nil {
+				return 0, err
 			}
+			cnt = hllp.Count()
+			if cnt&0x8000000000000000 != 0 {
+				return 0, errHLLCountOverflow
+			}
+			binary.BigEndian.PutUint64(fkv[pos:pos+8], cnt)
+			tsBuf := PutInt64(ts)
+			fkv = append(fkv, tsBuf...)
+			db.wb.Clear()
+			db.wb.Put(firstKey, fkv)
+			err = db.eng.Write(db.defaultWriteOpts, db.wb)
+			return int64(cnt), err
+		default:
+			// unknown hll type
+			return 0, errInvalidHLLData
 		}
 	} else {
 		hllp, _ := hll.NewPlus(hllPrecision)
@@ -112,7 +111,6 @@ func (db *RockDB) PFCount(ts int64, keys ...[]byte) (int64, error) {
 		}
 		return int64(hllp.Count()), nil
 	}
-	return 0, nil
 }
 
 func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error) {
