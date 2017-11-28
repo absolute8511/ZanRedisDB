@@ -45,6 +45,7 @@ type MachineConfig struct {
 	DataRootDir   string                `json:"data_root_dir"`
 	ElectionTick  int                   `json:"election_tick"`
 	TickMs        int                   `json:"tick_ms"`
+	KeepWAL       int                   `json:"keep_wal"`
 	RocksDBOpts   rockredis.RockOptions `json:"rocksdb_opts"`
 }
 
@@ -64,6 +65,7 @@ type RaftConfig struct {
 	RaftAddr       string                 `json:"raft_addr"`
 	DataDir        string                 `json:"data_dir"`
 	WALDir         string                 `json:"wal_dir"`
+	KeepWAL        int                    `json:"keep_wal"`
 	SnapDir        string                 `json:"snap_dir"`
 	RaftPeers      map[uint64]ReplicaInfo `json:"raft_peers"`
 	SnapCount      int                    `json:"snap_count"`

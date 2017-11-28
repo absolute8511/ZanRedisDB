@@ -359,7 +359,9 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 }
 
 func TestClusterBalanceAcrossMultiDC(t *testing.T) {
+	// TODO:
 }
 
 func TestClusterRemoveNode(t *testing.T) {
+	// TODO:
 }

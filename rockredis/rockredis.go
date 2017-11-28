@@ -3,6 +3,7 @@ package rockredis
 import (
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"math"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/spaolacci/murmur3"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
@@ -203,6 +206,7 @@ type RockDB struct {
 	indexMgr          *IndexMgr
 	isBatching        int32
 	checkpointDirLock sync.Mutex
+	hasher64          hash.Hash64
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -269,6 +273,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		wb:               gorocksdb.NewWriteBatch(),
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
+		hasher64:         murmur3.New64(),
 	}
 	eng, err := gorocksdb.OpenDb(opts, db.GetDataDir())
 	if err != nil {
