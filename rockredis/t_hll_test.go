@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/spaolacci/murmur3"
 
@@ -103,6 +104,7 @@ func TestDBHLLOp(t *testing.T) {
 	assert.NotEqual(t, v1, v11)
 	assert.NotEqual(t, v2, v22)
 
+	db.hllCache.Flush()
 	num, err := db.GetTableKeyCount([]byte("test"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(2), num)
@@ -111,6 +113,51 @@ func TestDBHLLOp(t *testing.T) {
 	assert.Nil(t, err)
 	t.Log(v3)
 	assert.True(t, v3 <= v11+v22, "merged count should not great than add")
+	db.Close()
+	db = getTestDBWithDir(t, db.cfg.DataDir)
+	v1Reopen, err := db.PFCount(0, key1)
+	assert.Nil(t, err)
+	rawV, _ := db.KVGet(key1)
+	t.Logf("pf key : %v\n", rawV)
+	v2Reopen, err := db.PFCount(0, key2)
+	assert.Nil(t, err)
+	t.Log(v1Reopen)
+	t.Log(v2Reopen)
+	assert.Equal(t, v11, v1Reopen)
+	assert.Equal(t, v22, v2Reopen)
+	v3Reopen, err := db.PFCount(0, key1, key2)
+	assert.Nil(t, err)
+	t.Log(v3Reopen)
+	assert.Equal(t, v3, v3Reopen)
+	stopC := make(chan bool, 0)
+	go func() {
+		var lastC1 int64
+		var lastC2 int64
+		var cnt int64
+		for {
+			c1, err := db.PFCount(0, key1)
+			assert.Nil(t, err)
+			c2, err := db.PFCount(0, key2)
+			assert.Nil(t, err)
+			if c1 < lastC1 {
+				t.Logf("pfcount not increased: %v, %v", c1, lastC1)
+				cnt++
+			}
+			if c2 < lastC2 {
+				t.Logf("pfcount not increased: %v, %v", c2, lastC2)
+				cnt++
+			}
+			lastC1 = c1
+			lastC2 = c2
+			select {
+			case <-stopC:
+				return
+			default:
+				time.Sleep(time.Microsecond)
+			}
+		}
+		assert.True(t, cnt < 10, "not increased count: %v", cnt)
+	}()
 	totalCnt := MAX_BATCH_NUM * 10
 	elems := make([][]byte, totalCnt)
 	for i := 0; i < totalCnt; i++ {
@@ -129,7 +176,7 @@ func TestDBHLLOp(t *testing.T) {
 	assert.Equal(t, int64(0), ret)
 	oldkey1, _ := db.KVGet(key1)
 	t.Logf("pf key len: %v\n", len(oldkey1))
-	oldkey2, _ := db.KVGet(key2)
+	//oldkey2, _ := db.KVGet(key2)
 	// lazy compute should modify value
 	v1, _ = db.PFCount(0, key1)
 	v2, _ = db.PFCount(0, key2)
@@ -137,9 +184,9 @@ func TestDBHLLOp(t *testing.T) {
 	t.Log(v2)
 	newkey1, _ := db.KVGet(key1)
 	t.Log(newkey1)
-	newkey2, _ := db.KVGet(key2)
-	assert.NotEqual(t, oldkey1, newkey1)
-	assert.NotEqual(t, oldkey2, newkey2)
+	//newkey2, _ := db.KVGet(key2)
+	//assert.NotEqual(t, oldkey1, newkey1)
+	//assert.NotEqual(t, oldkey2, newkey2)
 	assert.NotEqual(t, v1, v11)
 	assert.NotEqual(t, v2, v22)
 	assert.True(t, int64(totalCnt-totalCnt/100) < v1, "error should be less than 1%")
@@ -152,5 +199,30 @@ func TestDBHLLOp(t *testing.T) {
 	assert.NotEqual(t, v3, v33)
 	assert.True(t, v33 <= v1+v2+int64(totalCnt/100), "merged count should not diff too much")
 	assert.True(t, v33 >= v1+v2-int64(totalCnt/100), "merged count should not diff too much")
+	db.hllCache.Flush()
+	close(stopC)
+	// refill cache with key1, key2 to remove read cache
+	db.PFAdd(0, key1, []byte(strconv.Itoa(0)))
+	db.PFAdd(0, key2, []byte(strconv.Itoa(0+totalCnt)))
+	// test cache evict to remove write cache
+	for i := 0; i < HLLCacheSize*2; i++ {
+		db.PFAdd(0, []byte(strconv.Itoa(i)), []byte(strconv.Itoa(i)))
+	}
+	// refill cache with key1, key2
+	for i := 0; i < totalCnt; i++ {
+		db.PFAdd(0, key1, []byte(strconv.Itoa(i)))
+		db.PFAdd(0, key2, []byte(strconv.Itoa(i+totalCnt)))
+	}
+	// cache evict, remove read cache
+	for i := 0; i < HLLCacheSize*2; i++ {
+		db.PFAdd(0, []byte(strconv.Itoa(i)), []byte(strconv.Itoa(i)))
+	}
+	v3, err = db.PFCount(0, key1, key2)
+	assert.Nil(t, err)
+	assert.Equal(t, v3, v33)
+	v11, _ = db.PFCount(0, key1)
+	v22, _ = db.PFCount(0, key2)
+	assert.Equal(t, v1, v11)
+	assert.Equal(t, v2, v22)
 	//assert.True(t, false, "failed")
 }

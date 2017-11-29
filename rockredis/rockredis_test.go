@@ -24,6 +24,18 @@ func getTestDBNoTableCounter(t *testing.T) *RockDB {
 	return testDB
 }
 
+func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
+	cfg := NewRockConfig()
+	cfg.EnableTableCounter = true
+	cfg.DataDir = dataDir
+	testDB, err := OpenRockDB(cfg)
+	assert.Nil(t, err)
+	if testing.Verbose() {
+		SetLogLevel(int32(4))
+	}
+	return testDB
+}
+
 func getTestDB(t *testing.T) *RockDB {
 	cfg := NewRockConfig()
 	cfg.EnableTableCounter = true
