@@ -353,7 +353,7 @@ func (r *RockDB) GetDataDir() string {
 
 func (r *RockDB) reOpenEng() error {
 	var err error
-	hcache, err := newHLLCache(512, r)
+	hcache, err := newHLLCache(HLLCacheSize, r)
 	if err != nil {
 		return err
 	}
