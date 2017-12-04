@@ -1,6 +1,8 @@
 package node
 
 import (
+	"time"
+
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
 )
@@ -45,6 +47,17 @@ func (nd *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+// current we restrict the pfcount to single key to avoid merge,
+// since merge keys may across multi partitions on different nodes
+func (nd *KVNode) pfcountCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, err := nd.store.PFCount(time.Now().UnixNano(), cmd.Args[1:]...)
+	if err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(val)
+	}
+}
+
 func (nd *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	conn.WriteString("OK")
 }
@@ -78,16 +91,6 @@ func (nd *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface{}
 }
 
 func (nd *KVNode) pfaddCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-// current we restrict the pfcount to single key to avoid merge,
-// since merge keys may across multi partitions on different nodes
-func (nd *KVNode) pfcountCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
 	} else {

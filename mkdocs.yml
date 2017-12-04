@@ -28,7 +28,8 @@ google_analytics:
 pages:
   - 'Introduction': 'index.md'
   - 'Getting Started' : 'getting_started.md'
-  - 'Design' : 'design.md'
+  - 'Design' :
+      - 'Overview' : 'design.md'
       - 'full scan' : 'design/fullscan.md'
       - 'source analyse' : 'design/source_analyse.md'
   - 'Examples' : 'examples.md'

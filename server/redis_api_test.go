@@ -498,6 +498,9 @@ func TestPFOpErrorParams(t *testing.T) {
 
 	_, err = c.Do("pfcount", key1, key2)
 	assert.NotNil(t, err)
+
+	_, err = c.Do("pfcount")
+	assert.NotNil(t, err)
 }
 
 func TestHash(t *testing.T) {

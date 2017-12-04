@@ -703,6 +703,9 @@ func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset i
 		v = append(v, common.ScorePair{Member: m, Score: s})
 	}
 	it.Close()
+	if len(v) > MAX_BATCH_NUM*10 {
+		dbLog.Infof("key %v huge range in result: %v", string(key), len(v))
+	}
 
 	if reverse && (offset == 0 && count < 0) {
 		for i, j := 0, len(v)-1; i < j; i, j = i+1, j-1 {
@@ -963,6 +966,9 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 		if count >= 0 && len(ay) >= count {
 			break
 		}
+	}
+	if len(ay) > MAX_BATCH_NUM*10 {
+		dbLog.Infof("key %v huge range in result: %v", string(key), len(ay))
 	}
 	return ay, nil
 }
