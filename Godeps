@@ -22,3 +22,4 @@ github.com/stretchr/testify/assert
 github.com/tidwall/gjson
 github.com/tidwall/sjson
 github.com/absolute8511/hyperloglog
+github.com/hashicorp/golang-lru

@@ -25,6 +25,7 @@ import (
 
 const (
 	MAX_CHECKPOINT_NUM = 10
+	HLLCacheSize       = 512
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
@@ -207,6 +208,7 @@ type RockDB struct {
 	isBatching        int32
 	checkpointDirLock sync.Mutex
 	hasher64          hash.Hash64
+	hllCache          *hllCache
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -275,6 +277,13 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		quit:             make(chan struct{}),
 		hasher64:         murmur3.New64(),
 	}
+
+	hcache, err := newHLLCache(HLLCacheSize, db)
+	if err != nil {
+		return nil, err
+	}
+	db.hllCache = hcache
+
 	eng, err := gorocksdb.OpenDb(opts, db.GetDataDir())
 	if err != nil {
 		return nil, err
@@ -284,6 +293,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	err = db.indexMgr.LoadIndexes(db)
 	if err != nil {
 		dbLog.Infof("rocksdb %v load index failed: %v", db.GetDataDir(), err)
+		eng.Close()
 		return nil, err
 	}
 	atomic.StoreInt32(&db.engOpened, 1)
@@ -343,6 +353,12 @@ func (r *RockDB) GetDataDir() string {
 
 func (r *RockDB) reOpenEng() error {
 	var err error
+	hcache, err := newHLLCache(HLLCacheSize, r)
+	if err != nil {
+		return err
+	}
+	r.hllCache = hcache
+
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	r.indexMgr = NewIndexMgr()
 	if err == nil {
@@ -393,6 +409,7 @@ func (r *RockDB) Close() {
 	close(r.quit)
 	r.expiration.Stop()
 	r.wg.Wait()
+	r.hllCache.Flush()
 	r.closeEng()
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
@@ -528,6 +545,7 @@ func (r *RockDB) Backup(term uint64, index uint64) *BackupInfo {
 	fname := GetCheckpointDir(term, index)
 	checkpointDir := path.Join(r.GetBackupDir(), fname)
 	bi := newBackupInfo(checkpointDir)
+	r.hllCache.Flush()
 	select {
 	case r.backupC <- bi:
 	default:
