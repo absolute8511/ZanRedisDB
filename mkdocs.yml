@@ -16,7 +16,7 @@
 site_name: ZanRedisDB Documentation
 docs_dir: doc
 edit_uri: edit/master/doc/
-theme_dir: 'mkdocs-material/material'
+#theme_dir: 'mkdocs-material/material'
 #theme:
 #  name: null
 #  custom_dir: 'mkdocs-material/material'
