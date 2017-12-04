@@ -206,6 +206,23 @@ func (nd *KVNode) GetRaftStatus() raft.Status {
 	return nd.rn.node.Status()
 }
 
+func (nd *KVNode) IsReplicaRaftReady(raftID uint64) bool {
+	s := nd.rn.node.Status()
+	pg, ok := s.Progress[raftID]
+	if !ok {
+		return false
+	}
+	if pg.State.String() == "ProgressStateReplicate" {
+		if s.Commit <= maxInflightMsgs {
+			return true
+		}
+		if pg.Match >= s.Commit-maxInflightMsgs {
+			return true
+		}
+	}
+	return false
+}
+
 func (nd *KVNode) GetLeadMember() *common.MemberInfo {
 	return nd.rn.GetLeadMember()
 }

@@ -22,6 +22,7 @@ var (
 	ErrNamespaceNotReady = cluster.NewCoordErr("namespace node is not ready", cluster.CoordLocalErr)
 	ErrNamespaceInvalid  = errors.New("namespace name is invalid")
 	ErrNamespaceNotFound = errors.New("namespace is not found")
+	TransferLeaderWait   = time.Second * 10
 )
 
 const (
@@ -423,22 +424,47 @@ func (dc *DataCoordinator) getNamespaceRaftLeader(nsInfo *cluster.PartitionMetaI
 	return m.NodeID
 }
 
-func (dc *DataCoordinator) transferMyNamespaceLeader(nsInfo *cluster.PartitionMetaInfo, nid string) {
+func (dc *DataCoordinator) transferMyNamespaceLeader(nsInfo *cluster.PartitionMetaInfo, nid string, force bool) bool {
 	nsNode := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
-		return
+		return false
 	}
 	toRaftID, ok := nsInfo.RaftIDs[nid]
 	if !ok {
 		cluster.CoordLog().Warningf("transfer namespace %v leader to %v failed for missing raft id: %v",
 			nsInfo.GetDesp(), nid, nsInfo.RaftIDs)
-		return
+		return false
+	}
+
+	if !force {
+		if time.Now().UnixNano()-nsNode.GetLastLeaderChangedTime() < time.Minute.Nanoseconds() {
+			return false
+		}
+		if !dc.isReplicaReadyForRaft(nsNode, toRaftID) {
+			return false
+		}
 	}
 	cluster.CoordLog().Infof("begin transfer namespace %v leader to %v", nsInfo.GetDesp(), nid)
 	err := nsNode.TransferMyLeader(cluster.ExtractRegIDFromGenID(nid), toRaftID)
 	if err != nil {
 		cluster.CoordLog().Infof("failed to transfer namespace %v leader to %v: %v", nsInfo.GetDesp(), nid, err)
+		return false
 	}
+	return true
+}
+
+// check on leader if the replica ready for raft, which means this replica is most updated
+// and have the nearly the newest raft logs.
+func (dc *DataCoordinator) isReplicaReadyForRaft(nsNode *node.NamespaceNode, toRaftID uint64) bool {
+	if nsNode.IsReady() && nsNode.Node.IsReplicaRaftReady(toRaftID) {
+		return true
+	}
+	if nsNode.IsReady() {
+		stats := nsNode.Node.GetRaftStatus()
+		cluster.CoordLog().Infof("namespace %v raft status still not ready for node:%v, %v",
+			nsNode.FullName(), toRaftID, stats)
+	}
+	return false
 }
 
 func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
@@ -449,6 +475,8 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 		m  common.MemberInfo
 	}
 	pendingRemovings := make(map[string]map[uint64]pendingRemoveInfo)
+	// avoid transfer too much partitions in the same time
+	lastTransferredTime := time.Now()
 	doWork := func() {
 		if atomic.LoadInt32(&dc.stopping) == 1 {
 			return
@@ -537,8 +565,14 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 			if cluster.FindSlice(isrList, dc.GetMyID()) == -1 {
 				cluster.CoordLog().Infof("namespace %v leader is not in isr: %v, maybe removing",
 					namespaceMeta.GetDesp(), isrList)
-				if time.Now().UnixNano()-localNamespace.GetLastLeaderChangedTime() > time.Minute.Nanoseconds() {
-					dc.transferMyNamespaceLeader(namespaceMeta, isrList[0])
+				done := false
+				if time.Since(lastTransferredTime) >= TransferLeaderWait {
+					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], false)
+				}
+				if !done {
+					go dc.tryCheckNamespacesIn(TransferLeaderWait)
+				} else {
+					lastTransferredTime = time.Now()
 				}
 				continue
 			}
@@ -549,8 +583,15 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 				// all the cluster nodes.
 				// avoid transfer while some node is leaving, so wait enough time to
 				// allow node leaving
-				if time.Now().UnixNano()-localNamespace.GetLastLeaderChangedTime() > time.Minute.Nanoseconds() {
-					dc.transferMyNamespaceLeader(namespaceMeta, isrList[0])
+				// also we should avoid transfer leader while some node is catchuping while recover from restart
+				done := false
+				if time.Since(lastTransferredTime) >= TransferLeaderWait {
+					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], false)
+				}
+				if !done {
+					go dc.tryCheckNamespacesIn(TransferLeaderWait)
+				} else {
+					lastTransferredTime = time.Now()
 				}
 			} else {
 				// check if any replica is not joined to members
@@ -778,6 +819,11 @@ func (dc *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *clus
 		return err
 	}
 	return nil
+}
+
+func (dc *DataCoordinator) tryCheckNamespacesIn(wait time.Duration) {
+	time.Sleep(wait)
+	dc.tryCheckNamespaces()
 }
 
 func (dc *DataCoordinator) tryCheckNamespaces() {
@@ -1085,7 +1131,7 @@ func (dc *DataCoordinator) prepareLeavingCluster() {
 				if newLeader == dc.GetMyID() {
 					continue
 				}
-				dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader)
+				dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, true)
 				break
 			}
 		}

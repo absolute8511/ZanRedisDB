@@ -50,6 +50,8 @@ const (
 	// max number of in-flight snapshot messages allows to have
 	maxInFlightMsgSnap        = 16
 	releaseDelayAfterSnapshot = 30 * time.Second
+	maxSizePerMsg             = 1024 * 1024
+	maxInflightMsgs           = 256
 )
 
 type Snapshot interface {
@@ -312,8 +314,8 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 		ElectionTick:    elecTick,
 		HeartbeatTick:   elecTick / 10,
 		Storage:         rc.raftStorage,
-		MaxSizePerMsg:   1024 * 1024,
-		MaxInflightMsgs: 256,
+		MaxSizePerMsg:   maxSizePerMsg,
+		MaxInflightMsgs: maxInflightMsgs,
 		CheckQuorum:     true,
 		PreVote:         true,
 		Logger:          nodeLog,
