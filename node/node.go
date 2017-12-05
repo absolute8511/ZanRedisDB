@@ -213,11 +213,11 @@ func (nd *KVNode) IsReplicaRaftReady(raftID uint64) bool {
 		return false
 	}
 	if pg.State.String() == "ProgressStateReplicate" {
-		if pg.Match + maxInflightMsgs >= s.Commit {
+		if pg.Match+maxInflightMsgs >= s.Commit {
 			return true
 		}
 	} else if pg.State.String() == "ProgressStateProbe" {
-		if pg.Match + 1 >= s.Commit {
+		if pg.Match+1 >= s.Commit {
 			return true
 		}
 	}
@@ -355,7 +355,7 @@ func (nd *KVNode) handleProposeReq() {
 			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
-			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout*2)
+			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout+time.Second)
 			nd.rn.node.Propose(ctx, buffer)
 			//lastReqList = append(lastReqList, lastReq)
 			select {
@@ -402,7 +402,7 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		case <-nd.stopChan:
 			nd.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
 		case <-time.After(proposeTimeout / 2):
-			nd.w.Trigger(req.reqData.Header.ID, common.ErrTimeout)
+			nd.w.Trigger(req.reqData.Header.ID, common.ErrQueueTimeout)
 		}
 	}
 	//nd.rn.Infof("queue request: %v", req.reqData.String())
