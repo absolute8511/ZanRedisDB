@@ -213,10 +213,11 @@ func (nd *KVNode) IsReplicaRaftReady(raftID uint64) bool {
 		return false
 	}
 	if pg.State.String() == "ProgressStateReplicate" {
-		if s.Commit <= maxInflightMsgs {
+		if pg.Match + maxInflightMsgs >= s.Commit {
 			return true
 		}
-		if pg.Match >= s.Commit-maxInflightMsgs {
+	} else if pg.State.String() == "ProgressStateProbe" {
+		if pg.Match + 1 >= s.Commit {
 			return true
 		}
 	}
