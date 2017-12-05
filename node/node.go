@@ -356,12 +356,16 @@ func (nd *KVNode) handleProposeReq() {
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
 			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout+time.Second)
-			nd.rn.node.Propose(ctx, buffer)
+			nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
 			//lastReqList = append(lastReqList, lastReq)
 			select {
 			case <-lastReq.done:
 			case <-ctx.Done():
 				err := ctx.Err()
+				if err == context.Canceled {
+					// proposal canceled can be caused by leader transfer or no leader
+					err = ErrProposalCanceled
+				}
 				for _, r := range reqList.Reqs {
 					nd.w.Trigger(r.Header.ID, err)
 				}

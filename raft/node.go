@@ -33,7 +33,8 @@ var (
 	emptyState = pb.HardState{}
 
 	// ErrStopped is returned by methods on Nodes that have been stopped.
-	ErrStopped = errors.New("raft: stopped")
+	ErrStopped    = errors.New("raft: stopped")
+	errMsgDropped = errors.New("raft message dropped")
 )
 
 // SoftState provides state that is useful for logging and debugging.
@@ -110,6 +111,11 @@ func (rd Ready) containsUpdates() bool {
 		len(rd.CommittedEntries) > 0 || len(rd.Messages) > 0 || len(rd.ReadStates) != 0
 }
 
+type msgWithDrop struct {
+	m      pb.Message
+	dropCB context.CancelFunc
+}
+
 // Node represents a node in a raft cluster.
 type Node interface {
 	// Tick increments the internal logical clock for the Node by a single tick. Election
@@ -119,6 +125,8 @@ type Node interface {
 	Campaign(ctx context.Context) error
 	// Propose proposes that data be appended to the log.
 	Propose(ctx context.Context, data []byte) error
+	// Propose proposed that data be appended to the log and cancel it if dropped
+	ProposeWithDrop(ctx context.Context, data []byte, cancel context.CancelFunc) error
 	// ProposeConfChange proposes config change.
 	// At most one ConfChange can be in the process of going through consensus.
 	// Application needs to call ApplyConfChange when applying EntryConfChange type entry.
@@ -232,8 +240,8 @@ func RestartNode(c *Config) Node {
 
 // node is the canonical implementation of the Node interface
 type node struct {
-	propc      chan pb.Message
-	recvc      chan pb.Message
+	propc      chan msgWithDrop
+	recvc      chan msgWithDrop
 	confc      chan pb.ConfChange
 	confstatec chan pb.ConfState
 	readyc     chan Ready
@@ -248,8 +256,8 @@ type node struct {
 
 func newNode() node {
 	return node{
-		propc:      make(chan pb.Message),
-		recvc:      make(chan pb.Message),
+		propc:      make(chan msgWithDrop),
+		recvc:      make(chan msgWithDrop),
 		confc:      make(chan pb.ConfChange),
 		confstatec: make(chan pb.ConfState),
 		readyc:     make(chan Ready),
@@ -277,7 +285,7 @@ func (n *node) Stop() {
 }
 
 func (n *node) run(r *raft) {
-	var propc chan pb.Message
+	var propc chan msgWithDrop
 	var readyc chan Ready
 	var advancec chan struct{}
 	var prevLastUnstablei, prevLastUnstablet uint64
@@ -331,11 +339,16 @@ func (n *node) run(r *raft) {
 		// TODO: maybe buffer the config propose if there exists one (the way
 		// described in raft dissertation)
 		// Currently it is dropped in Step silently.
-		case m := <-propc:
+		case mdrop := <-propc:
+			m := mdrop.m
 			m.From = r.id
 			m.FromGroup = r.group
-			r.Step(m)
-		case m := <-n.recvc:
+			err := r.Step(m)
+			if err == errMsgDropped && mdrop.dropCB != nil {
+				mdrop.dropCB()
+			}
+		case mdrop := <-n.recvc:
+			m := mdrop.m
 			// filter out response message from unknown From.
 			from, ok := r.prs[m.From]
 			if ok || !IsResponseMsg(m.Type) {
@@ -461,6 +474,10 @@ func (n *node) Propose(ctx context.Context, data []byte) error {
 	return n.step(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Data: data}}})
 }
 
+func (n *node) ProposeWithDrop(ctx context.Context, data []byte, cancel context.CancelFunc) error {
+	return n.stepWithDrop(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Data: data}}}, cancel)
+}
+
 func (n *node) Step(ctx context.Context, m pb.Message) error {
 	// ignore unexpected local messages receiving over network
 	if IsLocalMsg(m.Type) {
@@ -478,22 +495,26 @@ func (n *node) ProposeConfChange(ctx context.Context, cc pb.ConfChange) error {
 	return n.Step(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Type: pb.EntryConfChange, Data: data}}})
 }
 
-// Step advances the state machine using msgs. The ctx.Err() will be returned,
-// if any.
-func (n *node) step(ctx context.Context, m pb.Message) error {
+func (n *node) stepWithDrop(ctx context.Context, m pb.Message, cancel context.CancelFunc) error {
 	ch := n.recvc
 	if m.Type == pb.MsgProp {
 		ch = n.propc
 	}
 
 	select {
-	case ch <- m:
+	case ch <- msgWithDrop{m: m, dropCB: cancel}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-n.done:
 		return ErrStopped
 	}
+}
+
+// Step advances the state machine using msgs. The ctx.Err() will be returned,
+// if any.
+func (n *node) step(ctx context.Context, m pb.Message) error {
+	return n.stepWithDrop(ctx, m, nil)
 }
 
 func (n *node) Ready() <-chan Ready { return n.readyc }
@@ -530,7 +551,7 @@ func (n *node) Status() Status {
 
 func (n *node) ReportUnreachable(id uint64, group pb.Group) {
 	select {
-	case n.recvc <- pb.Message{Type: pb.MsgUnreachable, From: id, FromGroup: group}:
+	case n.recvc <- msgWithDrop{m: pb.Message{Type: pb.MsgUnreachable, From: id, FromGroup: group}, dropCB: nil}:
 	case <-n.done:
 	}
 }
@@ -539,7 +560,7 @@ func (n *node) ReportSnapshot(id uint64, gp pb.Group, status SnapshotStatus) {
 	rej := status == SnapshotFailure
 
 	select {
-	case n.recvc <- pb.Message{Type: pb.MsgSnapStatus, From: id, FromGroup: gp, Reject: rej}:
+	case n.recvc <- msgWithDrop{m: pb.Message{Type: pb.MsgSnapStatus, From: id, FromGroup: gp, Reject: rej}, dropCB: nil}:
 	case <-n.done:
 	}
 }
@@ -547,7 +568,7 @@ func (n *node) ReportSnapshot(id uint64, gp pb.Group, status SnapshotStatus) {
 func (n *node) TransferLeadership(ctx context.Context, lead, transferee uint64) {
 	select {
 	// manually set 'from' and 'to', so that leader can voluntarily transfers its leadership
-	case n.recvc <- pb.Message{Type: pb.MsgTransferLeader, From: transferee, To: lead}:
+	case n.recvc <- msgWithDrop{m: pb.Message{Type: pb.MsgTransferLeader, From: transferee, To: lead}, dropCB: nil}:
 	case <-n.done:
 	case <-ctx.Done():
 	}

@@ -1119,8 +1119,9 @@ func TestPastElectionTimeout(t *testing.T) {
 // actual stepX function.
 func TestStepIgnoreOldTermMsg(t *testing.T) {
 	called := false
-	fakeStep := func(r *raft, m pb.Message) {
+	fakeStep := func(r *raft, m pb.Message) bool {
 		called = true
+		return false
 	}
 	sm := newTestRaft(1, []uint64{1}, 10, 1, NewMemoryStorage())
 	sm.step = fakeStep
@@ -3006,13 +3007,18 @@ func TestLeaderTransferIgnoreProposal(t *testing.T) {
 		t.Fatalf("wait transferring, leadTransferee = %v, want %v", lead.leadTransferee, 3)
 	}
 
-	nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{}}})
+	err := nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{}}})
 
 	if lead.prs[1].Match != 1 {
 		t.Fatalf("node 1 has match %x, want %x", lead.prs[1].Match, 1)
 	}
+	if err != errMsgDropped {
+		t.Fatalf("should return dropped error: %v", err)
+	}
 }
 
+// TestLeaderTransferToUpToDateNode verifies transferring should succeed
+// if the transferee has the most up-to-date log entries when transfer starts.
 func TestLeaderTransferReceiveHigherTermVote(t *testing.T) {
 	nt := newNetwork(nil, nil, nil)
 	nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgHup})
@@ -3410,7 +3416,7 @@ func preVoteConfig(c *Config) {
 	c.PreVote = true
 }
 
-func (nw *network) send(msgs ...pb.Message) {
+func (nw *network) send(msgs ...pb.Message) error {
 	for len(msgs) > 0 {
 		m := msgs[0]
 		p := nw.peers[m.To]
@@ -3424,9 +3430,13 @@ func (nw *network) send(msgs ...pb.Message) {
 			m.FromGroup.RaftReplicaId = m.From
 			m.FromGroup.GroupId = 1
 		}
-		p.Step(m)
+		err := p.Step(m)
+		if err != nil {
+			return err
+		}
 		msgs = append(msgs[1:], nw.filter(p.readMessages())...)
 	}
+	return nil
 }
 
 func (nw *network) drop(from, to uint64, perc float64) {

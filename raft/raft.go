@@ -856,25 +856,29 @@ func (r *raft) Step(m pb.Message) error {
 		}
 
 	default:
-		r.step(r, m)
+		dropped := r.step(r, m)
+		if dropped {
+			return errMsgDropped
+		}
 	}
 	return nil
 }
 
-type stepFunc func(r *raft, m pb.Message)
+// return true if the message is dropped
+type stepFunc func(r *raft, m pb.Message) bool
 
-func stepLeader(r *raft, m pb.Message) {
+func stepLeader(r *raft, m pb.Message) bool {
 	// These message types do not require any progress for m.From.
 	switch m.Type {
 	case pb.MsgBeat:
 		r.bcastHeartbeat()
-		return
+		return false
 	case pb.MsgCheckQuorum:
 		if !r.checkQuorumActive() {
 			r.logger.Warningf("%x stepped down to follower since quorum is not active", r.id)
 			r.becomeFollower(r.Term, None)
 		}
-		return
+		return false
 	case pb.MsgProp:
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
@@ -883,11 +887,11 @@ func stepLeader(r *raft, m pb.Message) {
 			// If we are not currently a member of the range (i.e. this node
 			// was removed from the configuration while serving as leader),
 			// drop any new proposals.
-			return
+			return true
 		}
 		if r.leadTransferee != None {
-			//r.logger.Debugf("%x [term %d] transfer leadership to %x is in progress; dropping proposal", r.id, r.Term, r.leadTransferee)
-			return
+			r.logger.Debugf("%x [term %d] transfer leadership to %x is in progress; dropping proposal", r.id, r.Term, r.leadTransferee)
+			return true
 		}
 
 		for i, e := range m.Entries {
@@ -903,12 +907,12 @@ func stepLeader(r *raft, m pb.Message) {
 		}
 		r.appendEntry(m.Entries...)
 		r.bcastAppend()
-		return
+		return false
 	case pb.MsgReadIndex:
 		if r.quorum() > 1 {
 			if r.raftLog.zeroTermOnErrCompacted(r.raftLog.term(r.raftLog.committed)) != r.Term {
 				// Reject read only request when this leader has not committed any log entry at its term.
-				return
+				return true
 			}
 
 			// thinking: use an interally defined context instead of the user given context.
@@ -934,14 +938,14 @@ func stepLeader(r *raft, m pb.Message) {
 			r.readStates = append(r.readStates, ReadState{Index: r.raftLog.committed, RequestCtx: m.Entries[0].Data})
 		}
 
-		return
+		return false
 	}
 
 	// All other message types require a progress for m.From (pr).
 	pr, prOk := r.prs[m.From]
 	if !prOk {
 		//r.logger.Debugf("%x no progress available for %x", r.id, m.From)
-		return
+		return true
 	}
 	switch m.Type {
 	case pb.MsgAppResp:
@@ -997,12 +1001,12 @@ func stepLeader(r *raft, m pb.Message) {
 		}
 
 		if r.readOnly.option != ReadOnlySafe || len(m.Context) == 0 {
-			return
+			return false
 		}
 
 		ackCount := r.readOnly.recvAck(m)
 		if ackCount < r.quorum() {
-			return
+			return false
 		}
 
 		rss := r.readOnly.advance(m)
@@ -1017,7 +1021,7 @@ func stepLeader(r *raft, m pb.Message) {
 		}
 	case pb.MsgSnapStatus:
 		if pr.State != ProgressStateSnapshot {
-			return
+			return false
 		}
 		if !m.Reject {
 			pr.becomeProbe()
@@ -1045,14 +1049,14 @@ func stepLeader(r *raft, m pb.Message) {
 			if lastLeadTransferee == leadTransferee {
 				r.logger.Infof("%x(%v) [term %d] transfer leadership to %x is in progress, ignores request to same node %x",
 					r.id, r.group.Name, r.Term, leadTransferee, leadTransferee)
-				return
+				return true
 			}
 			r.abortLeaderTransfer()
 			r.logger.Infof("%x(%v) [term %d] abort previous transferring leadership to %x", r.id, r.group.Name, r.Term, lastLeadTransferee)
 		}
 		if leadTransferee == r.id {
 			r.logger.Debugf("%x(%v) is already leader. Ignored transferring leadership to self", r.id, r.group.Name)
-			return
+			return false
 		}
 		// Transfer leadership to third party.
 		r.logger.Infof("%x(%v) [term %d] starts to transfer leadership to %x", r.id, r.group.Name, r.Term, leadTransferee)
@@ -1066,11 +1070,12 @@ func stepLeader(r *raft, m pb.Message) {
 			r.sendAppend(leadTransferee)
 		}
 	}
+	return false
 }
 
 // stepCandidate is shared by StateCandidate and StatePreCandidate; the difference is
 // whether they respond to MsgVoteResp or MsgPreVoteResp.
-func stepCandidate(r *raft, m pb.Message) {
+func stepCandidate(r *raft, m pb.Message) bool {
 	// Only handle vote responses corresponding to our candidacy (while in
 	// StateCandidate, we may get stale MsgPreVoteResp messages in this term from
 	// our pre-candidate state).
@@ -1083,7 +1088,7 @@ func stepCandidate(r *raft, m pb.Message) {
 	switch m.Type {
 	case pb.MsgProp:
 		r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
-		return
+		return true
 	case pb.MsgApp:
 		r.becomeFollower(r.Term, m.From)
 		r.handleAppendEntries(m)
@@ -1110,17 +1115,18 @@ func stepCandidate(r *raft, m pb.Message) {
 	case pb.MsgTimeoutNow:
 		r.logger.Debugf("%x [term %d state %v] ignored MsgTimeoutNow from %x", r.id, r.Term, r.state, m.From)
 	}
+	return false
 }
 
-func stepFollower(r *raft, m pb.Message) {
+func stepFollower(r *raft, m pb.Message) bool {
 	switch m.Type {
 	case pb.MsgProp:
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
-			return
+			return true
 		} else if r.disableProposalForwarding {
 			r.logger.Infof("%x not forwarding to leader %x at term %d; dropping proposal", r.id, r.lead, r.Term)
-			return
+			return true
 		}
 		m.To = r.lead
 		if g, ok := r.prs[m.To]; ok {
@@ -1142,7 +1148,7 @@ func stepFollower(r *raft, m pb.Message) {
 	case pb.MsgTransferLeader:
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping leader transfer msg", r.id, r.Term)
-			return
+			return true
 		}
 		m.To = r.lead
 		m.ToGroup = r.prs[m.To].group
@@ -1160,7 +1166,7 @@ func stepFollower(r *raft, m pb.Message) {
 	case pb.MsgReadIndex:
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping index reading msg", r.id, r.Term)
-			return
+			return true
 		}
 		m.To = r.lead
 		m.ToGroup = r.prs[m.To].group
@@ -1168,10 +1174,11 @@ func stepFollower(r *raft, m pb.Message) {
 	case pb.MsgReadIndexResp:
 		if len(m.Entries) != 1 {
 			r.logger.Errorf("%x invalid format of MsgReadIndexResp from %x, entries count: %d", r.id, m.From, len(m.Entries))
-			return
+			return false
 		}
 		r.readStates = append(r.readStates, ReadState{Index: m.Index, RequestCtx: m.Entries[0].Data})
 	}
+	return false
 }
 
 func (r *raft) handleAppendEntries(m pb.Message) {
