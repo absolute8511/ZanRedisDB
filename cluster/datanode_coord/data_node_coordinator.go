@@ -699,6 +699,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 			return
 		case <-dc.tryCheckUnsynced:
 			doWork()
+			time.Sleep(time.Millisecond * 100)
 		case <-ticker.C:
 			doWork()
 		case <-nsChangedChan:
