@@ -20,6 +20,7 @@ type ServerConfig struct {
 
 	LogLevel int32  `flag:"log-level" cfg:"log_level"`
 	LogDir   string `flag:"log-dir" cfg:"log_dir"`
+	DataDir  string `flag:"data-dir" cfg:"data_dir"`
 }
 
 func NewServerConfig() *ServerConfig {

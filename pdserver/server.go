@@ -69,6 +69,7 @@ func NewServer(conf *ServerConfig) *Server {
 	myNode.ID = cluster.GenNodeID(myNode, "pd")
 
 	clusterOpts := &cluster.Options{}
+	clusterOpts.DataDir = conf.DataDir
 	clusterOpts.AutoBalanceAndMigrate = conf.AutoBalanceAndMigrate
 	if len(conf.BalanceInterval) == 2 {
 		clusterOpts.BalanceStart, err = strconv.Atoi(conf.BalanceInterval[0])

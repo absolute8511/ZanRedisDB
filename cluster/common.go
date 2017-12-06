@@ -248,4 +248,5 @@ type Options struct {
 	AutoBalanceAndMigrate bool
 	BalanceStart          int
 	BalanceEnd            int
+	DataDir               string
 }

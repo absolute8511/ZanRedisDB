@@ -3,13 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/pdserver"
 	"log"
 	"os"
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/pdserver"
 
 	"github.com/BurntSushi/toml"
 	"github.com/absolute8511/glog"
@@ -35,6 +36,7 @@ var (
 
 	logLevel        = flagSet.Int("log-level", 1, "log verbose level")
 	logDir          = flagSet.String("log-dir", "", "directory for log file")
+	dataDir         = flagSet.String("data-dir", "", "directory for data")
 	balanceInterval = common.StringArray{}
 )
 

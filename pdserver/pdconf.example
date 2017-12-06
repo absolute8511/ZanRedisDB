@@ -13,6 +13,9 @@ cluster_id = "test-cluster-dev-1"
 ## the etcd cluster ip list
 cluster_leadership_addresses = "127.0.0.1:2379"
 
+## data dir for some cluster data
+data_dir = ""
+
 ## the detail of the log, larger number means more details
 log_level = 2
 
