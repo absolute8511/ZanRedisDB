@@ -30,7 +30,7 @@ var (
 	ErrNamespaceNotLeader         = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not leader on the node")
 	ErrNamespaceNoLeader          = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace has no leader")
 	ErrRaftGroupNotReady          = errors.New("ERR_CLUSTER_CHANGED: raft group not ready")
-	ErrProposalCanceled          = errors.New("ERR_CLUSTER_CHANGED: raft proposal " + context.Canceled.Error())
+	ErrProposalCanceled           = errors.New("ERR_CLUSTER_CHANGED: raft proposal " + context.Canceled.Error())
 	errNamespaceConfInvalid       = errors.New("namespace config is invalid")
 )
 
@@ -250,12 +250,6 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		return nil, err
 	}
 
-	nsm.mutex.Lock()
-	defer nsm.mutex.Unlock()
-	if n, ok := nsm.kvNodes[conf.Name]; ok {
-		return n, ErrNamespaceAlreadyExist
-	}
-
 	kvOpts := &KVOptions{
 		DataDir:          path.Join(nsm.machineConf.DataRootDir, conf.Name),
 		EngType:          conf.EngType,
@@ -279,6 +273,12 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		join = true
 	}
 
+	nsm.mutex.Lock()
+	defer nsm.mutex.Unlock()
+	if n, ok := nsm.kvNodes[conf.Name]; ok {
+		return n, ErrNamespaceAlreadyExist
+	}
+
 	d, _ := json.MarshalIndent(&conf, "", " ")
 	nodeLog.Infof("namespace load config: %v", string(d))
 	d, _ = json.MarshalIndent(&kvOpts, "", " ")
@@ -295,7 +295,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		SnapCatchup:    conf.SnapCatchup,
 		Replicator:     conf.Replicator,
 		OptimizedFsync: conf.OptimizedFsync,
-		KeepWAL: nsm.machineConf.KeepWAL,
+		KeepWAL:        nsm.machineConf.KeepWAL,
 	}
 	kv, err := NewKVNode(kvOpts, nsm.machineConf, raftConf, nsm.raftTransport,
 		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),

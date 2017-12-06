@@ -550,6 +550,7 @@ func (nd *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
 }
 
 func (nd *KVNode) Tick() {
+	nd.rn.Infof("ticking")
 	nd.rn.node.Tick()
 }
 

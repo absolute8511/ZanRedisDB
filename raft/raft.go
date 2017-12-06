@@ -620,7 +620,11 @@ func (r *raft) tickHeartbeat() {
 
 	if r.heartbeatElapsed >= r.heartbeatTimeout {
 		r.heartbeatElapsed = 0
-		r.Step(pb.Message{From: r.id, FromGroup: r.group, Type: pb.MsgBeat})
+		err := r.Step(pb.Message{From: r.id, FromGroup: r.group, Type: pb.MsgBeat})
+		if err != nil {
+			r.logger.Infof("%x(%v) step msgbeat failed: %v", r.id, r.group.Name, err.Error())
+		}
+		r.logger.Infof("%x(%v) step msgbeat", r.id, r.group.Name)
 	}
 }
 
