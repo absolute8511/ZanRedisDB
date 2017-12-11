@@ -806,6 +806,7 @@ func (rc *raftNode) serveChannels() {
 				for _, ent := range rd.CommittedEntries {
 					if ent.Type == raftpb.EntryConfChange {
 						waitApply = true
+						nodeLog.Infof("need wait apply for config changed: %v", ent.String())
 						break
 					}
 				}
@@ -839,10 +840,15 @@ func (rc *raftNode) serveChannels() {
 				msgs := rc.processMessages(rd.Messages)
 				raftDone <- struct{}{}
 				if waitApply {
+					s := time.Now()
 					select {
 					case <-applyWaitDone:
 					case <-rc.stopc:
 						return
+					}
+					cost := time.Since(s)
+					if cost > time.Second {
+						nodeLog.Infof("wait apply %v msgs done cost: %v", len(msgs), cost.String())
 					}
 				}
 				rc.transport.Send(msgs)
@@ -876,8 +882,10 @@ func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 				// drop msgSnap if the inflight chan if full.
 			}
 			msgs[i].To = 0
-		} else if msgs[i].Type == raftpb.MsgVoteResp {
+		} else if msgs[i].Type == raftpb.MsgVoteResp || msgs[i].Type == raftpb.MsgPreVoteResp {
 			rc.Infof("send vote resp : %v", msgs[i].String())
+		} else if msgs[i].Type == raftpb.MsgVote || msgs[i].Type == raftpb.MsgPreVote {
+			rc.Infof("process vote/prevote :%v ", msgs[i].String())
 		}
 	}
 	return msgs

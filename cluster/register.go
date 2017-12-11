@@ -174,6 +174,7 @@ type PDRegister interface {
 	Unregister(nodeData *NodeInfo) error
 	// the cluster root modify index
 	GetClusterEpoch() (EpochType, error)
+	GetClusterMetaInfo() (ClusterMetaInfo, error)
 	AcquireAndWatchLeader(leader chan *NodeInfo, stop chan struct{})
 
 	GetDataNodes() ([]NodeInfo, error)

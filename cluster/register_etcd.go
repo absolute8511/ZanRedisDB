@@ -670,6 +670,19 @@ func (etcdReg *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
 	return clusterMeta.MaxGID, err
 }
 
+func (etcdReg *PDEtcdRegister) GetClusterMetaInfo() (ClusterMetaInfo, error) {
+	var clusterMeta ClusterMetaInfo
+	rsp, err := etcdReg.client.Get(etcdReg.getClusterMetaPath(), false, false)
+	if err != nil {
+		if client.IsKeyNotFound(err) {
+			return clusterMeta, ErrKeyNotFound
+		}
+		return clusterMeta, err
+	}
+	err = json.Unmarshal([]byte(rsp.Node.Value), &clusterMeta)
+	return clusterMeta, err
+}
+
 func (etcdReg *PDEtcdRegister) GetClusterEpoch() (EpochType, error) {
 	rsp, err := etcdReg.client.Get(etcdReg.clusterPath, false, false)
 	if err != nil {

@@ -171,8 +171,16 @@ func (pdCoord *PDCoordinator) saveClusterToFile(newNamespaces map[string]map[int
 			return
 		}
 	}
-	fn := path.Join(dataDir, strconv.Itoa(int(time.Now().UnixNano()))+".meta.data")
-	ioutil.WriteFile(fn, d, common.FILE_PERM)
+	prefix := strconv.Itoa(int(time.Now().UnixNano()))
+	prefix = path.Join(dataDir, prefix)
+	ioutil.WriteFile(prefix+".meta.ns", d, common.FILE_PERM)
+	meta, err := pdCoord.register.GetClusterMetaInfo()
+	if err != nil {
+		cluster.CoordLog().Infof("get cluster meta failed: %v", err.Error())
+	} else {
+		d, _ := json.Marshal(meta)
+		ioutil.WriteFile(prefix+".meta.cluster", d, common.FILE_PERM)
+	}
 	for ns, _ := range newNamespaces {
 		schemas, err := pdCoord.register.GetNamespaceSchemas(ns)
 		if err != nil {
@@ -180,7 +188,7 @@ func (pdCoord *PDCoordinator) saveClusterToFile(newNamespaces map[string]map[int
 			continue
 		}
 		d, _ = json.Marshal(schemas)
-		ioutil.WriteFile(fn+".schemas."+ns, d, common.FILE_PERM)
+		ioutil.WriteFile(prefix+".schemas."+ns, d, common.FILE_PERM)
 	}
 	cluster.CoordLog().Infof("namespace meta saved to : %v", dataDir)
 }

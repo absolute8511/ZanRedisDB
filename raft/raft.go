@@ -624,7 +624,6 @@ func (r *raft) tickHeartbeat() {
 		if err != nil {
 			r.logger.Infof("%x(%v) step msgbeat failed: %v", r.id, r.group.Name, err.Error())
 		}
-		r.logger.Infof("%x(%v) step msgbeat", r.id, r.group.Name)
 	}
 }
 

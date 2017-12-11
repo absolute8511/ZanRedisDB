@@ -113,7 +113,8 @@ func (nn *NamespaceNode) Start(forceStandaloneCluster bool) error {
 }
 
 func (nn *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	waitTimeout := time.Duration(nn.Node.machineConfig.ElectionTick)*time.Duration(nn.Node.machineConfig.TickMs)* time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 	oldLeader := nn.Node.rn.Lead()
 	nn.Node.rn.node.TransferLeadership(ctx, oldLeader, toRaftID)
