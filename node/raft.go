@@ -115,6 +115,7 @@ type raftNode struct {
 	newLeaderChan       chan string
 	lastLeaderChangedTs int64
 	stopping            int32
+	replayRunning  int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -296,9 +297,20 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 	// send nil once lastIndex is published so client knows commit channel is current
 	if len(ents) > 0 {
 		rc.lastIndex = ents[len(ents)-1].Index
+		atomic.StoreInt32(&rc.replayRunning, 1)
+	} else {
+		atomic.StoreInt32(&rc.replayRunning, 0)
 	}
 	rc.Infof("replaying WAL (%v) at lastIndex : %v", len(ents), rc.lastIndex)
 	return nil
+}
+
+func (rc *raftNode) IsReplayFinished() bool {
+	return atomic.LoadInt32(&rc.replayRunning) == 0
+}
+
+func (rc *raftNode) MarkReplayFinished() {
+	atomic.StoreInt32(&rc.replayRunning, 0)
 }
 
 func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {

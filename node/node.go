@@ -871,6 +871,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		np.appliedi = evnt.Index
 		if evnt.Index == nd.rn.lastIndex {
 			nd.rn.Infof("replay finished at index: %v\n", evnt.Index)
+			nd.rn.MarkReplayFinished()
 		}
 	}
 	if shouldStop {

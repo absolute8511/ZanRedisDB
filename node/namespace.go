@@ -230,6 +230,19 @@ func (nsm *NamespaceMgr) Stop() {
 	nodeLog.Infof("namespace manager stopped")
 }
 
+func (nsm *NamespaceMgr) IsAllRecoveryDone() bool {
+	done := true
+	nsm.mutex.RLock()
+	for _, n := range nsm.kvNodes {
+		if !n.IsReady() || !n.Node.rn.IsReplayFinished() {
+			done = false
+			break
+		}
+	}
+	nsm.mutex.RUnlock()
+	return done
+}
+
 func (nsm *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 	tmp := make(map[string]*NamespaceNode)
 	nsm.mutex.RLock()
