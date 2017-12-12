@@ -357,27 +357,52 @@ func (nd *KVNode) handleProposeReq() {
 			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
-			ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout+time.Second)
-			nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
-			//lastReqList = append(lastReqList, lastReq)
-			select {
-			case <-lastReq.done:
-			case <-ctx.Done():
-				err := ctx.Err()
-				if err == context.Canceled {
-					// proposal canceled can be caused by leader transfer or no leader
-					err = ErrProposalCanceled
-				}
+			cost := time.Now().UnixNano() - start
+			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
+				nd.rn.Infof("ignore slow for begin propose too late: %v, cost %v", len(reqList.Reqs), cost)
 				for _, r := range reqList.Reqs {
-					nd.w.Trigger(r.Header.ID, err)
+					nd.w.Trigger(r.Header.ID, common.ErrQueueTimeout)
 				}
-			case <-nd.stopChan:
+			} else {
+				leftProposeTimeout := proposeTimeout+time.Second - time.Duration(cost)
+
+				ctx, cancel := context.WithTimeout(context.Background(), leftProposeTimeout)
+				err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
+				if err != nil {
+					nd.rn.Infof("propose failed: %v, err: %v", len(reqList.Reqs), err.Error())
+					for _, r := range reqList.Reqs {
+						nd.w.Trigger(r.Header.ID, err)
+					}
+				} else {
+					//lastReqList = append(lastReqList, lastReq)
+					select {
+					case <-lastReq.done:
+					case <-ctx.Done():
+						err := ctx.Err()
+						waitLeader := false
+						if err == context.DeadlineExceeded {
+							waitLeader = true
+						}
+						if err == context.Canceled {
+							// proposal canceled can be caused by leader transfer or no leader
+							err = ErrProposalCanceled
+							waitLeader = true
+						}
+						for _, r := range reqList.Reqs {
+							nd.w.Trigger(r.Header.ID, err)
+						}
+						if waitLeader {
+							time.Sleep(proposeTimeout/100 + time.Millisecond*100)
+						}
+					case <-nd.stopChan:
+						cancel()
+						return
+					}
+				}
 				cancel()
-				return
+				cost = time.Now().UnixNano() - start
 			}
-			cancel()
-			cost := (time.Now().UnixNano() - start) / 1000 / 1000 / 1000
-			if cost >= int64(proposeTimeout.Seconds())/2 {
+			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
 				nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
 			}
 			for i := range reqList.Reqs {
@@ -651,6 +676,34 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 }
 
 // return if configure changed and whether need force backup
+func (nd *KVNode) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{}, 
+	dupCheckMap map[string]bool) ([]uint64, []interface{}, map[string]bool) {
+	err := nd.store.CommitBatchWrite()
+	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
+	batchCost := time.Since(batchStart)
+	if nodeLog.Level() >= common.LOG_DETAIL {
+		nd.rn.Infof("batching command number: %v", len(batchReqIDList))
+	}
+	// write the future response or error
+	for idx, rid := range batchReqIDList {
+		if err != nil {
+			nd.w.Trigger(rid, err)
+		} else {
+			nd.w.Trigger(rid, batchReqRspList[idx])
+		}
+	}
+	if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
+		nd.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
+			cmdName, len(batchReqIDList), batchCost)
+	}
+	if len(batchReqIDList) > 0 {
+		nd.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+	}
+	batchReqIDList = batchReqIDList[:0]
+	batchReqRspList = batchReqRspList[:0]
+	return batchReqIDList, batchReqRspList, dupCheckMap
+}
+
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	var lastCommittedIndex uint64
 	if len(applyEvent.ents) > 0 {
@@ -703,6 +756,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 				var batchReqRspList []interface{}
 				var batchStart time.Time
 				dupCheckMap := make(map[string]bool, len(reqList.Reqs))
+				lastBatchCmd := ""
 				for reqIndex, req := range reqList.Reqs {
 					reqID := req.Header.ID
 					if req.Header.DataType == 0 {
@@ -730,6 +784,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 									batching = true
 								}
 								handled = true
+								lastBatchCmd = cmdName
 								h, ok := nd.router.GetInternalCmdHandler(cmdName)
 								if !ok {
 									nd.rn.Infof("unsupported redis command: %v", cmdName)
@@ -756,30 +811,9 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 								}
 							}
 							if batching {
-								err := nd.store.CommitBatchWrite()
-								dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 								batching = false
-								batchCost := time.Since(batchStart)
-								if nodeLog.Level() >= common.LOG_DETAIL {
-									nd.rn.Infof("batching command number: %v", len(batchReqIDList))
-								}
-								// write the future response or error
-								for idx, rid := range batchReqIDList {
-									if err != nil {
-										nd.w.Trigger(rid, err)
-									} else {
-										nd.w.Trigger(rid, batchReqRspList[idx])
-									}
-								}
-								if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
-									nd.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
-										cmdName, len(batchReqIDList), batchCost)
-								}
-								if len(batchReqIDList) > 0 {
-									nd.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
-								}
-								batchReqIDList = batchReqIDList[:0]
-								batchReqRspList = batchReqRspList[:0]
+								batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart, 
+									batchReqIDList, batchReqRspList, dupCheckMap)
 							}
 							if handled {
 								continue
@@ -807,26 +841,9 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 						}
 					} else {
 						if batching {
-							err := nd.store.CommitBatchWrite()
-							dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 							batching = false
-							batchCost := time.Since(batchStart)
-							// write the future response or error
-							for _, rid := range batchReqIDList {
-								if err != nil {
-									nd.w.Trigger(rid, err)
-								} else {
-									nd.w.Trigger(rid, nil)
-								}
-							}
-							if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
-								nd.rn.Infof("slow batch write command batch: %v, cost: %v",
-									len(batchReqIDList), batchCost)
-							}
-							if len(batchReqIDList) > 0 {
-								nd.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
-							}
-							batchReqIDList = batchReqIDList[:0]
+							batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart, 
+								batchReqIDList, batchReqRspList, dupCheckMap)
 						}
 						if req.Header.DataType == int32(HTTPReq) {
 							var p httpProposeData
@@ -858,6 +875,18 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 						}
 					}
 				}
+				// TODO: add test case for this
+				if batching {
+					batching = false
+					batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart, 
+						batchReqIDList, batchReqRspList, dupCheckMap)
+				}
+				for _, req := range reqList.Reqs {
+					if nd.w.IsRegistered(req.Header.ID) {
+						nd.rn.Infof("missing process request: %v", req.String())
+					}
+				}
+
 				cost := time.Since(start)
 				if cost >= proposeTimeout/2 {
 					nd.rn.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)

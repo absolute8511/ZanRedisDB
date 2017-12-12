@@ -978,9 +978,14 @@ func (rc *raftNode) RestoreMembers(mems []*common.MemberInfo) {
 
 func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
 	if rc.node == nil {
+		rc.Infof("dropping message since node is nil: %v", m.String())
 		return nil
 	}
-	return rc.node.Step(ctx, m)
+	err := rc.node.Step(ctx, m)
+	if err != nil {
+		rc.Infof("dropping message since step failed: %v", m.String())
+	}
+	return err
 }
 
 func (rc *raftNode) getLastLeaderChangedTime() int64 {
