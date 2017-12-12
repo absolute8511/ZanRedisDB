@@ -440,7 +440,7 @@ func (dc *DataCoordinator) transferMyNamespaceLeader(nsInfo *cluster.PartitionMe
 		if time.Now().UnixNano()-nsNode.GetLastLeaderChangedTime() < time.Minute.Nanoseconds() {
 			return false
 		}
-		if !dc.isReplicaReadyForRaft(nsNode, toRaftID) {
+		if !dc.isReplicaReadyForRaft(nsNode, toRaftID, nid) {
 			return false
 		}
 	}
@@ -455,8 +455,16 @@ func (dc *DataCoordinator) transferMyNamespaceLeader(nsInfo *cluster.PartitionMe
 
 // check on leader if the replica ready for raft, which means this replica is most updated
 // and have the nearly the newest raft logs.
-func (dc *DataCoordinator) isReplicaReadyForRaft(nsNode *node.NamespaceNode, toRaftID uint64) bool {
+func (dc *DataCoordinator) isReplicaReadyForRaft(nsNode *node.NamespaceNode, toRaftID uint64, nodeID string) bool {
 	if nsNode.IsReady() && nsNode.Node.IsReplicaRaftReady(toRaftID) {
+		nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(nodeID)
+		code, err := common.APIRequest("GET",
+			"http://"+net.JoinHostPort(nip, httpPort)+common.APINodeAllReady,
+			nil, time.Second, nil)
+		if err != nil {
+			cluster.CoordLog().Infof("not ready from %v for transfer leader: %v, %v", nip, code, err.Error())
+			return false
+		}
 		return true
 	}
 	if nsNode.IsReady() {
