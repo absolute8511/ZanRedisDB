@@ -298,6 +298,8 @@ func (nd *KVNode) handleProposeReq() {
 	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
 	var lastReq *internalReq
 	// TODO: combine pipeline and batch to improve performance
+	// notice the maxPendingProposals config while using pipeline, avoid 
+	// sending too much pipeline which overflow the proposal buffer.
 	//lastReqList := make([]*internalReq, 0, 1024)
 
 	defer func() {

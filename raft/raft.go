@@ -866,6 +866,7 @@ func (r *raft) Step(m pb.Message) error {
 	default:
 		dropped := r.step(r, m)
 		if dropped {
+			r.logger.Infof("%x(%v) at term %d dropping message: %v", r.id, r.group.Name, r.Term, m.String())
 			return errMsgDropped
 		}
 	}

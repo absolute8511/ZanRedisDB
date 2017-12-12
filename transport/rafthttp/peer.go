@@ -37,14 +37,17 @@ const (
 	ConnReadTimeout  = 5 * time.Second
 	ConnWriteTimeout = 5 * time.Second
 
-	recvBufSize = 4096
+	recvBufSize = 4096*8
 	// maxPendingProposals holds the proposals during one leader election process.
 	// Generally one leader election takes at most 1 sec. It should have
 	// 0-2 election conflicts, and each one takes 0.5 sec.
 	// We assume the number of concurrent proposers is smaller than 4096.
 	// One client blocks on its proposal for at least 1 sec, so 4096 is enough
 	// to hold all proposals.
-	maxPendingProposals = 4096
+
+	// since we are using the transport in multi-raft, we need more buffer to hold
+	// all proposals in all raft group
+	maxPendingProposals = 4096*16
 
 	streamAppV2 = "streamMsgAppV2"
 	streamMsg   = "streamMsg"
