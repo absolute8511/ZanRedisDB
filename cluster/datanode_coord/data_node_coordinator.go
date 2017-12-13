@@ -22,7 +22,7 @@ var (
 	ErrNamespaceNotReady = cluster.NewCoordErr("namespace node is not ready", cluster.CoordLocalErr)
 	ErrNamespaceInvalid  = errors.New("namespace name is invalid")
 	ErrNamespaceNotFound = errors.New("namespace is not found")
-	TransferLeaderWait   = time.Second * 10
+	TransferLeaderWait   = time.Second * 20
 )
 
 const (
@@ -484,7 +484,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 	}
 	pendingRemovings := make(map[string]map[uint64]pendingRemoveInfo)
 	// avoid transfer too much partitions in the same time
-	lastTransferredTime := time.Now()
+	lastTransferCheckedTime := time.Now()
 	doWork := func() {
 		if atomic.LoadInt32(&dc.stopping) == 1 {
 			return
@@ -574,13 +574,12 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 				cluster.CoordLog().Infof("namespace %v leader is not in isr: %v, maybe removing",
 					namespaceMeta.GetDesp(), isrList)
 				done := false
-				if time.Since(lastTransferredTime) >= TransferLeaderWait {
+				if time.Since(lastTransferCheckedTime) >= TransferLeaderWait {
 					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], false)
+					lastTransferCheckedTime = time.Now()
 				}
 				if !done {
 					go dc.tryCheckNamespacesIn(TransferLeaderWait)
-				} else {
-					lastTransferredTime = time.Now()
 				}
 				continue
 			}
@@ -593,13 +592,12 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 				// allow node leaving
 				// also we should avoid transfer leader while some node is catchuping while recover from restart
 				done := false
-				if time.Since(lastTransferredTime) >= TransferLeaderWait {
+				if time.Since(lastTransferCheckedTime) >= TransferLeaderWait {
 					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], false)
+					lastTransferCheckedTime = time.Now()
 				}
 				if !done {
 					go dc.tryCheckNamespacesIn(TransferLeaderWait)
-				} else {
-					lastTransferredTime = time.Now()
 				}
 			} else {
 				// check if any replica is not joined to members

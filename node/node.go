@@ -382,11 +382,13 @@ func (nd *KVNode) handleProposeReq() {
 						waitLeader := false
 						if err == context.DeadlineExceeded {
 							waitLeader = true
+							nd.rn.Infof("propose timeout: %v, %v", err.Error(), len(reqList.Reqs))
 						}
 						if err == context.Canceled {
 							// proposal canceled can be caused by leader transfer or no leader
 							err = ErrProposalCanceled
 							waitLeader = true
+							nd.rn.Infof("propose canceled : %v", len(reqList.Reqs))
 						}
 						for _, r := range reqList.Reqs {
 							nd.w.Trigger(r.Header.ID, err)
@@ -884,6 +886,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 				for _, req := range reqList.Reqs {
 					if nd.w.IsRegistered(req.Header.ID) {
 						nd.rn.Infof("missing process request: %v", req.String())
+						nd.w.Trigger(req.Header.ID, errUnknownData)
 					}
 				}
 
