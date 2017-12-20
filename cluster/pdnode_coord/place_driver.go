@@ -461,9 +461,10 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 						}
 					}
 				}
+				// wait raft leader election
 				select {
 				case <-monitorChan:
-				case <-time.After(time.Second):
+				case <-time.After(time.Second * 5):
 				}
 			}
 		}

@@ -91,11 +91,7 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if from, err := types.IDFromString(r.Header.Get("X-Server-From")); err != nil {
-		if urls := r.Header.Get("X-PeerURLs"); urls != "" {
-			h.tr.AddRemote(from, strings.Split(urls, ","))
-		}
-	}
+	addRemoteFromRequest(h.tr, r)
 
 	// Limit the data size that could be read from the request body, which ensures that read from
 	// connection will not time out accidentally due to possible blocking in underlying implementation.
@@ -179,11 +175,7 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if from, err := types.IDFromString(r.Header.Get("X-Server-From")); err != nil {
-		if urls := r.Header.Get("X-PeerURLs"); urls != "" {
-			h.tr.AddRemote(from, strings.Split(urls, ","))
-		}
-	}
+	addRemoteFromRequest(h.tr, r)
 
 	dec := &messageDecoder{r: r.Body}
 	m, err := dec.decode()

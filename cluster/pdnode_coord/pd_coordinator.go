@@ -1,13 +1,18 @@
 package pdnode_coord
 
 import (
+	"encoding/json"
 	"errors"
+	"io/ioutil"
+	"path"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 var (
@@ -52,6 +57,7 @@ type PDCoordinator struct {
 	doChecking             int32
 	autoBalance            bool
 	stableNodeNum          int32
+	dataDir                string
 }
 
 func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Options) *PDCoordinator {
@@ -64,11 +70,12 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 		checkNamespaceFailChan: make(chan cluster.NamespaceNameInfo, 3),
 		stopChan:               make(chan struct{}),
 		monitorChan:            make(chan struct{}),
-		autoBalance:            opts.AutoBalanceAndMigrate,
 	}
 	coord.dpm = NewDataPlacement(coord)
 	if opts != nil {
 		coord.dpm.SetBalanceInterval(opts.BalanceStart, opts.BalanceEnd)
+		coord.autoBalance = opts.AutoBalanceAndMigrate
+		coord.dataDir = opts.DataDir
 	}
 	return coord
 }
@@ -152,6 +159,40 @@ func (pdCoord *PDCoordinator) handleLeadership() {
 	}
 }
 
+func (pdCoord *PDCoordinator) saveClusterToFile(newNamespaces map[string]map[int]cluster.PartitionMetaInfo) {
+	cluster.CoordLog().Infof("begin save namespace meta ")
+	d, _ := json.Marshal(newNamespaces)
+	dataDir := pdCoord.dataDir
+	if dataDir == "" {
+		var err error
+		dataDir, err = ioutil.TempDir("", "zankv-meta")
+		if err != nil {
+			cluster.CoordLog().Infof("init temp dir failed: %v", err.Error())
+			return
+		}
+	}
+	prefix := strconv.Itoa(int(time.Now().UnixNano()))
+	prefix = path.Join(dataDir, prefix)
+	ioutil.WriteFile(prefix+".meta.ns", d, common.FILE_PERM)
+	meta, err := pdCoord.register.GetClusterMetaInfo()
+	if err != nil {
+		cluster.CoordLog().Infof("get cluster meta failed: %v", err.Error())
+	} else {
+		d, _ := json.Marshal(meta)
+		ioutil.WriteFile(prefix+".meta.cluster", d, common.FILE_PERM)
+	}
+	for ns, _ := range newNamespaces {
+		schemas, err := pdCoord.register.GetNamespaceSchemas(ns)
+		if err != nil {
+			cluster.CoordLog().Infof("namespace schemas failed: %v", err.Error())
+			continue
+		}
+		d, _ = json.Marshal(schemas)
+		ioutil.WriteFile(prefix+".schemas."+ns, d, common.FILE_PERM)
+	}
+	cluster.CoordLog().Infof("namespace meta saved to : %v", dataDir)
+}
+
 func (pdCoord *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	if pdCoord.leaderNode.GetID() != pdCoord.myNode.GetID() {
 		cluster.CoordLog().Infof("I am slave (%v). Leader is: %v", pdCoord.myNode, pdCoord.leaderNode)
@@ -175,6 +216,8 @@ func (pdCoord *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 			cluster.CoordLog().Errorf("load namespace info failed: %v", err)
 		} else {
 			cluster.CoordLog().Infof("namespace loaded : %v", len(newNamespaces))
+			// save to file in case of etcd data disaster
+			pdCoord.saveClusterToFile(newNamespaces)
 		}
 	}
 
@@ -456,12 +499,20 @@ func (pdCoord *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
 	if pdCoord.register == nil {
 		return
 	}
+	lastSaved := time.Now()
 	for {
 		select {
 		case <-monitorChan:
 			return
 		case <-ticker.C:
 			pdCoord.doCheckNamespaces(monitorChan, nil, waitingMigrateNamespace, true)
+			if time.Since(lastSaved) > time.Hour*12 {
+				allNamespaces, _, err := pdCoord.register.GetAllNamespaces()
+				if err == nil {
+					lastSaved = time.Now()
+					pdCoord.saveClusterToFile(allNamespaces)
+				}
+			}
 		case failedInfo := <-pdCoord.checkNamespaceFailChan:
 			pdCoord.doCheckNamespaces(monitorChan, &failedInfo, waitingMigrateNamespace, failedInfo.NamespaceName == "")
 		}

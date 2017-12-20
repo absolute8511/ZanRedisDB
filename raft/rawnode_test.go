@@ -195,8 +195,9 @@ func TestRawNodeProposeAddDuplicateNode(t *testing.T) {
 // to the underlying raft. It also ensures that ReadState can be read out.
 func TestRawNodeReadIndex(t *testing.T) {
 	msgs := []raftpb.Message{}
-	appendStep := func(r *raft, m raftpb.Message) {
+	appendStep := func(r *raft, m raftpb.Message) bool {
 		msgs = append(msgs, m)
+		return false
 	}
 	wrs := []ReadState{{Index: uint64(1), RequestCtx: []byte("somedata")}}
 

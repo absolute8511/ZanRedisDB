@@ -50,6 +50,8 @@ const (
 	// max number of in-flight snapshot messages allows to have
 	maxInFlightMsgSnap        = 16
 	releaseDelayAfterSnapshot = 30 * time.Second
+	maxSizePerMsg             = 1024 * 1024
+	maxInflightMsgs           = 256
 )
 
 type Snapshot interface {
@@ -113,6 +115,7 @@ type raftNode struct {
 	newLeaderChan       chan string
 	lastLeaderChangedTs int64
 	stopping            int32
+	replayRunning  int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -294,9 +297,20 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 	// send nil once lastIndex is published so client knows commit channel is current
 	if len(ents) > 0 {
 		rc.lastIndex = ents[len(ents)-1].Index
+		atomic.StoreInt32(&rc.replayRunning, 1)
+	} else {
+		atomic.StoreInt32(&rc.replayRunning, 0)
 	}
 	rc.Infof("replaying WAL (%v) at lastIndex : %v", len(ents), rc.lastIndex)
 	return nil
+}
+
+func (rc *raftNode) IsReplayFinished() bool {
+	return atomic.LoadInt32(&rc.replayRunning) == 0
+}
+
+func (rc *raftNode) MarkReplayFinished() {
+	atomic.StoreInt32(&rc.replayRunning, 0)
 }
 
 func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
@@ -312,8 +326,8 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 		ElectionTick:    elecTick,
 		HeartbeatTick:   elecTick / 10,
 		Storage:         rc.raftStorage,
-		MaxSizePerMsg:   1024 * 1024,
-		MaxInflightMsgs: 256,
+		MaxSizePerMsg:   maxSizePerMsg,
+		MaxInflightMsgs: maxInflightMsgs,
 		CheckQuorum:     true,
 		PreVote:         true,
 		Logger:          nodeLog,
@@ -804,6 +818,7 @@ func (rc *raftNode) serveChannels() {
 				for _, ent := range rd.CommittedEntries {
 					if ent.Type == raftpb.EntryConfChange {
 						waitApply = true
+						nodeLog.Infof("need wait apply for config changed: %v", ent.String())
 						break
 					}
 				}
@@ -837,10 +852,15 @@ func (rc *raftNode) serveChannels() {
 				msgs := rc.processMessages(rd.Messages)
 				raftDone <- struct{}{}
 				if waitApply {
+					s := time.Now()
 					select {
 					case <-applyWaitDone:
 					case <-rc.stopc:
 						return
+					}
+					cost := time.Since(s)
+					if cost > time.Second {
+						nodeLog.Infof("wait apply %v msgs done cost: %v", len(msgs), cost.String())
 					}
 				}
 				rc.transport.Send(msgs)
@@ -874,8 +894,10 @@ func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 				// drop msgSnap if the inflight chan if full.
 			}
 			msgs[i].To = 0
-		} else if msgs[i].Type == raftpb.MsgVoteResp {
+		} else if msgs[i].Type == raftpb.MsgVoteResp || msgs[i].Type == raftpb.MsgPreVoteResp {
 			rc.Infof("send vote resp : %v", msgs[i].String())
+		} else if msgs[i].Type == raftpb.MsgVote || msgs[i].Type == raftpb.MsgPreVote {
+			rc.Infof("process vote/prevote :%v ", msgs[i].String())
 		}
 	}
 	return msgs
@@ -956,9 +978,14 @@ func (rc *raftNode) RestoreMembers(mems []*common.MemberInfo) {
 
 func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
 	if rc.node == nil {
+		rc.Infof("dropping message since node is nil: %v", m.String())
 		return nil
 	}
-	return rc.node.Step(ctx, m)
+	err := rc.node.Step(ctx, m)
+	if err != nil {
+		rc.Infof("dropping message since step failed: %v", m.String())
+	}
+	return err
 }
 
 func (rc *raftNode) getLastLeaderChangedTime() int64 {

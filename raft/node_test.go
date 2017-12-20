@@ -30,8 +30,8 @@ import (
 func TestNodeStep(t *testing.T) {
 	for i, msgn := range raftpb.MessageType_name {
 		n := &node{
-			propc: make(chan raftpb.Message, 1),
-			recvc: make(chan raftpb.Message, 1),
+			propc: make(chan msgWithDrop, 1),
+			recvc: make(chan msgWithDrop, 1),
 		}
 		msgt := raftpb.MessageType(i)
 		n.Step(context.TODO(), raftpb.Message{Type: msgt})
@@ -64,7 +64,7 @@ func TestNodeStep(t *testing.T) {
 func TestNodeStepUnblock(t *testing.T) {
 	// a node without buffer to block step
 	n := &node{
-		propc: make(chan raftpb.Message),
+		propc: make(chan msgWithDrop),
 		done:  make(chan struct{}),
 	}
 
@@ -109,8 +109,9 @@ func TestNodeStepUnblock(t *testing.T) {
 // TestNodePropose ensures that node.Propose sends the given proposal to the underlying raft.
 func TestNodePropose(t *testing.T) {
 	msgs := []raftpb.Message{}
-	appendStep := func(r *raft, m raftpb.Message) {
+	appendStep := func(r *raft, m raftpb.Message) bool {
 		msgs = append(msgs, m)
+		return false
 	}
 
 	n := newNode()
@@ -147,8 +148,9 @@ func TestNodePropose(t *testing.T) {
 // It also ensures that ReadState can be read out through ready chan.
 func TestNodeReadIndex(t *testing.T) {
 	msgs := []raftpb.Message{}
-	appendStep := func(r *raft, m raftpb.Message) {
+	appendStep := func(r *raft, m raftpb.Message) bool {
 		msgs = append(msgs, m)
+		return false
 	}
 	wrs := []ReadState{{Index: uint64(1), RequestCtx: []byte("somedata")}}
 
@@ -290,8 +292,9 @@ func TestNodeReadIndexToOldLeader(t *testing.T) {
 // to the underlying raft.
 func TestNodeProposeConfig(t *testing.T) {
 	msgs := []raftpb.Message{}
-	appendStep := func(r *raft, m raftpb.Message) {
+	appendStep := func(r *raft, m raftpb.Message) bool {
 		msgs = append(msgs, m)
+		return false
 	}
 
 	n := newNode()

@@ -155,6 +155,14 @@ func (s *Server) getIndexes(w http.ResponseWriter, req *http.Request, ps httprou
 	return v.Node.GetIndexSchema(table)
 }
 
+func (s *Server) checkNodeAllReady(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ok := s.nsMgr.IsAllRecoveryDone()
+	if !ok {
+		return nil, common.HttpErr{Code: http.StatusNotAcceptable, Text: "not ready for all"}
+	}
+	return nil, nil
+}
+
 func (s *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := s.GetNamespaceFromFullName(ns)
@@ -322,6 +330,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))
+	router.Handle("GET", common.APINodeAllReady, common.Decorate(s.checkNodeAllReady, common.V1))
 
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))

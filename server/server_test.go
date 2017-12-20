@@ -22,6 +22,10 @@ func TestMarkFollowerAsRemoving(t *testing.T) {
 	// TODO:
 }
 
+func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {
+	// TODO: test transfer leader while replica is restarting and not catchuped fully.
+	// should only transfer leader when replica has almost the newest raft logs
+}
 func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 	// TODO:
 	// should not mark as remove while there is not enough for replica
