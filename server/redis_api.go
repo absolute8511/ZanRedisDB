@@ -68,6 +68,11 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			cmdStr := string(cmd.Args[0])
 			if len(cmd.Args) > 1 {
 				cmdStr += ", " + string(cmd.Args[1])
+				if level > 4 && len(cmd.Args) > 2 {
+					for _, arg := range cmd.Args[2:] {
+						cmdStr += "," + string(arg)
+					}
+				}
 			}
 			if err == nil {
 				h(conn, cmd)
@@ -79,8 +84,8 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 				if cost >= time.Second ||
 					(level > 1 && cost > time.Millisecond*500) ||
 					(level > 2 && cost > time.Millisecond*100) ||
-					(level > 3 && cost > time.Millisecond) {
-
+					(level > 3 && cost > time.Millisecond) ||
+					(level > 4) {
 					sLog.Infof("slow command %v cost %v", cmdStr, cost)
 				}
 			}

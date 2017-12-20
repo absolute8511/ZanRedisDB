@@ -298,7 +298,7 @@ func (nd *KVNode) handleProposeReq() {
 	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
 	var lastReq *internalReq
 	// TODO: combine pipeline and batch to improve performance
-	// notice the maxPendingProposals config while using pipeline, avoid 
+	// notice the maxPendingProposals config while using pipeline, avoid
 	// sending too much pipeline which overflow the proposal buffer.
 	//lastReqList := make([]*internalReq, 0, 1024)
 
@@ -364,7 +364,7 @@ func (nd *KVNode) handleProposeReq() {
 					nd.w.Trigger(r.Header.ID, common.ErrQueueTimeout)
 				}
 			} else {
-				leftProposeTimeout := proposeTimeout+time.Second - time.Duration(cost)
+				leftProposeTimeout := proposeTimeout + time.Second - time.Duration(cost)
 
 				ctx, cancel := context.WithTimeout(context.Background(), leftProposeTimeout)
 				err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
@@ -678,7 +678,7 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 }
 
 // return if configure changed and whether need force backup
-func (nd *KVNode) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{}, 
+func (nd *KVNode) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{},
 	dupCheckMap map[string]bool) ([]uint64, []interface{}, map[string]bool) {
 	err := nd.store.CommitBatchWrite()
 	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
@@ -801,6 +801,9 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 										nd.w.Trigger(reqID, err)
 										continue
 									}
+									if nodeLog.Level() > common.LOG_DETAIL {
+										nd.rn.Infof("batching write command: %v", string(cmd.Raw))
+									}
 									batchReqIDList = append(batchReqIDList, reqID)
 									batchReqRspList = append(batchReqRspList, v)
 									nd.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
@@ -814,7 +817,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 							}
 							if batching {
 								batching = false
-								batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart, 
+								batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart,
 									batchReqIDList, batchReqRspList, dupCheckMap)
 							}
 							if handled {
@@ -828,7 +831,8 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 							} else {
 								v, err := h(cmd, req.Header.Timestamp)
 								cmdCost := time.Since(cmdStart)
-								if cmdCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && cmdCost > time.Millisecond*100) {
+								if cmdCost >= time.Second || nodeLog.Level() > common.LOG_DETAIL ||
+									(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > time.Millisecond*100) {
 									nd.rn.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 								}
 								nd.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
@@ -844,7 +848,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 					} else {
 						if batching {
 							batching = false
-							batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart, 
+							batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart,
 								batchReqIDList, batchReqRspList, dupCheckMap)
 						}
 						if req.Header.DataType == int32(HTTPReq) {
@@ -880,7 +884,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 				// TODO: add test case for this
 				if batching {
 					batching = false
-					batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart, 
+					batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart,
 						batchReqIDList, batchReqRspList, dupCheckMap)
 				}
 				for _, req := range reqList.Reqs {
