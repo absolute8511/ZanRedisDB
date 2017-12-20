@@ -337,7 +337,8 @@ func (s *Server) Process(ctx context.Context, m raftpb.Message) error {
 	}
 	kv := s.nsMgr.GetNamespaceNodeFromGID(m.ToGroup.GroupId)
 	if kv == nil {
-		sLog.Errorf("kv namespace not found while processing %v ", m.String())
+		sLog.Errorf("from %v, to %v(%v), kv namespace not found while processing %v, %v, %v ", 
+			m.From, m.To, m.ToGroup.String(), m.Type, m.Index, m.Term)
 		return node.ErrNamespacePartitionNotFound
 	}
 	if !kv.IsReady() {
