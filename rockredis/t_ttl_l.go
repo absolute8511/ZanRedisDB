@@ -13,6 +13,8 @@ var localExpCheckInterval = 300
 
 const (
 	localBatchedBufSize = 16 * 1024
+	// should less than max batch keys for batch write
+	localBatchedMaxKeysNum = 1024
 )
 
 var (
@@ -255,7 +257,7 @@ func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 	batch := &localBatch{
 		dt:   dt,
 		wb:   gorocksdb.NewWriteBatch(),
-		keys: make([][]byte, 0, 1024),
+		keys: make([][]byte, 0, localBatchedMaxKeysNum),
 	}
 	batch.localDelFn = createLocalDelFunc(dt, db, batch.wb)
 	return batch
@@ -271,7 +273,7 @@ func (batch *localBatch) commit() error {
 }
 
 func (batch *localBatch) propose(tk []byte, mk []byte, key []byte) error {
-	if len(batch.keys) >= 1024 {
+	if len(batch.keys) >= localBatchedMaxKeysNum {
 		return ErrLocalBatchFullToCommit
 	} else {
 		batch.wb.Delete(tk)

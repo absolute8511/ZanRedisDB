@@ -25,6 +25,8 @@ const (
 
 func init() {
 	expireCmds[common.KV] = []byte("del")
+	// make sure we registered these internal command for clear,
+	// api is not registered for these commands
 	expireCmds[common.HASH] = []byte("hmclear")
 	expireCmds[common.LIST] = []byte("lmclear")
 	expireCmds[common.SET] = []byte("smclear")

@@ -77,7 +77,6 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(true, "sadd", wrapWriteCommandKSubkeySubkey(nd, nd.saddCommand))
 	nd.router.Register(true, "srem", wrapWriteCommandKSubkeySubkey(nd, nd.sremCommand))
 	nd.router.Register(true, "sclear", wrapWriteCommandK(nd, nd.sclearCommand))
-	nd.router.Register(true, "smclear", wrapWriteCommandKK(nd, nd.smclearCommand))
 	// for ttl
 	nd.router.Register(false, "ttl", wrapReadCommandK(nd.ttlCommand))
 	nd.router.Register(false, "httl", wrapReadCommandK(nd.httlCommand))
