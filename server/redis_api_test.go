@@ -1396,14 +1396,6 @@ func TestSet(t *testing.T) {
 	} else if n != 4 {
 		t.Fatal(n)
 	}
-
-	c.Do("sadd", key1, 0)
-	c.Do("sadd", key2, 1)
-	if n, err := goredis.Int(c.Do("smclear", key1, key2)); err != nil {
-		t.Fatal(err)
-	} else if n != 2 {
-		t.Fatal(n)
-	}
 }
 
 func TestSetErrorParams(t *testing.T) {
