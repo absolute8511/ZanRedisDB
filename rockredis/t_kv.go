@@ -97,24 +97,31 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 
 //	ps : here just focus on deleting the key-value data,
 //		 any other likes expire is ignore.
-func (db *RockDB) KVDel(key []byte) error {
+func (db *RockDB) KVDel(key []byte) (int64, error) {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	db.MaybeClearBatch()
+	delCnt := int64(1)
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
 			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
 			if v != nil {
 				db.IncrTableKeyCount(table, -1, db.wb)
+			} else {
+				delCnt = int64(0)
 			}
 		} else {
 			db.IncrTableKeyCount(table, -1, db.wb)
 		}
 	}
 	db.wb.Delete(key)
-	return db.MaybeCommitBatch()
+	err = db.MaybeCommitBatch()
+	if err != nil {
+		return 0, err
+	}
+	return delCnt, nil
 }
 
 func (db *RockDB) KVDelWithBatch(key []byte, wb *gorocksdb.WriteBatch) error {
@@ -144,13 +151,15 @@ func (db *RockDB) DecrBy(ts int64, key []byte, decrement int64) (int64, error) {
 	return db.incr(ts, key, -decrement)
 }
 
-func (db *RockDB) DelKeys(keys ...[]byte) {
+func (db *RockDB) DelKeys(keys ...[]byte) (int64, error) {
 	if len(keys) == 0 {
-		return
+		return 0, nil
 	}
 
+	delCnt := int64(0)
 	for _, k := range keys {
-		db.KVDel(k)
+		c, _ := db.KVDel(k)
+		delCnt += c
 	}
 
 	//clear all the expire meta data related to the keys
@@ -158,7 +167,11 @@ func (db *RockDB) DelKeys(keys ...[]byte) {
 	for _, k := range keys {
 		db.delExpire(KVType, k, db.wb)
 	}
-	db.MaybeCommitBatch()
+	err := db.MaybeCommitBatch()
+	if err != nil {
+		return 0, err
+	}
+	return delCnt, nil
 }
 
 func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {

@@ -123,8 +123,12 @@ func (nd *KVNode) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, e
 }
 
 func (nd *KVNode) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	nd.store.DelKeys(cmd.Args[1:]...)
-	return int64(len(cmd.Args[1:])), nil
+	cnt, err := nd.store.DelKeys(cmd.Args[1:]...)
+	if err != nil {
+		nodeLog.Infof("failed to delete keys: %v, %v", string(cmd.Raw), err)
+		return 0, err
+	}
+	return cnt, nil
 }
 
 func (nd *KVNode) localPFCountCommand(cmd redcon.Command, ts int64) (interface{}, error) {

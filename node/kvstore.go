@@ -90,7 +90,7 @@ func (s *KVStore) LocalLookup(key []byte) ([]byte, error) {
 	return value, err
 }
 
-func (s *KVStore) LocalDelete(key []byte) error {
+func (s *KVStore) LocalDelete(key []byte) (int64, error) {
 	return s.KVDel(key)
 }
 
