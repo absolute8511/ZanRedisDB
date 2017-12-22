@@ -161,18 +161,26 @@ func (db *RockDB) DelKeys(keys ...[]byte) {
 	db.MaybeCommitBatch()
 }
 
-func (db *RockDB) KVExists(key []byte) (int64, error) {
-	_, key, err := convertRedisKeyToDBKVKey(key)
-	if err != nil {
-		return 0, err
+func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
+	keyList := make([][]byte, len(keys))
+	errs := make([]error, len(keys))
+	for i, k := range keys {
+		_, kk, err := convertRedisKeyToDBKVKey(k)
+		if err != nil {
+			keyList[i] = nil
+			errs[i] = err
+		} else {
+			keyList[i] = kk
+		}
 	}
-
-	var v []byte
-	v, err = db.eng.GetBytes(db.defaultReadOpts, key)
-	if v != nil && err == nil {
-		return 1, nil
+	cnt := int64(0)
+	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, keyList, errs)
+	for i, v := range keyList {
+		if errs[i] == nil && v != nil {
+			cnt++
+		}
 	}
-	return 0, err
+	return cnt, nil
 }
 
 func (db *RockDB) KVGet(key []byte) ([]byte, error) {

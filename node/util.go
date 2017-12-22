@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -363,5 +364,90 @@ func wrapMergeCommand(f common.MergeCommandFunc) common.MergeCommandFunc {
 		cmd.Args[1] = key
 
 		return f(cmd)
+	}
+}
+
+func wrapMergeCommandKK(f common.MergeCommandFunc) common.MergeCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
+		if len(cmd.Args) < 2 {
+			return nil, fmt.Errorf("ERR wrong number of arguments for '%s' command", string(cmd.Args[0]))
+		}
+		if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
+			return nil, errTooMuchBatchSize
+		}
+		for i := 1; i < len(cmd.Args); i++ {
+			_, key, err := common.ExtractNamesapce(cmd.Args[i])
+			if err != nil {
+				return nil, err
+			}
+			cmd.Args[i] = key
+		}
+		return f(cmd)
+	}
+}
+
+func wrapWriteMergeCommandKK(kvn *KVNode, f common.MergeWriteCommandFunc) common.MergeCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
+		if len(cmd.Args) < 2 {
+			return nil, fmt.Errorf("ERR wrong number of arguments for '%s' command", string(cmd.Args[0]))
+		}
+		args := cmd.Args[1:]
+		if len(args) >= common.MAX_BATCH_NUM {
+			return nil, errTooMuchBatchSize
+		}
+		for i, v := range args {
+			_, key, err := common.ExtractNamesapce(v)
+			if err != nil {
+				return nil, err
+			}
+			if common.IsValidTableName(key) {
+				return nil, common.ErrInvalidTableName
+			}
+			args[i] = key
+		}
+		ncmd := buildCommand(cmd.Args)
+		copy(cmd.Raw[0:], ncmd.Raw[:])
+		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
+
+		rsp, err := kvn.Propose(cmd.Raw)
+		if err != nil {
+			return nil, err
+		}
+
+		return f(cmd, rsp)
+	}
+}
+
+func wrapWriteMergeCommandKVKV(kvn *KVNode, f common.MergeWriteCommandFunc) common.MergeCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
+		if len(cmd.Args) < 3 || len(cmd.Args[1:])%2 != 0 {
+			return nil, fmt.Errorf("ERR wrong number arguments for '%s' command", string(cmd.Args[0]))
+		}
+		if len(cmd.Args[1:])/2 >= common.MAX_BATCH_NUM {
+			return nil, errTooMuchBatchSize
+		}
+		args := cmd.Args[1:]
+		for i, v := range args {
+			if i%2 != 0 {
+				continue
+			}
+			_, key, err := common.ExtractNamesapce(v)
+			if err != nil {
+				return nil, err
+			}
+			if common.IsValidTableName(key) {
+				return nil, common.ErrInvalidTableName
+			}
+			args[i] = key
+		}
+		ncmd := buildCommand(cmd.Args)
+		copy(cmd.Raw[0:], ncmd.Raw[:])
+		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
+
+		rsp, err := kvn.Propose(cmd.Raw)
+		if err != nil {
+			return nil, err
+		}
+		return f(cmd, rsp)
 	}
 }

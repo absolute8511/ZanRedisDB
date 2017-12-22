@@ -4,14 +4,13 @@ func (nd *KVNode) registerHandler() {
 	// for kv
 	nd.router.Register(false, "get", wrapReadCommandK(nd.getCommand))
 	nd.router.Register(false, "mget", wrapReadCommandKK(nd.mgetCommand))
-	nd.router.Register(false, "exists", wrapReadCommandK(nd.existsCommand))
+	//nd.router.Register(false, "exists", wrapReadCommandK(nd.existsCommand))
 	nd.router.Register(true, "set", wrapWriteCommandKV(nd, nd.setCommand))
 	nd.router.Register(true, "setnx", wrapWriteCommandKV(nd, nd.setnxCommand))
-	nd.router.Register(true, "mset", wrapWriteCommandKVKV(nd, nd.msetCommand))
+	//nd.router.Register(true, "mset", wrapWriteCommandKVKV(nd, nd.msetCommand))
 	nd.router.Register(true, "incr", wrapWriteCommandK(nd, nd.incrCommand))
-	nd.router.Register(true, "del", wrapWriteCommandKK(nd, nd.delCommand))
-	nd.router.Register(false, "plget", nd.plgetCommand)
-	nd.router.Register(true, "plset", nd.plsetCommand)
+	//nd.router.Register(true, "del", wrapWriteCommandKK(nd, nd.delCommand))
+	//nd.router.Register(true, "plset", nd.plsetCommand)
 	nd.router.Register(true, "pfadd", wrapWriteCommandKAnySubkey(nd, nd.pfaddCommand, 0))
 	nd.router.Register(false, "pfcount", wrapReadCommandK(nd.pfcountCommand))
 	// for hash
@@ -117,6 +116,11 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterMerge("advscan", nd.advanceScanCommand)
 	nd.router.RegisterMerge("fullscan", nd.fullScanCommand)
 	nd.router.RegisterMerge("hidx.from", nd.hindexSearchCommand)
+
+	nd.router.RegisterMerge("exists", wrapMergeCommandKK(nd.existsCommand))
+	nd.router.RegisterWriteMerge("del", wrapWriteMergeCommandKK(nd, nd.delCommand))
+	//nd.router.RegisterWriteMerge("mset", nd.msetCommand)
+	nd.router.RegisterWriteMerge("plset", wrapWriteMergeCommandKVKV(nd, nd.plsetCommand))
 
 	// only write command need to be registered as internal
 	// kv

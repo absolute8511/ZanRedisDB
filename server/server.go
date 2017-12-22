@@ -260,57 +260,6 @@ func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (common.CommandF
 	return h, cmd, nil
 }
 
-func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, error) {
-	if len(cmd.Args) < 2 {
-		return nil, nil, common.ErrInvalidArgs
-	}
-	rawKey := cmd.Args[1]
-
-	namespace, realKey, err := common.ExtractNamesapce(rawKey)
-	if err != nil {
-		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return nil, nil, err
-	}
-
-	nodes, err := s.nsMgr.GetNamespaceNodes(namespace, true)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmdName := strings.ToLower(string(cmd.Args[0]))
-	var cmds map[string]redcon.Command
-	//do nodes filter
-	if common.IsMergeScanCommand(cmdName) {
-		cmds, err = s.doScanNodesFilter(realKey, namespace, cmd, nodes)
-		if err != nil {
-			return nil, nil, err
-		}
-	} else {
-		cmds = make(map[string]redcon.Command)
-		for k := range nodes {
-			newCmd := common.DeepCopyCmd(cmd)
-			cmds[k] = newCmd
-		}
-	}
-
-	var handlers []common.MergeCommandFunc
-	var commands []redcon.Command
-	for k, v := range nodes {
-		newCmd := cmds[k]
-		h, ok := v.Node.GetMergeHandler(cmdName)
-		if ok {
-			handlers = append(handlers, h)
-			commands = append(commands, newCmd)
-		}
-	}
-
-	if len(handlers) <= 0 {
-		return nil, nil, common.ErrInvalidCommand
-	}
-
-	return handlers, commands, nil
-}
-
 func (s *Server) serveRaft() {
 	url, err := url.Parse(s.conf.LocalRaftAddr)
 	if err != nil {
@@ -337,7 +286,7 @@ func (s *Server) Process(ctx context.Context, m raftpb.Message) error {
 	}
 	kv := s.nsMgr.GetNamespaceNodeFromGID(m.ToGroup.GroupId)
 	if kv == nil {
-		sLog.Errorf("from %v, to %v(%v), kv namespace not found while processing %v, %v, %v ", 
+		sLog.Errorf("from %v, to %v(%v), kv namespace not found while processing %v, %v, %v ",
 			m.From, m.To, m.ToGroup.String(), m.Type, m.Index, m.Term)
 		return node.ErrNamespacePartitionNotFound
 	}

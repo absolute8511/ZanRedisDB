@@ -156,12 +156,12 @@ func TestKVNode_kvCommand(t *testing.T) {
 	}{
 		{"get", buildCommand([][]byte{[]byte("get"), testKey})},
 		{"mget", buildCommand([][]byte{[]byte("mget"), testKey, testKey2})},
-		{"exists", buildCommand([][]byte{[]byte("exists"), testKey})},
+		{"exists", buildCommand([][]byte{[]byte("exists"), testKey, testKey2})},
 		{"set", buildCommand([][]byte{[]byte("set"), testKey, testKeyValue})},
 		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey, testKeyValue})},
 		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey2, testKey2Value})},
-		{"mset", buildCommand([][]byte{[]byte("mset"), testKey, testKeyValue, testKey2, testKey2Value})},
-		{"del", buildCommand([][]byte{[]byte("del"), testKey})},
+		//{"mset", buildCommand([][]byte{[]byte("mset"), testKey, testKeyValue, testKey2, testKey2Value})},
+		{"del", buildCommand([][]byte{[]byte("del"), testKey, testKey2})},
 		{"incr", buildCommand([][]byte{[]byte("incr"), testKey})},
 		{"get", buildCommand([][]byte{[]byte("get"), testKey})},
 		{"mget", buildCommand([][]byte{[]byte("mget"), testKey, testKey2})},
@@ -176,7 +176,13 @@ func TestKVNode_kvCommand(t *testing.T) {
 	for _, cmd := range tests {
 		c.Reset()
 		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
-		handler(c, cmd.args)
+		if handler != nil {
+			handler(c, cmd.args)
+		} else {
+			handler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
+			_, err := handler(cmd.args)
+			assert.Nil(t, err)
+		}
 		assert.Nil(t, c.GetError())
 	}
 }

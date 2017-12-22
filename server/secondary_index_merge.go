@@ -42,7 +42,7 @@ func (s *Server) doMergeIndexSearch(conn redcon.Conn, cmd redcon.Command) {
 	}
 	_ = origOffset
 
-	result, err := s.dispatchAndWaitMergeCmd(cmd)
+	_, result, err := s.dispatchAndWaitMergeCmd(cmd)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return

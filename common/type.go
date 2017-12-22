@@ -173,20 +173,23 @@ type CommandFunc func(redcon.Conn, redcon.Command)
 type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
 type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
 type MergeCommandFunc func(redcon.Command) (interface{}, error)
+type MergeWriteCommandFunc func(redcon.Command, interface{}) (interface{}, error)
 
 type CmdRouter struct {
-	wcmds        map[string]CommandFunc
-	rcmds        map[string]CommandFunc
-	internalCmds map[string]InternalCommandFunc
-	mergeCmds    map[string]MergeCommandFunc
+	wcmds          map[string]CommandFunc
+	rcmds          map[string]CommandFunc
+	internalCmds   map[string]InternalCommandFunc
+	mergeCmds      map[string]MergeCommandFunc
+	mergeWriteCmds map[string]MergeCommandFunc
 }
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
-		wcmds:        make(map[string]CommandFunc),
-		rcmds:        make(map[string]CommandFunc),
-		internalCmds: make(map[string]InternalCommandFunc),
-		mergeCmds:    make(map[string]MergeCommandFunc),
+		wcmds:          make(map[string]CommandFunc),
+		rcmds:          make(map[string]CommandFunc),
+		internalCmds:   make(map[string]InternalCommandFunc),
+		mergeCmds:      make(map[string]MergeCommandFunc),
+		mergeWriteCmds: make(map[string]MergeCommandFunc),
 	}
 }
 
@@ -232,9 +235,22 @@ func (r *CmdRouter) RegisterMerge(name string, f MergeCommandFunc) bool {
 	return true
 }
 
-func (r *CmdRouter) GetMergeCmdHandler(name string) (MergeCommandFunc, bool) {
+func (r *CmdRouter) RegisterWriteMerge(name string, f MergeCommandFunc) bool {
+	if _, ok := r.mergeWriteCmds[strings.ToLower(name)]; ok {
+		return false
+	}
+	r.mergeWriteCmds[name] = f
+	return true
+}
+
+// return handler, iswrite, isexist
+func (r *CmdRouter) GetMergeCmdHandler(name string) (MergeCommandFunc, bool, bool) {
 	v, ok := r.mergeCmds[strings.ToLower(name)]
-	return v, ok
+	if ok {
+		return v, false, ok
+	}
+	v, ok = r.mergeWriteCmds[strings.ToLower(name)]
+	return v, true, ok
 }
 
 type StringArray []string

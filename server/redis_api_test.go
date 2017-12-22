@@ -155,6 +155,11 @@ func TestKV(t *testing.T) {
 	} else if n != 1 {
 		t.Fatal(n)
 	}
+	if n, err := goredis.Int(c.Do("exists", key1, key2)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
 
 	if n, err := goredis.Int(c.Do("exists", "default:test:empty_key_test")); err != nil {
 		t.Fatal(err)
@@ -177,6 +182,40 @@ func TestKV(t *testing.T) {
 	} else if n != 0 {
 		t.Fatal(n)
 	}
+
+	if n, err := goredis.Int(c.Do("exists", key1, key2)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+}
+
+func TestKVPipeline(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+	pkey1 := "default:test:kvpla"
+	pkey2 := "default:test:kvplb"
+
+	err := c.Send("set", pkey1, "1")
+	assert.Nil(t, err)
+	err = c.Send("set", pkey2, "2")
+	assert.Nil(t, err)
+	v, err := goredis.String(c.Receive())
+	assert.Nil(t, err)
+	assert.Equal(t, OK, v)
+	v, err = goredis.String(c.Receive())
+	assert.Nil(t, err)
+	assert.Equal(t, OK, v)
+	if v, err := goredis.String(c.Do("get", pkey1)); err != nil {
+		t.Fatal(err)
+	} else if v != "1" {
+		t.Error(v)
+	}
+	if v, err := goredis.String(c.Do("get", pkey2)); err != nil {
+		t.Fatal(err)
+	} else if v != "2" {
+		t.Error(v)
+	}
 }
 
 func TestKVM(t *testing.T) {
@@ -186,7 +225,12 @@ func TestKVM(t *testing.T) {
 	key1 := "default:test:kvma"
 	key2 := "default:test:kvmb"
 	key3 := "default:test:kvmc"
-	if ok, err := goredis.String(c.Do("mset", key1, "1", key2, "2")); err != nil {
+	if ok, err := goredis.String(c.Do("set", key1, "1")); err != nil {
+		t.Fatal(err)
+	} else if ok != OK {
+		t.Fatal(ok)
+	}
+	if ok, err := goredis.String(c.Do("set", key2, "2")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
 		t.Fatal(ok)
@@ -323,11 +367,17 @@ func TestKVBatch(t *testing.T) {
 			mkey1 := "default:test:kvma" + strconv.Itoa(index)
 			mkey2 := "default:test:kvmb" + strconv.Itoa(index)
 			mkey3 := "default:test:kvmc" + strconv.Itoa(index)
-			if ok, err := goredis.String(c.Do("mset", mkey1, "1", mkey2, "2")); err != nil {
-				t.Fatal(err)
-			} else if ok != OK {
-				t.Fatal(ok)
-			}
+			// test pipeline set
+			err := c.Send("set", mkey1, "1")
+			assert.Nil(t, err)
+			err = c.Send("set", mkey2, "2")
+			assert.Nil(t, err)
+			v, err := goredis.String(c.Receive())
+			assert.Nil(t, err)
+			assert.Equal(t, OK, v)
+			v, err = goredis.String(c.Receive())
+			assert.Nil(t, err)
+			assert.Equal(t, OK, v)
 
 			if v, err := goredis.String(c.Do("get", mkey1)); err != nil {
 				t.Fatal(err)
@@ -427,7 +477,7 @@ func TestKVErrorParams(t *testing.T) {
 	_, err = c.Do("setnx", key1, key2, key3)
 	assert.NotNil(t, err)
 
-	_, err = c.Do("exists", key1, key2)
+	_, err = c.Do("exists")
 	assert.NotNil(t, err)
 
 	_, err = c.Do("incr", key1, key2)

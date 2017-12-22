@@ -72,7 +72,7 @@ func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, []byte, error)
 
 		var wg sync.WaitGroup
 		var results []interface{}
-		handlers, cmds, err := s.GetMergeHandlers(cmd)
+		handlers, cmds, _, err := s.GetMergeHandlers(cmd)
 		if err == nil {
 			length := len(handlers)
 			everyCount := count / length

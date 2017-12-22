@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"runtime"
 	"strconv"
 	"sync/atomic"
@@ -13,7 +12,7 @@ import (
 )
 
 var (
-	errInvalidCommand = errors.New("invalid command")
+	errInvalidCommand = common.ErrInvalidCommand
 	costStatsLevel    int32
 )
 

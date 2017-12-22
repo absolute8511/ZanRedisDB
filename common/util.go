@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	APIAddNode     = "/cluster/node/add"
-	APIGetMembers  = "/cluster/members"
-	APIGetLeader   = "/cluster/leader"
-	APICheckBackup = "/cluster/checkbackup"
-	APIGetIndexes  = "/schema/indexes"
-	APINodeAllReady  = "/node/allready"
+	APIAddNode      = "/cluster/node/add"
+	APIGetMembers   = "/cluster/members"
+	APIGetLeader    = "/cluster/leader"
+	APICheckBackup  = "/cluster/checkbackup"
+	APIGetIndexes   = "/schema/indexes"
+	APINodeAllReady = "/node/allready"
 )
 
 const (
@@ -166,6 +166,11 @@ func IsMergeIndexSearchCommand(cmd string) bool {
 	return strings.ToLower(cmd) == "hidx.from"
 }
 
+func IsMergeKeysCommand(cmd string) bool {
+	lcmd := strings.ToLower(cmd)
+	return lcmd == "plset" || lcmd == "exists" || lcmd == "del"
+}
+
 func IsMergeCommand(cmd string) bool {
 	if IsMergeScanCommand(cmd) {
 		return true
@@ -174,5 +179,10 @@ func IsMergeCommand(cmd string) bool {
 	if IsMergeIndexSearchCommand(cmd) {
 		return true
 	}
+
+	if IsMergeKeysCommand(cmd) {
+		return true
+	}
+
 	return false
 }

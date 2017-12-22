@@ -42,7 +42,7 @@ func TestKVNode_scanCommand(t *testing.T) {
 			handler(c, cmd.args)
 			assert.Nil(t, c.GetError())
 		} else {
-			mhandler, _ := nd.router.GetMergeCmdHandler(cmd.name)
+			mhandler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
 			_, err := mhandler(cmd.args)
 			assert.Nil(t, err)
 		}

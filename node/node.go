@@ -289,7 +289,7 @@ func (nd *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
 	return nd.router.GetCmdHandler(cmd)
 }
 
-func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool) {
+func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bool) {
 	return nd.router.GetMergeCmdHandler(cmd)
 }
 

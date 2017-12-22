@@ -26,13 +26,9 @@ func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) existsCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, _ := nd.store.KVExists(cmd.Args[1])
-	if val != 1 {
-		conn.WriteInt(0)
-	} else {
-		conn.WriteInt(1)
-	}
+func (nd *KVNode) existsCommand(cmd redcon.Command) (interface{}, error) {
+	val, err := nd.store.KVExists(cmd.Args[1:]...)
+	return val, err
 }
 
 func (nd *KVNode) mgetCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -70,8 +66,8 @@ func (nd *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command, v interface
 	}
 }
 
-func (nd *KVNode) msetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
+func (nd *KVNode) msetCommand(cmd redcon.Command, v interface{}) (interface{}, error) {
+	return nil, nil
 }
 
 func (nd *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
@@ -82,11 +78,11 @@ func (nd *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interface{
 	}
 }
 
-func (nd *KVNode) delCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+func (nd *KVNode) delCommand(cmd redcon.Command, v interface{}) (interface{}, error) {
 	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
+		return rsp, nil
 	} else {
-		conn.WriteError(errInvalidResponse.Error())
+		return nil, errInvalidResponse
 	}
 }
 

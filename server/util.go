@@ -38,6 +38,8 @@ func GetIPv4ForInterfaceName(ifname string) string {
 }
 
 // pipelineCommand creates a single command from a pipeline.
+// should handle some pipeline command which across multi partitions
+// since plget response is a bit complicated (order require), we do not handle pipeline for get
 func pipelineCommand(conn redcon.Conn, cmd redcon.Command) (int, redcon.Command, error) {
 	if conn == nil {
 		return 0, cmd, nil
@@ -52,20 +54,6 @@ func pipelineCommand(conn redcon.Conn, cmd redcon.Command) (int, redcon.Command,
 		return 0, cmd, nil
 	case "plget", "plset":
 		return 0, redcon.Command{}, ErrUnknownCommand
-	case "get":
-		if len(cmd.Args) != 2 {
-			return 0, cmd, nil
-		}
-		// convert to an PLGET command which similar to an MGET
-		for _, pcmd := range pcmds {
-			if qcmdlower(pcmd.Args[0]) != "get" || len(pcmd.Args) != 2 {
-				return 0, cmd, nil
-			}
-		}
-		args = append(args, []byte("plget"))
-		for _, pcmd := range append([]redcon.Command{cmd}, pcmds...) {
-			args = append(args, pcmd.Args[1])
-		}
 	case "set":
 		if len(cmd.Args) != 3 {
 			return 0, cmd, nil
