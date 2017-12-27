@@ -22,8 +22,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/pkg/fileutil"
 )
 
 var ErrNoDBSnapshot = errors.New("snap: snapshot file doesn't exist")

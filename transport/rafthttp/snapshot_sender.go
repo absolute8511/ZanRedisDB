@@ -24,9 +24,9 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/coreos/etcd/pkg/httputil"
-	pioutil "github.com/coreos/etcd/pkg/ioutil"
-	"github.com/coreos/etcd/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/pkg/httputil"
+	pioutil "github.com/absolute8511/ZanRedisDB/pkg/ioutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 )
 
 var (

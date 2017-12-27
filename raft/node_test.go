@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/pkg/testutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
 	"golang.org/x/net/context"
 )
 

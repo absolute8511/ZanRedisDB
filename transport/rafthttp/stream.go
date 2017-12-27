@@ -16,7 +16,6 @@ package rafthttp
 
 import (
 	"fmt"
-	"golang.org/x/net/context"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -25,11 +24,13 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/context"
+
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/stats"
-	"github.com/coreos/etcd/pkg/httputil"
-	"github.com/coreos/etcd/pkg/transport"
-	"github.com/coreos/etcd/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/pkg/httputil"
+	"github.com/absolute8511/ZanRedisDB/pkg/transport"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/go-semver/semver"
 )
@@ -52,6 +53,8 @@ var (
 		"2.3.0": {streamTypeMsgAppV2, streamTypeMessage},
 		"3.0.0": {streamTypeMsgAppV2, streamTypeMessage},
 		"3.1.0": {streamTypeMsgAppV2, streamTypeMessage},
+		"3.2.0": {streamTypeMsgAppV2, streamTypeMessage},
+		"3.3.0": {streamTypeMsgAppV2, streamTypeMessage},
 	}
 )
 

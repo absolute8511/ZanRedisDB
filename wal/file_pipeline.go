@@ -19,7 +19,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/coreos/etcd/pkg/fileutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
 )
 
 // filePipeline pipelines allocating disk space

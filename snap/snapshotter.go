@@ -30,8 +30,8 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap/snappb"
-	pioutil "github.com/coreos/etcd/pkg/ioutil"
-	"github.com/coreos/etcd/pkg/pbutil"
+	pioutil "github.com/absolute8511/ZanRedisDB/pkg/ioutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
 )
 
 const (

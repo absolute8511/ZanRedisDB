@@ -28,15 +28,15 @@ import (
 	"sync/atomic"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/absolute8511/ZanRedisDB/wal"
 	"github.com/absolute8511/ZanRedisDB/wal/walpb"
-	"github.com/coreos/etcd/pkg/fileutil"
-	"github.com/coreos/etcd/pkg/idutil"
-	"github.com/coreos/etcd/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/pkg/idutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"golang.org/x/net/context"
 )
 
@@ -115,7 +115,7 @@ type raftNode struct {
 	newLeaderChan       chan string
 	lastLeaderChangedTs int64
 	stopping            int32
-	replayRunning  int32
+	replayRunning       int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry

@@ -20,7 +20,7 @@ import (
 	"io"
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/coreos/etcd/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
 )
 
 // messageEncoder is a encoder that can encode all kinds of messages.

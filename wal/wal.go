@@ -26,11 +26,11 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/wal/walpb"
-	"github.com/coreos/etcd/pkg/fileutil"
-	"github.com/coreos/etcd/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
 )
 
 const (
@@ -179,7 +179,7 @@ func (w *WAL) renameWal(tmpdirpath string) (*WAL, error) {
 	w.dirFile = df
 	return w, err
 }
-	
+
 func (w *WAL) renameWalUnlock(tmpdirpath string) (*WAL, error) {
 	// rename of directory with locked files doesn't work on windows/cifs;
 	// close the WAL to release the locks so the directory can be renamed.
@@ -199,7 +199,6 @@ func (w *WAL) renameWalUnlock(tmpdirpath string) (*WAL, error) {
 	}
 	return newWAL, nil
 }
-	
 
 // Open opens the WAL at the given snap.
 // The snap SHOULD have been previously saved to the WAL, or the following
@@ -515,7 +514,7 @@ func (w *WAL) ReleaseLockTo(index uint64) error {
 	defer w.mu.Unlock()
 
 	if len(w.locks) == 0 {
-	    return nil
+		return nil
 	}
 
 	var smaller int

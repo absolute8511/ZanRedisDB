@@ -28,8 +28,8 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"github.com/coreos/etcd/version"
 )
 

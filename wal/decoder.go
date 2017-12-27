@@ -23,8 +23,8 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/wal/walpb"
-	"github.com/coreos/etcd/pkg/crc"
-	"github.com/coreos/etcd/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/crc"
+	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
 )
 
 const minSectorSize = 512
