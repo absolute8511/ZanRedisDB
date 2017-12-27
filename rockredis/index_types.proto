@@ -24,12 +24,12 @@ enum IndexState {
 }
 
 message HsetIndexInfo {
-    bytes name = 1 [(gogoproto.nullable) = false];
-    bytes index_field = 2 [(gogoproto.nullable) = false];
-    int32 prefix_len = 3 [(gogoproto.nullable) = false];
-    int32 unique = 4 [(gogoproto.nullable) = false];
-    IndexPropertyDType value_type = 5 [(gogoproto.nullable) = false];
-    IndexState state = 6 [(gogoproto.nullable) = false];
+    bytes name = 1 ;
+    bytes index_field = 2 ;
+    int32 prefix_len = 3 ;
+    int32 unique = 4 ;
+    IndexPropertyDType value_type = 5 ;
+    IndexState state = 6 ;
 }
 
 message HsetIndexList {
