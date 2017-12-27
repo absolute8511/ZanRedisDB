@@ -324,9 +324,9 @@ func (nd *KVNode) geoRadiusGeneric(conn redcon.Conn, cmd redcon.Command, stype s
 			dist := point.dist / conversion
 			conn.WriteBulk([]byte(strconv.FormatFloat(dist, 'g', -1, 64)))
 		}
+
 		if withhash {
-			hash := strconv.FormatUint(uint64(point.score), 10)
-			conn.WriteBulk([]byte(hash))
+			conn.WriteInt64(int64(point.score))
 		}
 
 		if withcoords {

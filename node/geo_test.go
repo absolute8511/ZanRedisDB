@@ -25,7 +25,7 @@ func TestKVNode_GeoCommand(t *testing.T) {
 		lat        float64
 		lon        float64
 		dist       float64
-		hash       uint64
+		hash       int64
 		hashBase32 string
 	}
 
@@ -334,7 +334,7 @@ func TestKVNode_GeoCommand(t *testing.T) {
 				sortedResult[i].name, sortedResult[i].dist)
 		}
 
-		assert.Equal(t, []byte(strconv.FormatUint(sortedResult[i].hash, 10)), c.rsp[i*7+3])
+		assert.Equal(t, sortedResult[i].hash, c.rsp[i*7+3])
 		assert.Equal(t, 2, c.rsp[i*7+4])
 
 		if ok, err := convIBytes2Float64AndCompare(c.rsp[i*7+5],
@@ -379,7 +379,7 @@ func TestKVNode_GeoCommand(t *testing.T) {
 				sortedResult[i].name, sortedResult[i].dist)
 		}
 
-		assert.Equal(t, []byte(strconv.FormatUint(sortedResult[i].hash, 10)), c.rsp[j*7+3])
+		assert.Equal(t, sortedResult[i].hash, c.rsp[j*7+3])
 		assert.Equal(t, 2, c.rsp[j*7+4])
 
 		if ok, err := convIBytes2Float64AndCompare(c.rsp[j*7+5],
