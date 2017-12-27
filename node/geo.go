@@ -98,7 +98,9 @@ GEODIST key elem0 elem1 [unit]
 func (nd *KVNode) geodistCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 4 && len(cmd.Args) != 5 {
 		conn.WriteError("ERR wrong number of arguments for 'geodist' command")
+		return
 	}
+
 	var toMeters float64 = 1.0
 	var err error
 
@@ -113,11 +115,13 @@ func (nd *KVNode) geodistCommand(conn redcon.Conn, cmd redcon.Command) {
 	hash0, err := nd.store.ZScore(cmd.Args[1], cmd.Args[2])
 	if err != nil {
 		conn.WriteNull()
+		return
 	}
 
 	hash1, err := nd.store.ZScore(cmd.Args[1], cmd.Args[3])
 	if err != nil {
 		conn.WriteNull()
+		return
 	}
 
 	distance := geohash.DistBetweenGeoHashWGS84(uint64(hash0), uint64(hash1)) / toMeters
@@ -136,23 +140,23 @@ func (nd *KVNode) geohashCommand(conn redcon.Conn, cmd redcon.Command) {
 		if err != nil {
 			//conn.WriteString(err.Error())
 			conn.WriteNull()
+		} else {
+			/* The internal format we use for geocoding is a bit different
+			 * than the standard, since we use as initial latitude range
+			 * -85,85, while the normal geohashing algorithm uses -90,90.
+			 * So we have to decode our position and re-encode using the
+			 * standard ranges in order to output a valid geohash string. */
+			/* Decode... */
+			longitude, latitude := geohash.DecodeToLongLatWGS84(uint64(hash))
+			code, _ := geohash.Encode(
+				&geohash.Range{Max: 180, Min: -180},
+				&geohash.Range{Max: 90, Min: -90},
+				longitude,
+				latitude,
+				geohash.WGS84_GEO_STEP)
+			conn.WriteBulk(geohash.EncodeToBase32(code.Bits))
 		}
-		/* The internal format we use for geocoding is a bit different
-		 * than the standard, since we use as initial latitude range
-		 * -85,85, while the normal geohashing algorithm uses -90,90.
-		 * So we have to decode our position and re-encode using the
-		 * standard ranges in order to output a valid geohash string. */
-		/* Decode... */
-		longitude, latitude := geohash.DecodeToLongLatWGS84(uint64(hash))
-		code, _ := geohash.Encode(
-			&geohash.Range{Max: 180, Min: -180},
-			&geohash.Range{Max: 90, Min: -90},
-			longitude,
-			latitude,
-			geohash.WGS84_GEO_STEP)
-		conn.WriteBulk(geohash.EncodeToBase32(code.Bits))
 	}
-
 }
 
 /* usage:
@@ -165,13 +169,13 @@ func (nd *KVNode) geoposCommand(conn redcon.Conn, cmd redcon.Command) {
 		hash, err := nd.store.ZScore(cmd.Args[1], member)
 		if err != nil {
 			conn.WriteNull()
+		} else {
+			longitude, latitude := geohash.DecodeToLongLatWGS84(uint64(hash))
+			conn.WriteArray(2)
+			conn.WriteBulk([]byte(strconv.FormatFloat(longitude, 'g', -1, 64)))
+			conn.WriteBulk([]byte(strconv.FormatFloat(latitude, 'g', -1, 64)))
 		}
-		longitude, latitude := geohash.DecodeToLongLatWGS84(uint64(hash))
-		conn.WriteArray(2)
-		conn.WriteBulk([]byte(strconv.FormatFloat(longitude, 'g', -1, 64)))
-		conn.WriteBulk([]byte(strconv.FormatFloat(latitude, 'g', -1, 64)))
 	}
-
 }
 
 /* usage:

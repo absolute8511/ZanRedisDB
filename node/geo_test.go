@@ -161,11 +161,14 @@ func TestKVNode_GeoCommand(t *testing.T) {
 	testCmd = "geohash"
 	cmdArgs[0] = []byte(testCmd)
 	cmdArgs[1] = testKey
-	for i := 0; i < len(tCases); i++ {
-		cmdArgs[i+2] = []byte(tCases[i].name)
-	}
 	cmdArgs = cmdArgs[:len(tCases)+2]
-
+	for i := 0; i < len(tCases); i++ {
+		if i%2 == 1 {
+			cmdArgs[i+2] = []byte("NoneExsitPlace" + strconv.Itoa(i))
+		} else {
+			cmdArgs[i+2] = []byte(tCases[i].name)
+		}
+	}
 	handlerCmd = buildCommand(cmdArgs)
 	handler, _, _ = nd.router.GetCmdHandler(testCmd)
 	handler(c, handlerCmd)
@@ -174,12 +177,13 @@ func TestKVNode_GeoCommand(t *testing.T) {
 		"response array length of geohash mismatch")
 
 	for i, tCase := range tCases {
-		if hb, ok := c.rsp[i+1].([]byte); !ok {
-			t.Fatalf("response of command:geohash should in type of []byte, %v", c.rsp[i])
-		} else if string(hb) != tCase.hashBase32 {
-			t.Fatalf("GeoHash of %s should be [%s] not [%s]", tCase.name, tCase.hashBase32, string(hb))
+		if i%2 == 1 {
+			assert.Equal(t, c.rsp[i+1], nil)
+		} else {
+			assert.Equal(t, c.rsp[i+1], []byte(tCase.hashBase32))
 		}
 	}
+
 	c.Reset()
 
 	/* Test geodist. */
@@ -221,7 +225,20 @@ func TestKVNode_GeoCommand(t *testing.T) {
 			c.Reset()
 		}
 	}
+	c.Reset()
 
+	/* Test geodist with nonexistent place. */
+	testCmd = "geodist"
+	cmdArgs = cmdArgs[0:5]
+	cmdArgs[0] = []byte(testCmd)
+	cmdArgs[1] = testKey
+	cmdArgs[2] = center
+	cmdArgs[3] = []byte("NoneExsitPlace")
+	cmdArgs[4] = []byte("m")
+	handlerCmd = buildCommand(cmdArgs)
+	handler, _, _ = nd.router.GetCmdHandler(testCmd)
+	handler(c, handlerCmd)
+	assert.Nil(t, c.rsp[0], "geodist with nonexistent should return nil")
 	c.Reset()
 
 	/* Test geopos. */
@@ -230,9 +247,12 @@ func TestKVNode_GeoCommand(t *testing.T) {
 	cmdArgs[1] = testKey
 	cmdArgs = cmdArgs[:len(tCases)+2]
 	for i, tCase := range tCases {
-		cmdArgs[i+2] = []byte(tCase.name)
+		if i%2 == 1 {
+			cmdArgs[i+2] = []byte("NoneExistPlace" + strconv.Itoa(i))
+		} else {
+			cmdArgs[i+2] = []byte(tCase.name)
+		}
 	}
-
 	handlerCmd = buildCommand(cmdArgs)
 	handler, _, _ = nd.router.GetCmdHandler(testCmd)
 	handler(c, handlerCmd)
@@ -241,20 +261,27 @@ func TestKVNode_GeoCommand(t *testing.T) {
 	assert.Equal(t, len(tCases), c.rsp[0],
 		"total response length from geopos mismatch")
 
-	for i, tCase := range tCases {
-		assert.Equal(t, 2, c.rsp[3*i+1])
-		/* Check the longitude of the position */
-		if ok, err := convIBytes2Float64AndCompare(c.rsp[3*i+2], tCase.lon, 0.0001); err != nil {
-			t.Fatal(err)
+	i := 1
+	for j, tCase := range tCases {
+		if j%2 == 1 {
+			assert.Equal(t, nil, c.rsp[i])
+			i++
 		} else {
-			assert.True(t, ok, "longitude of %s should be %f±0.0001", tCase.name, tCase.lon)
-		}
+			assert.Equal(t, 2, c.rsp[i])
+			/* Check the longitude of the position */
+			if ok, err := convIBytes2Float64AndCompare(c.rsp[i+1], tCase.lon, 0.0001); err != nil {
+				t.Fatal(err)
+			} else {
+				assert.True(t, ok, "longitude of %s should be %f±0.0001", tCase.name, tCase.lon)
+			}
 
-		/* Check the latitude of the position */
-		if ok, err := convIBytes2Float64AndCompare(c.rsp[3*i+3], tCase.lat, 0.0001); err != nil {
-			t.Fatal(err)
-		} else {
-			assert.True(t, ok, "latitude of %s should be %f±0.0001", tCase.name, tCase.lat)
+			/* Check the latitude of the position */
+			if ok, err := convIBytes2Float64AndCompare(c.rsp[i+2], tCase.lat, 0.0001); err != nil {
+				t.Fatal(err)
+			} else {
+				assert.True(t, ok, "latitude of %s should be %f±0.0001", tCase.name, tCase.lat)
+			}
+			i += 3
 		}
 	}
 	c.Reset()
