@@ -25,8 +25,8 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/stats"
-	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 )
 
 const (

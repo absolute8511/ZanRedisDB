@@ -18,7 +18,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/coreos/etcd/pkg/testutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
 )
 
 // TestURLPickerPickTwice tests that pick returns a possible url,

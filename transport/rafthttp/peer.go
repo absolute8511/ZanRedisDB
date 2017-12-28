@@ -22,7 +22,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
 	"github.com/absolute8511/ZanRedisDB/stats"
-	"github.com/coreos/etcd/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"golang.org/x/net/context"
 )
 
