@@ -35,7 +35,7 @@ func convertRedisKeyToDBHKey(key []byte, field []byte) ([]byte, error) {
 func checkHashKFSize(key []byte, field []byte) error {
 	if len(key) > MaxKeySize || len(key) == 0 {
 		return errKeySize
-	} else if len(field) > MaxHashFieldSize || len(field) == 0 {
+	} else if len(field) > MaxHashFieldSize {
 		return errHashFieldSize
 	}
 	return nil

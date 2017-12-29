@@ -553,6 +553,33 @@ func TestPFOpErrorParams(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
+func TestHashEmptyField(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:hashempty"
+	_, err := c.Do("hset", key, "", "v1")
+	assert.Nil(t, err)
+
+	v, _ := goredis.String(c.Do("hget", key, ""))
+	assert.Equal(t, "v1", v)
+
+	n, err := goredis.Int(c.Do("hexists", key, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+
+	_, err = c.Do("hdel", key, "")
+	assert.Nil(t, err)
+
+	v, err = goredis.String(c.Do("hget", key, ""))
+	assert.Equal(t, goredis.ErrNil, err)
+	assert.Equal(t, "", v)
+
+	n, err = goredis.Int(c.Do("hexists", key, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+}
+
 func TestHash(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
