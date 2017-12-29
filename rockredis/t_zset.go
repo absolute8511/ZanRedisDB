@@ -38,7 +38,7 @@ const (
 func checkZSetKMSize(key []byte, member []byte) error {
 	if len(key) > MaxKeySize || len(key) == 0 {
 		return errKeySize
-	} else if len(member) > MaxZSetMemberSize || len(member) == 0 {
+	} else if len(member) > MaxZSetMemberSize {
 		return errZSetMemberSize
 	}
 	return nil

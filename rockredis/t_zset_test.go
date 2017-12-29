@@ -62,6 +62,62 @@ func TestZSetCodec(t *testing.T) {
 
 }
 
+func TestDBZSetWithEmptyMember(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := bin("test:testdb_zset_empty")
+	if n, err := db.ZAdd(key, pair("a", 0), pair("b", 1),
+		pair("c", 2), pair("", 3)); err != nil {
+		t.Fatal(err)
+	} else if n != 4 {
+		t.Fatal(n)
+	}
+
+	if n, err := db.ZCount(key, 0, 0XFF); err != nil {
+		t.Fatal(err)
+	} else if n != 4 {
+		t.Fatal(n)
+	}
+
+	if s, err := db.ZScore(key, bin("")); err != nil {
+		t.Fatal(err)
+	} else if s != 3 {
+		t.Fatal(s)
+	}
+
+	if n, err := db.ZRem(key, bin("a"), bin("b")); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := db.ZRem(key, bin("a"), bin("b")); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	if n, err := db.ZCard(key); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := db.ZClear(key); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := db.ZCount(key, 0, 0XFF); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+}
+
 func TestDBZSet(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
