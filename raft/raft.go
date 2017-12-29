@@ -116,6 +116,9 @@ type Config struct {
 	// previous configuration will panic if peers is set. peer is private and only
 	// used for testing right now.
 	peers []pb.Group
+	// learners contains the IDs of all leaner nodes (including self if the local node is a leaner) in the raft cluster.
+	// learners only receives entries from the leader node. It does not vote or promote itself.
+	learners []pb.Group
 
 	// ElectionTick is the number of Node.Tick invocations that must pass between
 	// elections. That is, if a follower does not receive any message from the
@@ -249,8 +252,11 @@ type raft struct {
 	maxInflight int
 	maxMsgSize  uint64
 	prs         map[uint64]*Progress
+	learnerPrs  map[uint64]*Progress
 
 	state StateType
+	//isLearner is true if the local raft node is a learner.
+	isLearner bool
 
 	votes map[uint64]bool
 
@@ -303,15 +309,19 @@ func newRaft(c *Config) *raft {
 		panic(err) // TODO(bdarnell)
 	}
 	peers := c.peers
-	if len(cs.Nodes) > 0 {
-		if len(peers) > 0 {
+	learners := c.learners
+	if len(cs.Nodes) > 0 || len(cs.Learners) > 0 {
+		if len(peers) > 0 || len(learners) > 0 {
 			// TODO(bdarnell): the peers argument is always nil except in
 			// tests; the argument should be removed and these tests should be
 			// updated to specify their nodes through a snapshot.
-			panic("cannot specify both newRaft(peers) and ConfState.Nodes)")
+			panic("cannot specify both newRaft(peers, learners) and ConfState.(Nodes, Learners)")
 		}
 		if len(cs.Groups) != len(cs.Nodes) {
 			panic("initial peers from storage failed: invalid initial state")
+		}
+		if len(cs.LearnerGroups) != len(cs.Learners) {
+			panic("initial learner peers from storage failed: invalid initial state")
 		}
 		for _, g := range cs.Groups {
 			if g.GroupId == 0 {
@@ -319,15 +329,23 @@ func newRaft(c *Config) *raft {
 			}
 			peers = append(peers, *g)
 		}
+		for _, g := range cs.LearnerGroups {
+			if g.GroupId == 0 {
+				g.GroupId = c.Group.GroupId
+			}
+			learners = append(learners, *g)
+		}
 	}
 	r := &raft{
 		id:                        c.ID,
 		group:                     c.Group,
 		lead:                      None,
+		isLearner:                 false,
 		raftLog:                   raftlog,
 		maxMsgSize:                c.MaxSizePerMsg,
 		maxInflight:               c.MaxInflightMsgs,
 		prs:                       make(map[uint64]*Progress),
+		learnerPrs:                make(map[uint64]*Progress),
 		electionTimeout:           c.ElectionTick,
 		heartbeatTimeout:          c.HeartbeatTick,
 		logger:                    c.Logger,
@@ -339,6 +357,16 @@ func newRaft(c *Config) *raft {
 	for _, p := range peers {
 		r.prs[p.RaftReplicaId] = &Progress{Next: 1, ins: newInflights(r.maxInflight), group: p}
 		r.logger.Debugf("newRaft %x [add peer: %v ]", r.id, r.prs[p.RaftReplicaId])
+	}
+	for _, p := range learners {
+		if _, ok := r.prs[p.RaftReplicaId]; ok {
+			panic(fmt.Sprintf("node %x is in both learner and peer list", p))
+		}
+		r.learnerPrs[p.RaftReplicaId] = &Progress{Next: 1, ins: newInflights(r.maxInflight), group: p, IsLearner: true}
+		if r.id == p.RaftReplicaId {
+			r.isLearner = true
+		}
+		r.logger.Debugf("newRaft %x [add learner peer: %v ]", r.id, r.learnerPrs[p.RaftReplicaId])
 	}
 	if !isHardStateEqual(hs, emptyState) {
 		r.loadState(hs)
@@ -373,8 +401,11 @@ func (r *raft) hardState() pb.HardState {
 func (r *raft) quorum() int { return len(r.prs)/2 + 1 }
 
 func (r *raft) nodes() []uint64 {
-	nodes := make([]uint64, 0, len(r.prs))
+	nodes := make([]uint64, 0, len(r.prs)+len(r.learnerPrs))
 	for id := range r.prs {
+		nodes = append(nodes, id)
+	}
+	for id := range r.learnerPrs {
 		nodes = append(nodes, id)
 	}
 	sort.Sort(uint64Slice(nodes))
@@ -382,8 +413,12 @@ func (r *raft) nodes() []uint64 {
 }
 
 func (r *raft) groups() []*pb.Group {
-	groups := make([]*pb.Group, 0, len(r.prs))
+	groups := make([]*pb.Group, 0, len(r.prs)+len(r.learnerPrs))
 	for _, pr := range r.prs {
+		newg := pr.group
+		groups = append(groups, &newg)
+	}
+	for _, pr := range r.learnerPrs {
 		newg := pr.group
 		groups = append(groups, &newg)
 	}
@@ -395,8 +430,8 @@ func (r *raft) send(m pb.Message) {
 	m.From = r.id
 	m.FromGroup = r.group
 	if m.ToGroup.NodeId == 0 {
-		pr, ok := r.prs[m.To]
-		if ok {
+		pr := r.getProgress(m.To)
+		if pr != nil {
 			m.ToGroup = pr.group
 		}
 	}
@@ -432,9 +467,27 @@ func (r *raft) send(m pb.Message) {
 	r.msgs = append(r.msgs, m)
 }
 
+func (r *raft) getProgress(id uint64) *Progress {
+	if pr, ok := r.prs[id]; ok {
+		return pr
+	}
+
+	return r.learnerPrs[id]
+}
+
+func (r *raft) forEachProgress(f func(id uint64, pr *Progress)) {
+	for id, pr := range r.prs {
+		f(id, pr)
+	}
+
+	for id, pr := range r.learnerPrs {
+		f(id, pr)
+	}
+}
+
 // sendAppend sends RPC, with entries to the given peer.
 func (r *raft) sendAppend(to uint64) {
-	pr := r.prs[to]
+	pr := r.getProgress(to)
 	if pr.IsPaused() {
 		return
 	}
@@ -499,10 +552,11 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 	// or it might not have all the committed entries.
 	// The leader MUST NOT forward the follower's commit to
 	// an unmatched index.
-	commit := min(r.prs[to].Match, r.raftLog.committed)
+	pr := r.getProgress(to)
+	commit := min(pr.Match, r.raftLog.committed)
 	m := pb.Message{
 		To:      to,
-		ToGroup: r.prs[to].group,
+		ToGroup: pr.group,
 		Type:    pb.MsgHeartbeat,
 		Commit:  commit,
 		Context: ctx,
@@ -514,12 +568,12 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 // bcastAppend sends RPC, with entries to all peers that are not up-to-date
 // according to the progress recorded in r.prs.
 func (r *raft) bcastAppend() {
-	for id := range r.prs {
+	r.forEachProgress(func(id uint64, _ *Progress) {
 		if id == r.id {
-			continue
+			return
 		}
 		r.sendAppend(id)
-	}
+	})
 }
 
 // bcastHeartbeat sends RPC, without entries to all the peers.
@@ -533,12 +587,12 @@ func (r *raft) bcastHeartbeat() {
 }
 
 func (r *raft) bcastHeartbeatWithCtx(ctx []byte) {
-	for id := range r.prs {
+	r.forEachProgress(func(id uint64, _ *Progress) {
 		if id == r.id {
-			continue
+			return
 		}
 		r.sendHeartbeat(id, ctx)
-	}
+	})
 }
 
 // maybeCommit attempts to advance the commit index. Returns true if
@@ -547,8 +601,8 @@ func (r *raft) bcastHeartbeatWithCtx(ctx []byte) {
 func (r *raft) maybeCommit() bool {
 	// TODO(bmizerany): optimize.. Currently naive
 	mis := make(uint64Slice, 0, len(r.prs))
-	for id := range r.prs {
-		mis = append(mis, r.prs[id].Match)
+	for _, p := range r.prs {
+		mis = append(mis, p.Match)
 	}
 	sort.Sort(sort.Reverse(mis))
 	mci := mis[r.quorum()-1]
@@ -569,12 +623,12 @@ func (r *raft) reset(term uint64) {
 	r.abortLeaderTransfer()
 
 	r.votes = make(map[uint64]bool)
-	for id, pr := range r.prs {
-		r.prs[id] = &Progress{Next: r.raftLog.lastIndex() + 1, ins: newInflights(r.maxInflight), group: pr.group}
+	r.forEachProgress(func(id uint64, pr *Progress) {
+		*pr = Progress{Next: r.raftLog.lastIndex() + 1, ins: newInflights(r.maxInflight), group: pr.group, IsLearner: pr.IsLearner}
 		if id == r.id {
-			r.prs[id].Match = r.raftLog.lastIndex()
+			pr.Match = r.raftLog.lastIndex()
 		}
-	}
+	})
 	r.pendingConf = false
 	r.readOnly = newReadOnly(r.readOnly.option)
 }
@@ -586,7 +640,7 @@ func (r *raft) appendEntry(es ...pb.Entry) {
 		es[i].Index = li + 1 + uint64(i)
 	}
 	r.raftLog.append(es...)
-	r.prs[r.id].maybeUpdate(r.raftLog.lastIndex())
+	r.getProgress(r.id).maybeUpdate(r.raftLog.lastIndex())
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
 	r.maybeCommit()
 }
@@ -836,6 +890,12 @@ func (r *raft) Step(m pb.Message) error {
 		}
 
 	case pb.MsgVote, pb.MsgPreVote:
+		if r.isLearner {
+			// TODO: learner may need to vote, in case of node down when confchange.
+			r.logger.Debugf("%x [logterm: %d, index: %d, vote: %x] ignored %s from %x [logterm: %d, index: %d] at term %d: learner can not vote",
+				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
+			return nil
+		}
 		// The m.Term > r.Term clause is for MsgPreVote. For MsgVote m.Term should
 		// always equal r.Term.
 		if (r.Vote == None || m.Term > r.Term || r.Vote == m.From) && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
@@ -948,8 +1008,8 @@ func stepLeader(r *raft, m pb.Message) bool {
 	}
 
 	// All other message types require a progress for m.From (pr).
-	pr, prOk := r.prs[m.From]
-	if !prOk {
+	pr := r.getProgress(m.From)
+	if pr == nil {
 		//r.logger.Debugf("%x no progress available for %x", r.id, m.From)
 		return true
 	}
@@ -1049,13 +1109,17 @@ func stepLeader(r *raft, m pb.Message) bool {
 		}
 		r.logger.Debugf("%x failed to send message to %x because it is unreachable [%s]", r.id, m.From, pr)
 	case pb.MsgTransferLeader:
+		if pr.IsLearner {
+			r.logger.Debugf("%x is learner. Ignored transferring leadership", r.id)
+			return false
+		}
 		leadTransferee := m.From
 		lastLeadTransferee := r.leadTransferee
 		if lastLeadTransferee != None {
 			if lastLeadTransferee == leadTransferee {
 				r.logger.Infof("%x(%v) [term %d] transfer leadership to %x is in progress, ignores request to same node %x",
 					r.id, r.group.Name, r.Term, leadTransferee, leadTransferee)
-				return true
+				return false
 			}
 			r.abortLeaderTransfer()
 			r.logger.Infof("%x(%v) [term %d] abort previous transferring leadership to %x", r.id, r.group.Name, r.Term, lastLeadTransferee)
@@ -1135,8 +1199,8 @@ func stepFollower(r *raft, m pb.Message) bool {
 			return true
 		}
 		m.To = r.lead
-		if g, ok := r.prs[m.To]; ok {
-			m.ToGroup = g.group
+		if pr := r.getProgress(m.To); pr != nil {
+			m.ToGroup = pr.group
 		}
 		r.send(m)
 	case pb.MsgApp:
@@ -1157,7 +1221,7 @@ func stepFollower(r *raft, m pb.Message) bool {
 			return true
 		}
 		m.To = r.lead
-		m.ToGroup = r.prs[m.To].group
+		m.ToGroup = r.getProgress(m.To).group
 		r.send(m)
 	case pb.MsgTimeoutNow:
 		if r.promotable() {
@@ -1175,7 +1239,7 @@ func stepFollower(r *raft, m pb.Message) bool {
 			return true
 		}
 		m.To = r.lead
-		m.ToGroup = r.prs[m.To].group
+		m.ToGroup = r.getProgress(m.To).group
 		r.send(m)
 	case pb.MsgReadIndexResp:
 		if len(m.Entries) != 1 {
@@ -1234,27 +1298,50 @@ func (r *raft) restore(s pb.Snapshot) bool {
 		return false
 	}
 
+	// The normal peer can't become learner.
+	if !r.isLearner {
+		for _, id := range s.Metadata.ConfState.Learners {
+			if id == r.id {
+				r.logger.Errorf("%x can't become learner when restores snapshot [index: %d, term: %d]", r.id, s.Metadata.Index, s.Metadata.Term)
+				return false
+			}
+		}
+	}
+
 	r.logger.Infof("%x [commit: %d, lastindex: %d, lastterm: %d] starts to restore snapshot [index: %d, term: %d, prs:%v]",
 		r.id, r.raftLog.committed, r.raftLog.lastIndex(), r.raftLog.lastTerm(),
 		s.Metadata.Index, s.Metadata.Term, r.prs)
 
 	r.raftLog.restore(s)
 	r.prs = make(map[uint64]*Progress)
+	r.learnerPrs = make(map[uint64]*Progress)
+
+	success := r.restoreNode(s.Metadata.ConfState.Nodes, s.Metadata.ConfState.Groups, false)
+	if !success {
+		return false
+	}
+	success = r.restoreNode(s.Metadata.ConfState.Learners, s.Metadata.ConfState.LearnerGroups, true)
+	return success
+}
+
+func (r *raft) restoreNode(nodes []uint64, grpsConf []*pb.Group, isLearner bool) bool {
 	grps := make(map[uint64]pb.Group)
-	for _, g := range s.Metadata.ConfState.Groups {
+	for _, g := range grpsConf {
 		if g.GroupId != r.group.GroupId {
 			r.logger.Errorf("group id mismatch for replica: %v, %v", g, r.group)
 			return false
 		}
 		grps[g.RaftReplicaId] = *g
 	}
-	for _, n := range s.Metadata.ConfState.Nodes {
+
+	for _, n := range nodes {
 		match, next := uint64(0), r.raftLog.lastIndex()+1
 		if n == r.id {
 			match = next - 1
+			r.isLearner = isLearner
 		}
-		r.setProgress(n, match, next, grps[n])
-		r.logger.Infof("%x restored progress of %x [%s]", r.id, n, r.prs[n])
+		r.setProgress(n, match, next, grps[n], isLearner)
+		r.logger.Infof("%x(%v) restored progress of %x(%v) [%s]", r.id, r.group, n, grps[n], r.getProgress(n))
 	}
 	return true
 }
@@ -1268,7 +1355,7 @@ func (r *raft) promotable() bool {
 
 func (r *raft) updateNode(id uint64, g pb.Group) {
 	r.pendingConf = false
-	if pr, ok := r.prs[id]; ok {
+	if pr := r.getProgress(id); pr != nil {
 		r.logger.Infof("%x update progress group info for node : %v, %v", r.id, pr, g)
 		if g.NodeId > 0 && g.GroupId == r.group.GroupId && g.RaftReplicaId == id {
 			pr.group = g
@@ -1277,23 +1364,56 @@ func (r *raft) updateNode(id uint64, g pb.Group) {
 }
 
 func (r *raft) addNode(id uint64, g pb.Group) {
+	r.addNodeOrLearnerNode(id, g, false)
+}
+
+func (r *raft) addLearner(id uint64, g pb.Group) {
+	r.addNodeOrLearnerNode(id, g, true)
+}
+
+func (r *raft) addNodeOrLearnerNode(id uint64, g pb.Group, isLearner bool) {
 	r.pendingConf = false
-	if pr, ok := r.prs[id]; ok {
-		// Ignore any redundant addNode calls (which can happen because the
-		// initial bootstrapping entries are applied twice).
+	pr := r.getProgress(id)
+	if pr == nil {
+		r.setProgress(id, 0, r.raftLog.lastIndex()+1, g, isLearner)
+	} else {
+		if isLearner && !pr.IsLearner {
+			// can only change Learner to Voter
+			r.logger.Infof("%x(%v) ignored addLeaner: do not support changing %x from raft peer to learner.", r.id, r.group, id)
+			return
+		}
 		if pr.group.NodeId == 0 || pr.group.GroupId == 0 ||
 			pr.group.RaftReplicaId == 0 {
 			r.logger.Infof("%x missing progress group info for node : %v, %v", r.id, pr, g)
 			pr.group = g
 		}
-		return
+		// Ignore any redundant addNode calls (which can happen because the
+		// initial bootstrapping entries are applied twice).
+		if isLearner == pr.IsLearner {
+			// Ignore any redundant addNode calls (which can happen because the
+			// initial bootstrapping entries are applied twice).
+			return
+		}
+		// TODO: add flag to disable learner became voter, this node will be always a learner, working as catchup node only
+		//if r.keepLearner {
+		//	return
+		//}
+		//
+		// change Learner to Voter, use origin Learner progress
+		delete(r.learnerPrs, id)
+		pr.IsLearner = false
+		r.prs[id] = pr
+		r.logger.Infof("%x(%v) changed : %x from raft learner to voter.", r.id, r.group, id)
 	}
 
-	r.setProgress(id, 0, r.raftLog.lastIndex()+1, g)
+	if r.id == id {
+		r.isLearner = isLearner
+	}
 	// When a node is first added, we should mark it as recently active.
 	// Otherwise, CheckQuorum may cause us to step down if it is invoked
 	// before the added node has a chance to communicate with us.
-	r.prs[id].RecentActive = true
+	pr = r.getProgress(id)
+	pr.RecentActive = true
 }
 
 func (r *raft) removeNode(id uint64) {
@@ -1301,7 +1421,7 @@ func (r *raft) removeNode(id uint64) {
 	r.pendingConf = false
 
 	// do not try to commit or abort transferring if there is no nodes in the cluster.
-	if len(r.prs) == 0 {
+	if len(r.prs) == 0 && len(r.learnerPrs) == 0 {
 		return
 	}
 
@@ -1318,15 +1438,25 @@ func (r *raft) removeNode(id uint64) {
 
 func (r *raft) resetPendingConf() { r.pendingConf = false }
 
-func (r *raft) setProgress(id, match, next uint64, g pb.Group) {
-	r.prs[id] = &Progress{Next: next, Match: match,
-		ins: newInflights(r.maxInflight), group: g}
-
-	r.logger.Infof(" %x [peer progress: %v ]", r.id, r.prs[id])
+func (r *raft) setProgress(id, match, next uint64, g pb.Group, isLearner bool) {
+	if !isLearner {
+		delete(r.learnerPrs, id)
+		r.prs[id] = &Progress{Next: next, Match: match,
+			ins: newInflights(r.maxInflight), group: g}
+		r.logger.Infof(" %x [peer progress: %v ]", r.id, r.prs[id])
+		return
+	}
+	if _, ok := r.prs[id]; ok {
+		panic(fmt.Sprintf("%x unexpected changing from voter to learner for %x", r.id, id))
+	}
+	r.learnerPrs[id] = &Progress{Next: next, Match: match, ins: newInflights(r.maxInflight),
+		group: g, IsLearner: true}
+	r.logger.Infof(" %x [peer progress: %v ]", r.id, r.learnerPrs[id])
 }
 
 func (r *raft) delProgress(id uint64) {
 	delete(r.prs, id)
+	delete(r.learnerPrs, id)
 }
 
 func (r *raft) loadState(state pb.HardState) {
@@ -1356,19 +1486,17 @@ func (r *raft) resetRandomizedElectionTimeout() {
 func (r *raft) checkQuorumActive() bool {
 	var act int
 
-	for id := range r.prs {
+	r.forEachProgress(func(id uint64, pr *Progress) {
 		if id == r.id { // self is always active
 			act++
-			continue
+			return
 		}
 
-		if r.prs[id].RecentActive {
+		if pr.RecentActive && !pr.IsLearner {
 			act++
 		}
-
-		r.prs[id].RecentActive = false
-	}
-
+		pr.RecentActive = false
+	})
 	return act >= r.quorum()
 }
 
