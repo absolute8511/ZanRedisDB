@@ -4,11 +4,35 @@ import (
 	"errors"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type geoTStruct struct {
+	name       string
+	lat        float64
+	lon        float64
+	dist       float64
+	hash       int64
+	hashBase32 string
+}
+
+type posTSlice []*geoTStruct
+
+func (slice posTSlice) Less(i, j int) bool {
+	return slice[i].dist < slice[j].dist
+}
+
+func (slice posTSlice) Len() int {
+	return len(slice)
+}
+
+func (slice posTSlice) Swap(i, j int) {
+	slice[i], slice[j] = slice[j], slice[i]
+}
 
 func TestKVNode_GeoCommand(t *testing.T) {
 	ifGeoHashUnitTest = true
@@ -20,115 +44,106 @@ func TestKVNode_GeoCommand(t *testing.T) {
 	defer nd.Stop()
 	defer close(stopC)
 
-	type tStruct struct {
-		name       string
-		lat        float64
-		lon        float64
-		dist       float64
-		hash       int64
-		hashBase32 string
-	}
-
-	tCases := []tStruct{
-		tStruct{
+	tCases := posTSlice{
+		&geoTStruct{
 			name: "Tian An Men Square",
 			lat:  39.905637761392, lon: 116.39763057232,
 			dist:       0,
 			hash:       4069885364411786,
 			hashBase32: "wx4g08w5jm0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "The Great Wall",
 			lat:  40.359759768836, lon: 116.02002181113,
 			dist:       59853.4742,
 			hash:       4069895257856587,
 			hashBase32: "wx4t8570wk0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "The Palace Museum",
 			lat:  39.916345328893, lon: 116.39715582132,
 			dist:       1191.8406,
 			hash:       4069885548623625,
 			hashBase32: "wx4g0dtcd60",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "The Summer Palace",
 			lat:  39.999886103047, lon: 116.27552270889,
 			dist:       14774.6742,
 			hash:       4069880322548821,
 			hashBase32: "wx4etcv20p0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Great Hall of the people",
 			lat:  39.9050003, lon: 116.3939423,
 			dist:       322.7538,
 			hash:       4069885362257819,
 			hashBase32: "wx4g087rrr0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Terracotta Warriors and Horses",
 			lat:  34.384972, lon: 109.274127,
 			dist:       880281.2654,
 			hash:       4040142446455543,
 			hashBase32: "wqjewedfzx0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "West Lake",
 			lat:  30.150197, lon: 120.094491,
 			dist:       1135799.4856,
 			hash:       4054121678641499,
 			hashBase32: "wtm7sbdjsk0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Hainan ends of the earth",
 			lon:  109.205175, lat: 18.173128,
 			dist:       2514090.2704,
 			hash:       3974157332439237,
 			hashBase32: "w7jxmh2f1h0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Pearl of the Orient",
 			lon:  121.49491, lat: 31.24169,
 			dist:       1067807.3858,
 			hash:       4054803515096369,
 			hashBase32: "wtw3sxmuh80",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Buckingham Palace",
 			lon:  -0.83279, lat: 51.30387,
 			dist:       8193510.0282,
 			hash:       2163507521029941,
 			hashBase32: "gcp7v59ddw0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Taj Mahal",
 			lon:  78.23188, lat: 27.102839,
 			dist:       3780302.7628,
 			hash:       3631332645702463,
 			hashBase32: "tszdhjytqz0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Sydney Opera House, Australia",
 			lon:  151.12541, lat: -33.512513,
 			dist:       8912296.5074,
 			hash:       3252040564825549,
 			hashBase32: "r653qgnpmq0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Pyramids, Egypt",
 			lon:  31.8506, lat: 29.584341,
 			dist:       7525469.5594,
 			hash:       3491552924055853,
 			hashBase32: "stq8kc8vkb0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Statue of Liberty, New York City, USA",
 			lon:  -74.24038, lat: 40.412148,
 			dist:       11022442.0136,
 			hash:       1791816099668153,
 			hashBase32: "dr5jysgccf0",
 		},
-		tStruct{
+		&geoTStruct{
 			name: "Mount verest",
 			lon:  86.9221941736, lat: 27.9782502279,
 			dist:       3007044.9039,
@@ -291,7 +306,7 @@ func TestKVNode_GeoCommand(t *testing.T) {
 	cmdArgs[0] = []byte(testCmd)
 	cmdArgs[1] = testKey
 	cmdArgs[2] = center
-	cmdArgs[3] = []byte("88282")
+	cmdArgs[3] = []byte("880282")
 	cmdArgs[4] = []byte("m")
 	cmdArgs[5] = []byte("withcoord")
 	cmdArgs[6] = []byte("withdist")
@@ -305,43 +320,8 @@ func TestKVNode_GeoCommand(t *testing.T) {
 	handler, _, _ = nd.router.GetCmdHandler(testCmd)
 	handler(c, handlerCmd)
 
-	sortedResult := []tStruct{
-		tStruct{
-			name: "Tian An Men Square",
-			lat:  39.905637761392, lon: 116.39763057232,
-			dist:       0,
-			hash:       4069885364411786,
-			hashBase32: "wx4g08w5jm0",
-		},
-		tStruct{
-			name: "Great Hall of the people",
-			lat:  39.9050003, lon: 116.3939423,
-			dist:       322.7538,
-			hash:       4069885362257819,
-			hashBase32: "wx4g087rrr0",
-		},
-		tStruct{
-			name: "The Palace Museum",
-			lat:  39.916345328893, lon: 116.39715582132,
-			dist:       1191.8406,
-			hash:       4069885548623625,
-			hashBase32: "wx4g0dtcd60",
-		},
-		tStruct{
-			name: "The Summer Palace",
-			lat:  39.999886103047, lon: 116.27552270889,
-			dist:       14774.6742,
-			hash:       4069880322548821,
-			hashBase32: "wx4etcv20p0",
-		},
-		tStruct{
-			name: "The Great Wall",
-			lat:  40.359759768836, lon: 116.02002181113,
-			dist:       59853.4742,
-			hash:       4069895257856587,
-			hashBase32: "wx4t8570wk0",
-		},
-	}
+	sortedResult := tCases
+	sort.Sort(sortedResult)
 
 	assert.Nil(t, c.GetError(), "test command: georadiusbymember failed")
 	//assert.Equal(t, len(sortedResult)*7+1, len(c.rsp))
@@ -392,13 +372,20 @@ func TestKVNode_GeoCommand(t *testing.T) {
 	assert.Equal(t, 3*7+1, len(c.rsp))
 	assert.Equal(t, 3, c.rsp[0])
 
-	c.rsp = c.rsp[1:]
-	sortedResult = sortedResult[3:]
-	for i, j := len(sortedResult)-1, 0; i >= 0; i, j = i-1, j+1 {
-		assert.Equal(t, 4, c.rsp[j*7])
-		assert.Equal(t, []byte(sortedResult[i].name), c.rsp[j*7+1])
+	sort.Sort(sort.Reverse(sortedResult))
+	for i, v := range sortedResult {
+		if v.dist < 880282 {
+			sortedResult = sortedResult[i:]
+			break
+		}
+	}
 
-		if ok, err := convIBytes2Float64AndCompare(c.rsp[j*7+2],
+	c.rsp = c.rsp[1:]
+	for i := 0; i < 3; i++ {
+		assert.Equal(t, 4, c.rsp[i*7])
+		assert.Equal(t, []byte(sortedResult[i].name), c.rsp[i*7+1])
+
+		if ok, err := convIBytes2Float64AndCompare(c.rsp[i*7+2],
 			sortedResult[i].dist, 0.5); err != nil {
 			t.Fatal(err)
 		} else {
@@ -406,10 +393,10 @@ func TestKVNode_GeoCommand(t *testing.T) {
 				sortedResult[i].name, sortedResult[i].dist)
 		}
 
-		assert.Equal(t, sortedResult[i].hash, c.rsp[j*7+3])
-		assert.Equal(t, 2, c.rsp[j*7+4])
+		assert.Equal(t, sortedResult[i].hash, c.rsp[i*7+3])
+		assert.Equal(t, 2, c.rsp[i*7+4])
 
-		if ok, err := convIBytes2Float64AndCompare(c.rsp[j*7+5],
+		if ok, err := convIBytes2Float64AndCompare(c.rsp[i*7+5],
 			sortedResult[i].lon, 0.0001); err != nil {
 			t.Fatal(err)
 		} else {
@@ -417,7 +404,7 @@ func TestKVNode_GeoCommand(t *testing.T) {
 				sortedResult[i].name, sortedResult[i].lon)
 		}
 
-		if ok, err := convIBytes2Float64AndCompare(c.rsp[j*7+6],
+		if ok, err := convIBytes2Float64AndCompare(c.rsp[i*7+6],
 			sortedResult[i].lat, 0.0001); err != nil {
 			t.Fatal(err)
 		} else {
@@ -425,6 +412,61 @@ func TestKVNode_GeoCommand(t *testing.T) {
 				sortedResult[i].name, sortedResult[i].lat)
 		}
 	}
+	c.Reset()
+
+	/* Test  georadius with a very large radius. */
+	testCmd = "georadius"
+	cmdArgs[0] = []byte(testCmd)
+	cmdArgs[1] = testKey
+	cmdArgs[2] = []byte("0")
+	cmdArgs[3] = []byte("31")
+	cmdArgs[4] = []byte("100000")
+	cmdArgs[5] = []byte("km")
+	cmdArgs[6] = []byte("asc")
+	cmdArgs = cmdArgs[:7]
+
+	handlerCmd = buildCommand(cmdArgs)
+	handler, _, _ = nd.router.GetCmdHandler(testCmd)
+	handler(c, handlerCmd)
+
+	assert.Nil(t, c.GetError(), "command: georadius executed failed, %v", c.GetError())
+	assert.Equal(t, len(tCases), c.rsp[0])
+
+	/* Test georadius with to much members. */
+	testCmd = "geoadd"
+	var k int64
+	member := "fakePosition"
+	for longitude := -100.0; longitude < 100.0; longitude += 1.0 {
+		for latitude := -50.0; latitude < 50.0; latitude += 1.0 {
+			cmdArgs[0] = []byte(testCmd)
+			cmdArgs[1] = testKey
+			cmdArgs[2] = []byte(strconv.FormatFloat(longitude, 'f', 4, 64))
+			cmdArgs[3] = []byte(strconv.FormatFloat(latitude, 'f', 4, 64))
+			cmdArgs[4] = []byte(member + strconv.FormatInt(k, 36))
+			cmdArgs = cmdArgs[0:5]
+			handlerCmd = buildCommand(cmdArgs)
+			handler, _, _ = nd.router.GetCmdHandler(testCmd)
+			handler(c, handlerCmd)
+			assert.Nil(t, c.GetError(), "command: geoadd executed failed, %v", c.GetError())
+			c.Reset()
+			k += 1
+		}
+	}
+
+	cmdArgs = cmdArgs[:6]
+	testCmd = "georadius"
+	cmdArgs[0] = []byte(testCmd)
+	cmdArgs[1] = testKey
+	cmdArgs[2] = []byte("0")
+	cmdArgs[3] = []byte("31")
+	cmdArgs[4] = []byte("100000")
+	cmdArgs[5] = []byte("km")
+
+	handlerCmd = buildCommand(cmdArgs)
+	handler, _, _ = nd.router.GetCmdHandler(testCmd)
+	handler(c, handlerCmd)
+
+	assert.Equal(t, c.GetError(), errTooMuchBatchSize, "command: georadius executed failed, %v", c.GetError())
 }
 
 func convIBytes2Float64AndCompare(i interface{}, v, deviation float64) (bool, error) {
