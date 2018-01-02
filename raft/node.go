@@ -350,11 +350,11 @@ func (n *node) run(r *raft) {
 		case mdrop := <-n.recvc:
 			m := mdrop.m
 			// filter out response message from unknown From.
-			from, ok := r.prs[m.From]
-			if ok || !IsResponseMsg(m.Type) {
+			from := r.getProgress(m.From)
+			if from != nil || !IsResponseMsg(m.Type) {
 				if m.Type == pb.MsgTransferLeader {
 					if m.FromGroup.NodeId == 0 {
-						if !ok {
+						if from == nil {
 							if m.From == r.id {
 								m.FromGroup = r.group
 							} else {
@@ -367,8 +367,8 @@ func (n *node) run(r *raft) {
 						}
 					}
 					if m.ToGroup.NodeId == 0 {
-						g, ok := r.prs[m.To]
-						if !ok {
+						pr := r.getProgress(m.To)
+						if pr == nil {
 							if m.To == r.id {
 								m.ToGroup = r.group
 							} else {
@@ -377,13 +377,13 @@ func (n *node) run(r *raft) {
 								continue
 							}
 						} else {
-							m.ToGroup = g.group
+							m.ToGroup = pr.group
 						}
 					}
 				} else {
 					// if we missing the peer node group info, try update it from
 					// raft message
-					if ok && from.group.NodeId == 0 && m.FromGroup.NodeId > 0 &&
+					if from != nil && from.group.NodeId == 0 && m.FromGroup.NodeId > 0 &&
 						m.FromGroup.GroupId == r.group.GroupId {
 						from.group = m.FromGroup
 					}
@@ -402,6 +402,8 @@ func (n *node) run(r *raft) {
 			switch cc.Type {
 			case pb.ConfChangeAddNode:
 				r.addNode(cc.ReplicaID, cc.NodeGroup)
+			case pb.ConfChangeAddLearnerNode:
+				r.addLearner(cc.ReplicaID, cc.NodeGroup)
 			case pb.ConfChangeRemoveNode:
 				// block incoming proposal when local node is
 				// removed

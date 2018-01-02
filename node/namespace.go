@@ -113,7 +113,7 @@ func (nn *NamespaceNode) Start(forceStandaloneCluster bool) error {
 }
 
 func (nn *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
-	waitTimeout := time.Duration(nn.Node.machineConfig.ElectionTick)*time.Duration(nn.Node.machineConfig.TickMs)* time.Millisecond
+	waitTimeout := time.Duration(nn.Node.machineConfig.ElectionTick) * time.Duration(nn.Node.machineConfig.TickMs) * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 	oldLeader := nn.Node.rn.Lead()
@@ -399,12 +399,12 @@ func (nsm *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 	defer nsm.mutex.RUnlock()
 	gn, ok := nsm.groups[gid]
 	if !ok {
-		nodeLog.Errorf("group name not found %v ", gid)
+		nodeLog.Debugf("group name not found %v ", gid)
 		return nil
 	}
 	kv, ok := nsm.kvNodes[gn]
 	if !ok {
-		nodeLog.Errorf("kv namespace not found %v ", gn)
+		nodeLog.Infof("kv namespace not found %v ", gn)
 		return nil
 	}
 

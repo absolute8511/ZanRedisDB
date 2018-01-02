@@ -22,7 +22,7 @@ const (
 func checkSetKMSize(key []byte, member []byte) error {
 	if len(key) > MaxKeySize || len(key) == 0 {
 		return errKeySize
-	} else if len(member) > MaxSetMemberSize || len(member) == 0 {
+	} else if len(member) > MaxSetMemberSize {
 		return errSetMemberSize
 	}
 	return nil

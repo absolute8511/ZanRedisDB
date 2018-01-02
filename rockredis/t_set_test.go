@@ -32,6 +32,57 @@ func TestSetCodec(t *testing.T) {
 	}
 }
 
+func TestDBSetWithEmptyMember(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_set_empty")
+	member := []byte("")
+
+	if n, err := db.SAdd(key, member); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+
+	if cnt, err := db.SCard(key); err != nil {
+		t.Fatal(err)
+	} else if cnt != 1 {
+		t.Fatal(cnt)
+	}
+
+	if n, err := db.SIsMember(key, member); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+
+	if v, err := db.SMembers(key); err != nil {
+		t.Fatal(err)
+	} else if string(v[0]) != string(member) {
+		t.Fatal(string(v[0]))
+	}
+
+	if n, err := db.SRem(key, member); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+
+	if n, err := db.SIsMember(key, member); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	if v, err := db.SMembers(key); err != nil {
+		t.Fatal(err)
+	} else if len(v) != 0 {
+		t.Fatal(string(v[0]))
+	}
+}
+
 func TestDBSet(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)

@@ -29,14 +29,14 @@ import (
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/idutil"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/absolute8511/ZanRedisDB/wal"
 	"github.com/absolute8511/ZanRedisDB/wal/walpb"
-	"github.com/absolute8511/ZanRedisDB/pkg/idutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"golang.org/x/net/context"
 )
 
@@ -611,7 +611,7 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 	if err != nil {
 		return err
 	}
-	rc.Infof("get snapshot object done: %v", snapi)
+	rc.Infof("get snapshot object done: %v, state: %v", snapi, confState.String())
 
 	rc.wgAsync.Add(1)
 	go func() {

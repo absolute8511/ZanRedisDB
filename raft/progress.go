@@ -16,6 +16,7 @@ package raft
 
 import (
 	"fmt"
+
 	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
 )
 
@@ -82,6 +83,8 @@ type Progress struct {
 
 	// group indicate which node the raft follower is belonged
 	group pb.Group
+	// IsLearner is true if this progress is tracked for a learner.
+	IsLearner bool
 }
 
 func (pr *Progress) resetState(state ProgressStateType) {
