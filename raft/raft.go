@@ -380,6 +380,9 @@ func newRaft(c *Config) *raft {
 	for _, n := range r.nodes() {
 		nodesStrs = append(nodesStrs, fmt.Sprintf("%x", n))
 	}
+	for _, n := range r.learnerNodes() {
+		nodesStrs = append(nodesStrs, fmt.Sprintf("learner-%x", n))
+	}
 
 	r.logger.Infof("newRaft %x(%v) [peers: [%s], term: %d, commit: %d, applied: %d, lastindex: %d, lastterm: %d]",
 		r.id, r.group.Name, strings.Join(nodesStrs, ","), r.Term, r.raftLog.committed, r.raftLog.applied, r.raftLog.lastIndex(), r.raftLog.lastTerm())
@@ -401,10 +404,16 @@ func (r *raft) hardState() pb.HardState {
 func (r *raft) quorum() int { return len(r.prs)/2 + 1 }
 
 func (r *raft) nodes() []uint64 {
-	nodes := make([]uint64, 0, len(r.prs)+len(r.learnerPrs))
+	nodes := make([]uint64, 0, len(r.prs))
 	for id := range r.prs {
 		nodes = append(nodes, id)
 	}
+	sort.Sort(uint64Slice(nodes))
+	return nodes
+}
+
+func (r *raft) learnerNodes() []uint64 {
+	nodes := make([]uint64, 0, len(r.learnerPrs))
 	for id := range r.learnerPrs {
 		nodes = append(nodes, id)
 	}
@@ -418,6 +427,15 @@ func (r *raft) groups() []*pb.Group {
 		newg := pr.group
 		groups = append(groups, &newg)
 	}
+	for _, pr := range r.learnerPrs {
+		newg := pr.group
+		groups = append(groups, &newg)
+	}
+	return groups
+}
+
+func (r *raft) learnerGroups() []*pb.Group {
+	groups := make([]*pb.Group, 0, len(r.learnerPrs))
 	for _, pr := range r.learnerPrs {
 		newg := pr.group
 		groups = append(groups, &newg)

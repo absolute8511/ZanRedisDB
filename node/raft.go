@@ -455,6 +455,12 @@ func getIDsAndGroups(snap *raftpb.Snapshot, ents []raftpb.Entry) ([]uint64, map[
 		for _, grp := range snap.Metadata.ConfState.Groups {
 			grps[grp.RaftReplicaId] = *grp
 		}
+		for _, id := range snap.Metadata.ConfState.Learners {
+			ids[id] = true
+		}
+		for _, grp := range snap.Metadata.ConfState.LearnerGroups {
+			grps[grp.RaftReplicaId] = *grp
+		}
 	}
 	for _, e := range ents {
 		if e.Type != raftpb.EntryConfChange {
