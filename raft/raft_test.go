@@ -2504,7 +2504,7 @@ func TestRestoreWithLearner(t *testing.T) {
 		t.Errorf("%x is not learner, want yes", sm.id)
 	}
 	sg := sm.nodes()
-	if len(sg) != len(s.Metadata.ConfState.Nodes)+len(s.Metadata.ConfState.Learners) {
+	if len(sg)+len(sm.learnerNodes()) != len(s.Metadata.ConfState.Nodes)+len(s.Metadata.ConfState.Learners) {
 		t.Errorf("sm.Nodes = %+v, length not equal with %+v", sg, s.Metadata.ConfState)
 	}
 	for _, n := range s.Metadata.ConfState.Nodes {
@@ -2873,6 +2873,7 @@ func TestAddLearner(t *testing.T) {
 		t.Errorf("pendingConf = %v, want false", r.pendingConf)
 	}
 	nodes := r.nodes()
+	nodes = append(nodes, r.learnerNodes()...)
 	wnodes := []uint64{1, 2}
 	if !reflect.DeepEqual(nodes, wnodes) {
 		t.Errorf("nodes = %v, want %v", nodes, wnodes)

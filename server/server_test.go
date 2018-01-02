@@ -46,3 +46,7 @@ func TestRestartCluster(t *testing.T) {
 	// TODO:
 	// stop all nodes in cluster and start one by one
 }
+
+func TestRestartWithForceAlone(t *testing.T) {
+	// TODO: test force restart with alone
+}

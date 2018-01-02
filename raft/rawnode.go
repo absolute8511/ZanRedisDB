@@ -174,7 +174,8 @@ func (rn *RawNode) ProposeConfChange(cc pb.ConfChange) error {
 func (rn *RawNode) ApplyConfChange(cc pb.ConfChange) *pb.ConfState {
 	if cc.ReplicaID == None {
 		rn.raft.resetPendingConf()
-		return &pb.ConfState{Nodes: rn.raft.nodes(), Groups: rn.raft.groups()}
+		return &pb.ConfState{Nodes: rn.raft.nodes(), Groups: rn.raft.groups(),
+			Learners: rn.raft.learnerNodes(), LearnerGroups: rn.raft.learnerGroups()}
 	}
 	switch cc.Type {
 	case pb.ConfChangeAddNode:
@@ -188,7 +189,8 @@ func (rn *RawNode) ApplyConfChange(cc pb.ConfChange) *pb.ConfState {
 	default:
 		panic("unexpected conf type")
 	}
-	return &pb.ConfState{Nodes: rn.raft.nodes(), Groups: rn.raft.groups()}
+	return &pb.ConfState{Nodes: rn.raft.nodes(), Groups: rn.raft.groups(),
+		Learners: rn.raft.learnerNodes(), LearnerGroups: rn.raft.learnerGroups()}
 }
 
 // Step advances the state machine using the given message.

@@ -394,7 +394,10 @@ func (n *node) run(r *raft) {
 			if cc.ReplicaID == None {
 				r.resetPendingConf()
 				select {
-				case n.confstatec <- pb.ConfState{Nodes: r.nodes(), Groups: r.groups()}:
+				case n.confstatec <- pb.ConfState{Nodes: r.nodes(),
+					Groups:        r.groups(),
+					Learners:      r.learnerNodes(),
+					LearnerGroups: r.learnerGroups()}:
 				case <-n.done:
 				}
 				break
@@ -417,7 +420,10 @@ func (n *node) run(r *raft) {
 				panic("unexpected conf type")
 			}
 			select {
-			case n.confstatec <- pb.ConfState{Nodes: r.nodes(), Groups: r.groups()}:
+			case n.confstatec <- pb.ConfState{Nodes: r.nodes(),
+				Groups:        r.groups(),
+				Learners:      r.learnerNodes(),
+				LearnerGroups: r.learnerGroups()}:
 			case <-n.done:
 			}
 		case <-n.tickc:

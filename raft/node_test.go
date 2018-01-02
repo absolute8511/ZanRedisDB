@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
 )
 
@@ -771,4 +771,61 @@ func TestIsHardStateEqual(t *testing.T) {
 			t.Errorf("#%d, equal = %v, want %v", i, isHardStateEqual(tt.st, emptyState), tt.we)
 		}
 	}
+}
+
+func TestNodeProposeAddLearnerNode(t *testing.T) {
+	grp := raftpb.Group{
+		NodeId:        2,
+		RaftReplicaId: 2,
+		GroupId:       1,
+	}
+
+	ticker := time.NewTicker(time.Millisecond * 100)
+	defer ticker.Stop()
+	n := newNode()
+	s := NewMemoryStorage()
+	r := newTestRaft(1, []uint64{1}, 10, 1, s)
+	go n.run(r)
+	n.Campaign(context.TODO())
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	applyConfChan := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				n.Tick()
+			case rd := <-n.Ready():
+				s.Append(rd.Entries)
+				t.Logf("raft: %v", rd.Entries)
+				for _, ent := range rd.Entries {
+					if ent.Type == raftpb.EntryConfChange {
+						var cc raftpb.ConfChange
+						cc.Unmarshal(ent.Data)
+						state := n.ApplyConfChange(cc)
+						if len(state.Learners) == 0 || state.Learners[0] != cc.ReplicaID {
+							t.Fatalf("apply conf change should return new added learner: %v", state.String())
+						}
+						if len(state.LearnerGroups) == 0 || state.LearnerGroups[0].String() != cc.NodeGroup.String() {
+							t.Fatalf("apply conf change should return new added learner group: %v", state.String())
+						}
+						if len(state.Nodes) != 1 {
+							t.Fatalf("add learner should not change the nodes: %v", state.String())
+						}
+						t.Logf("apply raft conf %v changed to: %v", cc, state.String())
+						applyConfChan <- struct{}{}
+					}
+				}
+				n.Advance()
+			}
+		}
+	}()
+	cc := raftpb.ConfChange{Type: raftpb.ConfChangeAddLearnerNode, ReplicaID: 2, NodeGroup: grp}
+	n.ProposeConfChange(context.TODO(), cc)
+	<-applyConfChan
+	close(stop)
+	<-done
 }
