@@ -674,10 +674,18 @@ func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset i
 	if count >= MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
+	// if count == -1, check if we may get too much data
+	if count < 0 {
+		total, _ := db.ZCard(key)
+		if total >= MAX_BATCH_NUM {
+			return nil, errTooMuchBatchSize
+		}
+	}
+
 	nv := count
 	// count may be very large, so we must limit it for below mem make.
-	if nv <= 0 || nv > 1024 {
-		nv = 64
+	if nv <= 0 || nv > MAX_BATCH_NUM {
+		nv = MAX_BATCH_NUM
 	}
 
 	v := make([]common.ScorePair, 0, nv)
@@ -694,6 +702,7 @@ func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset i
 	if err != nil {
 		return nil, err
 	}
+	tooMuch := false
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()
 		_, _, m, s, err := zDecodeScoreKey(rawk)
@@ -701,12 +710,17 @@ func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset i
 			continue
 		}
 		v = append(v, common.ScorePair{Member: m, Score: s})
+
+		if count < 0 && len(v) > MAX_BATCH_NUM {
+			tooMuch = true
+			break
+		}
 	}
 	it.Close()
-	if len(v) > MAX_BATCH_NUM*10 {
+	if tooMuch {
 		dbLog.Infof("key %v huge range in result: %v", string(key), len(v))
+		return nil, errTooMuchBatchSize
 	}
-
 	if reverse && (offset == 0 && count < 0) {
 		for i, j := 0, len(v)-1; i < j; i, j = i+1, j-1 {
 			v[i], v[j] = v[j], v[i]
@@ -949,7 +963,12 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	if count >= MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
-
+	if count < 0 {
+		total, _ := db.ZCard(key)
+		if total >= MAX_BATCH_NUM {
+			return nil, errTooMuchBatchSize
+		}
+	}
 	it, err := NewDBRangeLimitIterator(db.eng, min, max, rangeType, offset, count, false)
 	if err != nil {
 		return nil, err
@@ -966,10 +985,12 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 		if count >= 0 && len(ay) >= count {
 			break
 		}
+		if count < 0 && len(ay) > MAX_BATCH_NUM {
+			dbLog.Infof("key %v huge range in result: %v", string(key), len(ay))
+			return nil, errTooMuchBatchSize
+		}
 	}
-	if len(ay) > MAX_BATCH_NUM*10 {
-		dbLog.Infof("key %v huge range in result: %v", string(key), len(ay))
-	}
+
 	return ay, nil
 }
 

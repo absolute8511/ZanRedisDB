@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -287,6 +288,46 @@ func TestZSetOrder(t *testing.T) {
 
 func TestZRemRange(t *testing.T) {
 	// all range remove test
+}
+
+func TestZRangeLimit(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:myzset_range")
+	for i := 0; i < MAX_BATCH_NUM-1; i++ {
+		m := fmt.Sprintf("%8d", i)
+		_, err := db.ZAdd(key, common.ScorePair{Score: float64(i), Member: []byte(m)})
+		assert.Nil(t, err)
+	}
+
+	maxMem := fmt.Sprintf("%8d", MAX_BATCH_NUM+1)
+	ay, err := db.ZRangeByLex(key, nil, []byte(maxMem), common.RangeClose, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, MAX_BATCH_NUM-1, len(ay))
+
+	elems, err := db.ZRange(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, MAX_BATCH_NUM-1, len(elems))
+
+	for i := MAX_BATCH_NUM; i < MAX_BATCH_NUM+10; i++ {
+		m := fmt.Sprintf("%8d", i)
+		_, err := db.ZAdd(key, common.ScorePair{Score: float64(i), Member: []byte(m)})
+		assert.Nil(t, err)
+	}
+	_, err = db.ZRange(key, 0, -1)
+	assert.Equal(t, errTooMuchBatchSize, err)
+	_, err = db.ZRangeByLex(key, nil, []byte(maxMem), common.RangeClose, 0, -1)
+	assert.Equal(t, errTooMuchBatchSize, err)
+
+	elems, err = db.ZRange(key, 0, MAX_BATCH_NUM-2)
+	assert.Nil(t, err)
+	assert.Equal(t, MAX_BATCH_NUM-1, len(elems))
+
+	ay, err = db.ZRangeByLex(key, nil, []byte(maxMem), common.RangeClose, 0, MAX_BATCH_NUM-1)
+	assert.Nil(t, err)
+	assert.Equal(t, MAX_BATCH_NUM-1, len(ay))
 }
 
 func TestZLex(t *testing.T) {
