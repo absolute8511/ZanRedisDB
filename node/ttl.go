@@ -314,7 +314,7 @@ func (exp *ExpireHandler) applyExpiration(stop chan struct{}) {
 	for {
 		select {
 		case <-checkTicker.C:
-			if err := exp.node.store.CheckExpiredData(exp.batchBuffer, stop); err == ErrExpiredBatchedBuffFull {
+			if err := exp.node.sm.CheckExpiredData(exp.batchBuffer, stop); err == ErrExpiredBatchedBuffFull {
 				if buffFullTimes += 1; buffFullTimes >= 3 {
 					nodeLog.Warningf("expired data buffer is filled three times in succession, stats:%s", exp.batchBuffer.GetStats())
 					buffFullTimes = 0

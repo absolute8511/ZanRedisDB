@@ -16,12 +16,12 @@ import (
 	"github.com/absolute8511/ZanRedisDB/cluster/datanode_coord"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/absolute8511/redcon"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"golang.org/x/net/context"
 )
 
@@ -81,6 +81,7 @@ func NewServer(conf ServerConfig) *Server {
 		Tags:        make(map[string]interface{}),
 		DataRoot:    conf.DataDir,
 		RsyncModule: "zanredisdb",
+		LearnerRole: conf.LearnerRole,
 	}
 	if conf.DataRsyncModule != "" {
 		myNode.RsyncModule = conf.DataRsyncModule
@@ -133,6 +134,7 @@ func NewServer(conf ServerConfig) *Server {
 		DataRootDir:   conf.DataDir,
 		TickMs:        conf.TickMs,
 		ElectionTick:  conf.ElectionTick,
+		LearnerRole:   conf.LearnerRole,
 		RocksDBOpts:   conf.RocksDBOpts,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)

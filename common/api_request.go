@@ -25,7 +25,7 @@ func (c *deadlinedConn) Write(b []byte) (n int, err error) {
 	return c.Conn.Write(b)
 }
 
-func newDeadlineTransport(timeout time.Duration) *http.Transport {
+func NewDeadlineTransport(timeout time.Duration) *http.Transport {
 	transport := &http.Transport{
 		Dial: func(netw, addr string) (net.Conn, error) {
 			c, err := net.DialTimeout(netw, addr, timeout)
@@ -40,7 +40,7 @@ func newDeadlineTransport(timeout time.Duration) *http.Transport {
 
 // stores the result in the value pointed to by ret(must be a pointer)
 func APIRequest(method string, endpoint string, body io.Reader, timeout time.Duration, ret interface{}) (int, error) {
-	httpclient := &http.Client{Transport: newDeadlineTransport(timeout)}
+	httpclient := &http.Client{Transport: NewDeadlineTransport(timeout)}
 	req, err := http.NewRequest(method, endpoint, body)
 	if err != nil {
 		return 0, err

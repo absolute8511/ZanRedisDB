@@ -519,6 +519,7 @@ func (r *RockDB) backupLoop() {
 					dbLog.Infof("checkpoint exist: %v, remove it", rsp.backupDir)
 					os.RemoveAll(rsp.backupDir)
 				}
+				rsp.rsp = []byte(rsp.backupDir)
 				time.AfterFunc(time.Millisecond*10, func() {
 					close(rsp.started)
 				})
@@ -532,7 +533,6 @@ func (r *RockDB) backupLoop() {
 				cost := time.Now().Sub(start)
 				dbLog.Infof("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
 				// purge some old checkpoint
-				rsp.rsp = []byte(rsp.backupDir)
 				purgeOldCheckpoint(MAX_CHECKPOINT_NUM, r.GetBackupDir())
 			}()
 		case <-r.quit:

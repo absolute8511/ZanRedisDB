@@ -18,6 +18,7 @@ type ServerConfig struct {
 	DataRsyncModule      string            `json:"data_rsync_module"`
 	LocalRaftAddr        string            `json:"local_raft_addr"`
 	Tags                 map[string]string `json:"tags"`
+	LearnerRole          string            `json:"learner_role"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`

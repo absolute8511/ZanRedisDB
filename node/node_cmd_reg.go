@@ -1,6 +1,21 @@
 package node
 
+import "github.com/absolute8511/ZanRedisDB/common"
+
+func (nd *KVNode) registerLogSyncerHandler() {
+	// log syncer should not handle any api
+	// only handle the raft apply command
+}
+
 func (nd *KVNode) registerHandler() {
+	if nd.machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
+		nd.registerLogSyncerHandler()
+		return
+	}
+	if nd.machineConfig.LearnerRole != "" {
+		// unknown role
+		return
+	}
 	// for kv
 	nd.router.Register(false, "get", wrapReadCommandK(nd.getCommand))
 	nd.router.Register(false, "mget", wrapReadCommandKK(nd.mgetCommand))

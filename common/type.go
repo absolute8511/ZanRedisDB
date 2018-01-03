@@ -16,6 +16,11 @@ const (
 	FILE_PERM = 0644
 )
 
+const (
+	LearnerRoleLogSyncer = "role_log_syncer"
+	LearnerRoleSearcher  = "role_searcher"
+)
+
 var (
 	SCAN_CURSOR_SEP = []byte(";")
 	SCAN_NODE_SEP   = []byte(":")

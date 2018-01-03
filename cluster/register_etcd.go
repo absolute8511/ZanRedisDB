@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/common"
 	etcdlock "github.com/absolute8511/xlock2"
 	"github.com/coreos/etcd/client"
 	"golang.org/x/net/context"
@@ -990,15 +991,36 @@ func NewDNEtcdRegister(host string) *DNEtcdRegister {
 }
 
 func (etcdReg *DNEtcdRegister) Register(nodeData *NodeInfo) error {
+	if nodeData.LearnerRole != "" &&
+		nodeData.LearnerRole != common.LearnerRoleLogSyncer &&
+		nodeData.LearnerRole != common.LearnerRoleSearcher {
+		return ErrLearnerRoleUnsupported
+	}
 	value, err := json.Marshal(nodeData)
 	if err != nil {
 		return err
+	}
+	etcdReg.nodeKey = etcdReg.getDataNodePath(nodeData)
+	rsp, err := etcdReg.client.Get(etcdReg.nodeKey, false, false)
+	if err != nil {
+		if !client.IsKeyNotFound(err) {
+			return err
+		}
+	} else {
+		var node NodeInfo
+		err = json.Unmarshal([]byte(rsp.Node.Value), &node)
+		if err != nil {
+			return err
+		}
+		if node.LearnerRole != nodeData.LearnerRole {
+			coordLog.Warningf("node learner role should never be changed: %v (old %v)", nodeData.LearnerRole, node.LearnerRole)
+			return ErrLearnerRoleInvalidChanged
+		}
 	}
 	if etcdReg.refreshStopCh != nil {
 		close(etcdReg.refreshStopCh)
 	}
 
-	etcdReg.nodeKey = etcdReg.getDataNodePath(nodeData)
 	etcdReg.nodeValue = string(value)
 	_, err = etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
 	if err != nil {

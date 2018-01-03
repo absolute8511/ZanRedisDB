@@ -7,13 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"path"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,12 +18,11 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/pkg/wait"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
-	"github.com/absolute8511/redcon"
-	"github.com/absolute8511/ZanRedisDB/pkg/wait"
 )
 
 var (
@@ -70,12 +66,12 @@ type KVNode struct {
 	reqProposeC       chan *internalReq
 	rn                *raftNode
 	store             *KVStore
+	sm                StateMachine
 	stopping          int32
 	stopChan          chan struct{}
 	w                 wait.Wait
 	router            *common.CmdRouter
 	deleteCb          func()
-	dbWriteStats      common.WriteStats
 	clusterWriteStats common.WriteStats
 	ns                string
 	machineConfig     *MachineConfig
@@ -95,11 +91,13 @@ type KVSnapInfo struct {
 }
 
 func (si *KVSnapInfo) GetData() ([]byte, error) {
-	meta, err := si.BackupInfo.GetResult()
-	if err != nil {
-		return nil, err
+	if si.BackupInfo != nil {
+		meta, err := si.BackupInfo.GetResult()
+		if err != nil {
+			return nil, err
+		}
+		si.BackupMeta = meta
 	}
-	si.BackupMeta = meta
 	d, _ := json.Marshal(si)
 	return d, nil
 }
@@ -111,20 +109,28 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
 	config.nodeConfig = machineConfig
 
-	store, err := NewKVStore(kvopts)
+	stopChan := make(chan struct{})
+	fullName := config.GroupName + "-" + strconv.Itoa(int(config.ID))
+	sm, err := NewStateMachine(fullName, kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo, stopChan)
 	if err != nil {
 		return nil, err
 	}
 	s := &KVNode{
 		reqProposeC:      make(chan *internalReq, 200),
-		stopChan:         make(chan struct{}),
-		store:            store,
+		stopChan:         stopChan,
+		store:            nil,
+		sm:               sm,
 		w:                wait.New(),
 		router:           common.NewCmdRouter(),
 		deleteCb:         deleteCb,
 		ns:               config.GroupName,
 		machineConfig:    machineConfig,
 		expirationPolicy: kvopts.ExpirationPolicy,
+	}
+	if kvsm, ok := sm.(*kvStoreSM); ok {
+		kvsm.w = s.w
+		kvsm.router = s.router
+		s.store = kvsm.store
 	}
 	s.clusterInfo = clusterInfo
 	s.expireHandler = NewExpireHandler(s)
@@ -180,13 +186,13 @@ func (nd *KVNode) Stop() {
 	nd.expireHandler.Stop()
 	nd.wg.Wait()
 	nd.rn.StopNode()
-	nd.store.Close()
+	nd.sm.Close()
 	nd.rn.Infof("node %v stopped", nd.ns)
 }
 
 func (nd *KVNode) OptimizeDB() {
 	nd.rn.Infof("node %v begin optimize db", nd.ns)
-	nd.store.CompactRange()
+	nd.sm.Optimize()
 	nd.rn.Infof("node %v end optimize db", nd.ns)
 	// since we can not know whether leader or follower is done on optimize
 	// we backup anyway after optimize
@@ -246,43 +252,28 @@ func (nd *KVNode) GetLocalMemberInfo() *common.MemberInfo {
 }
 
 func (nd *KVNode) GetDBInternalStats() string {
-	return nd.store.GetStatistics()
+	if s, ok := nd.sm.(*kvStoreSM); ok {
+		return s.store.GetStatistics()
+	}
+	return ""
 }
 
 func (nd *KVNode) GetStats() common.NamespaceStats {
-	tbs := nd.store.GetTables()
-	var ns common.NamespaceStats
-	ns.DBWriteStats = nd.dbWriteStats.Copy()
+	ns := nd.sm.GetStats()
 	ns.ClusterWriteStats = nd.clusterWriteStats.Copy()
-	ns.InternalStats = nd.store.GetInternalStatus()
-
-	for t := range tbs {
-		cnt, err := nd.store.GetTableKeyCount(t)
-		if err != nil {
-			continue
-		}
-		var ts common.TableStats
-		ts.Name = string(t)
-		ts.KeyNum = cnt
-		ns.TStats = append(ns.TStats, ts)
-	}
-	//nd.rn.Infof(nd.store.GetStatistics())
 	return ns
 }
 
 func (nd *KVNode) destroy() error {
 	nd.Stop()
-	nd.store.Destroy()
+	nd.sm.Destroy()
 	ts := strconv.Itoa(int(time.Now().UnixNano()))
 	return os.Rename(nd.rn.config.DataDir,
 		nd.rn.config.DataDir+"-deleted-"+ts)
 }
 
 func (nd *KVNode) CleanData() error {
-	if err := nd.store.CleanData(); err != nil {
-		return err
-	}
-	return nil
+	return nd.sm.CleanData()
 }
 
 func (nd *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
@@ -677,33 +668,25 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	np.appliedi = applyEvent.snapshot.Metadata.Index
 }
 
-// return if configure changed and whether need force backup
-func (nd *KVNode) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{},
-	dupCheckMap map[string]bool) ([]uint64, []interface{}, map[string]bool) {
-	err := nd.store.CommitBatchWrite()
-	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
-	batchCost := time.Since(batchStart)
-	if nodeLog.Level() >= common.LOG_DETAIL {
-		nd.rn.Infof("batching command number: %v", len(batchReqIDList))
-	}
-	// write the future response or error
-	for idx, rid := range batchReqIDList {
-		if err != nil {
-			nd.w.Trigger(rid, err)
-		} else {
-			nd.w.Trigger(rid, batchReqRspList[idx])
+func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
+	forceBackup := false
+	if evnt.Data != nil {
+		// try redis command
+		var reqList BatchInternalRaftRequest
+		parseErr := reqList.Unmarshal(evnt.Data)
+		if parseErr != nil {
+			nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
+				parseErr, len(evnt.Data), evnt,
+				string(evnt.Data))
 		}
+		if len(reqList.Reqs) != int(reqList.ReqNum) {
+			nd.rn.Infof("request check failed %v, real len:%v",
+				reqList, len(reqList.Reqs))
+		}
+
+		forceBackup = nd.sm.ApplyRaftRequest(reqList)
 	}
-	if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
-		nd.rn.Infof("slow batch write command: %v, batch: %v, cost: %v",
-			cmdName, len(batchReqIDList), batchCost)
-	}
-	if len(batchReqIDList) > 0 {
-		nd.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
-	}
-	batchReqIDList = batchReqIDList[:0]
-	batchReqRspList = batchReqRspList[:0]
-	return batchReqIDList, batchReqRspList, dupCheckMap
+	return forceBackup
 }
 
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
@@ -739,166 +722,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		evnt := ents[i]
 		switch evnt.Type {
 		case raftpb.EntryNormal:
-			if evnt.Data != nil {
-				start := time.Now()
-				// try redis command
-				var reqList BatchInternalRaftRequest
-				parseErr := reqList.Unmarshal(evnt.Data)
-				if parseErr != nil {
-					nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
-						parseErr, len(evnt.Data), evnt,
-						string(evnt.Data))
-				}
-				if len(reqList.Reqs) != int(reqList.ReqNum) {
-					nd.rn.Infof("request check failed %v, real len:%v",
-						reqList, len(reqList.Reqs))
-				}
-				batching := false
-				var batchReqIDList []uint64
-				var batchReqRspList []interface{}
-				var batchStart time.Time
-				dupCheckMap := make(map[string]bool, len(reqList.Reqs))
-				lastBatchCmd := ""
-				for reqIndex, req := range reqList.Reqs {
-					reqID := req.Header.ID
-					if req.Header.DataType == 0 {
-						cmd, err := redcon.Parse(req.Data)
-						if err != nil {
-							nd.w.Trigger(reqID, err)
-						} else {
-							cmdStart := time.Now()
-							cmdName := strings.ToLower(string(cmd.Args[0]))
-							_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
-							_, ok := dupCheckMap[string(pk)]
-							handled := false
-							// TODO: table counter can be batched???
-							if nd.store.IsBatchableWrite(cmdName) &&
-								len(batchReqIDList) < maxBatchCmdNum &&
-								!ok {
-								if !batching {
-									err := nd.store.BeginBatchWrite()
-									if err != nil {
-										nd.rn.Infof("begin batch command %v failed: %v, %v", cmdName, string(cmd.Raw), err)
-										nd.w.Trigger(reqID, err)
-										continue
-									}
-									batchStart = time.Now()
-									batching = true
-								}
-								handled = true
-								lastBatchCmd = cmdName
-								h, ok := nd.router.GetInternalCmdHandler(cmdName)
-								if !ok {
-									nd.rn.Infof("unsupported redis command: %v", cmdName)
-									nd.w.Trigger(reqID, common.ErrInvalidCommand)
-								} else {
-									if pk != nil {
-										dupCheckMap[string(pk)] = true
-									}
-									v, err := h(cmd, req.Header.Timestamp)
-									if err != nil {
-										nd.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
-										nd.w.Trigger(reqID, err)
-										continue
-									}
-									if nodeLog.Level() > common.LOG_DETAIL {
-										nd.rn.Infof("batching write command: %v", string(cmd.Raw))
-									}
-									batchReqIDList = append(batchReqIDList, reqID)
-									batchReqRspList = append(batchReqRspList, v)
-									nd.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
-								}
-								if nodeLog.Level() > common.LOG_DETAIL {
-									nd.rn.Infof("batching redis command: %v", cmdName)
-								}
-								if reqIndex < len(reqList.Reqs)-1 {
-									continue
-								}
-							}
-							if batching {
-								batching = false
-								batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart,
-									batchReqIDList, batchReqRspList, dupCheckMap)
-							}
-							if handled {
-								continue
-							}
-
-							h, ok := nd.router.GetInternalCmdHandler(cmdName)
-							if !ok {
-								nd.rn.Infof("unsupported redis command: %v", cmd)
-								nd.w.Trigger(reqID, common.ErrInvalidCommand)
-							} else {
-								v, err := h(cmd, req.Header.Timestamp)
-								cmdCost := time.Since(cmdStart)
-								if cmdCost >= time.Second || nodeLog.Level() > common.LOG_DETAIL ||
-									(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > time.Millisecond*100) {
-									nd.rn.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
-								}
-								nd.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
-								// write the future response or error
-								if err != nil {
-									nd.rn.Infof("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
-									nd.w.Trigger(reqID, err)
-								} else {
-									nd.w.Trigger(reqID, v)
-								}
-							}
-						}
-					} else {
-						if batching {
-							batching = false
-							batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart,
-								batchReqIDList, batchReqRspList, dupCheckMap)
-						}
-						if req.Header.DataType == int32(HTTPReq) {
-							var p httpProposeData
-							err := json.Unmarshal(req.Data, &p)
-							if err != nil {
-								nd.rn.Infof("failed to unmarshal http propose: %v", req.String())
-								nd.w.Trigger(reqID, err)
-							}
-							if p.ProposeOp == HttpProposeOp_Backup {
-								nd.rn.Infof("got force backup request")
-								forceBackup = true
-								nd.w.Trigger(reqID, nil)
-							} else {
-								nd.w.Trigger(reqID, errUnknownData)
-							}
-						} else if req.Header.DataType == int32(SchemaChangeReq) {
-							nd.rn.Infof("handle schema change: %v", string(req.Data))
-							var sc SchemaChange
-							err := sc.Unmarshal(req.Data)
-							if err != nil {
-								nd.rn.Infof("schema data error: %v, %v", string(req.Data), err)
-								nd.w.Trigger(reqID, err)
-							} else {
-								err = nd.handleSchemaUpdate(sc)
-								nd.w.Trigger(reqID, err)
-							}
-						} else {
-							nd.w.Trigger(reqID, errUnknownData)
-						}
-					}
-				}
-				// TODO: add test case for this
-				if batching {
-					batching = false
-					batchReqIDList, batchReqRspList, dupCheckMap = nd.processBatching(lastBatchCmd, reqList, batchStart,
-						batchReqIDList, batchReqRspList, dupCheckMap)
-				}
-				for _, req := range reqList.Reqs {
-					if nd.w.IsRegistered(req.Header.ID) {
-						nd.rn.Infof("missing process request: %v", req.String())
-						nd.w.Trigger(req.Header.ID, errUnknownData)
-					}
-				}
-
-				cost := time.Since(start)
-				if cost >= proposeTimeout/2 {
-					nd.rn.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
-				}
-			}
+			forceBackup = nd.applyEntry(evnt)
 		case raftpb.EntryConfChange:
 			var cc raftpb.ConfChange
 			cc.Unmarshal(evnt.Data)
@@ -1002,15 +826,12 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 }
 
 func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
-	// use the rocksdb backup/checkpoint interface to backup data
-	var si KVSnapInfo
-	si.BackupInfo = nd.store.Backup(term, index)
-	if si.BackupInfo == nil {
-		return nil, errors.New("failed to begin backup: maybe too much backup running")
+	si, err := nd.sm.GetSnapshot(term, index)
+	if err != nil {
+		return nil, err
 	}
-	si.WaitReady()
 	si.Members, si.LeaderInfo = nd.rn.GetMembersAndLeader()
-	return &si, nil
+	return si, nil
 }
 
 func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
@@ -1022,45 +843,7 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 	}
 	nd.rn.RestoreMembers(si.Members)
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
-	// while startup we can use the local snapshot to restart,
-	// but while running, we should install the leader's snapshot,
-	// so we need remove local and sync from leader
-	retry := 0
-	for retry < 3 {
-		hasBackup, _ := nd.checkLocalBackup(raftSnapshot)
-		if !hasBackup {
-			nd.rn.Infof("local no backup for snapshot, copy from remote\n")
-			syncAddr, syncDir := nd.GetValidBackupInfo(raftSnapshot, retry)
-			if syncAddr == "" && syncDir == "" {
-				return errors.New("no backup available from others")
-			}
-			// copy backup data from the remote leader node, and recovery backup from it
-			// if local has some old backup data, we should use rsync to sync the data file
-			// use the rocksdb backup/checkpoint interface to backup data
-			err = common.RunFileSync(syncAddr,
-				path.Join(rockredis.GetBackupDir(syncDir),
-					rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
-				nd.store.GetBackupDir())
-			if err != nil {
-				nd.rn.Infof("failed to copy snapshot: %v", err)
-				retry++
-				time.Sleep(time.Second)
-				continue
-			}
-		}
-		err = nd.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
-		if err == nil {
-			return nil
-		}
-		select {
-		case <-nd.stopChan:
-			return err
-		default:
-		}
-		retry++
-		time.Sleep(time.Second)
-		nd.rn.Infof("failed to restore snapshot: %v", err)
-	}
+	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot)
 	return err
 }
 
@@ -1070,112 +853,10 @@ func (nd *KVNode) CheckLocalBackup(snapData []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return nd.checkLocalBackup(rs)
-}
-
-func (nd *KVNode) checkLocalBackup(rs raftpb.Snapshot) (bool, error) {
-	var si KVSnapInfo
-	err := json.Unmarshal(rs.Data, &si)
-	if err != nil {
-		nd.rn.Infof("unmarshal snap meta failed: %v", string(rs.Data))
-		return false, err
+	if s, ok := nd.sm.(*kvStoreSM); ok {
+		return checkLocalBackup(s.store, rs)
 	}
-	return nd.store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
-}
-
-type deadlinedConn struct {
-	Timeout time.Duration
-	net.Conn
-}
-
-func (c *deadlinedConn) Read(b []byte) (n int, err error) {
-	c.Conn.SetReadDeadline(time.Now().Add(c.Timeout))
-	return c.Conn.Read(b)
-}
-
-func (c *deadlinedConn) Write(b []byte) (n int, err error) {
-	c.Conn.SetWriteDeadline(time.Now().Add(c.Timeout))
-	return c.Conn.Write(b)
-}
-
-func newDeadlineTransport(timeout time.Duration) *http.Transport {
-	transport := &http.Transport{
-		Dial: func(netw, addr string) (net.Conn, error) {
-			c, err := net.DialTimeout(netw, addr, timeout)
-			if err != nil {
-				return nil, err
-			}
-			return &deadlinedConn{timeout, c}, nil
-		},
-	}
-	return transport
-}
-
-func (nd *KVNode) GetValidBackupInfo(raftSnapshot raftpb.Snapshot, retry int) (string, string) {
-	// we need find the right backup data match with the raftsnapshot
-	// for each cluster member, it need check the term+index and the backup meta to
-	// make sure the data is valid
-	syncAddr := ""
-	syncDir := ""
-	h := nd.machineConfig.BroadcastAddr
-
-	innerRetry := 0
-	var snapSyncInfoList []common.SnapshotSyncInfo
-	var err error
-	for innerRetry < 3 {
-		innerRetry++
-		snapSyncInfoList, err = nd.clusterInfo.GetSnapshotSyncInfo(nd.ns)
-		if err != nil {
-			nd.rn.Infof("get snapshot info failed: %v", err)
-			select {
-			case <-nd.stopChan:
-				break
-			case <-time.After(time.Second):
-			}
-		} else {
-			break
-		}
-	}
-
-	nd.rn.Infof("current cluster raft nodes info: %v", snapSyncInfoList)
-	syncAddrList := make([]string, 0)
-	syncDirList := make([]string, 0)
-	for _, ssi := range snapSyncInfoList {
-		if ssi.ReplicaID == uint64(nd.rn.config.ID) {
-			continue
-		}
-
-		c := http.Client{Transport: newDeadlineTransport(time.Second)}
-		body, _ := raftSnapshot.Marshal()
-		req, _ := http.NewRequest("GET", "http://"+ssi.RemoteAddr+":"+
-			ssi.HttpAPIPort+common.APICheckBackup+"/"+nd.ns, bytes.NewBuffer(body))
-		rsp, err := c.Do(req)
-		if err != nil || rsp.StatusCode != http.StatusOK {
-			nd.rn.Infof("request error: %v, %v", err, rsp)
-			continue
-		}
-		rsp.Body.Close()
-		if ssi.RemoteAddr == h {
-			if ssi.DataRoot == nd.machineConfig.DataRootDir {
-				// the leader is old mine, try find another leader
-				nd.rn.Infof("data dir can not be same if on local: %v, %v", ssi, nd.machineConfig)
-				continue
-			}
-			// local node with different directory
-			syncAddrList = append(syncAddrList, "")
-			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, nd.ns))
-		} else {
-			// for remote snapshot, we do rsync from remote module
-			syncAddrList = append(syncAddrList, ssi.RemoteAddr)
-			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, nd.ns))
-		}
-	}
-	if len(syncAddrList) > 0 {
-		syncAddr = syncAddrList[retry%len(syncAddrList)]
-		syncDir = syncDirList[retry%len(syncDirList)]
-	}
-	nd.rn.Infof("should recovery from : %v, %v", syncAddr, syncDir)
-	return syncAddr, syncDir
+	return false, nil
 }
 
 func (nd *KVNode) GetLastLeaderChangedTime() int64 {

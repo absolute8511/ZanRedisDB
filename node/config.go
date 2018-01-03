@@ -46,6 +46,7 @@ type MachineConfig struct {
 	ElectionTick  int                   `json:"election_tick"`
 	TickMs        int                   `json:"tick_ms"`
 	KeepWAL       int                   `json:"keep_wal"`
+	LearnerRole   string                `json:"learner_role"`
 	RocksDBOpts   rockredis.RockOptions `json:"rocksdb_opts"`
 }
 

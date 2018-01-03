@@ -7,9 +7,11 @@ import (
 )
 
 var (
-	ErrKeyAlreadyExist = errors.New("Key already exist")
-	ErrKeyNotFound     = errors.New("Key not found")
-	DCInfoTag          = "dc_info"
+	ErrKeyAlreadyExist           = errors.New("Key already exist")
+	ErrKeyNotFound               = errors.New("Key not found")
+	ErrLearnerRoleInvalidChanged = errors.New("node learner role should never be changed")
+	ErrLearnerRoleUnsupported    = errors.New("node learner role is not supported")
+	DCInfoTag                    = "dc_info"
 )
 
 type EpochType int64
@@ -27,6 +29,7 @@ type NodeInfo struct {
 	Tags              map[string]interface{}
 	DataRoot          string
 	RsyncModule       string
+	LearnerRole       string
 	epoch             EpochType
 }
 
@@ -71,11 +74,12 @@ type RemovingInfo struct {
 }
 
 type PartitionReplicaInfo struct {
-	RaftNodes []string
-	RaftIDs   map[string]uint64
-	Removings map[string]RemovingInfo
-	MaxRaftID int64
-	epoch     EpochType
+	RaftNodes    []string
+	RaftIDs      map[string]uint64
+	Removings    map[string]RemovingInfo
+	MaxRaftID    int64
+	LearnerNodes map[string][]string
+	epoch        EpochType
 }
 
 func (self *PartitionReplicaInfo) GetISR() []string {
@@ -201,6 +205,7 @@ type PDRegister interface {
 
 type DataNodeRegister interface {
 	Register
+	// check the learner role before register, should never change the role
 	Register(nodeData *NodeInfo) error // update
 	Unregister(nodeData *NodeInfo) error
 	// get the newest pd leader and watch the change of it.
