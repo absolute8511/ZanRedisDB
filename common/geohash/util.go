@@ -165,7 +165,7 @@ func GetAreasByRadiusWGS84(longitude, latitude, radius float64) (*Radius, error)
 		decrStep = true
 	}
 
-	if decrStep {
+	if decrStep && steps > 1 {
 		steps--
 		hash, err = Encode(
 			WGS84_LONG_RANGE, WGS84_LAT_RANGE,
@@ -241,7 +241,7 @@ func estimateStepsByRadius(rangeMeters, latitude float64) uint8 {
 	if rangeMeters == 0 {
 		return WGS84_GEO_STEP
 	}
-	var step uint8 = 1
+	var step int8 = 1
 	for rangeMeters < MERCATOR_MAX {
 		rangeMeters *= 2
 		step++
@@ -266,7 +266,7 @@ func estimateStepsByRadius(rangeMeters, latitude float64) uint8 {
 	} else if step > 26 {
 		step = 26
 	}
-	return step
+	return uint8(step)
 
 }
 
