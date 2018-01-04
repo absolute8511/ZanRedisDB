@@ -50,7 +50,7 @@ type kvStoreSM struct {
 	ID            uint64
 	dbWriteStats  common.WriteStats
 	w             wait.Wait
-	router        *common.CmdRouter
+	router        *common.SMCmdRouter
 }
 
 func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
@@ -59,7 +59,7 @@ func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig,
 	if err != nil {
 		return nil, err
 	}
-	return &kvStoreSM{
+	sm := &kvStoreSM{
 		fullName:      fullName,
 		ns:            ns,
 		machineConfig: machineConfig,
@@ -67,7 +67,10 @@ func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig,
 		clusterInfo:   clusterInfo,
 		store:         store,
 		stopChan:      stopChan,
-	}, nil
+		router:        common.NewSMCmdRouter(),
+	}
+	sm.registerHandlers()
+	return sm, nil
 }
 
 func (kvsm *kvStoreSM) Debugf(f string, args ...interface{}) {

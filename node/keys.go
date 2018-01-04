@@ -97,33 +97,33 @@ func (nd *KVNode) pfaddCommand(conn redcon.Conn, cmd redcon.Command, v interface
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (nd *KVNode) localSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	err := nd.store.KVSet(ts, cmd.Args[1], cmd.Args[2])
+func (kvsm *kvStoreSM) localSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	err := kvsm.store.KVSet(ts, cmd.Args[1], cmd.Args[2])
 	return nil, err
 }
 
-func (nd *KVNode) localSetnxCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := nd.store.SetNX(ts, cmd.Args[1], cmd.Args[2])
+func (kvsm *kvStoreSM) localSetnxCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := kvsm.store.SetNX(ts, cmd.Args[1], cmd.Args[2])
 	return v, err
 }
 
-func (nd *KVNode) localMSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localMSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	args := cmd.Args[1:]
 	kvlist := make([]common.KVRecord, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
 		kvlist = append(kvlist, common.KVRecord{Key: args[i], Value: args[i+1]})
 	}
-	err := nd.store.MSet(ts, kvlist...)
+	err := kvsm.store.MSet(ts, kvlist...)
 	return nil, err
 }
 
-func (nd *KVNode) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := nd.store.Incr(ts, cmd.Args[1])
+func (kvsm *kvStoreSM) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := kvsm.store.Incr(ts, cmd.Args[1])
 	return v, err
 }
 
-func (nd *KVNode) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	cnt, err := nd.store.DelKeys(cmd.Args[1:]...)
+func (kvsm *kvStoreSM) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	cnt, err := kvsm.store.DelKeys(cmd.Args[1:]...)
 	if err != nil {
 		nodeLog.Infof("failed to delete keys: %v, %v", string(cmd.Raw), err)
 		return 0, err
@@ -131,12 +131,12 @@ func (nd *KVNode) localDelCommand(cmd redcon.Command, ts int64) (interface{}, er
 	return cnt, nil
 }
 
-func (nd *KVNode) localPFCountCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := nd.store.PFCount(ts, cmd.Args[1:]...)
+func (kvsm *kvStoreSM) localPFCountCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := kvsm.store.PFCount(ts, cmd.Args[1:]...)
 	return v, err
 }
 
-func (nd *KVNode) localPFAddCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := nd.store.PFAdd(ts, cmd.Args[1], cmd.Args[2:]...)
+func (kvsm *kvStoreSM) localPFAddCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := kvsm.store.PFAdd(ts, cmd.Args[1], cmd.Args[2:]...)
 	return v, err
 }

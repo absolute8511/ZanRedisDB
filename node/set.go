@@ -68,17 +68,17 @@ func (nd *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v interfa
 	}
 }
 
-func (nd *KVNode) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.SAdd(cmd.Args[1], cmd.Args[2:]...)
+func (kvsm *kvStoreSM) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.SAdd(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (nd *KVNode) localSrem(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.SRem(cmd.Args[1], cmd.Args[2:]...)
+func (kvsm *kvStoreSM) localSrem(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.SRem(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (nd *KVNode) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.SClear(cmd.Args[1])
+func (kvsm *kvStoreSM) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.SClear(cmd.Args[1])
 }
-func (nd *KVNode) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.SMclear(cmd.Args[1:]...)
+func (kvsm *kvStoreSM) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.SMclear(cmd.Args[1:]...)
 }

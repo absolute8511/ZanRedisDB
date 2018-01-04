@@ -183,7 +183,6 @@ type MergeWriteCommandFunc func(redcon.Command, interface{}) (interface{}, error
 type CmdRouter struct {
 	wcmds          map[string]CommandFunc
 	rcmds          map[string]CommandFunc
-	internalCmds   map[string]InternalCommandFunc
 	mergeCmds      map[string]MergeCommandFunc
 	mergeWriteCmds map[string]MergeCommandFunc
 }
@@ -192,7 +191,6 @@ func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
 		wcmds:          make(map[string]CommandFunc),
 		rcmds:          make(map[string]CommandFunc),
-		internalCmds:   make(map[string]InternalCommandFunc),
 		mergeCmds:      make(map[string]MergeCommandFunc),
 		mergeWriteCmds: make(map[string]MergeCommandFunc),
 	}
@@ -219,19 +217,6 @@ func (r *CmdRouter) GetCmdHandler(name string) (CommandFunc, bool, bool) {
 	return v, true, ok
 }
 
-func (r *CmdRouter) RegisterInternal(name string, f InternalCommandFunc) bool {
-	if _, ok := r.internalCmds[strings.ToLower(name)]; ok {
-		return false
-	}
-	r.internalCmds[name] = f
-	return true
-}
-
-func (r *CmdRouter) GetInternalCmdHandler(name string) (InternalCommandFunc, bool) {
-	v, ok := r.internalCmds[strings.ToLower(name)]
-	return v, ok
-}
-
 func (r *CmdRouter) RegisterMerge(name string, f MergeCommandFunc) bool {
 	if _, ok := r.mergeCmds[strings.ToLower(name)]; ok {
 		return false
@@ -256,6 +241,29 @@ func (r *CmdRouter) GetMergeCmdHandler(name string) (MergeCommandFunc, bool, boo
 	}
 	v, ok = r.mergeWriteCmds[strings.ToLower(name)]
 	return v, true, ok
+}
+
+type SMCmdRouter struct {
+	smCmds map[string]InternalCommandFunc
+}
+
+func NewSMCmdRouter() *SMCmdRouter {
+	return &SMCmdRouter{
+		smCmds: make(map[string]InternalCommandFunc),
+	}
+}
+
+func (r *SMCmdRouter) RegisterInternal(name string, f InternalCommandFunc) bool {
+	if _, ok := r.smCmds[strings.ToLower(name)]; ok {
+		return false
+	}
+	r.smCmds[name] = f
+	return true
+}
+
+func (r *SMCmdRouter) GetInternalCmdHandler(name string) (InternalCommandFunc, bool) {
+	v, ok := r.smCmds[strings.ToLower(name)]
+	return v, ok
 }
 
 type StringArray []string

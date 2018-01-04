@@ -129,7 +129,6 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	}
 	if kvsm, ok := sm.(*kvStoreSM); ok {
 		kvsm.w = s.w
-		kvsm.router = s.router
 		s.store = kvsm.store
 	}
 	s.clusterInfo = clusterInfo

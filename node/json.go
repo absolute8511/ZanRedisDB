@@ -158,34 +158,34 @@ func (nd *KVNode) jsonArrayPopCommand(conn redcon.Conn, cmd redcon.Command, v in
 	conn.WriteBulkString(rsp)
 }
 
-func (nd *KVNode) localJSONSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, err := nd.store.JSet(ts, cmd.Args[1], cmd.Args[2], cmd.Args[3])
+func (kvsm *kvStoreSM) localJSONSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := kvsm.store.JSet(ts, cmd.Args[1], cmd.Args[2], cmd.Args[3])
 	return v, err
 }
 
-func (nd *KVNode) localJSONDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	n, err := nd.store.JDel(ts, cmd.Args[1], cmd.Args[2])
+func (kvsm *kvStoreSM) localJSONDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	n, err := kvsm.store.JDel(ts, cmd.Args[1], cmd.Args[2])
 	if err != nil {
 		return int64(0), err
 	}
 	return n, nil
 }
 
-func (nd *KVNode) localJSONArrayAppendCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	n, err := nd.store.JArrayAppend(ts, cmd.Args[1], cmd.Args[2], cmd.Args[3:]...)
+func (kvsm *kvStoreSM) localJSONArrayAppendCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	n, err := kvsm.store.JArrayAppend(ts, cmd.Args[1], cmd.Args[2], cmd.Args[3:]...)
 	if err != nil {
 		return int64(0), err
 	}
 	return n, nil
 }
 
-func (nd *KVNode) localJSONArrayPopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localJSONArrayPopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var err error
 	var path []byte
 	if len(cmd.Args) >= 3 {
 		path = cmd.Args[2]
 	}
-	elem, err := nd.store.JArrayPop(ts, cmd.Args[1], path)
+	elem, err := kvsm.store.JArrayPop(ts, cmd.Args[1], path)
 	if err != nil {
 		return nil, err
 	}

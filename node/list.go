@@ -155,29 +155,29 @@ func (nd *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
-func (nd *KVNode) localLfixkeyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	nd.store.LFixKey(cmd.Args[1])
+func (kvsm *kvStoreSM) localLfixkeyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	kvsm.store.LFixKey(cmd.Args[1])
 	return nil, nil
 }
 
-func (nd *KVNode) localLpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.LPop(cmd.Args[1])
+func (kvsm *kvStoreSM) localLpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.LPop(cmd.Args[1])
 }
 
-func (nd *KVNode) localLpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.LPush(cmd.Args[1], cmd.Args[2:]...)
+func (kvsm *kvStoreSM) localLpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.LPush(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (nd *KVNode) localLsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localLsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	index, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
 	}
 
-	return nil, nd.store.LSet(cmd.Args[1], index, cmd.Args[3])
+	return nil, kvsm.store.LSet(cmd.Args[1], index, cmd.Args[3])
 }
 
-func (nd *KVNode) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	start, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
@@ -187,25 +187,25 @@ func (nd *KVNode) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}, 
 		return nil, err
 	}
 
-	return nil, nd.store.LTrim(cmd.Args[1], start, stop)
+	return nil, kvsm.store.LTrim(cmd.Args[1], start, stop)
 }
 
-func (nd *KVNode) localRpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.RPop(cmd.Args[1])
+func (kvsm *kvStoreSM) localRpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.RPop(cmd.Args[1])
 }
 
-func (nd *KVNode) localRpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.RPush(cmd.Args[1], cmd.Args[2:]...)
+func (kvsm *kvStoreSM) localRpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.RPush(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (nd *KVNode) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.LClear(cmd.Args[1])
+func (kvsm *kvStoreSM) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.LClear(cmd.Args[1])
 }
 
-func (nd *KVNode) localLMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localLMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, lkey := range cmd.Args[1:] {
-		if _, err := nd.store.LClear(lkey); err != nil {
+		if _, err := kvsm.store.LClear(lkey); err != nil {
 			return count, err
 		} else {
 			count++
