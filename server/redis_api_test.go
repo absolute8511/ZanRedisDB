@@ -23,6 +23,29 @@ var testOnce sync.Once
 var kvs *Server
 var redisport int
 var OK = "OK"
+var gtmpDir string
+
+type testLogger struct {
+	t *testing.T
+}
+
+func newTestLogger(t *testing.T) *testLogger {
+	return &testLogger{t: t}
+}
+func (l *testLogger) Output(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputErr(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputWarning(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
 
 func startTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
@@ -47,10 +70,10 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		TickMs:        100,
 		ElectionTick:  5,
 	}
-	if testing.Verbose() {
-		rockredis.SetLogLevel(4)
-		node.SetLogLevel(4)
-	}
+
+	node.SetLogger(2, newTestLogger(t))
+	rockredis.SetLogger(2, newTestLogger(t))
+
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
 	nsConf.BaseName = "default"
@@ -72,7 +95,7 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 
 func getTestConn(t *testing.T) *goredis.PoolConn {
 	testOnce.Do(func() {
-		kvs, redisport, _ = startTestServer(t)
+		kvs, redisport, gtmpDir = startTestServer(t)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisport), "")

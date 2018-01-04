@@ -184,7 +184,10 @@ type Peer struct {
 
 // StartNode returns a new Node given configuration and a list of raft peers.
 // It appends a ConfChangeAddNode entry for each given peer to the initial log.
-func StartNode(c *Config, peers []Peer) Node {
+func StartNode(c *Config, peers []Peer, isLearner bool) Node {
+	if isLearner {
+		c.learners = append(c.learners, c.Group)
+	}
 	r := newRaft(c)
 	// become the follower at term 1 and apply initial configuration
 	// entries of term 1

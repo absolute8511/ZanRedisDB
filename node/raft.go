@@ -385,11 +385,12 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 				raft.Peer{ReplicaID: v.ReplicaID, NodeID: v.NodeID, Context: d})
 		}
 
+		isLearner := rc.config.nodeConfig.LearnerRole != ""
 		startPeers := rpeers
 		if rc.join {
 			startPeers = nil
 		}
-		rc.node = raft.StartNode(c, startPeers)
+		rc.node = raft.StartNode(c, startPeers, isLearner)
 	}
 	rc.initForTransport()
 	rc.wgServe.Add(1)
@@ -755,6 +756,23 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 
 		if cc.NodeGroup.NodeId != uint64(rc.config.nodeConfig.NodeID) {
 			rc.transport.UpdatePeer(types.ID(cc.NodeGroup.NodeId), m.RaftURLs)
+		}
+	case raftpb.ConfChangeAddLearnerNode:
+		rc.Infof("got add learner change: %v", cc.String())
+		var m common.MemberInfo
+		err := json.Unmarshal(cc.Context, &m)
+		if err != nil {
+			nodeLog.Errorf("error conf context: %v", err)
+			return false, false, err
+		}
+		m.ID = cc.ReplicaID
+		if m.NodeID == 0 {
+			nodeLog.Errorf("invalid member info: %v", m)
+			return false, confChanged, errors.New("add member should include node id ")
+		}
+		confChanged = true
+		if m.NodeID != rc.config.nodeConfig.NodeID {
+			rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
 		}
 	}
 	return false, confChanged, nil

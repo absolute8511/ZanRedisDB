@@ -507,6 +507,24 @@ func (nd *KVNode) FillMyMemberInfo(m *common.MemberInfo) {
 	m.RaftURLs = append(m.RaftURLs, nd.machineConfig.LocalRaftAddr)
 }
 
+func (nd *KVNode) ProposeAddLearner(m common.MemberInfo) error {
+	if m.NodeID == nd.machineConfig.NodeID {
+		nd.FillMyMemberInfo(&m)
+	}
+	data, _ := json.Marshal(m)
+	cc := raftpb.ConfChange{
+		Type:      raftpb.ConfChangeAddLearnerNode,
+		ReplicaID: m.ID,
+		NodeGroup: raftpb.Group{
+			NodeId:        m.NodeID,
+			Name:          m.GroupName,
+			GroupId:       uint64(m.GroupID),
+			RaftReplicaId: m.ID},
+		Context: data,
+	}
+	return nd.proposeConfChange(cc)
+}
+
 func (nd *KVNode) ProposeAddMember(m common.MemberInfo) error {
 	if m.NodeID == nd.machineConfig.NodeID {
 		nd.FillMyMemberInfo(&m)
@@ -559,7 +577,7 @@ func (nd *KVNode) ProposeUpdateMember(m common.MemberInfo) error {
 func (nd *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
 	cc.ID = nd.rn.reqIDGen.Next()
 	nd.rn.Infof("propose the conf change: %v", cc.String())
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(nd.machineConfig.TickMs*5)*time.Millisecond)
 	err := nd.rn.node.ProposeConfChange(ctx, cc)
 	if err != nil {
 		nd.rn.Infof("failed to propose the conf change: %v", err)
@@ -683,7 +701,7 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
 				reqList, len(reqList.Reqs))
 		}
 
-		forceBackup = nd.sm.ApplyRaftRequest(reqList)
+		forceBackup = nd.sm.ApplyRaftRequest(reqList, evnt.Term, evnt.Index)
 	}
 	return forceBackup
 }

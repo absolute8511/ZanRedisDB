@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
@@ -16,6 +17,8 @@ type logSyncerSM struct {
 	machineConfig MachineConfig
 	stopChan      chan struct{}
 	ID            uint64
+	synced        int64
+	syncedIndex   uint64
 }
 
 func NewLogSyncerSM(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
@@ -59,6 +62,11 @@ func (sm *logSyncerSM) GetDBInternalStats() string {
 
 func (sm *logSyncerSM) GetStats() common.NamespaceStats {
 	var ns common.NamespaceStats
+	stat := make(map[string]interface{})
+	stat["role"] = common.LearnerRoleLogSyncer
+	stat["synced"] = atomic.LoadInt64(&sm.synced)
+	stat["synced_index"] = atomic.LoadUint64(&sm.syncedIndex)
+	ns.InternalStats = stat
 	return ns
 }
 
@@ -84,6 +92,10 @@ func (kvsm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, er
 }
 
 func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
+	if sm.clusterInfo == nil {
+		// in test, the cluster coordinator is not enabled, we can just ignore restore.
+		return nil
+	}
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
@@ -100,7 +112,10 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	return err
 }
 
-func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest) bool {
+func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64) bool {
+	if nodeLog.Level() >= common.LOG_DETAIL {
+		sm.Debugf("applying : %v at (%v, %v)", reqList, term, index)
+	}
 	forceBackup := false
 	for _, req := range reqList.Reqs {
 		if req.Header.DataType == int32(HTTPReq) {
@@ -117,5 +132,7 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest) bool {
 		}
 	}
 	// TODO: send reqlist to remote cluster
+	atomic.AddInt64(&sm.synced, 1)
+	atomic.StoreUint64(&sm.syncedIndex, index)
 	return forceBackup
 }

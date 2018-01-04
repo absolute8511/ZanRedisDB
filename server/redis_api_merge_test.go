@@ -21,6 +21,7 @@ var testOnceMerge sync.Once
 var kvsMerge *Server
 var redisportMerge int
 var testNamespaces = make(map[string]*node.NamespaceNode)
+var gtmpMergeDir string
 
 func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
@@ -96,7 +97,7 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 
 func getMergeTestConn(t *testing.T) *goredis.PoolConn {
 	testOnceMerge.Do(func() {
-		kvsMerge, redisportMerge, _ = startMergeTestServer(t)
+		kvsMerge, redisportMerge, gtmpMergeDir = startMergeTestServer(t)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisportMerge), "")

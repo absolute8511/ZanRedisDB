@@ -18,7 +18,7 @@ import (
 )
 
 type StateMachine interface {
-	ApplyRaftRequest(BatchInternalRaftRequest) bool
+	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64) bool
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
 	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error
 	Destroy()
@@ -160,6 +160,9 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	if hasBackup {
 		return nil
 	}
+	if clusterInfo == nil {
+		return errors.New("cluster info is not available.")
+	}
 	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, ns, localID, stopChan, raftSnapshot, retry)
 	if syncAddr == "" && syncDir == "" {
 		return errors.New("no backup available from others")
@@ -277,7 +280,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	return errors.New("failed to restore from snapshot")
 }
 
-func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest) bool {
+func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64) bool {
 	forceBackup := false
 	start := time.Now()
 	batching := false

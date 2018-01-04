@@ -555,7 +555,7 @@ func TestNodeStart(t *testing.T) {
 		MaxInflightMsgs: 256,
 		Group:           grp,
 	}
-	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}})
+	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
 	g := <-n.Ready()
 	if !reflect.DeepEqual(g, wants[0]) {
@@ -715,7 +715,7 @@ func TestNodeAdvance(t *testing.T) {
 		MaxInflightMsgs: 256,
 		Group:           grp,
 	}
-	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}})
+	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
 	rd := <-n.Ready()
 	storage.Append(rd.Entries)
