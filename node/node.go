@@ -163,12 +163,7 @@ func (nd *KVNode) Start(standalone bool) error {
 		nd.handleProposeReq()
 	}()
 
-	nd.wg.Add(1)
-	go func() {
-		defer nd.wg.Done()
-		nd.expireHandler.Start()
-	}()
-
+	nd.expireHandler.Start()
 	return nil
 }
 

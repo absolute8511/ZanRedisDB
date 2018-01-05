@@ -324,12 +324,20 @@ func TestKVBatch(t *testing.T) {
 		node.SetLogLevel(int(common.LOG_DETAIL))
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	concurrency := 100
+	poolList := make([]*goredis.PoolConn, concurrency)
+	for i := 0; i < concurrency; i++ {
+		poolList[i] = getTestConn(t)
+	}
+	defer func() {
+		for i := 0; i < concurrency; i++ {
+			poolList[i].Close()
+		}
+	}()
+	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
-		go func(index int) {
+		go func(index int, c *goredis.PoolConn) {
 			defer wg.Done()
-			c := getTestConn(t)
-			defer c.Close()
 
 			key1 := "default:test:a" + strconv.Itoa(index)
 			key2 := "default:test:b" + strconv.Itoa(index)
@@ -476,9 +484,10 @@ func TestKVBatch(t *testing.T) {
 			} else if n != 0 {
 				t.Fatal(n)
 			}
-		}(i)
+		}(i, poolList[i])
 	}
 	wg.Wait()
+
 }
 
 func TestKVErrorParams(t *testing.T) {

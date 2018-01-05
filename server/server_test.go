@@ -18,11 +18,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type testClusterInfo struct {
+	server    *Server
+	nsConf    *node.NamespaceConfig
+	redisPort int
+	replicaID uint64
+}
+
 var testClusterOnce sync.Once
-var kvsCluster []*Server
+var kvsCluster []testClusterInfo
 var learnerServers []*Server
-var redisClusterPort int
 var gtmpClusterDir string
+var seedNodes []node.ReplicaInfo
 
 func TestMain(m *testing.M) {
 	//SetLogger(2, newTestLogger(t))
@@ -41,7 +48,7 @@ func TestMain(m *testing.M) {
 		kvsFullScan.Stop()
 	}
 	for _, v := range kvsCluster {
-		v.Stop()
+		v.server.Stop()
 	}
 	if ret == 0 {
 		if strings.Contains(gtmpClusterDir, "rocksdb-test") {
@@ -64,18 +71,18 @@ func TestMain(m *testing.M) {
 	os.Exit(ret)
 }
 
-func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]*Server, []*Server, int, string) {
+func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testClusterInfo, []*Server, string) {
 	ctmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
-	//SetLogger(2, newTestLogger(t))
+	SetLogger(2, newTestLogger(t))
 	node.SetLogger(2, newTestLogger(t))
 	rockredis.SetLogger(2, newTestLogger(t))
 	t.Logf("dir:%v\n", ctmpDir)
-	kvsClusterTmp := make([]*Server, 0, replicaNum)
+	kvsClusterTmp := make([]testClusterInfo, 0, replicaNum)
 	learnerServersTmp := make([]*Server, 0, syncLearnerNum)
 	rport := 52845
 	raftPort := 52745
-	seedNodes := make([]node.ReplicaInfo, 0, replicaNum)
+	seedNodes = make([]node.ReplicaInfo, 0, replicaNum)
 	for index := 0; index < replicaNum; index++ {
 		raftAddr := "http://127.0.0.1:" + strconv.Itoa(raftPort+index)
 		var replica node.ReplicaInfo
@@ -130,20 +137,35 @@ func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]*Serv
 		if index >= replicaNum {
 			learnerServersTmp = append(learnerServersTmp, kv)
 		} else {
-			kvsClusterTmp = append(kvsClusterTmp, kv)
+			kvsClusterTmp = append(kvsClusterTmp, testClusterInfo{server: kv,
+				nsConf: nsConf, redisPort: redisport, replicaID: replica.ReplicaID})
 		}
 	}
 
 	time.Sleep(time.Second * 3)
-	return kvsClusterTmp, learnerServersTmp, rport, ctmpDir
+	return kvsClusterTmp, learnerServersTmp, ctmpDir
 }
 
-func getTestClusterConn(t *testing.T) *goredis.PoolConn {
-	testOnce.Do(func() {
-		kvsCluster, learnerServers, redisClusterPort, gtmpClusterDir = startTestCluster(t, 3, 1)
+func getTestClusterConn(t *testing.T, needLeader bool) *goredis.PoolConn {
+	testClusterOnce.Do(func() {
+		kvsCluster, learnerServers, gtmpClusterDir = startTestCluster(t, 3, 1)
 	},
 	)
-	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisClusterPort), "")
+	rport := 0
+	for _, n := range kvsCluster {
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		if needLeader {
+			if replicaNode.Node.IsLead() {
+				rport = n.redisPort
+				break
+			}
+		} else {
+			rport = n.redisPort
+			break
+		}
+	}
+	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(rport), "")
 	c.SetMaxIdleConns(4)
 	conn, err := c.Get()
 	if err != nil {
@@ -153,13 +175,13 @@ func getTestClusterConn(t *testing.T) *goredis.PoolConn {
 }
 
 func TestStartCluster(t *testing.T) {
-	c := getTestClusterConn(t)
+	c := getTestClusterConn(t, false)
 	defer c.Close()
 
 	assert.Equal(t, 3, len(kvsCluster))
 	var leaderNode *node.NamespaceNode
 	for _, n := range kvsCluster {
-		replicaNode := n.GetNamespaceFromFullName("default-0")
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
 		assert.NotNil(t, replicaNode)
 		if replicaNode.Node.IsLead() {
 			leaderNode = replicaNode
@@ -180,7 +202,8 @@ func TestStartCluster(t *testing.T) {
 
 	err := leaderNode.Node.ProposeAddLearner(*m)
 	assert.Nil(t, err)
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 3)
+	assert.Equal(t, true, learnerNode.IsReady())
 
 	key := "default:test-cluster:a"
 	rsp, err := goredis.String(c.Do("set", key, "1234"))
@@ -198,6 +221,7 @@ func TestStartCluster(t *testing.T) {
 	_, err = goredis.Int(c.Do("del", key))
 	assert.Nil(t, err)
 
+	time.Sleep(time.Second * 3)
 	nsStats = learnerNode.Node.GetStats()
 	assert.Equal(t, int64(2), nsStats.InternalStats["synced"])
 	assert.Equal(t, sindex+1, nsStats.InternalStats["synced_index"])
@@ -209,49 +233,119 @@ func TestStartCluster(t *testing.T) {
 	raftStats = leaderNode.Node.GetRaftStatus()
 	pr := raftStats.Progress[m.ID]
 	assert.Equal(t, true, pr.IsLearner)
+
+	learnerNode.Close()
+	time.Sleep(time.Second)
+	learnerNode = learnerServers[0].GetNamespaceFromFullName("default-0")
+	assert.Nil(t, learnerNode)
+
+	_, err = goredis.Int(c.Do("del", key))
+	assert.Nil(t, err)
+
+	// restart will replay all logs
+	nsConf := node.NewNSConfig()
+	nsConf.Name = "default-0"
+	nsConf.BaseName = "default"
+	nsConf.EngType = rockredis.EngType
+	nsConf.PartitionNum = 1
+	nsConf.Replicator = 3
+	nsConf.RaftGroupConf.GroupID = 1000
+	nsConf.ExpirationPolicy = "consistency_deletion"
+	learnerNode, err = learnerServers[0].InitKVNamespace(m.ID, nsConf, true)
+	assert.Nil(t, err)
+	err = learnerNode.Start(false)
+	assert.Nil(t, err)
+
+	time.Sleep(time.Second)
+	nsStats = learnerNode.Node.GetStats()
+	assert.Equal(t, int64(3), nsStats.InternalStats["synced"])
+	assert.Equal(t, sindex+1+1, nsStats.InternalStats["synced_index"])
 }
 
 func TestRestartFollower(t *testing.T) {
-	assert.Nil(t, nil)
-}
+	c := getTestClusterConn(t, true)
+	defer c.Close()
 
-func TestRestartLeader(t *testing.T) {
-	// TODO:
-}
+	assert.Equal(t, 3, len(kvsCluster))
+	var leaderNode *node.NamespaceNode
+	var followerS testClusterInfo
+	var follower *node.NamespaceNode
+	for _, n := range kvsCluster {
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNode = replicaNode
+		} else {
+			followerS = n
+			follower = replicaNode
+			break
+		}
+	}
 
-func TestMarkLeaderAsRemoving(t *testing.T) {
-	// TODO:
-}
+	ci := follower.Node.GetCommittedIndex()
+	m := follower.Node.GetLocalMemberInfo()
+	follower.Close()
+	_ = leaderNode
+	key := "default:test-cluster:a"
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, rsp)
 
-func TestMarkFollowerAsRemoving(t *testing.T) {
-	// TODO:
-}
-
-func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {
-	// TODO: test transfer leader while replica is restarting and not catchuped fully.
-	// should only transfer leader when replica has almost the newest raft logs
-}
-func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
-	// TODO:
-	// should not mark as remove while there is not enough for replica
-}
-
-func TestRestartWithCleanData(t *testing.T) {
-	// TODO:
-}
-
-func TestRestartWithMigrate(t *testing.T) {
-	// TODO:
-	// stop for a while and wait the data migrate to others
-	// and then start this node to join the cluster and wait
-	// data migrate back to this node
+	follower, err = followerS.server.InitKVNamespace(m.ID, followerS.nsConf, true)
+	assert.Nil(t, err)
+	follower.Start(false)
+	time.Sleep(time.Second)
+	// restart follower should catchup with new committed
+	assert.Equal(t, ci+1, follower.Node.GetCommittedIndex())
 }
 
 func TestRestartCluster(t *testing.T) {
-	// TODO:
 	// stop all nodes in cluster and start one by one
-}
+	c := getTestClusterConn(t, true)
+	defer c.Close()
 
-func TestRestartWithForceAlone(t *testing.T) {
-	// TODO: test force restart with alone
+	assert.Equal(t, 3, len(kvsCluster))
+
+	var leaderNode *node.NamespaceNode
+	for _, n := range kvsCluster {
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNode = replicaNode
+			break
+		}
+	}
+
+	ci := leaderNode.Node.GetCommittedIndex()
+
+	key := "default:test-cluster:a"
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, rsp)
+
+	for _, s := range kvsCluster {
+		node := s.server.GetNamespaceFromFullName("default-0")
+		node.Close()
+	}
+
+	for _, s := range kvsCluster {
+		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
+		assert.Nil(t, err)
+		assert.NotNil(t, node)
+		err = node.Start(false)
+		assert.Nil(t, err)
+	}
+	time.Sleep(time.Second)
+
+	hasLeader := false
+	for _, s := range kvsCluster {
+		replicaNode := s.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		newci := replicaNode.Node.GetCommittedIndex()
+		assert.Equal(t, ci+1+1, newci)
+		if replicaNode.Node.IsLead() {
+			hasLeader = true
+		}
+	}
+	assert.Equal(t, true, hasLeader)
 }

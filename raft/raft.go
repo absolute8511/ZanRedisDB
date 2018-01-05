@@ -427,10 +427,6 @@ func (r *raft) groups() []*pb.Group {
 		newg := pr.group
 		groups = append(groups, &newg)
 	}
-	for _, pr := range r.learnerPrs {
-		newg := pr.group
-		groups = append(groups, &newg)
-	}
 	return groups
 }
 
