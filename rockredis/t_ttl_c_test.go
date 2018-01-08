@@ -165,7 +165,7 @@ func TestListTTL_C(t *testing.T) {
 		t.Fatal("return value from lpersist of not exist list key != 0")
 	}
 
-	if _, err := db.LPush(listKey, []byte("this"), []byte("is"), []byte("list"),
+	if _, err := db.LPush(0, listKey, []byte("this"), []byte("is"), []byte("list"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}

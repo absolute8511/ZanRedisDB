@@ -775,8 +775,8 @@ func IsBatchableWrite(cmd string) bool {
 func init() {
 	batchableCmds = make(map[string]bool)
 	// command need response value (not just error or ok) can not be batched
+	// TODO: batched command may cause the table count not-exactly.
 	batchableCmds["set"] = true
-	batchableCmds["mset"] = true
 	batchableCmds["setex"] = true
 	batchableCmds["del"] = true
 }

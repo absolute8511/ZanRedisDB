@@ -48,7 +48,7 @@ func TestListTrim(t *testing.T) {
 	init := func() {
 		db.LClear(key)
 		for i := 0; i < 100; i++ {
-			n, err := db.RPush(key, []byte(strconv.Itoa(i)))
+			n, err := db.RPush(0, key, []byte(strconv.Itoa(i)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,7 +60,7 @@ func TestListTrim(t *testing.T) {
 
 	init()
 
-	err := db.LTrim(key, 0, 99)
+	err := db.LTrim(0, key, 0, 99)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestListTrim(t *testing.T) {
 		t.Fatal("wrong len:", l)
 	}
 
-	err = db.LTrim(key, 0, 50)
+	err = db.LTrim(0, key, 0, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestListTrim(t *testing.T) {
 		}
 	}
 
-	err = db.LTrim(key, 11, 30)
+	err = db.LTrim(0, key, 11, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestListTrim(t *testing.T) {
 		}
 	}
 
-	err = db.LTrim(key, 0, -1)
+	err = db.LTrim(0, key, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestListTrim(t *testing.T) {
 
 	t.Logf("reinit list")
 	init()
-	err = db.LTrim(key, -3, -3)
+	err = db.LTrim(0, key, -3, -3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestDBList(t *testing.T) {
 
 	key := []byte("test:testdb_list_a")
 
-	if n, err := db.RPush(key, []byte("1"), []byte("2"), []byte("3")); err != nil {
+	if n, err := db.RPush(0, key, []byte("1"), []byte("2"), []byte("3")); err != nil {
 		t.Fatal(err)
 	} else if n != 3 {
 		t.Fatal(n)
@@ -154,13 +154,13 @@ func TestDBList(t *testing.T) {
 		}
 	}
 
-	if k, err := db.RPop(key); err != nil {
+	if k, err := db.RPop(0, key); err != nil {
 		t.Fatal(err)
 	} else if string(k) != "3" {
 		t.Fatal(string(k))
 	}
 
-	if k, err := db.LPop(key); err != nil {
+	if k, err := db.LPop(0, key); err != nil {
 		t.Fatal(err)
 	} else if string(k) != "1" {
 		t.Fatal(string(k))
@@ -194,7 +194,7 @@ func TestLKeyExists(t *testing.T) {
 	} else if n != 0 {
 		t.Fatal("invalid value ", n)
 	}
-	db.LPush(key, []byte("hello"), []byte("world"))
+	db.LPush(0, key, []byte("hello"), []byte("world"))
 	if n, err := db.LKeyExists(key); err != nil {
 		t.Fatal(err.Error())
 	} else if n != 1 {
@@ -209,7 +209,7 @@ func TestListPop(t *testing.T) {
 
 	key := []byte("test:lpop_test")
 
-	if v, err := db.LPop(key); err != nil {
+	if v, err := db.LPop(0, key); err != nil {
 		t.Fatal(err)
 	} else if v != nil {
 		t.Fatal(v)
@@ -222,7 +222,7 @@ func TestListPop(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		if n, err := db.LPush(key, []byte("a")); err != nil {
+		if n, err := db.LPush(0, key, []byte("a")); err != nil {
 			t.Fatal(err)
 		} else if n != 1+int64(i) {
 			t.Fatal(n)
@@ -236,7 +236,7 @@ func TestListPop(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		if _, err := db.LPop(key); err != nil {
+		if _, err := db.LPop(0, key); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -247,7 +247,7 @@ func TestListPop(t *testing.T) {
 		t.Fatal(s)
 	}
 
-	if v, err := db.LPop(key); err != nil {
+	if v, err := db.LPop(0, key); err != nil {
 		t.Fatal(err)
 	} else if v != nil {
 		t.Fatal(v)
@@ -263,17 +263,17 @@ func TestListLPushEmpty(t *testing.T) {
 		SetLogLevel(int32(4))
 	}
 	k1 := []byte("test:1")
-	_, err := db.LPush(k1, nil)
+	_, err := db.LPush(0, k1, nil)
 	assert.Nil(t, err)
-	_, err = db.LPush(k1, nil)
+	_, err = db.LPush(0, k1, nil)
 	assert.Nil(t, err)
-	v, err := db.RPop(k1)
+	v, err := db.RPop(0, k1)
 	assert.Nil(t, err)
 	t.Log(v)
 	assert.Equal(t, []byte(""), v)
-	_, err = db.LPush(k1, []byte(""))
+	_, err = db.LPush(0, k1, []byte(""))
 	assert.Nil(t, err)
-	_, err = db.LPush(k1, []byte("a"))
+	_, err = db.LPush(0, k1, []byte("a"))
 	assert.Nil(t, err)
 	n, err := db.LLen(k1)
 	assert.Nil(t, err)
@@ -300,9 +300,9 @@ func TestListLPushRPop(t *testing.T) {
 	s, err := db.LLen(k2)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), s)
-	_, err = db.LPush(k2, []byte("a"))
-	_, err = db.LPush(k2, []byte("b"))
-	_, err = db.LPush(k1, []byte("a"))
+	_, err = db.LPush(0, k2, []byte("a"))
+	_, err = db.LPush(0, k2, []byte("b"))
+	_, err = db.LPush(0, k1, []byte("a"))
 
 	length, err := db.LLen(k1)
 	assert.Nil(t, err)
@@ -310,31 +310,31 @@ func TestListLPushRPop(t *testing.T) {
 	length, err = db.LLen(k2)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(2), length)
-	_, err = db.RPop(k1)
+	_, err = db.RPop(0, k1)
 	length, err = db.LLen(k1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), length)
-	_, err = db.RPop(k1)
+	_, err = db.RPop(0, k1)
 	length, err = db.LLen(k1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), length)
-	db.LPush(k1, []byte("a"))
-	db.LPush(k1, []byte("a"))
-	db.LPush(k1, []byte("a"))
-	db.LPush(k1, []byte("a"))
-	db.RPop(k1)
-	db.RPop(k1)
-	db.LPush(k1, []byte("a"))
-	db.LPush(k1, []byte("a"))
-	db.RPop(k1)
-	db.RPop(k1)
-	db.LPush(k1, []byte("a"))
-	db.RPop(k1)
-	db.RPop(k1)
+	db.LPush(0, k1, []byte("a"))
+	db.LPush(0, k1, []byte("a"))
+	db.LPush(0, k1, []byte("a"))
+	db.LPush(0, k1, []byte("a"))
+	db.RPop(0, k1)
+	db.RPop(0, k1)
+	db.LPush(0, k1, []byte("a"))
+	db.LPush(0, k1, []byte("a"))
+	db.RPop(0, k1)
+	db.RPop(0, k1)
+	db.LPush(0, k1, []byte("a"))
+	db.RPop(0, k1)
+	db.RPop(0, k1)
 	length, err = db.LLen(k1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), length)
-	db.RPop(k1)
+	db.RPop(0, k1)
 	length, err = db.LLen(k1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), length)
@@ -351,7 +351,7 @@ func TestListLPushRPop(t *testing.T) {
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for {
 			mutex.Lock()
-			_, err := db.LPush(k1, []byte("a"))
+			_, err := db.LPush(0, k1, []byte("a"))
 			mutex.Unlock()
 			assert.Nil(t, err)
 			atomic.AddInt32(&pushed, 1)
@@ -366,7 +366,7 @@ func TestListLPushRPop(t *testing.T) {
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for {
 			mutex.Lock()
-			v, err := db.RPop(k1)
+			v, err := db.RPop(0, k1)
 			mutex.Unlock()
 			assert.Nil(t, err)
 			if v != nil {

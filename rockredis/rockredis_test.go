@@ -70,13 +70,13 @@ func TestRockDB(t *testing.T) {
 	assert.Equal(t, string(value), string(v))
 
 	key = []byte("test:test_list_key")
-	_, err = db.LPush(key, value)
+	_, err = db.LPush(0, key, value)
 	assert.Nil(t, err)
 
 	_, err = db.LRange(key, 0, 100)
 	assert.Nil(t, err)
 
-	v, err = db.LPop(key)
+	v, err = db.LPop(0, key)
 	assert.Nil(t, err)
 	assert.Equal(t, string(value), string(v))
 
@@ -193,11 +193,11 @@ func TestRockDBScanTableForList(t *testing.T) {
 		keyList2 = append(keyList2, []byte("test2:test2_list_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
 	for _, key := range keyList1 {
-		_, err := db.LPush(key, key, key)
+		_, err := db.LPush(0, key, key, key)
 		assert.Nil(t, err)
 	}
 	for _, key := range keyList2 {
-		_, err := db.LPush(key, key, key)
+		_, err := db.LPush(0, key, key, key)
 		assert.Nil(t, err)
 	}
 
