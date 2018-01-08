@@ -110,8 +110,8 @@ func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testC
 			RedisAPIPort:  redisport,
 			LocalRaftAddr: raftAddr,
 			BroadcastAddr: "127.0.0.1",
-			TickMs:        100,
-			ElectionTick:  5,
+			TickMs:        20,
+			ElectionTick:  20,
 		}
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer
@@ -210,10 +210,22 @@ func TestStartCluster(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
 
-	nsStats = learnerNode.Node.GetStats()
-	assert.Equal(t, int64(1), nsStats.InternalStats["synced"])
-	sindex := nsStats.InternalStats["synced_index"].(uint64)
-	assert.Equal(t, true, sindex > uint64(3))
+	var sindex uint64
+	start := time.Now()
+	for {
+		nsStats = learnerNode.Node.GetStats()
+		if nsStats.InternalStats["synced"].(int64) >= 1 {
+			assert.Equal(t, int64(1), nsStats.InternalStats["synced"])
+			sindex = nsStats.InternalStats["synced_index"].(uint64)
+			assert.Equal(t, true, sindex > uint64(3))
+			break
+		}
+		time.Sleep(time.Second)
+		if time.Since(start) > time.Minute {
+			t.Errorf("\033[31m timed out %v for wait raft stats \033[39m\n", time.Since(start))
+			break
+		}
+	}
 
 	v, err := goredis.String(c.Do("get", key))
 	assert.Nil(t, err)
@@ -225,6 +237,7 @@ func TestStartCluster(t *testing.T) {
 	nsStats = learnerNode.Node.GetStats()
 	assert.Equal(t, int64(2), nsStats.InternalStats["synced"])
 	assert.Equal(t, sindex+1, nsStats.InternalStats["synced_index"])
+	sindex = nsStats.InternalStats["synced_index"].(uint64)
 
 	n, err := goredis.Int(c.Do("exists", key))
 	assert.Nil(t, err)
@@ -256,10 +269,21 @@ func TestStartCluster(t *testing.T) {
 	err = learnerNode.Start(false)
 	assert.Nil(t, err)
 
-	time.Sleep(time.Second)
-	nsStats = learnerNode.Node.GetStats()
-	assert.Equal(t, int64(3), nsStats.InternalStats["synced"])
-	assert.Equal(t, sindex+1+1, nsStats.InternalStats["synced_index"])
+	start = time.Now()
+	for {
+		time.Sleep(time.Second)
+		nsStats = learnerNode.Node.GetStats()
+		if nsStats.InternalStats["synced"].(int64) >= 3 {
+			assert.Equal(t, int64(3), nsStats.InternalStats["synced"])
+			assert.Equal(t, sindex+1, nsStats.InternalStats["synced_index"])
+			break
+		}
+
+		if time.Since(start) > time.Minute {
+			t.Errorf("\033[31m timed out %v for wait raft stats \033[39m\n", time.Since(start))
+			break
+		}
+	}
 }
 
 func TestRestartFollower(t *testing.T) {
@@ -294,9 +318,19 @@ func TestRestartFollower(t *testing.T) {
 	follower, err = followerS.server.InitKVNamespace(m.ID, followerS.nsConf, true)
 	assert.Nil(t, err)
 	follower.Start(false)
-	time.Sleep(time.Second)
-	// restart follower should catchup with new committed
-	assert.Equal(t, ci+1, follower.Node.GetCommittedIndex())
+	start := time.Now()
+	for {
+		time.Sleep(time.Second)
+		if ci+1 >= follower.Node.GetCommittedIndex() {
+			// restart follower should catchup with new committed
+			assert.Equal(t, ci+1, follower.Node.GetCommittedIndex())
+			break
+		}
+		if time.Since(start) > time.Minute {
+			t.Errorf("\033[31m timed out %v for wait raft stats \033[39m\n", time.Since(start))
+			break
+		}
+	}
 }
 
 func TestRestartCluster(t *testing.T) {
@@ -335,7 +369,7 @@ func TestRestartCluster(t *testing.T) {
 		err = node.Start(false)
 		assert.Nil(t, err)
 	}
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 2)
 
 	hasLeader := false
 	for _, s := range kvsCluster {
