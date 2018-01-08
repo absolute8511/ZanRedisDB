@@ -519,6 +519,7 @@ func (r *RockDB) backupLoop() {
 					dbLog.Infof("checkpoint exist: %v, remove it", rsp.backupDir)
 					os.RemoveAll(rsp.backupDir)
 				}
+				rsp.rsp = []byte(rsp.backupDir)
 				time.AfterFunc(time.Millisecond*10, func() {
 					close(rsp.started)
 				})
@@ -532,7 +533,6 @@ func (r *RockDB) backupLoop() {
 				cost := time.Now().Sub(start)
 				dbLog.Infof("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
 				// purge some old checkpoint
-				rsp.rsp = []byte(rsp.backupDir)
 				purgeOldCheckpoint(MAX_CHECKPOINT_NUM, r.GetBackupDir())
 			}()
 		case <-r.quit:
@@ -775,8 +775,8 @@ func IsBatchableWrite(cmd string) bool {
 func init() {
 	batchableCmds = make(map[string]bool)
 	// command need response value (not just error or ok) can not be batched
+	// TODO: batched command may cause the table count not-exactly.
 	batchableCmds["set"] = true
-	batchableCmds["mset"] = true
 	batchableCmds["setex"] = true
 	batchableCmds["del"] = true
 }

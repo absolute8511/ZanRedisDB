@@ -20,7 +20,7 @@ func (nd *KVNode) GetIndexSchema(table string) (map[string]*common.IndexSchema, 
 	}, nil
 }
 
-func (nd *KVNode) handleSchemaUpdate(sc SchemaChange) error {
+func (kvsm *kvStoreSM) handleSchemaUpdate(sc SchemaChange) error {
 	switch sc.Type {
 	case SchemaChangeAddHsetIndex, SchemaChangeUpdateHsetIndex, SchemaChangeDeleteHsetIndex:
 		var hindex common.HsetIndexSchema
@@ -29,9 +29,9 @@ func (nd *KVNode) handleSchemaUpdate(sc SchemaChange) error {
 			return err
 		}
 		if sc.Type == SchemaChangeAddHsetIndex {
-			err = nd.store.AddHsetIndex(sc.Table, &hindex)
+			err = kvsm.store.AddHsetIndex(sc.Table, &hindex)
 		} else {
-			err = nd.store.UpdateHsetIndexState(sc.Table, &hindex)
+			err = kvsm.store.UpdateHsetIndexState(sc.Table, &hindex)
 		}
 		return err
 	default:

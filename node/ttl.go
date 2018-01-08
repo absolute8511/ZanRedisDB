@@ -77,51 +77,51 @@ func (nd *KVNode) zsetExpireCommand(conn redcon.Conn, cmd redcon.Command, v inte
 	}
 }
 
-func (nd *KVNode) localSetexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localSetexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return nil, err
 	} else {
-		return nil, nd.store.SetEx(ts, cmd.Args[1], int64(duration), cmd.Args[3])
+		return nil, kvsm.store.SetEx(ts, cmd.Args[1], int64(duration), cmd.Args[3])
 	}
 }
 
-func (nd *KVNode) localExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return nd.store.Expire(cmd.Args[1], int64(duration))
+		return kvsm.store.Expire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (nd *KVNode) localHashExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localHashExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return nd.store.HExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.HExpire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (nd *KVNode) localListExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localListExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return nd.store.LExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.LExpire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (nd *KVNode) localSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return nd.store.SExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.SExpire(cmd.Args[1], int64(duration))
 	}
 }
 
-func (nd *KVNode) localZSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZSetExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return nd.store.ZExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.ZExpire(cmd.Args[1], int64(duration))
 	}
 }
 
@@ -133,24 +133,24 @@ func (nd *KVNode) persistCommand(conn redcon.Conn, cmd redcon.Command, v interfa
 	}
 }
 
-func (nd *KVNode) localPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.Persist(cmd.Args[1])
+func (kvsm *kvStoreSM) localPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.Persist(cmd.Args[1])
 }
 
-func (nd *KVNode) localHashPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.HPersist(cmd.Args[1])
+func (kvsm *kvStoreSM) localHashPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.HPersist(cmd.Args[1])
 }
 
-func (nd *KVNode) localListPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.LPersist(cmd.Args[1])
+func (kvsm *kvStoreSM) localListPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.LPersist(cmd.Args[1])
 }
 
-func (nd *KVNode) localSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.SPersist(cmd.Args[1])
+func (kvsm *kvStoreSM) localSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.SPersist(cmd.Args[1])
 }
 
-func (nd *KVNode) localZSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return nd.store.ZPersist(cmd.Args[1])
+func (kvsm *kvStoreSM) localZSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.ZPersist(cmd.Args[1])
 }
 
 //read commands related to TTL
@@ -314,7 +314,7 @@ func (exp *ExpireHandler) applyExpiration(stop chan struct{}) {
 	for {
 		select {
 		case <-checkTicker.C:
-			if err := exp.node.store.CheckExpiredData(exp.batchBuffer, stop); err == ErrExpiredBatchedBuffFull {
+			if err := exp.node.sm.CheckExpiredData(exp.batchBuffer, stop); err == ErrExpiredBatchedBuffFull {
 				if buffFullTimes += 1; buffFullTimes >= 3 {
 					nodeLog.Warningf("expired data buffer is filled three times in succession, stats:%s", exp.batchBuffer.GetStats())
 					buffFullTimes = 0

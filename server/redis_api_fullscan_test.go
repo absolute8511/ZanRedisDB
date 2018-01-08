@@ -19,6 +19,7 @@ import (
 var testOnceFullScan sync.Once
 var kvsFullScan *Server
 var redisportFullScan int
+var gtmpScanDir string
 
 func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
@@ -90,7 +91,7 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 }
 func getFullScanConn(t *testing.T) *goredis.PoolConn {
 	testOnceFullScan.Do(func() {
-		kvsFullScan, redisportFullScan, _ = startFullScanTestServer(t)
+		kvsFullScan, redisportFullScan, gtmpScanDir = startFullScanTestServer(t)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisportFullScan), "")

@@ -341,18 +341,6 @@ func (db *RockDB) zDelItem(key []byte, member []byte,
 	return 1, nil
 }
 
-func (db *RockDB) zDelete(key []byte, wb *gorocksdb.WriteBatch) (int64, error) {
-	table, rk, err := extractTableFromRedisKey(key)
-	if err != nil {
-		return 0, err
-	}
-	minKey := zEncodeStartKey(table, rk)
-	maxKey := zEncodeStopKey(table, rk)
-	delMembCnt, err := db.zRemRangeBytes(key, minKey, maxKey, 0, -1, wb)
-	//	TODO : log err
-	return delMembCnt, err
-}
-
 func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 	if len(args) == 0 {
 		return 0, nil
@@ -394,6 +382,30 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 	return num, err
 }
 
+func (db *RockDB) ZFixKey(key []byte) error {
+	n, err := db.ZCard(key)
+	if err != nil {
+		dbLog.Infof("get zset card failed: %v", err.Error())
+		return err
+	}
+	elems, err := db.ZRange(key, 0, -1)
+	if err != nil {
+		dbLog.Infof("get zset range failed: %v", err.Error())
+		return err
+	}
+	if len(elems) != int(n) {
+		dbLog.Infof("unmatched length : %v, %v, detail: %v", n, len(elems), elems)
+		db.wb.Clear()
+		db.zSetSize(key, int64(len(elems)), db.wb)
+		err = db.eng.Write(db.defaultWriteOpts, db.wb)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// note: we should not batch incrsize, because we read the old and put the new.
 func (db *RockDB) zIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	sk := zEncodeSizeKey(key)
 
@@ -410,6 +422,24 @@ func (db *RockDB) zIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (
 		}
 	}
 	return size, nil
+}
+
+func (db *RockDB) zGetSize(key []byte, newSize int64, wb *gorocksdb.WriteBatch) (int64, error) {
+	sk := zEncodeSizeKey(key)
+	size, err := Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk))
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
+}
+
+func (db *RockDB) zSetSize(key []byte, newSize int64, wb *gorocksdb.WriteBatch) {
+	sk := zEncodeSizeKey(key)
+	if newSize <= 0 {
+		wb.Delete(sk)
+	} else {
+		wb.Put(sk, PutInt64(newSize))
+	}
 }
 
 func (db *RockDB) ZCard(key []byte) (int64, error) {
@@ -799,21 +829,28 @@ func (db *RockDB) ZMclear(keys ...[]byte) (int64, error) {
 	if len(keys) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	db.wb.Clear()
+	deleted := int64(0)
 	for _, key := range keys {
 		table, rk, err := extractTableFromRedisKey(key)
 		if err != nil {
-			return 0, err
+			return deleted, err
 		}
+		// note: the zRemRangeBytes can not be batched, so we need clear and commit
+		// after each key.
+		db.wb.Clear()
 		minKey := zEncodeStartKey(table, rk)
 		maxKey := zEncodeStopKey(table, rk)
 		if _, err := db.zRemRangeBytes(key, minKey, maxKey, 0, -1, db.wb); err != nil {
-			return 0, err
+			return deleted, err
 		}
+		err = db.eng.Write(db.defaultWriteOpts, db.wb)
+		if err != nil {
+			return deleted, err
+		}
+		deleted++
 	}
 
-	err := db.eng.Write(db.defaultWriteOpts, db.wb)
-	return int64(len(keys)), err
+	return int64(len(keys)), nil
 }
 
 func (db *RockDB) zMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {

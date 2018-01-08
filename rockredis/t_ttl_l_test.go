@@ -117,7 +117,7 @@ func TestListTTL_L(t *testing.T) {
 		t.Fatal("return value from expire of not exist list key != 0")
 	}
 
-	if _, err := db.LPush(listKey, []byte("this"), []byte("is"), []byte("list"),
+	if _, err := db.LPush(0, listKey, []byte("this"), []byte("is"), []byte("list"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 
 		case ListType:
 			tListKey := []byte("test_checker_local_listKey")
-			db.LPush(tListKey, []byte("this"), []byte("is"), []byte("list"),
+			db.LPush(0, tListKey, []byte("this"), []byte("is"), []byte("list"),
 				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
 
 		case HashType:

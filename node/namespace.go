@@ -79,12 +79,9 @@ func (nn *NamespaceNode) CheckRaftConf(raftID uint64, conf *NamespaceConfig) err
 	return nil
 }
 
-func (nn *NamespaceNode) StopRaft() {
-	nn.Node.StopRaft()
-}
-
 func (nn *NamespaceNode) Close() {
 	nn.Node.Stop()
+	atomic.StoreInt32(&nn.ready, 0)
 	nodeLog.Infof("namespace stopped: %v", nn.conf.Name)
 }
 
@@ -568,6 +565,11 @@ func (nsm *NamespaceMgr) clearUnusedRaftPeer() {
 		currentNodeIDs := make(map[uint64]bool)
 		for _, v := range nsm.kvNodes {
 			mems := v.Node.GetMembers()
+			for _, m := range mems {
+				currentNodeIDs[m.NodeID] = true
+			}
+			// handle learners here
+			mems = v.Node.GetLearners()
 			for _, m := range mems {
 				currentNodeIDs[m.NodeID] = true
 			}

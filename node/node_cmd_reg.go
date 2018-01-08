@@ -1,16 +1,79 @@
 package node
 
+func (kvsm *kvStoreSM) registerHandlers() {
+	// only write command need to be registered as internal
+	// kv
+	kvsm.router.RegisterInternal("del", kvsm.localDelCommand)
+	kvsm.router.RegisterInternal("set", kvsm.localSetCommand)
+	kvsm.router.RegisterInternal("setnx", kvsm.localSetnxCommand)
+	kvsm.router.RegisterInternal("mset", kvsm.localMSetCommand)
+	kvsm.router.RegisterInternal("incr", kvsm.localIncrCommand)
+	kvsm.router.RegisterInternal("plset", kvsm.localPlsetCommand)
+	kvsm.router.RegisterInternal("pfadd", kvsm.localPFAddCommand)
+	//kvsm.router.RegisterInternal("pfcount", kvsm.localPFCountCommand)
+	// hash
+	kvsm.router.RegisterInternal("hset", kvsm.localHSetCommand)
+	kvsm.router.RegisterInternal("hsetnx", kvsm.localHSetNXCommand)
+	kvsm.router.RegisterInternal("hmset", kvsm.localHMsetCommand)
+	kvsm.router.RegisterInternal("hdel", kvsm.localHDelCommand)
+	kvsm.router.RegisterInternal("hincrby", kvsm.localHIncrbyCommand)
+	kvsm.router.RegisterInternal("hclear", kvsm.localHclearCommand)
+	kvsm.router.RegisterInternal("hmclear", kvsm.localHMClearCommand)
+	// for json
+	kvsm.router.RegisterInternal("json.set", kvsm.localJSONSetCommand)
+	kvsm.router.RegisterInternal("json.del", kvsm.localJSONDelCommand)
+	kvsm.router.RegisterInternal("json.arrappend", kvsm.localJSONArrayAppendCommand)
+	kvsm.router.RegisterInternal("json.arrpop", kvsm.localJSONArrayPopCommand)
+	// list
+	kvsm.router.RegisterInternal("lfixkey", kvsm.localLfixkeyCommand)
+	kvsm.router.RegisterInternal("lpop", kvsm.localLpopCommand)
+	kvsm.router.RegisterInternal("lpush", kvsm.localLpushCommand)
+	kvsm.router.RegisterInternal("lset", kvsm.localLsetCommand)
+	kvsm.router.RegisterInternal("ltrim", kvsm.localLtrimCommand)
+	kvsm.router.RegisterInternal("rpop", kvsm.localRpopCommand)
+	kvsm.router.RegisterInternal("rpush", kvsm.localRpushCommand)
+	kvsm.router.RegisterInternal("lclear", kvsm.localLclearCommand)
+	kvsm.router.RegisterInternal("lmclear", kvsm.localLMClearCommand)
+	// zset
+	kvsm.router.RegisterInternal("zfixkey", kvsm.localZFixKeyCommand)
+	kvsm.router.RegisterInternal("zadd", kvsm.localZaddCommand)
+	kvsm.router.RegisterInternal("zincrby", kvsm.localZincrbyCommand)
+	kvsm.router.RegisterInternal("zrem", kvsm.localZremCommand)
+	kvsm.router.RegisterInternal("zremrangebyrank", kvsm.localZremrangebyrankCommand)
+	kvsm.router.RegisterInternal("zremrangebyscore", kvsm.localZremrangebyscoreCommand)
+	kvsm.router.RegisterInternal("zremrangebylex", kvsm.localZremrangebylexCommand)
+	kvsm.router.RegisterInternal("zclear", kvsm.localZclearCommand)
+	kvsm.router.RegisterInternal("zmclear", kvsm.localZMClearCommand)
+	// set
+	kvsm.router.RegisterInternal("sadd", kvsm.localSadd)
+	kvsm.router.RegisterInternal("srem", kvsm.localSrem)
+	kvsm.router.RegisterInternal("sclear", kvsm.localSclear)
+	kvsm.router.RegisterInternal("smclear", kvsm.localSmclear)
+	// expire
+	kvsm.router.RegisterInternal("setex", kvsm.localSetexCommand)
+	kvsm.router.RegisterInternal("expire", kvsm.localExpireCommand)
+	kvsm.router.RegisterInternal("lexpire", kvsm.localListExpireCommand)
+	kvsm.router.RegisterInternal("hexpire", kvsm.localHashExpireCommand)
+	kvsm.router.RegisterInternal("sexpire", kvsm.localSetExpireCommand)
+	kvsm.router.RegisterInternal("zexpire", kvsm.localZSetExpireCommand)
+	kvsm.router.RegisterInternal("persist", kvsm.localPersistCommand)
+	kvsm.router.RegisterInternal("hpersist", kvsm.localHashPersistCommand)
+	kvsm.router.RegisterInternal("lpersist", kvsm.localListPersistCommand)
+	kvsm.router.RegisterInternal("spersist", kvsm.localSetPersistCommand)
+	kvsm.router.RegisterInternal("zpersist", kvsm.localZSetPersistCommand)
+}
+
 func (nd *KVNode) registerHandler() {
+	if nd.machineConfig.LearnerRole != "" {
+		// other learner role should only sync from raft log, so no need redis API
+		return
+	}
 	// for kv
 	nd.router.Register(false, "get", wrapReadCommandK(nd.getCommand))
 	nd.router.Register(false, "mget", wrapReadCommandKK(nd.mgetCommand))
-	//nd.router.Register(false, "exists", wrapReadCommandK(nd.existsCommand))
 	nd.router.Register(true, "set", wrapWriteCommandKV(nd, nd.setCommand))
 	nd.router.Register(true, "setnx", wrapWriteCommandKV(nd, nd.setnxCommand))
-	//nd.router.Register(true, "mset", wrapWriteCommandKVKV(nd, nd.msetCommand))
 	nd.router.Register(true, "incr", wrapWriteCommandK(nd, nd.incrCommand))
-	//nd.router.Register(true, "del", wrapWriteCommandKK(nd, nd.delCommand))
-	//nd.router.Register(true, "plset", nd.plsetCommand)
 	nd.router.Register(true, "pfadd", wrapWriteCommandKAnySubkey(nd, nd.pfaddCommand, 0))
 	nd.router.Register(false, "pfcount", wrapReadCommandK(nd.pfcountCommand))
 	// for hash
@@ -63,6 +126,8 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "zrevrangebyscore", wrapReadCommandKAnySubkey(nd.zrevrangebyscoreCommand))
 	nd.router.Register(false, "zrank", wrapReadCommandKSubkey(nd.zrankCommand))
 	nd.router.Register(false, "zrevrank", wrapReadCommandKSubkey(nd.zrevrankCommand))
+
+	nd.router.Register(true, "zfixkey", wrapWriteCommandK(nd, nd.zfixkeyCommand))
 	nd.router.Register(true, "zadd", nd.zaddCommand)
 	nd.router.Register(true, "zincrby", nd.zincrbyCommand)
 	nd.router.Register(true, "zrem", wrapWriteCommandKSubkeySubkey(nd, nd.zremCommand))
@@ -121,63 +186,4 @@ func (nd *KVNode) registerHandler() {
 	//nd.router.RegisterWriteMerge("mset", nd.msetCommand)
 	nd.router.RegisterWriteMerge("plset", wrapWriteMergeCommandKVKV(nd, nd.plsetCommand))
 
-	// only write command need to be registered as internal
-	// kv
-	nd.router.RegisterInternal("del", nd.localDelCommand)
-	nd.router.RegisterInternal("set", nd.localSetCommand)
-	nd.router.RegisterInternal("setnx", nd.localSetnxCommand)
-	nd.router.RegisterInternal("mset", nd.localMSetCommand)
-	nd.router.RegisterInternal("incr", nd.localIncrCommand)
-	nd.router.RegisterInternal("plset", nd.localPlsetCommand)
-	nd.router.RegisterInternal("pfadd", nd.localPFAddCommand)
-	//nd.router.RegisterInternal("pfcount", nd.localPFCountCommand)
-	// hash
-	nd.router.RegisterInternal("hset", nd.localHSetCommand)
-	nd.router.RegisterInternal("hsetnx", nd.localHSetNXCommand)
-	nd.router.RegisterInternal("hmset", nd.localHMsetCommand)
-	nd.router.RegisterInternal("hdel", nd.localHDelCommand)
-	nd.router.RegisterInternal("hincrby", nd.localHIncrbyCommand)
-	nd.router.RegisterInternal("hclear", nd.localHclearCommand)
-	nd.router.RegisterInternal("hmclear", nd.localHMClearCommand)
-	// for json
-	nd.router.RegisterInternal("json.set", nd.localJSONSetCommand)
-	nd.router.RegisterInternal("json.del", nd.localJSONDelCommand)
-	nd.router.RegisterInternal("json.arrappend", nd.localJSONArrayAppendCommand)
-	nd.router.RegisterInternal("json.arrpop", nd.localJSONArrayPopCommand)
-	// list
-	nd.router.RegisterInternal("lfixkey", nd.localLfixkeyCommand)
-	nd.router.RegisterInternal("lpop", nd.localLpopCommand)
-	nd.router.RegisterInternal("lpush", nd.localLpushCommand)
-	nd.router.RegisterInternal("lset", nd.localLsetCommand)
-	nd.router.RegisterInternal("ltrim", nd.localLtrimCommand)
-	nd.router.RegisterInternal("rpop", nd.localRpopCommand)
-	nd.router.RegisterInternal("rpush", nd.localRpushCommand)
-	nd.router.RegisterInternal("lclear", nd.localLclearCommand)
-	nd.router.RegisterInternal("lmclear", nd.localLMClearCommand)
-	// zset
-	nd.router.RegisterInternal("zadd", nd.localZaddCommand)
-	nd.router.RegisterInternal("zincrby", nd.localZincrbyCommand)
-	nd.router.RegisterInternal("zrem", nd.localZremCommand)
-	nd.router.RegisterInternal("zremrangebyrank", nd.localZremrangebyrankCommand)
-	nd.router.RegisterInternal("zremrangebyscore", nd.localZremrangebyscoreCommand)
-	nd.router.RegisterInternal("zremrangebylex", nd.localZremrangebylexCommand)
-	nd.router.RegisterInternal("zclear", nd.localZclearCommand)
-	nd.router.RegisterInternal("zmclear", nd.localZMClearCommand)
-	// set
-	nd.router.RegisterInternal("sadd", nd.localSadd)
-	nd.router.RegisterInternal("srem", nd.localSrem)
-	nd.router.RegisterInternal("sclear", nd.localSclear)
-	nd.router.RegisterInternal("smclear", nd.localSmclear)
-	// expire
-	nd.router.RegisterInternal("setex", nd.localSetexCommand)
-	nd.router.RegisterInternal("expire", nd.localExpireCommand)
-	nd.router.RegisterInternal("lexpire", nd.localListExpireCommand)
-	nd.router.RegisterInternal("hexpire", nd.localHashExpireCommand)
-	nd.router.RegisterInternal("sexpire", nd.localSetExpireCommand)
-	nd.router.RegisterInternal("zexpire", nd.localZSetExpireCommand)
-	nd.router.RegisterInternal("persist", nd.localPersistCommand)
-	nd.router.RegisterInternal("hpersist", nd.localHashPersistCommand)
-	nd.router.RegisterInternal("lpersist", nd.localListPersistCommand)
-	nd.router.RegisterInternal("spersist", nd.localSetPersistCommand)
-	nd.router.RegisterInternal("zpersist", nd.localZSetPersistCommand)
 }

@@ -490,6 +490,10 @@ func (nd *KVNode) zclearCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	}
 }
 
+func (nd *KVNode) zfixkeyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	conn.WriteString("OK")
+}
+
 func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
 	mlist := make([]common.ScorePair, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
@@ -503,35 +507,35 @@ func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
 	return mlist, nil
 }
 
-func (nd *KVNode) localZaddCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZaddCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	mlist, err := getScorePairs(cmd.Args[2:])
 	if err != nil {
 		return nil, err
 	}
-	v, err := nd.store.ZAdd(cmd.Args[1], mlist...)
+	v, err := kvsm.store.ZAdd(cmd.Args[1], mlist...)
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
 }
 
-func (nd *KVNode) localZincrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZincrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	delta, err := strconv.ParseFloat(string(cmd.Args[2]), 64)
 	if err != nil {
 		return nil, err
 	}
-	return nd.store.ZIncrBy(cmd.Args[1], delta, cmd.Args[3])
+	return kvsm.store.ZIncrBy(cmd.Args[1], delta, cmd.Args[3])
 }
 
-func (nd *KVNode) localZremCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZremCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) < 3 {
 		return nil, common.ErrInvalidArgs
 	}
 
-	return nd.store.ZRem(cmd.Args[1], cmd.Args[2:]...)
+	return kvsm.store.ZRem(cmd.Args[1], cmd.Args[2:]...)
 }
 
-func (nd *KVNode) localZremrangebyrankCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZremrangebyrankCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	start, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
 		return nil, err
@@ -541,40 +545,45 @@ func (nd *KVNode) localZremrangebyrankCommand(cmd redcon.Command, ts int64) (int
 		return nil, err
 	}
 
-	return nd.store.ZRemRangeByRank(cmd.Args[1], int(start), int(stop))
+	return kvsm.store.ZRemRangeByRank(cmd.Args[1], int(start), int(stop))
 }
 
-func (nd *KVNode) localZremrangebyscoreCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZremrangebyscoreCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	min, max, err := getScoreRange(cmd.Args[2], cmd.Args[3])
 	if err != nil {
 		return nil, err
 	}
-	return nd.store.ZRemRangeByScore(cmd.Args[1], min, max)
+	return kvsm.store.ZRemRangeByScore(cmd.Args[1], min, max)
 }
 
-func (nd *KVNode) localZremrangebylexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZremrangebylexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	min, max, rt, err := getLexRange(cmd.Args[2], cmd.Args[3])
 	if err != nil {
 		return nil, err
 	}
-	return nd.store.ZRemRangeByLex(cmd.Args[1], min, max, rt)
+	return kvsm.store.ZRemRangeByLex(cmd.Args[1], min, max, rt)
 }
 
-func (nd *KVNode) localZclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if len(cmd.Args) != 2 {
 		return nil, common.ErrInvalidArgs
 	}
-	return nd.store.ZClear(cmd.Args[1])
+	return kvsm.store.ZClear(cmd.Args[1])
 }
 
-func (nd *KVNode) localZMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+func (kvsm *kvStoreSM) localZMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, zkey := range cmd.Args[1:] {
-		if _, err := nd.store.ZClear(zkey); err != nil {
+		if _, err := kvsm.store.ZClear(zkey); err != nil {
 			return count, err
 		} else {
 			count++
 		}
 	}
 	return count, nil
+}
+
+func (kvsm *kvStoreSM) localZFixKeyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	kvsm.store.ZFixKey(cmd.Args[1])
+	return nil, nil
 }

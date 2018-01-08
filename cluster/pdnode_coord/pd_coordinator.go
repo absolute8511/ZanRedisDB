@@ -45,6 +45,7 @@ type PDCoordinator struct {
 	leaderNode             cluster.NodeInfo
 	nodesMutex             sync.RWMutex
 	dataNodes              map[string]cluster.NodeInfo
+	learnerNodes           map[string]cluster.NodeInfo
 	removingNodes          map[string]string
 	nodesEpoch             int64
 	checkNamespaceFailChan chan cluster.NamespaceNameInfo
@@ -66,6 +67,7 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 		myNode:                 *n,
 		register:               nil,
 		dataNodes:              make(map[string]cluster.NodeInfo),
+		learnerNodes:           make(map[string]cluster.NodeInfo),
 		removingNodes:          make(map[string]string),
 		checkNamespaceFailChan: make(chan cluster.NamespaceNameInfo, 3),
 		stopChan:               make(chan struct{}),
@@ -336,13 +338,28 @@ func (pdCoord *PDCoordinator) handleDataNodes(monitorChan chan struct{}, isMaste
 			// check if any node changed.
 			cluster.CoordLog().Infof("Current data nodes: %v", len(nodes))
 			oldNodes := pdCoord.dataNodes
+			oldLearnerNodes := pdCoord.learnerNodes
 			newNodes := make(map[string]cluster.NodeInfo)
+			newLearnerNodes := make(map[string]cluster.NodeInfo)
 			for _, v := range nodes {
 				//cluster.CoordLog().Infof("node %v : %v", v.GetID(), v)
-				newNodes[v.GetID()] = v
+				if v.LearnerRole == "" {
+					if old, ok := oldLearnerNodes[v.GetID()]; ok {
+						cluster.CoordLog().Errorf("old learner role changed from %v to %v, should not allowed", old, v)
+						continue
+					}
+					newNodes[v.GetID()] = v
+				} else {
+					if old, ok := oldNodes[v.GetID()]; ok {
+						cluster.CoordLog().Errorf("old learner role changed from %v to %v, should not allowed", old, v)
+						continue
+					}
+					newLearnerNodes[v.GetID()] = v
+				}
 			}
 			pdCoord.nodesMutex.Lock()
 			pdCoord.dataNodes = newNodes
+			pdCoord.learnerNodes = newLearnerNodes
 			check := false
 			for oldID, oldNode := range oldNodes {
 				if _, ok := newNodes[oldID]; !ok {

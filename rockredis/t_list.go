@@ -142,7 +142,7 @@ func lDecodeListKey(ek []byte) (table []byte, key []byte, seq int64, err error) 
 	return
 }
 
-func (db *RockDB) fixListKey(key []byte) {
+func (db *RockDB) fixListKey(ts int64, key []byte) {
 	// fix head and tail by iterator to find if any list key found or not found
 	var headSeq int64
 	var tailSeq int64
@@ -151,7 +151,7 @@ func (db *RockDB) fixListKey(key []byte) {
 
 	db.wb.Clear()
 	metaKey := lEncodeMetaKey(key)
-	if headSeq, tailSeq, llen, err = db.lGetMeta(metaKey); err != nil {
+	if headSeq, tailSeq, llen, _, err = db.lGetMeta(metaKey); err != nil {
 		dbLog.Warningf("read list %v meta error: %v", string(key), err.Error())
 		return
 	}
@@ -205,7 +205,7 @@ func (db *RockDB) fixListKey(key []byte) {
 		table, _, _ := extractTableFromRedisKey(key)
 		db.IncrTableKeyCount(table, -1, db.wb)
 	} else {
-		_, err = db.lSetMeta(metaKey, fixedHead, fixedTail, db.wb)
+		_, err = db.lSetMeta(metaKey, fixedHead, fixedTail, ts, db.wb)
 		if err != nil {
 			return
 		}
@@ -214,7 +214,7 @@ func (db *RockDB) fixListKey(key []byte) {
 	db.eng.Write(db.defaultWriteOpts, db.wb)
 }
 
-func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, error) {
+func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
@@ -232,7 +232,7 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 	wb := db.wb
 	wb.Clear()
 	metaKey := lEncodeMetaKey(key)
-	headSeq, tailSeq, size, err = db.lGetMeta(metaKey)
+	headSeq, tailSeq, size, _, err = db.lGetMeta(metaKey)
 	if err != nil {
 		return 0, err
 	}
@@ -267,7 +267,7 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		if v != nil {
 			dbLog.Warningf("list %v should not override the old value: %v, meta: %v, %v,%v", string(key),
 				v, seq, headSeq, tailSeq)
-			db.fixListKey(key)
+			db.fixListKey(ts, key)
 			return 0, errListSeq
 		}
 		wb.Put(ek, args[i])
@@ -283,20 +283,20 @@ func (db *RockDB) lpush(key []byte, whereSeq int64, args ...[]byte) (int64, erro
 		tailSeq = seq
 	}
 
-	_, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
+	_, err = db.lSetMeta(metaKey, headSeq, tailSeq, ts, wb)
 	if dbLog.Level() >= common.LOG_DETAIL {
 		dbLog.Debugf("lpush %v list %v meta updated to: %v, %v", whereSeq,
 			string(key), headSeq, tailSeq)
 	}
 	if err != nil {
-		db.fixListKey(key)
+		db.fixListKey(ts, key)
 		return 0, err
 	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return int64(size) + int64(pushCnt), err
 }
 
-func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
+func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {
 	if err := checkKeySize(key); err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	var err error
 
 	metaKey := lEncodeMetaKey(key)
-	headSeq, tailSeq, size, err = db.lGetMeta(metaKey)
+	headSeq, tailSeq, size, _, err = db.lGetMeta(metaKey)
 	if err != nil {
 		return nil, err
 	} else if size == 0 {
@@ -339,7 +339,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	if err != nil || value == nil {
 		dbLog.Warningf("list %v pop error: %v, meta: %v, %v, %v", string(key), err,
 			seq, headSeq, tailSeq)
-		db.fixListKey(key)
+		db.fixListKey(ts, key)
 		return nil, err
 	}
 
@@ -350,12 +350,12 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	}
 
 	wb.Delete(itemKey)
-	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
+	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, ts, wb)
 	if dbLog.Level() >= common.LOG_DETAIL {
 		dbLog.Debugf("pop %v list %v meta updated to: %v, %v, %v", whereSeq, string(key), headSeq, tailSeq, size)
 	}
 	if err != nil {
-		db.fixListKey(key)
+		db.fixListKey(ts, key)
 		return nil, err
 	}
 	if size == 0 {
@@ -368,7 +368,7 @@ func (db *RockDB) lpop(key []byte, whereSeq int64) ([]byte, error) {
 	return value, err
 }
 
-func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
+func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 	if err := checkKeySize(key); err != nil {
 		return err
 	}
@@ -387,7 +387,7 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 	stop := int64(stopP)
 
 	ek := lEncodeMetaKey(key)
-	if headSeq, _, llen, err = db.lGetMeta(ek); err != nil {
+	if headSeq, _, llen, _, err = db.lGetMeta(ek); err != nil {
 		return err
 	} else {
 		if start < 0 {
@@ -414,12 +414,12 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 	}
 	if stop < int64(llen-1) {
 		wb.DeleteRange(lEncodeListKey(table, rk, headSeq+int64(stop+1)),
-				lEncodeListKey(table, rk, headSeq+llen))
+			lEncodeListKey(table, rk, headSeq+llen))
 	}
 
-	newLen, err := db.lSetMeta(ek, headSeq+start, headSeq+stop, wb)
+	newLen, err := db.lSetMeta(ek, headSeq+start, headSeq+stop, ts, wb)
 	if err != nil {
-		db.fixListKey(key)
+		db.fixListKey(ts, key)
 		return err
 	}
 	if llen > 0 && newLen == 0 {
@@ -431,7 +431,7 @@ func (db *RockDB) ltrim2(key []byte, startP, stopP int64) error {
 	return db.eng.Write(db.defaultWriteOpts, wb)
 }
 
-func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
+func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
@@ -453,7 +453,7 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	var err error
 
 	metaKey := lEncodeMetaKey(key)
-	headSeq, tailSeq, size, err = db.lGetMeta(metaKey)
+	headSeq, tailSeq, size, _, err = db.lGetMeta(metaKey)
 	if err != nil {
 		return 0, err
 	} else if size == 0 {
@@ -480,9 +480,9 @@ func (db *RockDB) ltrim(key []byte, trimSize, whereSeq int64) (int64, error) {
 	wb.DeleteRange(itemStartKey, itemEndKey)
 	wb.Delete(itemEndKey)
 
-	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, wb)
+	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, ts, wb)
 	if err != nil {
-		db.fixListKey(key)
+		db.fixListKey(ts, key)
 		return 0, err
 	}
 	if size == 0 {
@@ -511,7 +511,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	var size int64
 	var err error
 
-	headSeq, tailSeq, size, err = db.lGetMeta(mk)
+	headSeq, tailSeq, size, _, err = db.lGetMeta(mk)
 	if err != nil {
 		return 0
 	}
@@ -539,7 +539,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	return num
 }
 
-func (db *RockDB) lGetMeta(ek []byte) (headSeq int64, tailSeq int64, size int64, err error) {
+func (db *RockDB) lGetMeta(ek []byte) (headSeq int64, tailSeq int64, size int64, ts int64, err error) {
 	var v []byte
 	v, err = db.eng.GetBytes(db.defaultReadOpts, ek)
 	if err != nil {
@@ -552,12 +552,15 @@ func (db *RockDB) lGetMeta(ek []byte) (headSeq int64, tailSeq int64, size int64,
 	} else {
 		headSeq = int64(binary.BigEndian.Uint64(v[0:8]))
 		tailSeq = int64(binary.BigEndian.Uint64(v[8:16]))
+		if len(v) >= 24 {
+			ts = int64(binary.BigEndian.Uint64(v[16 : 16+8]))
+		}
 		size = tailSeq - headSeq + 1
 	}
 	return
 }
 
-func (db *RockDB) lSetMeta(ek []byte, headSeq int64, tailSeq int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) lSetMeta(ek []byte, headSeq int64, tailSeq int64, ts int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	size := tailSeq - headSeq + 1
 	if size < 0 {
 		//	todo : log error + panic
@@ -566,9 +569,10 @@ func (db *RockDB) lSetMeta(ek []byte, headSeq int64, tailSeq int64, wb *gorocksd
 	} else if size == 0 {
 		wb.Delete(ek)
 	} else {
-		buf := make([]byte, 16)
+		buf := make([]byte, 24)
 		binary.BigEndian.PutUint64(buf[0:8], uint64(headSeq))
 		binary.BigEndian.PutUint64(buf[8:16], uint64(tailSeq))
+		binary.BigEndian.PutUint64(buf[16:24], uint64(ts))
 		wb.Put(ek, buf)
 	}
 	return size, nil
@@ -586,7 +590,7 @@ func (db *RockDB) LIndex(key []byte, index int64) ([]byte, error) {
 
 	metaKey := lEncodeMetaKey(key)
 
-	headSeq, tailSeq, _, err = db.lGetMeta(metaKey)
+	headSeq, tailSeq, _, _, err = db.lGetMeta(metaKey)
 	if err != nil {
 		return nil, err
 	}
@@ -610,37 +614,37 @@ func (db *RockDB) LLen(key []byte) (int64, error) {
 	}
 
 	ek := lEncodeMetaKey(key)
-	_, _, size, err := db.lGetMeta(ek)
+	_, _, size, _, err := db.lGetMeta(ek)
 	return int64(size), err
 }
 
-func (db *RockDB) LFixKey(key []byte) {
-	db.fixListKey(key)
+func (db *RockDB) LFixKey(ts int64, key []byte) {
+	db.fixListKey(ts, key)
 }
 
-func (db *RockDB) LPop(key []byte) ([]byte, error) {
-	return db.lpop(key, listHeadSeq)
+func (db *RockDB) LPop(ts int64, key []byte) ([]byte, error) {
+	return db.lpop(ts, key, listHeadSeq)
 }
 
-func (db *RockDB) LTrim(key []byte, start, stop int64) error {
-	return db.ltrim2(key, start, stop)
+func (db *RockDB) LTrim(ts int64, key []byte, start, stop int64) error {
+	return db.ltrim2(ts, key, start, stop)
 }
 
-func (db *RockDB) LTrimFront(key []byte, trimSize int64) (int64, error) {
-	return db.ltrim(key, trimSize, listHeadSeq)
+func (db *RockDB) LTrimFront(ts int64, key []byte, trimSize int64) (int64, error) {
+	return db.ltrim(ts, key, trimSize, listHeadSeq)
 }
 
-func (db *RockDB) LTrimBack(key []byte, trimSize int64) (int64, error) {
-	return db.ltrim(key, trimSize, listTailSeq)
+func (db *RockDB) LTrimBack(ts int64, key []byte, trimSize int64) (int64, error) {
+	return db.ltrim(ts, key, trimSize, listTailSeq)
 }
 
-func (db *RockDB) LPush(key []byte, args ...[]byte) (int64, error) {
+func (db *RockDB) LPush(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	return db.lpush(key, listHeadSeq, args...)
+	return db.lpush(ts, key, listHeadSeq, args...)
 }
-func (db *RockDB) LSet(key []byte, index int64, value []byte) error {
+func (db *RockDB) LSet(ts int64, key []byte, index int64, value []byte) error {
 	if err := checkKeySize(key); err != nil {
 		return err
 	}
@@ -652,13 +656,15 @@ func (db *RockDB) LSet(key []byte, index int64, value []byte) error {
 	var err error
 	metaKey := lEncodeMetaKey(key)
 
-	headSeq, tailSeq, size, err = db.lGetMeta(metaKey)
+	headSeq, tailSeq, size, _, err = db.lGetMeta(metaKey)
 	if err != nil {
 		return err
 	}
 	if size == 0 {
 		return errListIndex
 	}
+	db.wb.Clear()
+	wb := db.wb
 
 	if index >= 0 {
 		seq = headSeq + index
@@ -672,7 +678,9 @@ func (db *RockDB) LSet(key []byte, index int64, value []byte) error {
 	if err != nil {
 		return err
 	}
-	err = db.eng.Put(db.defaultWriteOpts, sk, value)
+	db.lSetMeta(metaKey, headSeq, tailSeq, ts, wb)
+	wb.Put(sk, value)
+	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return err
 }
 
@@ -688,7 +696,7 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 
 	metaKey := lEncodeMetaKey(key)
 
-	if headSeq, tailSeq, llen, err = db.lGetMeta(metaKey); err != nil {
+	if headSeq, tailSeq, llen, _, err = db.lGetMeta(metaKey); err != nil {
 		return nil, err
 	}
 
@@ -741,15 +749,15 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	return v, nil
 }
 
-func (db *RockDB) RPop(key []byte) ([]byte, error) {
-	return db.lpop(key, listTailSeq)
+func (db *RockDB) RPop(ts int64, key []byte) ([]byte, error) {
+	return db.lpop(ts, key, listTailSeq)
 }
 
-func (db *RockDB) RPush(key []byte, args ...[]byte) (int64, error) {
+func (db *RockDB) RPush(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	return db.lpush(key, listTailSeq, args...)
+	return db.lpush(ts, key, listTailSeq, args...)
 }
 
 func (db *RockDB) LClear(key []byte) (int64, error) {

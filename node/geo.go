@@ -82,7 +82,12 @@ func (nd *KVNode) geoaddCommand(conn redcon.Conn, cmd redcon.Command) {
 			return
 		}
 		zaddCmd.Args[1] = key
-		if _, err := nd.localZaddCommand(buildCommand(zaddCmd.Args), -1); err != nil {
+		sm, ok := nd.sm.(*kvStoreSM)
+		if !ok {
+			conn.WriteError("Err not supported state machine")
+			return
+		}
+		if _, err := sm.localZaddCommand(buildCommand(zaddCmd.Args), -1); err != nil {
 			conn.WriteError("Err " + err.Error())
 		}
 
