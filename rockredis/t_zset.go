@@ -382,7 +382,7 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 	return num, err
 }
 
-func (db *RockDB) ZFixCard(key []byte) error {
+func (db *RockDB) ZFixKey(key []byte) error {
 	n, err := db.ZCard(key)
 	if err != nil {
 		dbLog.Infof("get zset card failed: %v", err.Error())

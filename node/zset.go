@@ -490,6 +490,10 @@ func (nd *KVNode) zclearCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	}
 }
 
+func (nd *KVNode) zfixkeyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	conn.WriteString("OK")
+}
+
 func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
 	mlist := make([]common.ScorePair, 0, len(args)/2)
 	for i := 0; i < len(args); i += 2 {
@@ -577,4 +581,9 @@ func (kvsm *kvStoreSM) localZMClearCommand(cmd redcon.Command, ts int64) (interf
 		}
 	}
 	return count, nil
+}
+
+func (kvsm *kvStoreSM) localZFixKeyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	kvsm.store.ZFixKey(cmd.Args[1])
+	return nil, nil
 }

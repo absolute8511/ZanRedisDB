@@ -35,6 +35,7 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	kvsm.router.RegisterInternal("lclear", kvsm.localLclearCommand)
 	kvsm.router.RegisterInternal("lmclear", kvsm.localLMClearCommand)
 	// zset
+	kvsm.router.RegisterInternal("zfixkey", kvsm.localZFixKeyCommand)
 	kvsm.router.RegisterInternal("zadd", kvsm.localZaddCommand)
 	kvsm.router.RegisterInternal("zincrby", kvsm.localZincrbyCommand)
 	kvsm.router.RegisterInternal("zrem", kvsm.localZremCommand)
@@ -125,6 +126,8 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "zrevrangebyscore", wrapReadCommandKAnySubkey(nd.zrevrangebyscoreCommand))
 	nd.router.Register(false, "zrank", wrapReadCommandKSubkey(nd.zrankCommand))
 	nd.router.Register(false, "zrevrank", wrapReadCommandKSubkey(nd.zrevrankCommand))
+
+	nd.router.Register(true, "zfixkey", wrapWriteCommandK(nd, nd.zfixkeyCommand))
 	nd.router.Register(true, "zadd", nd.zaddCommand)
 	nd.router.Register(true, "zincrby", nd.zincrbyCommand)
 	nd.router.Register(true, "zrem", wrapWriteCommandKSubkeySubkey(nd, nd.zremCommand))
