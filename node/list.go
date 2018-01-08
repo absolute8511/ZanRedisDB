@@ -156,16 +156,16 @@ func (nd *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.
 func (kvsm *kvStoreSM) localLfixkeyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	kvsm.store.LFixKey(cmd.Args[1])
+	kvsm.store.LFixKey(ts, cmd.Args[1])
 	return nil, nil
 }
 
 func (kvsm *kvStoreSM) localLpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.LPop(cmd.Args[1])
+	return kvsm.store.LPop(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localLpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.LPush(cmd.Args[1], cmd.Args[2:]...)
+	return kvsm.store.LPush(ts, cmd.Args[1], cmd.Args[2:]...)
 }
 
 func (kvsm *kvStoreSM) localLsetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -174,7 +174,7 @@ func (kvsm *kvStoreSM) localLsetCommand(cmd redcon.Command, ts int64) (interface
 		return nil, err
 	}
 
-	return nil, kvsm.store.LSet(cmd.Args[1], index, cmd.Args[3])
+	return nil, kvsm.store.LSet(ts, cmd.Args[1], index, cmd.Args[3])
 }
 
 func (kvsm *kvStoreSM) localLtrimCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -187,15 +187,15 @@ func (kvsm *kvStoreSM) localLtrimCommand(cmd redcon.Command, ts int64) (interfac
 		return nil, err
 	}
 
-	return nil, kvsm.store.LTrim(cmd.Args[1], start, stop)
+	return nil, kvsm.store.LTrim(ts, cmd.Args[1], start, stop)
 }
 
 func (kvsm *kvStoreSM) localRpopCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.RPop(cmd.Args[1])
+	return kvsm.store.RPop(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localRpushCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.RPush(cmd.Args[1], cmd.Args[2:]...)
+	return kvsm.store.RPush(ts, cmd.Args[1], cmd.Args[2:]...)
 }
 
 func (kvsm *kvStoreSM) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {

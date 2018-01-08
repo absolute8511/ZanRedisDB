@@ -568,7 +568,11 @@ func (nsm *NamespaceMgr) clearUnusedRaftPeer() {
 			for _, m := range mems {
 				currentNodeIDs[m.NodeID] = true
 			}
-			// TODO: handle learners here
+			// handle learners here
+			mems = v.Node.GetLearners()
+			for _, m := range mems {
+				currentNodeIDs[m.NodeID] = true
+			}
 		}
 		for _, p := range peers {
 			if _, ok := currentNodeIDs[uint64(p)]; !ok {

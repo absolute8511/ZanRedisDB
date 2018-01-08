@@ -85,9 +85,11 @@ type KVNode struct {
 
 type KVSnapInfo struct {
 	*rockredis.BackupInfo
+	Ver        int                  `json:"version"`
 	BackupMeta []byte               `json:"backup_meta"`
 	LeaderInfo *common.MemberInfo   `json:"leader_info"`
 	Members    []*common.MemberInfo `json:"members"`
+	Learners   []*common.MemberInfo `json:"learners"`
 }
 
 func (si *KVSnapInfo) GetData() ([]byte, error) {
@@ -230,6 +232,10 @@ func (nd *KVNode) GetLeadMember() *common.MemberInfo {
 
 func (nd *KVNode) GetMembers() []*common.MemberInfo {
 	return nd.rn.GetMembers()
+}
+
+func (nd *KVNode) GetLearners() []*common.MemberInfo {
+	return nd.rn.GetLearners()
 }
 
 func (nd *KVNode) GetLocalMemberInfo() *common.MemberInfo {
@@ -843,6 +849,7 @@ func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 		return nil, err
 	}
 	si.Members, si.LeaderInfo = nd.rn.GetMembersAndLeader()
+	si.Learners = nd.rn.GetLearners()
 	return si, nil
 }
 
@@ -853,7 +860,7 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 	if err != nil {
 		return err
 	}
-	nd.rn.RestoreMembers(si.Members)
+	nd.rn.RestoreMembers(si)
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
 	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot)
 	return err

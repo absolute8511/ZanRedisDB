@@ -25,6 +25,7 @@ var allowStaleRead int32
 type RaftStatus struct {
 	LeaderInfo *common.MemberInfo
 	Members    []*common.MemberInfo
+	Learners   []*common.MemberInfo
 	RaftStat   raft.Status
 }
 
@@ -278,6 +279,7 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 		var s RaftStatus
 		s.LeaderInfo = nsNode.Node.GetLeadMember()
 		s.Members = nsNode.Node.GetMembers()
+		s.Learners = nsNode.Node.GetLearners()
 		s.RaftStat = nsNode.Node.GetRaftStatus()
 		rstat = append(rstat, &s)
 	}

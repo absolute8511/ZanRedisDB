@@ -88,11 +88,12 @@ type raftNode struct {
 	commitC chan<- applyInfo // entries committed to log (k,v)
 	config  *RaftConfig
 
-	memMutex  sync.Mutex
-	members   map[uint64]*common.MemberInfo
-	join      bool   // node is joining an existing cluster
-	lastIndex uint64 // index of log at start
-	lead      uint64
+	memMutex    sync.Mutex
+	members     map[uint64]*common.MemberInfo
+	learnerMems map[uint64]*common.MemberInfo
+	join        bool   // node is joining an existing cluster
+	lastIndex   uint64 // index of log at start
+	lead        uint64
 
 	// raft backing for the commit/error channel
 	node        raft.Node
@@ -138,6 +139,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		commitC:       commitC,
 		config:        rconfig,
 		members:       make(map[uint64]*common.MemberInfo),
+		learnerMems:   make(map[uint64]*common.MemberInfo),
 		join:          join,
 		raftStorage:   raft.NewMemoryStorage(),
 		stopc:         make(chan struct{}),
@@ -414,6 +416,11 @@ func (rc *raftNode) initForTransport() {
 		}
 	}
 	for _, m := range rc.members {
+		if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
+			rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
+		}
+	}
+	for _, m := range rc.learnerMems {
 		if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
 			rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
 		}
@@ -734,6 +741,7 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		rc.memMutex.Lock()
 		rc.Infof("raft replica %v removed from the cluster!", cc.String())
 		delete(rc.members, cc.ReplicaID)
+		delete(rc.learnerMems, cc.ReplicaID)
 		confChanged = true
 		atomic.StoreInt32(&rc.memberCnt, int32(len(rc.members)))
 		rc.memMutex.Unlock()
@@ -770,6 +778,11 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 			nodeLog.Errorf("invalid member info: %v", m)
 			return false, confChanged, errors.New("add member should include node id ")
 		}
+		rc.memMutex.Lock()
+		if _, ok := rc.learnerMems[cc.ReplicaID]; !ok {
+			rc.learnerMems[cc.ReplicaID] = &m
+		}
+		rc.memMutex.Unlock()
 		confChanged = true
 		if m.NodeID != rc.config.nodeConfig.NodeID {
 			rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
@@ -964,6 +977,18 @@ func (rc *raftNode) GetMembers() []*common.MemberInfo {
 	return mems
 }
 
+func (rc *raftNode) GetLearners() []*common.MemberInfo {
+	rc.memMutex.Lock()
+	mems := make(memberSorter, 0, len(rc.members))
+	for _, m := range rc.learnerMems {
+		tmp := *m
+		mems = append(mems, &tmp)
+	}
+	rc.memMutex.Unlock()
+	sort.Sort(memberSorter(mems))
+	return mems
+}
+
 func (rc *raftNode) GetLeadMember() *common.MemberInfo {
 	var tmp common.MemberInfo
 	rc.memMutex.Lock()
@@ -978,7 +1003,9 @@ func (rc *raftNode) GetLeadMember() *common.MemberInfo {
 	return nil
 }
 
-func (rc *raftNode) RestoreMembers(mems []*common.MemberInfo) {
+func (rc *raftNode) RestoreMembers(si KVSnapInfo) {
+	mems := si.Members
+	learners := si.Learners
 	rc.memMutex.Lock()
 	rc.members = make(map[uint64]*common.MemberInfo)
 	for _, m := range mems {
@@ -988,9 +1015,23 @@ func (rc *raftNode) RestoreMembers(mems []*common.MemberInfo) {
 			rc.Infof("node added to the cluster: %v\n", m)
 		}
 	}
+	rc.learnerMems = make(map[uint64]*common.MemberInfo)
+	for _, m := range learners {
+		if _, ok := rc.learnerMems[m.ID]; ok {
+		} else {
+			rc.learnerMems[m.ID] = m
+			rc.Infof("learner node added to the cluster: %v\n", m)
+		}
+	}
 	atomic.StoreInt32(&rc.memberCnt, int32(len(rc.members)))
 	if rc.transport != nil && rc.transport.IsStarted() {
 		for _, m := range rc.members {
+			if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
+				//rc.transport.RemovePeer(types.ID(m.NodeID))
+				rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
+			}
+		}
+		for _, m := range rc.learnerMems {
 			if m.NodeID != uint64(rc.config.nodeConfig.NodeID) {
 				//rc.transport.RemovePeer(types.ID(m.NodeID))
 				rc.transport.UpdatePeer(types.ID(m.NodeID), m.RaftURLs)
