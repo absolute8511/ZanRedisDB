@@ -174,20 +174,32 @@ func getTestClusterConn(t *testing.T, needLeader bool) *goredis.PoolConn {
 	return conn
 }
 
+func waitForLeader(t *testing.T, w time.Duration) *node.NamespaceNode {
+	start := time.Now()
+	for {
+		for _, n := range kvsCluster {
+			replicaNode := n.server.GetNamespaceFromFullName("default-0")
+			assert.NotNil(t, replicaNode)
+			if replicaNode.Node.IsLead() {
+				leaderNode := replicaNode
+				return leaderNode
+			}
+		}
+		if time.Since(start) > w {
+			t.Fatalf("\033[31m timed out %v for wait leader \033[39m\n", time.Since(start))
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	return nil
+}
 func TestStartCluster(t *testing.T) {
 	c := getTestClusterConn(t, false)
 	defer c.Close()
 
 	assert.Equal(t, 3, len(kvsCluster))
-	var leaderNode *node.NamespaceNode
-	for _, n := range kvsCluster {
-		replicaNode := n.server.GetNamespaceFromFullName("default-0")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNode = replicaNode
-			break
-		}
-	}
+	leaderNode := waitForLeader(t, time.Minute)
+	assert.NotNil(t, leaderNode)
 
 	assert.Equal(t, 1, len(learnerServers))
 	learnerNode := learnerServers[0].GetNamespaceFromFullName("default-0")
@@ -273,9 +285,10 @@ func TestStartCluster(t *testing.T) {
 	for {
 		time.Sleep(time.Second)
 		nsStats = learnerNode.Node.GetStats()
-		if nsStats.InternalStats["synced"].(int64) >= 3 {
-			assert.Equal(t, int64(3), nsStats.InternalStats["synced"])
-			assert.Equal(t, sindex+1, nsStats.InternalStats["synced_index"])
+		newSindex := nsStats.InternalStats["synced_index"].(uint64)
+		if newSindex > sindex {
+			assert.Equal(t, true, nsStats.InternalStats["synced"].(int64) >= 1)
+			assert.Equal(t, sindex+1, newSindex)
 			break
 		}
 
@@ -291,15 +304,14 @@ func TestRestartFollower(t *testing.T) {
 	defer c.Close()
 
 	assert.Equal(t, 3, len(kvsCluster))
-	var leaderNode *node.NamespaceNode
+	leaderNode := waitForLeader(t, time.Minute)
+	assert.NotNil(t, leaderNode)
 	var followerS testClusterInfo
 	var follower *node.NamespaceNode
 	for _, n := range kvsCluster {
 		replicaNode := n.server.GetNamespaceFromFullName("default-0")
 		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNode = replicaNode
-		} else {
+		if !replicaNode.Node.IsLead() {
 			followerS = n
 			follower = replicaNode
 			break
@@ -340,15 +352,8 @@ func TestRestartCluster(t *testing.T) {
 
 	assert.Equal(t, 3, len(kvsCluster))
 
-	var leaderNode *node.NamespaceNode
-	for _, n := range kvsCluster {
-		replicaNode := n.server.GetNamespaceFromFullName("default-0")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNode = replicaNode
-			break
-		}
-	}
+	leaderNode := waitForLeader(t, time.Minute)
+	assert.NotNil(t, leaderNode)
 
 	ci := leaderNode.Node.GetCommittedIndex()
 
