@@ -151,6 +151,10 @@ func getTestClusterConn(t *testing.T, needLeader bool) *goredis.PoolConn {
 		kvsCluster, learnerServers, gtmpClusterDir = startTestCluster(t, 3, 1)
 	},
 	)
+	if needLeader {
+		leaderNode := waitForLeader(t, time.Minute)
+		assert.NotNil(t, leaderNode)
+	}
 	rport := 0
 	for _, n := range kvsCluster {
 		replicaNode := n.server.GetNamespaceFromFullName("default-0")
@@ -194,7 +198,7 @@ func waitForLeader(t *testing.T, w time.Duration) *node.NamespaceNode {
 	return nil
 }
 func TestStartCluster(t *testing.T) {
-	c := getTestClusterConn(t, false)
+	c := getTestClusterConn(t, true)
 	defer c.Close()
 
 	assert.Equal(t, 3, len(kvsCluster))
@@ -222,12 +226,13 @@ func TestStartCluster(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
 
+	leaderci := leaderNode.Node.GetCommittedIndex()
 	var sindex uint64
 	start := time.Now()
 	for {
 		nsStats = learnerNode.Node.GetStats()
-		if nsStats.InternalStats["synced"].(int64) >= 1 {
-			assert.Equal(t, int64(1), nsStats.InternalStats["synced"])
+		ci := learnerNode.Node.GetCommittedIndex()
+		if ci >= leaderci {
 			sindex = nsStats.InternalStats["synced_index"].(uint64)
 			assert.Equal(t, true, sindex > uint64(3))
 			break
@@ -246,8 +251,10 @@ func TestStartCluster(t *testing.T) {
 	assert.Nil(t, err)
 
 	time.Sleep(time.Second * 3)
+	leaderci = leaderNode.Node.GetCommittedIndex()
+	ci := learnerNode.Node.GetCommittedIndex()
+	assert.Equal(t, leaderci, ci)
 	nsStats = learnerNode.Node.GetStats()
-	assert.Equal(t, int64(2), nsStats.InternalStats["synced"])
 	assert.Equal(t, sindex+1, nsStats.InternalStats["synced_index"])
 	sindex = nsStats.InternalStats["synced_index"].(uint64)
 
@@ -281,13 +288,17 @@ func TestStartCluster(t *testing.T) {
 	err = learnerNode.Start(false)
 	assert.Nil(t, err)
 
+	leaderci = leaderNode.Node.GetCommittedIndex()
 	start = time.Now()
 	for {
 		time.Sleep(time.Second)
 		nsStats = learnerNode.Node.GetStats()
+
+		ci := learnerNode.Node.GetCommittedIndex()
+		assert.Equal(t, leaderci, ci)
 		newSindex := nsStats.InternalStats["synced_index"].(uint64)
-		if newSindex > sindex {
-			assert.Equal(t, true, nsStats.InternalStats["synced"].(int64) >= 1)
+		if ci >= leaderci {
+			assert.Equal(t, leaderci, ci)
 			assert.Equal(t, sindex+1, newSindex)
 			break
 		}

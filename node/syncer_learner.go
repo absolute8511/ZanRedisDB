@@ -92,6 +92,7 @@ func (kvsm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, er
 }
 
 func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
+	atomic.StoreUint64(&sm.syncedIndex, raftSnapshot.Metadata.Index)
 	if sm.clusterInfo == nil {
 		// in test, the cluster coordinator is not enabled, we can just ignore restore.
 		return nil
