@@ -289,7 +289,20 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	var batchStart time.Time
 	dupCheckMap := make(map[string]bool, len(reqList.Reqs))
 	lastBatchCmd := ""
+	ts := reqList.Timestamp
+	if reqList.Type == FromClusterSyncer {
+		// TODO: check original term and index
+		// if less or equal than last, we need log and skip
+
+		// TODO: here we need compare the key timestamp in this cluster and the timestamp from raft request to handle
+		// the conflict change between two cluster.
+		//
+	}
 	for reqIndex, req := range reqList.Reqs {
+		reqTs := ts
+		if reqTs == 0 {
+			reqTs = req.Header.Timestamp
+		}
 		reqID := req.Header.ID
 		if req.Header.DataType == 0 {
 			cmd, err := redcon.Parse(req.Data)
@@ -325,7 +338,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 						if pk != nil {
 							dupCheckMap[string(pk)] = true
 						}
-						v, err := h(cmd, req.Header.Timestamp)
+						v, err := h(cmd, reqTs)
 						if err != nil {
 							kvsm.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
 							kvsm.w.Trigger(reqID, err)
@@ -359,7 +372,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 					kvsm.Infof("unsupported redis command: %v", cmd)
 					kvsm.w.Trigger(reqID, common.ErrInvalidCommand)
 				} else {
-					v, err := h(cmd, req.Header.Timestamp)
+					v, err := h(cmd, reqTs)
 					cmdCost := time.Since(cmdStart)
 					if cmdCost >= time.Second || nodeLog.Level() > common.LOG_DETAIL ||
 						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > time.Millisecond*100) {
@@ -427,6 +440,13 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	cost := time.Since(start)
 	if cost >= proposeTimeout/2 {
 		kvsm.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
+	}
+	if reqList.Type == FromClusterSyncer {
+		// TODO: update the orig term-index
+	}
+	// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
+	if reqList.ReqId > 0 {
+		kvsm.w.Trigger(reqList.ReqId, nil)
 	}
 	return forceBackup
 }

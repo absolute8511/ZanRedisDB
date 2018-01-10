@@ -333,6 +333,7 @@ func (nd *KVNode) handleProposeReq() {
 				}
 			}
 			reqList.ReqNum = int32(len(reqList.Reqs))
+			reqList.Timestamp = time.Now().UnixNano()
 			buffer, err := reqList.Marshal()
 			// buffer will be reused by raft?
 			// TODO:buffer, err := reqList.MarshalTo()
@@ -348,7 +349,7 @@ func (nd *KVNode) handleProposeReq() {
 			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
-			cost := time.Now().UnixNano() - start
+			cost := reqList.Timestamp - start
 			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
 				nd.rn.Infof("ignore slow for begin propose too late: %v, cost %v", len(reqList.Reqs), cost)
 				for _, r := range reqList.Reqs {
@@ -409,6 +410,68 @@ func (nd *KVNode) handleProposeReq() {
 
 func (nd *KVNode) IsWriteReady() bool {
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(nd.rn.config.Replicator/2)
+}
+
+// used only by grpc cluster sync
+func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
+	var reqList BatchInternalRaftRequest
+	err := reqList.Unmarshal(buffer)
+	if err != nil {
+		return err
+	}
+	reqList.Type = FromClusterSyncer
+	reqList.ReqId = nd.rn.reqIDGen.Next()
+	reqList.OrigTerm = term
+	reqList.OrigIndex = index
+	if reqList.Timestamp != raftTs {
+		return fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
+	}
+
+	for _, req := range reqList.Reqs {
+		// re-generate the req id to override the id from log
+		req.Header.ID = nd.rn.reqIDGen.Next()
+	}
+	dataLen := reqList.Size()
+	if dataLen <= len(buffer) {
+		n, err := reqList.MarshalTo(buffer[:dataLen])
+		if err != nil {
+			return err
+		}
+		if n != dataLen {
+			return errors.New("marshal length mismatch")
+		}
+	}
+	ch := nd.w.Register(reqList.ReqId)
+	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
+	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	var ok bool
+	select {
+	case rsp, closed := <-ch:
+		if err, ok = rsp.(error); ok {
+		} else if closed {
+			nd.rn.Infof("result chan closed: %v for req %v", rsp, reqList.String())
+			err = context.DeadlineExceeded
+		} else {
+			err = nil
+		}
+	case <-nd.stopChan:
+		err = common.ErrStopped
+	case <-ctx.Done():
+		err = ctx.Err()
+		if err == context.DeadlineExceeded {
+			nd.rn.Infof("propose timeout: %v", err.Error())
+		}
+		if err == context.Canceled {
+			// proposal canceled can be caused by leader transfer or no leader
+			err = ErrProposalCanceled
+			nd.rn.Infof("propose canceled ")
+		}
+	}
+	return err
 }
 
 func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {

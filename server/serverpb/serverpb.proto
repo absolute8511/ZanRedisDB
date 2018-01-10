@@ -1,0 +1,43 @@
+syntax = "proto3";
+package serverpb;
+
+import "gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.sizer_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+option (gogoproto.goproto_getters_all) = false;
+option (gogoproto.goproto_enum_prefix_all) = false;
+
+service CrossClusterAPI {
+    rpc ApplyRaftReqs(RaftReqs) returns (RpcErr) {}
+}
+
+message RpcErr {
+    int32 err_type = 1;
+    int32 err_code = 2;
+    string err_msg = 3;
+}
+
+enum RaftLogType {
+    // indicate what stored in the data in raftlog
+    EntryNormalRaw = 0;
+}
+
+message RaftLogData {
+    RaftLogType type = 1;
+    // raft group for different partition has different name, so
+    // we can make sure (term-index) is increased in same raft group.
+    // (term-index) will be checked while replaying in remote cluster
+    uint64 raft_gid =2;
+    string raft_group_name = 3;
+    uint64 term = 4;
+    uint64 index = 5;
+    int64 raft_timestamp = 6;
+    bytes sharding_key = 7;
+    bytes data = 8;
+}
+
+message RaftReqs {
+    repeated RaftLogData raft_log = 1;
+}
