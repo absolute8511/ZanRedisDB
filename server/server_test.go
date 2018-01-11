@@ -295,12 +295,13 @@ func TestStartCluster(t *testing.T) {
 		nsStats = learnerNode.Node.GetStats()
 
 		ci := learnerNode.Node.GetCommittedIndex()
-		assert.Equal(t, leaderci, ci)
 		newSindex := nsStats.InternalStats["synced_index"].(uint64)
 		if ci >= leaderci {
 			assert.Equal(t, leaderci, ci)
 			assert.Equal(t, sindex+1, newSindex)
 			break
+		} else {
+			t.Logf("waiting matched commit: %v vs %v", ci, leaderci)
 		}
 
 		if time.Since(start) > time.Minute {

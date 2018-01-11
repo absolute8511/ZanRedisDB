@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -19,23 +20,30 @@ type logSyncerSM struct {
 	ID            uint64
 	synced        int64
 	syncedIndex   uint64
+	sendCh        chan *BatchInternalRaftRequest
+	lgSender      *LogSender
+	wg            sync.WaitGroup
+	stopping      int32
 }
 
 func NewLogSyncerSM(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
-	clusterInfo common.IClusterInfo, stopChan chan struct{}) (StateMachine, error) {
+	clusterInfo common.IClusterInfo) (StateMachine, error) {
 	store, err := NewKVStore(opts)
 	if err != nil {
 		return nil, err
 	}
-	return &logSyncerSM{
+
+	lg := &logSyncerSM{
 		fullName:      fullName,
 		ns:            ns,
 		machineConfig: machineConfig,
 		ID:            localID,
 		clusterInfo:   clusterInfo,
 		store:         store,
-		stopChan:      stopChan,
-	}, nil
+		stopChan:      make(chan struct{}),
+	}
+
+	return lg, nil
 }
 
 func (sm *logSyncerSM) Debugf(f string, args ...interface{}) {
@@ -51,6 +59,10 @@ func (sm *logSyncerSM) Infof(f string, args ...interface{}) {
 func (sm *logSyncerSM) Errorf(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
 	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", sm.fullName, msg))
+}
+
+func (sm *logSyncerSM) SetRecvChan(c chan *BatchInternalRaftRequest) {
+	sm.sendCh = c
 }
 
 func (sm *logSyncerSM) Optimize() {
@@ -82,7 +94,27 @@ func (sm *logSyncerSM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop ch
 	return nil
 }
 
+func (sm *logSyncerSM) Start() error {
+	lgSender, err := NewLogSender(sm.fullName, sm.machineConfig.RemoteSyncCluster, sm.stopChan)
+	if err != nil {
+		return err
+	}
+
+	sm.SetRecvChan(lgSender.GetChan())
+	sm.wg.Add(1)
+	go func() {
+		defer sm.wg.Done()
+		lgSender.Start()
+	}()
+	return nil
+}
+
 func (sm *logSyncerSM) Close() {
+	if !atomic.CompareAndSwapInt32(&sm.stopping, 0, 1) {
+		return
+	}
+	close(sm.stopChan)
+	sm.wg.Wait()
 	sm.store.Close()
 }
 
@@ -97,6 +129,10 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		// in test, the cluster coordinator is not enabled, we can just ignore restore.
 		return nil
 	}
+	// TODO: get (term-index) from the remote cluster, if the remote cluster has
+	// greater (term-index) than snapshot, we can just ignore the snapshot restore
+	// since we already synced the data in snapshot.
+
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
@@ -110,14 +146,22 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	if err != nil {
 		sm.Infof("failed to restore snapshot: %v", err)
 	}
+	// TODO: since we can not restore from checkpoint on leader in the remote cluster, we need send
+	// clear request to remote and then scan the db and send all keys to the remote cluster to restore
+	// from a clean state.
 	return err
 }
 
 func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64) bool {
 	if nodeLog.Level() >= common.LOG_DETAIL {
-		sm.Debugf("applying : %v at (%v, %v)", reqList, term, index)
+		sm.Debugf("applying in log syncer: %v at (%v, %v)", reqList.String(), term, index)
 	}
 	forceBackup := false
+	reqList.OrigTerm = term
+	reqList.OrigIndex = index
+	if reqList.Timestamp == 0 {
+		sm.Errorf("miss timestamp in raft request: %v", reqList)
+	}
 	for _, req := range reqList.Reqs {
 		if req.Header.DataType == int32(HTTPReq) {
 			var p httpProposeData
@@ -132,7 +176,11 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 			}
 		}
 	}
-	// TODO: send reqlist to remote cluster
+	select {
+	case sm.sendCh <- &reqList:
+	case <-sm.stopChan:
+		return false
+	}
 	atomic.AddInt64(&sm.synced, 1)
 	atomic.StoreUint64(&sm.syncedIndex, index)
 	return forceBackup

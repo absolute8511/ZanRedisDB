@@ -113,7 +113,7 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 
 	stopChan := make(chan struct{})
 	fullName := config.GroupName + "-" + strconv.Itoa(int(config.ID))
-	sm, err := NewStateMachine(fullName, kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo, stopChan)
+	sm, err := NewStateMachine(fullName, kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +149,17 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 }
 
 func (nd *KVNode) Start(standalone bool) error {
-	err := nd.rn.startRaft(nd, standalone)
+	// handle start/stop carefully
+	// if the object has self start()/stop() interface, and do not use the stopChan in KVNode,
+	// then we should call start() directly without put into waitgroup, and call stop() when the KVNode.Stop() is invoked.
+	// Otherwise, any other goroutine should be added into waitgroup and watch stopChan to
+	// get notify for stop and we will wait goroutines in waitgroup when the KVNode.Stop() is invoked.
+
+	err := nd.sm.Start()
+	if err != nil {
+		return err
+	}
+	err = nd.rn.startRaft(nd, standalone)
 	if err != nil {
 		return err
 	}

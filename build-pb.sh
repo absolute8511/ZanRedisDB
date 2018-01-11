@@ -2,7 +2,7 @@
 set -e
 GOGOROOT="${GOPATH}/src/github.com/gogo/protobuf"
 GOGOPATH="${GOGOROOT}:${GOGOROOT}/protobuf"
-DIRS="./node ./raft/raftpb ./snap/snappb ./wal/walpb ./rockredis ./server/serverpb"
+DIRS="./node ./raft/raftpb ./snap/snappb ./wal/walpb ./rockredis ./syncerpb"
 echo $GOROOT
 echo $GOPATH
 for dir in ${DIRS}; do

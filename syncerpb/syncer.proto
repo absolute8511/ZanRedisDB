@@ -1,5 +1,5 @@
 syntax = "proto3";
-package serverpb;
+package syncerpb;
 
 import "gogoproto/gogo.proto";
 
@@ -22,6 +22,7 @@ message RpcErr {
 enum RaftLogType {
     // indicate what stored in the data in raftlog
     EntryNormalRaw = 0;
+    EntrySnapshotRawKV = 1;
 }
 
 message RaftLogData {
@@ -34,8 +35,7 @@ message RaftLogData {
     uint64 term = 4;
     uint64 index = 5;
     int64 raft_timestamp = 6;
-    bytes sharding_key = 7;
-    bytes data = 8;
+    bytes data = 15;
 }
 
 message RaftReqs {

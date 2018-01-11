@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -25,16 +26,17 @@ type StateMachine interface {
 	CleanData() error
 	Optimize()
 	GetStats() common.NamespaceStats
+	Start() error
 	Close()
 	CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error
 }
 
 func NewStateMachine(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64,
-	ns string, clusterInfo common.IClusterInfo, stopChan chan struct{}) (StateMachine, error) {
+	ns string, clusterInfo common.IClusterInfo) (StateMachine, error) {
 	if machineConfig.LearnerRole == "" {
-		return NewKVStoreSM(fullName, opts, machineConfig, localID, ns, clusterInfo, stopChan)
+		return NewKVStoreSM(fullName, opts, machineConfig, localID, ns, clusterInfo)
 	} else if machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
-		return NewLogSyncerSM(fullName, opts, machineConfig, localID, ns, clusterInfo, stopChan)
+		return NewLogSyncerSM(fullName, opts, machineConfig, localID, ns, clusterInfo)
 	} else {
 		return nil, errors.New("unknown learner role")
 	}
@@ -51,10 +53,11 @@ type kvStoreSM struct {
 	dbWriteStats  common.WriteStats
 	w             wait.Wait
 	router        *common.SMCmdRouter
+	stopping      int32
 }
 
 func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
-	clusterInfo common.IClusterInfo, stopChan chan struct{}) (StateMachine, error) {
+	clusterInfo common.IClusterInfo) (StateMachine, error) {
 	store, err := NewKVStore(opts)
 	if err != nil {
 		return nil, err
@@ -66,7 +69,7 @@ func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig,
 		ID:            localID,
 		clusterInfo:   clusterInfo,
 		store:         store,
-		stopChan:      stopChan,
+		stopChan:      make(chan struct{}),
 		router:        common.NewSMCmdRouter(),
 	}
 	sm.registerHandlers()
@@ -88,7 +91,15 @@ func (kvsm *kvStoreSM) Errorf(f string, args ...interface{}) {
 	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", kvsm.fullName, msg))
 }
 
+func (kvsm *kvStoreSM) Start() error {
+	return nil
+}
+
 func (kvsm *kvStoreSM) Close() {
+	if !atomic.CompareAndSwapInt32(&kvsm.stopping, 0, 1) {
+		return
+	}
+	close(kvsm.stopChan)
 	kvsm.store.Close()
 }
 
@@ -291,6 +302,9 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	lastBatchCmd := ""
 	ts := reqList.Timestamp
 	if reqList.Type == FromClusterSyncer {
+		if nodeLog.Level() >= common.LOG_DETAIL {
+			kvsm.Debugf("recv write from cluster syncer at (%v-%v): %v, ", term, index, reqList.String())
+		}
 		// TODO: check original term and index
 		// if less or equal than last, we need log and skip
 
