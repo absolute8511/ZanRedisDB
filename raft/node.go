@@ -391,7 +391,10 @@ func (n *node) run(r *raft) {
 						from.group = m.FromGroup
 					}
 				}
-				r.Step(m) // raft never returns an error
+				err := r.Step(m) // raft never returns an error
+				if err == errMsgDropped && mdrop.dropCB != nil {
+					mdrop.dropCB()
+				}
 			}
 		case cc := <-n.confc:
 			if cc.ReplicaID == None {

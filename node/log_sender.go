@@ -81,7 +81,7 @@ func (s *LogSender) getClient(addr string) syncerpb.CrossClusterAPIClient {
 	if c, ok := s.connPool[addr]; ok {
 		return c.client
 	}
-	conn, err := grpc.Dial(addr)
+	conn, err := grpc.Dial(addr, grpc.WithInsecure())
 	if err != nil {
 		return nil
 	}
