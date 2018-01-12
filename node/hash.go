@@ -133,7 +133,10 @@ func (kvsm *kvStoreSM) localHMsetCommand(cmd redcon.Command, ts int64) (interfac
 }
 
 func (kvsm *kvStoreSM) localHIncrbyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	v, _ := strconv.Atoi(string(cmd.Args[3]))
+	v, err := strconv.ParseInt(string(cmd.Args[3]), 10, 64)
+	if err != nil {
+		return 0, err
+	}
 	ret, err := kvsm.store.HIncrBy(ts, cmd.Args[1], cmd.Args[2], int64(v))
 	return ret, err
 }
