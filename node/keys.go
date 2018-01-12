@@ -1,6 +1,7 @@
 package node
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -78,6 +79,14 @@ func (nd *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interface{
 	}
 }
 
+func (nd *KVNode) incrbyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
 func (nd *KVNode) delCommand(cmd redcon.Command, v interface{}) (interface{}, error) {
 	if rsp, ok := v.(int64); ok {
 		return rsp, nil
@@ -120,6 +129,15 @@ func (kvsm *kvStoreSM) localMSetCommand(cmd redcon.Command, ts int64) (interface
 func (kvsm *kvStoreSM) localIncrCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	v, err := kvsm.store.Incr(ts, cmd.Args[1])
 	return v, err
+}
+
+func (kvsm *kvStoreSM) localIncrByCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	v, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	ret, err := kvsm.store.IncrBy(ts, cmd.Args[1], v)
+	return ret, err
 }
 
 func (kvsm *kvStoreSM) localDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {

@@ -8,6 +8,7 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	kvsm.router.RegisterInternal("setnx", kvsm.localSetnxCommand)
 	kvsm.router.RegisterInternal("mset", kvsm.localMSetCommand)
 	kvsm.router.RegisterInternal("incr", kvsm.localIncrCommand)
+	kvsm.router.RegisterInternal("incrby", kvsm.localIncrByCommand)
 	kvsm.router.RegisterInternal("plset", kvsm.localPlsetCommand)
 	kvsm.router.RegisterInternal("pfadd", kvsm.localPFAddCommand)
 	//kvsm.router.RegisterInternal("pfcount", kvsm.localPFCountCommand)
@@ -74,6 +75,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(true, "set", wrapWriteCommandKV(nd, nd.setCommand))
 	nd.router.Register(true, "setnx", wrapWriteCommandKV(nd, nd.setnxCommand))
 	nd.router.Register(true, "incr", wrapWriteCommandK(nd, nd.incrCommand))
+	nd.router.Register(true, "incrby", wrapWriteCommandKV(nd, nd.incrbyCommand))
 	nd.router.Register(true, "pfadd", wrapWriteCommandKAnySubkey(nd, nd.pfaddCommand, 0))
 	nd.router.Register(false, "pfcount", wrapReadCommandK(nd.pfcountCommand))
 	// for hash

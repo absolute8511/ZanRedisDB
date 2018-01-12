@@ -306,17 +306,17 @@ func TestKVIncrDecr(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	//if n, err := goredis.Int64(c.Do("incrby", "n", 10)); err != nil {
-	//	t.Fatal(err)
-	//} else if n != 11 {
-	//	t.Fatal(n)
-	//}
+	if n, err := goredis.Int64(c.Do("incrby", key, 10)); err != nil {
+		t.Fatal(err)
+	} else if n != 12 {
+		t.Fatal(n)
+	}
 
-	//if n, err := goredis.Int64(c.Do("decrby", "n", 10)); err != nil {
-	//	t.Fatal(err)
-	//} else if n != 1 {
-	//	t.Fatal(n)
-	//}
+	if n, err := goredis.Int64(c.Do("incrby", key, -10)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
 }
 
 func TestKVBatch(t *testing.T) {
@@ -516,6 +516,9 @@ func TestKVErrorParams(t *testing.T) {
 	assert.NotNil(t, err)
 
 	_, err = c.Do("incrby", key1)
+	assert.NotNil(t, err)
+
+	_, err = c.Do("incrby", key1, "nan")
 	assert.NotNil(t, err)
 
 	_, err = c.Do("decrby", key1)
