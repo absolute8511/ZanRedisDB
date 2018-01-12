@@ -16,7 +16,7 @@ echo $GOPATH
 
 arch=$(go env GOARCH)
 os=$(go env GOOS)
-version=$(awk '/const VerBinary/ {print $NF}' < $DIR/common/binary.go | sed 's/"//g')
+version=$(awk '/VERBINARY\?/ {print $NF}' < $DIR/Makefile | sed 's/"//g')
 goversion=$(go version | awk '{print $3}')
 
 echo "... building v$version for $os/$arch"
