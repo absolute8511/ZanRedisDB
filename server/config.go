@@ -13,12 +13,14 @@ type ServerConfig struct {
 	BroadcastAddr        string            `json:"broadcast_addr"`
 	RedisAPIPort         int               `json:"redis_api_port"`
 	HttpAPIPort          int               `json:"http_api_port"`
+	GrpcAPIPort          int               `json:"grpc_api_port"`
 	ProfilePort          int               `json:"profile_port"`
 	DataDir              string            `json:"data_dir"`
 	DataRsyncModule      string            `json:"data_rsync_module"`
 	LocalRaftAddr        string            `json:"local_raft_addr"`
 	Tags                 map[string]string `json:"tags"`
 	LearnerRole          string            `json:"learner_role"`
+	RemoteSyncCluster    string            `json:"remote_sync_cluster"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`

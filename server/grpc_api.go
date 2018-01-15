@@ -27,13 +27,16 @@ type grpcServerInfo struct {
 }
 
 func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*syncerpb.RpcErr, error) {
-	if sLog.Level() >= common.LOG_DETAIL {
-		sLog.Debugf("applying from remote cluster syncer: %v", reqs.String())
-	}
+	var rpcErr syncerpb.RpcErr
 	for _, r := range reqs.RaftLog {
+		if sLog.Level() >= common.LOG_DETAIL {
+			sLog.Debugf("applying raft log from remote cluster syncer: %v", r.String())
+		}
 		kv := s.GetNamespaceFromFullName(r.RaftGroupName)
 		if kv == nil || !kv.IsReady() {
-			return &syncerpb.RpcErr{ErrCode: http.StatusNotFound, ErrMsg: "namespace node not found"}, nil
+			rpcErr.ErrCode = http.StatusNotFound
+			rpcErr.ErrMsg = "namespace node not found"
+			return &rpcErr, nil
 		}
 		if r.Type != syncerpb.EntryNormalRaw {
 			// unsupported other type
@@ -46,7 +49,9 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		err := kv.Node.ProposeRawAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
 		if err != nil {
 			sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
-			return &syncerpb.RpcErr{ErrCode: http.StatusInternalServerError, ErrMsg: err.Error()}, nil
+			rpcErr.ErrCode = http.StatusInternalServerError
+			rpcErr.ErrMsg = err.Error()
+			return &rpcErr, nil
 		}
 		cost = time.Now().UnixNano() - localStart
 		if cost >= int64(proposeTimeout.Nanoseconds())/2 {
@@ -56,7 +61,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		syncLatency := cost + localStart - logStart
 		_ = syncLatency
 	}
-	return nil, nil
+	return &rpcErr, nil
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
@@ -65,6 +70,7 @@ func (s *Server) serveGRPCAPI(port int, stopC <-chan struct{}) error {
 	if err != nil {
 		return err
 	}
+	sLog.Infof("begin grpc server at port: %v", port)
 	rpcServer := grpc.NewServer()
 	syncerpb.RegisterCrossClusterAPIServer(rpcServer, s)
 	go func() {

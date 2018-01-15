@@ -128,14 +128,15 @@ func NewServer(conf ServerConfig) *Server {
 		ErrorC:      nil,
 	}
 	mconf := &node.MachineConfig{
-		BroadcastAddr: conf.BroadcastAddr,
-		HttpAPIPort:   conf.HttpAPIPort,
-		LocalRaftAddr: conf.LocalRaftAddr,
-		DataRootDir:   conf.DataDir,
-		TickMs:        conf.TickMs,
-		ElectionTick:  conf.ElectionTick,
-		LearnerRole:   conf.LearnerRole,
-		RocksDBOpts:   conf.RocksDBOpts,
+		BroadcastAddr:     conf.BroadcastAddr,
+		HttpAPIPort:       conf.HttpAPIPort,
+		LocalRaftAddr:     conf.LocalRaftAddr,
+		DataRootDir:       conf.DataDir,
+		TickMs:            conf.TickMs,
+		ElectionTick:      conf.ElectionTick,
+		LearnerRole:       conf.LearnerRole,
+		RemoteSyncCluster: conf.RemoteSyncCluster,
+		RocksDBOpts:       conf.RocksDBOpts,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID
@@ -216,6 +217,12 @@ func (s *Server) Start() {
 		defer s.wg.Done()
 		s.serveRedisAPI(s.conf.RedisAPIPort, s.stopC)
 	}()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.serveGRPCAPI(s.conf.GrpcAPIPort, s.stopC)
+	}()
+
 	if s.dataCoord != nil {
 		err := s.dataCoord.Start()
 		if err != nil {

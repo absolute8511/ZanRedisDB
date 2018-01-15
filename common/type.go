@@ -322,7 +322,7 @@ type SnapshotSyncInfo struct {
 }
 
 type IClusterInfo interface {
-	GetSnapshotSyncInfo(string) ([]SnapshotSyncInfo, error)
+	GetSnapshotSyncInfo(fullNS string) ([]SnapshotSyncInfo, error)
 	// return leader node id, leader epoch, for this namespace
 	GetNamespaceLeader(fullNS string) (uint64, int64, error)
 	UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error)

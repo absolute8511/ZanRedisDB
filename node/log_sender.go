@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -12,14 +13,19 @@ import (
 	"google.golang.org/grpc"
 )
 
+var (
+	errInvalidRemoteCluster = errors.New("remote cluster is not valid")
+	errInvalidNamespace     = errors.New("namespace is not valid")
+)
+
 type ccAPIClient struct {
 	client syncerpb.CrossClusterAPIClient
 	conn   *grpc.ClientConn
 }
 
+// LogSender is the raft log sender. It will send all the raft logs
+// to the remote cluster using grpc service.
 type LogSender struct {
-	recvCh            chan *BatchInternalRaftRequest
-	stopChan          chan struct{}
 	grpName           string
 	ns                string
 	pid               int
@@ -28,24 +34,30 @@ type LogSender struct {
 	remoteClusterAddr string
 }
 
-func NewLogSender(fullName string, remoteCluster string, stopChan chan struct{}) (*LogSender, error) {
+func NewLogSender(fullName string, remoteCluster string) (*LogSender, error) {
+	if remoteCluster == "" {
+		return nil, errInvalidRemoteCluster
+	}
+	// used for test only
+	if remoteCluster == "test://" {
+		remoteCluster = ""
+	}
 	ns, pid := common.GetNamespaceAndPartition(fullName)
+	if ns == "" {
+		nodeLog.Infof("invalid namespace string: %v", fullName)
+		return nil, errInvalidNamespace
+	}
 	return &LogSender{
-		stopChan:          stopChan,
-		recvCh:            make(chan *BatchInternalRaftRequest),
 		ns:                ns,
 		pid:               pid,
 		remoteClusterAddr: remoteCluster,
 		grpName:           fullName,
+		connPool:          make(map[string]ccAPIClient),
 	}, nil
 }
 
-func (s *LogSender) GetChan() chan *BatchInternalRaftRequest {
-	return s.recvCh
-}
-
 func (s *LogSender) getZanCluster() *zanredisdb.Cluster {
-	if s.remoteClusterAddr == "" {
+	if s.remoteClusterAddr == "" || strings.HasPrefix(s.remoteClusterAddr, "test://") {
 		return nil
 	}
 	conf := &zanredisdb.Conf{
@@ -60,9 +72,7 @@ func (s *LogSender) getZanCluster() *zanredisdb.Cluster {
 	return s.zanCluster
 }
 
-func (s *LogSender) Start() {
-	s.getZanCluster()
-	s.sendRaftLogLoop()
+func (s *LogSender) Stop() {
 	for _, c := range s.connPool {
 		if c.conn != nil {
 			c.conn.Close()
@@ -90,78 +100,83 @@ func (s *LogSender) getClient(addr string) syncerpb.CrossClusterAPIClient {
 	return c
 }
 
-func (s *LogSender) doSendOnce(r *BatchInternalRaftRequest) error {
+func (s *LogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 	if s.remoteClusterAddr == "" {
-		nodeLog.Infof("sending log with no remote: %v-%v, %v", r.OrigTerm, r.OrigIndex, r.String())
+		nodeLog.Infof("sending log with no remote: %v", r)
 		return nil
 	}
-	if s.zanCluster == nil {
-		s.zanCluster = s.getZanCluster()
+	var addr string
+	if strings.HasPrefix(s.remoteClusterAddr, "test://") {
+		addr = s.remoteClusterAddr[len("test://"):]
+	} else {
 		if s.zanCluster == nil {
-			return errors.New("failed to init remote zankv cluster")
+			s.zanCluster = s.getZanCluster()
+			if s.zanCluster == nil {
+				return errors.New("failed to init remote zankv cluster")
+			}
 		}
+		h, err := s.zanCluster.GetHostByPart(s.pid, true)
+		if err != nil {
+			nodeLog.Infof("failed to get host address :%v", err.Error())
+			return err
+		}
+		addr = h.Addr()
 	}
-	h, err := s.zanCluster.GetHostByPart(s.pid, true)
-	if err != nil {
-		nodeLog.Infof("failed to get host address :%v,  %v-%v", err.Error(), r.OrigTerm, r.OrigIndex)
-		return err
-	}
-	addr := h.Addr()
 	c := s.getClient(addr)
 	if c == nil {
-		nodeLog.Infof("sending(%v) log failed to get grpc client", addr, r.OrigTerm, r.OrigIndex)
+		nodeLog.Infof("sending(%v) log failed to get grpc client", addr)
 		return errors.New("failed to get grpc client")
 	}
-	raftLogs := make([]*syncerpb.RaftLogData, 1)
-	raftLogs[0].Type = syncerpb.EntryNormalRaw
-	raftLogs[0].Data, _ = r.Marshal()
-	raftLogs[0].Term = r.OrigTerm
-	raftLogs[0].Index = r.OrigIndex
-	raftLogs[0].RaftTimestamp = r.Timestamp
-	raftLogs[0].RaftGroupName = s.grpName
+	raftLogs := make([]*syncerpb.RaftLogData, len(r))
+	for i, e := range r {
+		var rld syncerpb.RaftLogData
+		raftLogs[i] = &rld
+		raftLogs[i].Type = syncerpb.EntryNormalRaw
+		raftLogs[i].Data, _ = e.Marshal()
+		raftLogs[i].Term = e.OrigTerm
+		raftLogs[i].Index = e.OrigIndex
+		raftLogs[i].RaftTimestamp = e.Timestamp
+		raftLogs[i].RaftGroupName = s.grpName
+	}
 
 	in := &syncerpb.RaftReqs{RaftLog: raftLogs}
 	if nodeLog.Level() >= common.LOG_DETAIL {
-		nodeLog.Debugf("sending(%v) log : %v-%v, %v", addr, r.OrigTerm, r.OrigIndex, r.String())
+		nodeLog.Debugf("sending(%v) log : %v", addr, in.String())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	rpcErr, err := c.ApplyRaftReqs(ctx, in)
 	if err != nil {
-		nodeLog.Infof("sending(%v) log failed: %v,  %v-%v, %v", addr, err.Error(), r.OrigTerm, r.OrigIndex, r.String())
+		nodeLog.Infof("sending(%v) log failed: %v,  %v", addr, err.Error(), in.String())
 		return err
 	}
-	if rpcErr != nil && rpcErr.ErrCode != http.StatusOK {
-		nodeLog.Infof("sending(%v) log failed: %v,  %v-%v, %v", addr, rpcErr, r.OrigTerm, r.OrigIndex, r.String())
+	if rpcErr != nil && rpcErr.ErrCode != http.StatusOK &&
+		rpcErr.ErrCode != 0 {
+		nodeLog.Infof("sending(%v) log failed: %v,  %v", addr, rpcErr, in.String())
 		return errors.New(rpcErr.ErrMsg)
 	}
 	return nil
 }
 
-func (s *LogSender) sendRaftLogLoop() {
-	defer func() {
-		nodeLog.Infof("raft log send loop exit")
-	}()
-
+func (s *LogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
+	retry := 0
 	for {
-		select {
-		case r := <-s.recvCh:
-			for {
-				err := s.doSendOnce(r)
-				if err != nil {
-					nodeLog.Infof("failed to send raft log: %v, %v", err.Error(), r.String())
-					select {
-					case <-s.stopChan:
-						return
-					case <-time.After(time.Millisecond * 100):
-						continue
-					}
-				} else {
-					break
-				}
+		retry++
+		err := s.doSendOnce(r)
+		if err != nil {
+			nodeLog.Infof("failed to send raft log (retried %v): %v", retry, err.Error())
+			wait := time.Millisecond * 100 * time.Duration(retry)
+			if wait > time.Second*30 {
+				wait = time.Second * 30
 			}
-		case <-s.stopChan:
-			return
+			select {
+			case <-stop:
+				return err
+			case <-time.After(wait):
+				continue
+			}
+		} else {
+			return nil
 		}
 	}
 }

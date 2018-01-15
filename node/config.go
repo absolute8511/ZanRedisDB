@@ -58,7 +58,8 @@ type ReplicaInfo struct {
 }
 
 type RaftConfig struct {
-	GroupID   uint64 `json:"group_id"`
+	GroupID uint64 `json:"group_id"`
+	// group name is combined namespace-partition string
 	GroupName string `json:"group_name"`
 	// this is replica id
 	ID uint64 `json:"id"`

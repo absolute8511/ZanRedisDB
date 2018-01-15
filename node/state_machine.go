@@ -19,9 +19,9 @@ import (
 )
 
 type StateMachine interface {
-	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64) bool
+	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
-	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error
+	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
 	CleanData() error
 	Optimize()
@@ -31,12 +31,12 @@ type StateMachine interface {
 	CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error
 }
 
-func NewStateMachine(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64,
-	ns string, clusterInfo common.IClusterInfo) (StateMachine, error) {
+func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint64,
+	fullNS string, clusterInfo common.IClusterInfo) (StateMachine, error) {
 	if machineConfig.LearnerRole == "" {
-		return NewKVStoreSM(fullName, opts, machineConfig, localID, ns, clusterInfo)
+		return NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo)
 	} else if machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
-		return NewLogSyncerSM(fullName, opts, machineConfig, localID, ns, clusterInfo)
+		return NewLogSyncerSM(opts, machineConfig, localID, fullNS, clusterInfo)
 	} else {
 		return nil, errors.New("unknown learner role")
 	}
@@ -46,9 +46,8 @@ type kvStoreSM struct {
 	fullName      string
 	store         *KVStore
 	clusterInfo   common.IClusterInfo
-	ns            string
+	fullNS        string
 	machineConfig MachineConfig
-	stopChan      chan struct{}
 	ID            uint64
 	dbWriteStats  common.WriteStats
 	w             wait.Wait
@@ -56,20 +55,18 @@ type kvStoreSM struct {
 	stopping      int32
 }
 
-func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
+func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
 	clusterInfo common.IClusterInfo) (StateMachine, error) {
 	store, err := NewKVStore(opts)
 	if err != nil {
 		return nil, err
 	}
 	sm := &kvStoreSM{
-		fullName:      fullName,
-		ns:            ns,
+		fullNS:        ns,
 		machineConfig: machineConfig,
 		ID:            localID,
 		clusterInfo:   clusterInfo,
 		store:         store,
-		stopChan:      make(chan struct{}),
 		router:        common.NewSMCmdRouter(),
 	}
 	sm.registerHandlers()
@@ -78,17 +75,17 @@ func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig,
 
 func (kvsm *kvStoreSM) Debugf(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.DebugDepth(1, fmt.Sprintf("%v: %s", kvsm.fullName, msg))
+	nodeLog.DebugDepth(1, fmt.Sprintf("%v: %s", kvsm.fullNS, msg))
 }
 
 func (kvsm *kvStoreSM) Infof(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.InfoDepth(1, fmt.Sprintf("%v: %s", kvsm.fullName, msg))
+	nodeLog.InfoDepth(1, fmt.Sprintf("%v: %s", kvsm.fullNS, msg))
 }
 
 func (kvsm *kvStoreSM) Errorf(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", kvsm.fullName, msg))
+	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", kvsm.fullNS, msg))
 }
 
 func (kvsm *kvStoreSM) Start() error {
@@ -99,7 +96,6 @@ func (kvsm *kvStoreSM) Close() {
 	if !atomic.CompareAndSwapInt32(&kvsm.stopping, 0, 1) {
 		return
 	}
-	close(kvsm.stopChan)
 	kvsm.store.Close()
 }
 
@@ -163,7 +159,7 @@ func checkLocalBackup(store *KVStore, rs raftpb.Snapshot) (bool, error) {
 }
 
 func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
-	clusterInfo common.IClusterInfo, ns string,
+	clusterInfo common.IClusterInfo, fullNS string,
 	localID uint64, stopChan chan struct{},
 	raftSnapshot raftpb.Snapshot, retry int) error {
 
@@ -174,7 +170,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	if clusterInfo == nil {
 		return errors.New("cluster info is not available.")
 	}
-	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, ns, localID, stopChan, raftSnapshot, retry)
+	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, fullNS, localID, stopChan, raftSnapshot, retry)
 	if syncAddr == "" && syncDir == "" {
 		return errors.New("no backup available from others")
 	}
@@ -190,7 +186,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 }
 
 func GetValidBackupInfo(machineConfig MachineConfig,
-	clusterInfo common.IClusterInfo, ns string,
+	clusterInfo common.IClusterInfo, fullNS string,
 	localID uint64, stopChan chan struct{},
 	raftSnapshot raftpb.Snapshot, retryIndex int) (string, string) {
 	// we need find the right backup data match with the raftsnapshot
@@ -205,9 +201,9 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 	var err error
 	for innerRetry < 3 {
 		innerRetry++
-		snapSyncInfoList, err = clusterInfo.GetSnapshotSyncInfo(ns)
+		snapSyncInfoList, err = clusterInfo.GetSnapshotSyncInfo(fullNS)
 		if err != nil {
-			nodeLog.Infof("%v get snapshot info failed: %v", ns, err)
+			nodeLog.Infof("%v get snapshot info failed: %v", fullNS, err)
 			select {
 			case <-stopChan:
 				break
@@ -218,7 +214,7 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 		}
 	}
 
-	nodeLog.Infof("%v current cluster raft nodes info: %v", ns, snapSyncInfoList)
+	nodeLog.Infof("%v current cluster raft nodes info: %v", fullNS, snapSyncInfoList)
 	syncAddrList := make([]string, 0)
 	syncDirList := make([]string, 0)
 	for _, ssi := range snapSyncInfoList {
@@ -229,7 +225,7 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 		c := http.Client{Transport: common.NewDeadlineTransport(time.Second)}
 		body, _ := raftSnapshot.Marshal()
 		uri := "http://" + ssi.RemoteAddr + ":" +
-			ssi.HttpAPIPort + common.APICheckBackup + "/" + ns
+			ssi.HttpAPIPort + common.APICheckBackup + "/" + fullNS
 		req, _ := http.NewRequest("GET", uri, bytes.NewBuffer(body))
 		rsp, err := c.Do(req)
 		if err != nil {
@@ -249,29 +245,29 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 			}
 			// local node with different directory
 			syncAddrList = append(syncAddrList, "")
-			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, ns))
+			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, fullNS))
 		} else {
 			// for remote snapshot, we do rsync from remote module
 			syncAddrList = append(syncAddrList, ssi.RemoteAddr)
-			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, ns))
+			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, fullNS))
 		}
 	}
 	if len(syncAddrList) > 0 {
 		syncAddr = syncAddrList[retryIndex%len(syncAddrList)]
 		syncDir = syncDirList[retryIndex%len(syncDirList)]
 	}
-	nodeLog.Infof("%v should recovery from : %v, %v", ns, syncAddr, syncDir)
+	nodeLog.Infof("%v should recovery from : %v, %v", fullNS, syncAddr, syncDir)
 	return syncAddr, syncDir
 }
 
-func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
+func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
 	retry := 0
 	for retry < 3 {
-		err := prepareSnapshotForStore(kvsm.store, kvsm.machineConfig, kvsm.clusterInfo, kvsm.ns,
-			kvsm.ID, kvsm.stopChan, raftSnapshot, retry)
+		err := prepareSnapshotForStore(kvsm.store, kvsm.machineConfig, kvsm.clusterInfo, kvsm.fullNS,
+			kvsm.ID, stop, raftSnapshot, retry)
 		if err != nil {
 			kvsm.Infof("failed to prepare snapshot: %v", err)
 		} else {
@@ -283,7 +279,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		retry++
 		kvsm.Infof("failed to restore snapshot: %v", err)
 		select {
-		case <-kvsm.stopChan:
+		case <-stop:
 			return err
 		case <-time.After(time.Second):
 		}
@@ -291,7 +287,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	return errors.New("failed to restore from snapshot")
 }
 
-func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64) bool {
+func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool {
 	forceBackup := false
 	start := time.Now()
 	batching := false
@@ -303,7 +299,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	ts := reqList.Timestamp
 	if reqList.Type == FromClusterSyncer {
 		if nodeLog.Level() >= common.LOG_DETAIL {
-			kvsm.Debugf("recv write from cluster syncer at (%v-%v): %v, ", term, index, reqList.String())
+			kvsm.Debugf("recv write from cluster syncer at (%v-%v): %v", term, index, reqList.String())
 		}
 		// TODO: check original term and index
 		// if less or equal than last, we need log and skip

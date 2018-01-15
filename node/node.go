@@ -112,8 +112,7 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	config.nodeConfig = machineConfig
 
 	stopChan := make(chan struct{})
-	fullName := config.GroupName + "-" + strconv.Itoa(int(config.ID))
-	sm, err := NewStateMachine(fullName, kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo)
+	sm, err := NewStateMachine(kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +426,11 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	var reqList BatchInternalRaftRequest
 	err := reqList.Unmarshal(buffer)
 	if err != nil {
+		nd.rn.Infof("propose raw failed: %v at (%v-%v)", err.Error(), term, index)
 		return err
+	}
+	if nodeLog.Level() >= common.LOG_DETAIL {
+		nd.rn.Infof("propose raw (%v): %v at (%v-%v)", len(buffer), buffer, term, index)
 	}
 	reqList.Type = FromClusterSyncer
 	reqList.ReqId = nd.rn.reqIDGen.Next()
@@ -450,21 +453,28 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 		if n != dataLen {
 			return errors.New("marshal length mismatch")
 		}
+	} else {
+		buffer, err = reqList.Marshal()
+		if err != nil {
+			return err
+		}
 	}
 	ch := nd.w.Register(reqList.ReqId)
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
+	if nodeLog.Level() >= common.LOG_DETAIL {
+		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
+	}
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
 	if err != nil {
 		return err
 	}
 	defer cancel()
 	var ok bool
+	var rsp interface{}
 	select {
-	case rsp, closed := <-ch:
+	case rsp = <-ch:
 		if err, ok = rsp.(error); ok {
-		} else if closed {
-			nd.rn.Infof("result chan closed: %v for req %v", rsp, reqList.String())
-			err = context.DeadlineExceeded
+			rsp = nil
 		} else {
 			err = nil
 		}
@@ -768,14 +778,14 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
 		if parseErr != nil {
 			nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
 				parseErr, len(evnt.Data), evnt,
-				string(evnt.Data))
+				evnt.String())
 		}
 		if len(reqList.Reqs) != int(reqList.ReqNum) {
 			nd.rn.Infof("request check failed %v, real len:%v",
 				reqList, len(reqList.Reqs))
 		}
 
-		forceBackup = nd.sm.ApplyRaftRequest(reqList, evnt.Term, evnt.Index)
+		forceBackup = nd.sm.ApplyRaftRequest(reqList, evnt.Term, evnt.Index, nd.stopChan)
 	}
 	return forceBackup
 }
@@ -935,7 +945,7 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 	}
 	nd.rn.RestoreMembers(si)
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
-	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot)
+	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot, nd.stopChan)
 	return err
 }
 
