@@ -98,6 +98,7 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 //	ps : here just focus on deleting the key-value data,
 //		 any other likes expire is ignore.
 func (db *RockDB) KVDel(key []byte) (int64, error) {
+	rawKey := key
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
 		return 0, err
@@ -121,6 +122,7 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	db.delPFCache(rawKey)
 	return delCnt, nil
 }
 

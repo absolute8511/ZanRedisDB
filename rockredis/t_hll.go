@@ -37,6 +37,7 @@ type hllCacheItem struct {
 	hllType     uint8
 	ts          int64
 	flushed     bool
+	deleting    bool
 }
 
 type hllCache struct {
@@ -69,8 +70,9 @@ func (c *hllCache) Flush() {
 		v, ok := c.lruCache.Peek(k)
 		if ok {
 			item, ok := v.(*hllCacheItem)
-			if ok && !item.flushed {
+			if ok && !item.flushed && !item.deleting {
 				c.onEvicted(k, v)
+				c.readCache.Remove(k.(string))
 			}
 		}
 	}
@@ -81,12 +83,15 @@ func (c *hllCache) Flush() {
 
 // must be called in raft commit loop
 func (c *hllCache) onEvicted(rawKey interface{}, value interface{}) {
-	wb := gorocksdb.NewWriteBatch()
-	defer wb.Destroy()
 	item, ok := value.(*hllCacheItem)
 	if !ok {
 		return
 	}
+	if item.deleting {
+		return
+	}
+	wb := gorocksdb.NewWriteBatch()
+	defer wb.Destroy()
 	cachedKey := []byte(rawKey.(string))
 	table, key, err := convertRedisKeyToDBKVKey(cachedKey)
 	oldV, _ := c.db.eng.GetBytesNoLock(c.db.defaultReadOpts, key)
@@ -121,10 +126,13 @@ func (c *hllCache) onEvicted(rawKey interface{}, value interface{}) {
 
 func (c *hllCache) Get(key []byte) (*hllCacheItem, bool) {
 	v, ok := c.lruCache.Get(string(key))
+	rmRead := true
 	if !ok {
 		v, ok = c.readCache.Get(string(key))
 		if !ok {
 			return nil, false
+		} else {
+			rmRead = false
 		}
 	}
 
@@ -132,7 +140,9 @@ func (c *hllCache) Get(key []byte) (*hllCacheItem, bool) {
 	if !ok {
 		return nil, false
 	}
-	c.readCache.Remove(string(key))
+	if rmRead {
+		c.readCache.Remove(string(key))
+	}
 	return item, true
 }
 
@@ -141,8 +151,20 @@ func (c *hllCache) AddToReadCache(key []byte, item *hllCacheItem) {
 }
 
 func (c *hllCache) Add(key []byte, item *hllCacheItem) {
-	c.readCache.Remove(string(key))
 	c.lruCache.Add(string(key), item)
+	c.readCache.Remove(string(key))
+}
+
+func (c *hllCache) Del(key []byte) {
+	v, ok := c.lruCache.Peek(string(key))
+	if ok {
+		item, ok := v.(*hllCacheItem)
+		if ok {
+			item.deleting = true
+		}
+		c.lruCache.Remove(string(key))
+	}
+	c.readCache.Remove(string(key))
 }
 
 func (db *RockDB) PFCount(ts int64, keys ...[]byte) (int64, error) {
@@ -261,6 +283,11 @@ func (db *RockDB) PFCount(ts int64, keys ...[]byte) (int64, error) {
 		}
 		return int64(hllp.Count()), nil
 	}
+}
+
+func (db *RockDB) delPFCache(rawKey []byte) {
+	// only use this to delete pf while the key is really deleted
+	db.hllCache.Del(rawKey)
 }
 
 func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error) {

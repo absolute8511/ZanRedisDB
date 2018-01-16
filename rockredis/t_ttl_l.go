@@ -205,7 +205,14 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			for _, k := range keys {
 				db.KVDelWithBatch(k, wb)
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			err := db.eng.Write(db.defaultWriteOpts, wb)
+			if err != nil {
+				return err
+			}
+			for _, k := range keys {
+				db.delPFCache(k)
+			}
+			return nil
 		}
 	case common.HASH:
 		return func(keys [][]byte) error {
