@@ -414,26 +414,24 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	return num, err
 }
 
-func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes *TableIndexContainer) int64 {
+func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes *TableIndexContainer) error {
 	sk := hEncodeSizeKey(hkey)
 	table, rk, err := extractTableFromRedisKey(hkey)
 	if err != nil {
-		return 0
+		return err
 	}
 	start := hEncodeStartKey(table, rk)
 	stop := hEncodeStopKey(table, rk)
 
-	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
-	if err != nil {
-		return 0
-	}
-	defer it.Close()
+	if tableIndexes != nil {
+		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
 
-	var num int64 = 0
-	for ; it.Valid(); it.Next() {
-		rawk := it.RefKey()
-
-		if tableIndexes != nil {
+		for ; it.Valid(); it.Next() {
+			rawk := it.RefKey()
 			_, _, field, _ := hDecodeHashKey(rawk)
 			if hindex := tableIndexes.GetHIndexNoLock(string(field)); hindex != nil {
 				oldV := it.RefValue()
@@ -443,12 +441,10 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 				hindex.RemoveRec(oldV, hkey, wb)
 			}
 		}
-
-		num++
 	}
 	wb.DeleteRange(start, stop)
 	wb.Delete(sk)
-	return num
+	return nil
 }
 
 func (db *RockDB) HClear(hkey []byte) (int64, error) {
@@ -473,7 +469,10 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 
 	wb := db.wb
 	wb.Clear()
-	db.hDeleteAll(hkey, wb, tableIndexes)
+	err = db.hDeleteAll(hkey, wb, tableIndexes)
+	if err != nil {
+		return 0, err
+	}
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 		db.delExpire(HashType, hkey, wb)
@@ -502,7 +501,10 @@ func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
 		defer tableIndexes.Unlock()
 	}
 
-	db.hDeleteAll(hkey, wb, tableIndexes)
+	err = db.hDeleteAll(hkey, wb, tableIndexes)
+	if err != nil {
+		return err
+	}
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 		db.delExpire(HashType, hkey, wb)

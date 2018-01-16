@@ -516,27 +516,18 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 		return 0
 	}
 
-	var num int64
 	startKey := lEncodeListKey(table, rk, headSeq)
 	stopKey := lEncodeListKey(table, rk, tailSeq)
 
-	rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
-	if err != nil {
-		return 0
-	}
-	for ; rit.Valid(); rit.Next() {
-		num++
-	}
-	rit.Close()
+	wb.DeleteRange(startKey, stopKey)
+	// delete range is [left, right), so we need delete end
+	wb.Delete(stopKey)
 	if size > 0 {
-		wb.DeleteRange(startKey, stopKey)
-		// delete range is [left, right), so we need delete end
-		wb.Delete(stopKey)
 		db.IncrTableKeyCount(table, -1, wb)
 	}
 
 	wb.Delete(mk)
-	return num
+	return size
 }
 
 func (db *RockDB) lGetMeta(ek []byte) (headSeq int64, tailSeq int64, size int64, ts int64, err error) {
