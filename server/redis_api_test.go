@@ -538,6 +538,9 @@ func TestKVErrorParams(t *testing.T) {
 }
 
 func TestPFOp(t *testing.T) {
+	if testing.Verbose() {
+		rockredis.SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
+	}
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -570,6 +573,12 @@ func TestPFOp(t *testing.T) {
 	cnt, err = goredis.Int64(c.Do("pfcount", key1))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(3), cnt)
+
+	c.Do("del", key1)
+
+	cnt, err = goredis.Int64(c.Do("pfcount", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), cnt)
 }
 
 func TestPFOpErrorParams(t *testing.T) {
