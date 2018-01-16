@@ -32,11 +32,16 @@ var gtmpClusterDir string
 var seedNodes []node.ReplicaInfo
 
 func TestMain(m *testing.M) {
-	//SetLogger(2, newTestLogger(t))
+	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+
 	if testing.Verbose() {
-		rockredis.SetLogLevel(4)
-		node.SetLogLevel(4)
+		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
+		node.SetLogLevel(int(common.LOG_DETAIL))
+		sLog.SetLevel(int32(common.LOG_DETAIL))
 	}
+
 	ret := m.Run()
 	if kvs != nil {
 		kvs.Stop()
@@ -79,9 +84,6 @@ func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testC
 func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, syncLearnerNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string) {
 	ctmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
-	SetLogger(2, newTestLogger(t))
-	node.SetLogger(2, newTestLogger(t))
-	rockredis.SetLogger(2, newTestLogger(t))
 	t.Logf("dir:%v\n", ctmpDir)
 	kvsClusterTmp := make([]testClusterInfo, 0, replicaNum)
 	learnerServersTmp := make([]*Server, 0, syncLearnerNum)
@@ -125,11 +127,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 			// use test:// will ignore the remote cluster fail
 			kvOpts.RemoteSyncCluster = "test://127.0.0.1:" + strconv.Itoa(51845-110)
 		}
-		if testing.Verbose() {
-			rockredis.SetLogLevel(4)
-			node.SetLogLevel(4)
-			sLog.SetLevel(4)
-		}
+
 		nsConf := node.NewNSConfig()
 		nsConf.Name = "default-0"
 		nsConf.BaseName = "default"
@@ -154,6 +152,16 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 
 	time.Sleep(time.Second * 3)
 	return kvsClusterTmp, tmpSeeds, learnerServersTmp, ctmpDir
+}
+
+func getTestConnForPort(t *testing.T, port int) *goredis.PoolConn {
+	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(port), "")
+	c.SetMaxIdleConns(4)
+	conn, err := c.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conn
 }
 
 func getTestClusterConn(t *testing.T, needLeader bool) *goredis.PoolConn {
@@ -208,18 +216,24 @@ func waitForLeader(t *testing.T, w time.Duration) *node.NamespaceNode {
 	return nil
 }
 
-func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *node.NamespaceNode) {
+func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *node.NamespaceNode, logSyncer bool) {
 	start := time.Now()
 	for {
 		nsStats := node.Node.GetStats()
 		ci := node.Node.GetCommittedIndex()
 		if ci >= leaderci {
 			assert.Equal(t, leaderci, ci)
-			sindex := nsStats.InternalStats["synced_index"].(uint64)
-			if sindex == ci {
+
+			v := nsStats.InternalStats["synced_index"]
+			if v != nil {
+				sindex := v.(uint64)
+				if sindex == ci {
+					break
+				} else {
+					t.Logf("waiting matched synced commit: %v vs %v", sindex, leaderci)
+				}
+			} else if !logSyncer {
 				break
-			} else {
-				t.Logf("waiting matched synced commit: %v vs %v", sindex, leaderci)
 			}
 		} else {
 			t.Logf("waiting matched commit: %v vs %v", ci, leaderci)
@@ -231,7 +245,10 @@ func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *
 		}
 	}
 }
-func TestStartCluster(t *testing.T) {
+func TestStartClusterWithLogSyncer(t *testing.T) {
+	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	remoteServers, _, _, remoteDir := startTestClusterWithBasePort(t, 51845, 1, 0)
 	defer func() {
 		for _, remote := range remoteServers {
@@ -239,6 +256,9 @@ func TestStartCluster(t *testing.T) {
 		}
 		os.RemoveAll(remoteDir)
 	}()
+	assert.Equal(t, 1, len(remoteServers))
+	remoteConn := getTestConnForPort(t, remoteServers[0].redisPort)
+	defer remoteConn.Close()
 
 	c := getTestClusterConn(t, true)
 	defer c.Close()
@@ -271,11 +291,16 @@ func TestStartCluster(t *testing.T) {
 	// wait raft log synced
 	time.Sleep(time.Second)
 	leaderci := leaderNode.Node.GetCommittedIndex()
-	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode)
+	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
 
 	v, err := goredis.String(c.Do("get", key))
 	assert.Nil(t, err)
 	assert.Equal(t, "1234", v)
+
+	v, err = goredis.String(remoteConn.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", v)
+
 	_, err = goredis.Int(c.Do("del", key))
 	assert.Nil(t, err)
 
@@ -283,9 +308,13 @@ func TestStartCluster(t *testing.T) {
 	newci := leaderNode.Node.GetCommittedIndex()
 	assert.Equal(t, leaderci+1, newci)
 	leaderci = newci
-	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode)
+	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
 
 	n, err := goredis.Int(c.Do("exists", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+
+	n, err = goredis.Int(remoteConn.Do("exists", key))
 	assert.Nil(t, err)
 	assert.Equal(t, 0, n)
 
@@ -317,10 +346,15 @@ func TestStartCluster(t *testing.T) {
 
 	leaderci = leaderNode.Node.GetCommittedIndex()
 
-	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode)
+	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
 }
 
 func TestRestartFollower(t *testing.T) {
+	if testing.Verbose() {
+		SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
+		rockredis.SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
+		node.SetLogger(int32(common.LOG_DEBUG), newTestLogger(t))
+	}
 	c := getTestClusterConn(t, true)
 	defer c.Close()
 
@@ -351,7 +385,7 @@ func TestRestartFollower(t *testing.T) {
 	assert.Nil(t, err)
 	follower.Start(false)
 	leaderci := leaderNode.Node.GetCommittedIndex()
-	waitSyncedWithCommit(t, time.Minute, leaderci, follower)
+	waitSyncedWithCommit(t, time.Second*30, leaderci, follower, false)
 }
 
 func TestRestartCluster(t *testing.T) {
