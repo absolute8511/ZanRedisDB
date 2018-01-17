@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -23,18 +24,20 @@ type ccAPIClient struct {
 	conn   *grpc.ClientConn
 }
 
-// LogSender is the raft log sender. It will send all the raft logs
+// RemoteLogSender is the raft log sender. It will send all the raft logs
 // to the remote cluster using grpc service.
-type LogSender struct {
+type RemoteLogSender struct {
+	localCluster      string
 	grpName           string
 	ns                string
 	pid               int
+	poolMutex         sync.RWMutex
 	connPool          map[string]ccAPIClient
 	zanCluster        *zanredisdb.Cluster
 	remoteClusterAddr string
 }
 
-func NewLogSender(fullName string, remoteCluster string) (*LogSender, error) {
+func NewRemoteLogSender(localCluster string, fullName string, remoteCluster string) (*RemoteLogSender, error) {
 	if remoteCluster == "" {
 		return nil, errInvalidRemoteCluster
 	}
@@ -47,7 +50,8 @@ func NewLogSender(fullName string, remoteCluster string) (*LogSender, error) {
 		nodeLog.Infof("invalid namespace string: %v", fullName)
 		return nil, errInvalidNamespace
 	}
-	return &LogSender{
+	return &RemoteLogSender{
+		localCluster:      localCluster,
 		ns:                ns,
 		pid:               pid,
 		remoteClusterAddr: remoteCluster,
@@ -56,7 +60,7 @@ func NewLogSender(fullName string, remoteCluster string) (*LogSender, error) {
 	}, nil
 }
 
-func (s *LogSender) getZanCluster() *zanredisdb.Cluster {
+func (s *RemoteLogSender) getZanCluster() *zanredisdb.Cluster {
 	if s.remoteClusterAddr == "" || strings.HasPrefix(s.remoteClusterAddr, "test://") {
 		return nil
 	}
@@ -72,27 +76,32 @@ func (s *LogSender) getZanCluster() *zanredisdb.Cluster {
 	return s.zanCluster
 }
 
-func (s *LogSender) Stop() {
+func (s *RemoteLogSender) Stop() {
+	s.poolMutex.RLock()
 	for _, c := range s.connPool {
 		if c.conn != nil {
 			c.conn.Close()
 		}
 	}
+	s.poolMutex.RUnlock()
 	if s.zanCluster != nil {
 		s.zanCluster.Close()
 	}
 }
 
-func (s *LogSender) GetStats() interface{} {
+func (s *RemoteLogSender) GetStats() interface{} {
 	return nil
 }
 
-func (s *LogSender) getClient(addr string) syncerpb.CrossClusterAPIClient {
+func (s *RemoteLogSender) getClientFromAddr(addr string) syncerpb.CrossClusterAPIClient {
+	s.poolMutex.Lock()
+	defer s.poolMutex.Unlock()
 	if c, ok := s.connPool[addr]; ok {
 		return c.client
 	}
 	conn, err := grpc.Dial(addr, grpc.WithInsecure())
 	if err != nil {
+		nodeLog.Infof("failed to get grpc client: %v, %v", addr, err)
 		return nil
 	}
 	c := syncerpb.NewCrossClusterAPIClient(conn)
@@ -100,11 +109,7 @@ func (s *LogSender) getClient(addr string) syncerpb.CrossClusterAPIClient {
 	return c
 }
 
-func (s *LogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
-	if s.remoteClusterAddr == "" {
-		nodeLog.Infof("sending log with no remote: %v", r)
-		return nil
-	}
+func (s *RemoteLogSender) getClient() (syncerpb.CrossClusterAPIClient, string, error) {
 	var addr string
 	if strings.HasPrefix(s.remoteClusterAddr, "test://") {
 		addr = s.remoteClusterAddr[len("test://"):]
@@ -112,19 +117,28 @@ func (s *LogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 		if s.zanCluster == nil {
 			s.zanCluster = s.getZanCluster()
 			if s.zanCluster == nil {
-				return errors.New("failed to init remote zankv cluster")
+				return nil, addr, errors.New("failed to init remote zankv cluster")
 			}
 		}
 		h, err := s.zanCluster.GetHostByPart(s.pid, true)
 		if err != nil {
 			nodeLog.Infof("failed to get host address :%v", err.Error())
-			return err
+			return nil, addr, err
 		}
 		addr = h.Addr()
 	}
-	c := s.getClient(addr)
+	c := s.getClientFromAddr(addr)
+	return c, addr, nil
+}
+
+func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
+	if s.remoteClusterAddr == "" {
+		nodeLog.Infof("sending log with no remote: %v", r)
+		return nil
+	}
+	c, addr, err := s.getClient()
 	if c == nil {
-		nodeLog.Infof("sending(%v) log failed to get grpc client", addr)
+		nodeLog.Infof("sending(%v) log failed to get grpc client: %v", addr, err)
 		return errors.New("failed to get grpc client")
 	}
 	raftLogs := make([]*syncerpb.RaftLogData, len(r))
@@ -141,7 +155,7 @@ func (s *LogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 
 	in := &syncerpb.RaftReqs{RaftLog: raftLogs}
 	if nodeLog.Level() >= common.LOG_DETAIL {
-		nodeLog.Debugf("sending(%v) log : %v", addr, in.String())
+		nodeLog.Debugf("sending log : %v", addr, in.String())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -158,7 +172,56 @@ func (s *LogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 	return nil
 }
 
-func (s *LogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
+func (s *RemoteLogSender) getRemoteSyncedRaftOnce() (SyncedState, error) {
+	var state SyncedState
+	if s.remoteClusterAddr == "" {
+		return state, nil
+	}
+	c, addr, err := s.getClient()
+	if c == nil {
+		nodeLog.Infof("failed to get grpc client(%v): %v", addr, err)
+		return state, errors.New("failed to get grpc client")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req := &syncerpb.SyncedRaftReq{ClusterName: s.localCluster, RaftGroupName: s.grpName}
+	rsp, err := c.GetSyncedRaft(ctx, req)
+	if err != nil {
+		return state, err
+	}
+	if rsp == nil {
+		return state, nil
+	}
+	state.SyncedTerm = rsp.Term
+	state.SyncedIndex = rsp.Index
+	nodeLog.Debugf("remote(%v) raft group %v synced : %v", addr, s.grpName, state)
+	return state, nil
+}
+
+func (s *RemoteLogSender) getRemoteSyncedRaft(stop chan struct{}) (SyncedState, error) {
+	retry := 0
+	for {
+		retry++
+		state, err := s.getRemoteSyncedRaftOnce()
+		if err != nil {
+			nodeLog.Infof("failed to get remote synced raft (retried %v): %v", retry, err.Error())
+			wait := time.Millisecond * 100 * time.Duration(retry)
+			if wait > time.Second*30 {
+				wait = time.Second * 30
+			}
+			select {
+			case <-stop:
+				return state, err
+			case <-time.After(wait):
+				continue
+			}
+		} else {
+			return state, nil
+		}
+	}
+}
+
+func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
 	retry := 0
 	for {
 		retry++

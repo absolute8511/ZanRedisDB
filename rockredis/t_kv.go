@@ -122,6 +122,8 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// fixme: if del is batched, the deleted key may be in write batch while removing cache
+	// and removed cache may be reload by read before the write batch is committed.
 	db.delPFCache(rawKey)
 	return delCnt, nil
 }

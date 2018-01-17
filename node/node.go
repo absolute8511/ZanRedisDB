@@ -61,35 +61,81 @@ type httpProposeData struct {
 	NeedBackup bool
 }
 
+type SyncedState struct {
+	SyncedTerm  uint64 `json:"synced_term,omitempty"`
+	SyncedIndex uint64 `json:"synced_index,omitempty"`
+}
+
+type remoteSyncedStateMgr struct {
+	sync.RWMutex
+	remoteSyncedStates map[string]SyncedState
+}
+
+func newRemoteSyncedStateMgr() *remoteSyncedStateMgr {
+	return &remoteSyncedStateMgr{
+		remoteSyncedStates: make(map[string]SyncedState),
+	}
+}
+func (rss *remoteSyncedStateMgr) UpdateState(name string, state SyncedState) {
+	rss.Lock()
+	rss.remoteSyncedStates[name] = state
+	rss.Unlock()
+}
+func (rss *remoteSyncedStateMgr) GetState(name string) (SyncedState, bool) {
+	rss.RLock()
+	state, ok := rss.remoteSyncedStates[name]
+	rss.RUnlock()
+	return state, ok
+}
+func (rss *remoteSyncedStateMgr) RestoreStates(ss map[string]SyncedState) {
+	rss.Lock()
+	rss.remoteSyncedStates = make(map[string]SyncedState, len(ss))
+	for k, v := range rss.remoteSyncedStates {
+		rss.remoteSyncedStates[k] = v
+	}
+	rss.Unlock()
+}
+func (rss *remoteSyncedStateMgr) Clone() map[string]SyncedState {
+	rss.RLock()
+	clone := make(map[string]SyncedState, len(rss.remoteSyncedStates))
+	for k, v := range rss.remoteSyncedStates {
+		clone[k] = v
+	}
+	rss.RUnlock()
+	return clone
+}
+
 // a key-value node backed by raft
 type KVNode struct {
-	reqProposeC       chan *internalReq
-	rn                *raftNode
-	store             *KVStore
-	sm                StateMachine
-	stopping          int32
-	stopChan          chan struct{}
-	w                 wait.Wait
-	router            *common.CmdRouter
-	deleteCb          func()
-	clusterWriteStats common.WriteStats
-	ns                string
-	machineConfig     *MachineConfig
-	wg                sync.WaitGroup
-	commitC           <-chan applyInfo
-	committedIndex    uint64
-	clusterInfo       common.IClusterInfo
-	expireHandler     *ExpireHandler
-	expirationPolicy  common.ExpirationPolicy
+	reqProposeC        chan *internalReq
+	rn                 *raftNode
+	store              *KVStore
+	sm                 StateMachine
+	stopping           int32
+	stopChan           chan struct{}
+	w                  wait.Wait
+	router             *common.CmdRouter
+	deleteCb           func()
+	clusterWriteStats  common.WriteStats
+	ns                 string
+	machineConfig      *MachineConfig
+	wg                 sync.WaitGroup
+	commitC            <-chan applyInfo
+	committedIndex     uint64
+	clusterInfo        common.IClusterInfo
+	expireHandler      *ExpireHandler
+	expirationPolicy   common.ExpirationPolicy
+	remoteSyncedStates *remoteSyncedStateMgr
 }
 
 type KVSnapInfo struct {
 	*rockredis.BackupInfo
-	Ver        int                  `json:"version"`
-	BackupMeta []byte               `json:"backup_meta"`
-	LeaderInfo *common.MemberInfo   `json:"leader_info"`
-	Members    []*common.MemberInfo `json:"members"`
-	Learners   []*common.MemberInfo `json:"learners"`
+	Ver                int                    `json:"version"`
+	BackupMeta         []byte                 `json:"backup_meta"`
+	LeaderInfo         *common.MemberInfo     `json:"leader_info"`
+	Members            []*common.MemberInfo   `json:"members"`
+	Learners           []*common.MemberInfo   `json:"learners"`
+	RemoteSyncedStates map[string]SyncedState `json:"remote_synced_states"`
 }
 
 func (si *KVSnapInfo) GetData() ([]byte, error) {
@@ -117,16 +163,17 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:      make(chan *internalReq, 200),
-		stopChan:         stopChan,
-		store:            nil,
-		sm:               sm,
-		w:                wait.New(),
-		router:           common.NewCmdRouter(),
-		deleteCb:         deleteCb,
-		ns:               config.GroupName,
-		machineConfig:    machineConfig,
-		expirationPolicy: kvopts.ExpirationPolicy,
+		reqProposeC:        make(chan *internalReq, 200),
+		stopChan:           stopChan,
+		store:              nil,
+		sm:                 sm,
+		w:                  wait.New(),
+		router:             common.NewCmdRouter(),
+		deleteCb:           deleteCb,
+		ns:                 config.GroupName,
+		machineConfig:      machineConfig,
+		expirationPolicy:   kvopts.ExpirationPolicy,
+		remoteSyncedStates: newRemoteSyncedStateMgr(),
 	}
 	if kvsm, ok := sm.(*kvStoreSM); ok {
 		kvsm.w = s.w
@@ -786,6 +833,9 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
 		}
 
 		forceBackup = nd.sm.ApplyRaftRequest(reqList, evnt.Term, evnt.Index, nd.stopChan)
+		if reqList.Type == FromClusterSyncer {
+			nd.remoteSyncedStates.UpdateState(reqList.OrigCluster, SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex})
+		}
 	}
 	return forceBackup
 }
@@ -926,12 +976,18 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 	np.snapi = np.appliedi
 }
 
+func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64) {
+	state, _ := nd.remoteSyncedStates.GetState(name)
+	return state.SyncedTerm, state.SyncedIndex
+}
+
 func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 	si, err := nd.sm.GetSnapshot(term, index)
 	if err != nil {
 		return nil, err
 	}
 	si.Members, si.LeaderInfo = nd.rn.GetMembersAndLeader()
+	si.RemoteSyncedStates = nd.remoteSyncedStates.Clone()
 	si.Learners = nd.rn.GetLearners()
 	return si, nil
 }
@@ -946,6 +1002,7 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 	nd.rn.RestoreMembers(si)
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
 	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot, nd.stopChan)
+	nd.remoteSyncedStates.RestoreStates(si.RemoteSyncedStates)
 	return err
 }
 

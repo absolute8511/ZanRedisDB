@@ -26,6 +26,18 @@ type grpcServerInfo struct {
 	lastRaft map[string]raftMeta
 }
 
+func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq) (*syncerpb.SyncedRaftRsp, error) {
+	var rsp syncerpb.SyncedRaftRsp
+	kv := s.GetNamespaceFromFullName(req.RaftGroupName)
+	if kv == nil || !kv.IsReady() {
+		return &rsp, errRaftGroupNotReady
+	}
+	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	rsp.Term = term
+	rsp.Index = index
+	return &rsp, nil
+}
+
 func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*syncerpb.RpcErr, error) {
 	var rpcErr syncerpb.RpcErr
 	for _, r := range reqs.RaftLog {

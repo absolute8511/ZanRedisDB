@@ -79,6 +79,10 @@ func NewDataCoordinator(cluster string, nodeInfo *cluster.NodeInfo, nsMgr *node.
 	return coord
 }
 
+func (dc *DataCoordinator) GetClusterName() string {
+	return dc.clusterKey
+}
+
 func (dc *DataCoordinator) GetMyID() string {
 	return dc.myNode.GetID()
 }

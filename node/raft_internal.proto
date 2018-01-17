@@ -34,6 +34,7 @@ message BatchInternalRaftRequest {
     // used for cluster log syncer
     uint64 orig_term = 6;
     uint64 orig_index = 7;
+    string orig_cluster = 8;
 }
 
 enum SchemaChangeType {

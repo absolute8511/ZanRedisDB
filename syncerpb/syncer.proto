@@ -11,6 +11,7 @@ option (gogoproto.goproto_enum_prefix_all) = false;
 
 service CrossClusterAPI {
     rpc ApplyRaftReqs(RaftReqs) returns (RpcErr) {}
+    rpc GetSyncedRaft(SyncedRaftReq) returns (SyncedRaftRsp) {}
 }
 
 message RpcErr {
@@ -27,10 +28,12 @@ enum RaftLogType {
 
 message RaftLogData {
     RaftLogType type = 1;
+    // the name for source cluster, if there are multi different source clusters for syncer,
+    // we can separate them.
+    uint64 cluster_name =2;
     // raft group for different partition has different name, so
     // we can make sure (term-index) is increased in same raft group.
     // (term-index) will be checked while replaying in remote cluster
-    uint64 raft_gid =2;
     string raft_group_name = 3;
     uint64 term = 4;
     uint64 index = 5;
@@ -40,4 +43,14 @@ message RaftLogData {
 
 message RaftReqs {
     repeated RaftLogData raft_log = 1;
+}
+
+message SyncedRaftReq {
+    string cluster_name = 1;
+    string raft_group_name = 2;
+}
+
+message SyncedRaftRsp {
+    uint64 term = 1;
+    uint64 index = 2;
 }

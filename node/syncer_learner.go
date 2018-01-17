@@ -16,9 +16,10 @@ type logSyncerSM struct {
 	fullNS        string
 	machineConfig MachineConfig
 	ID            uint64
-	synced        int64
+	syncedCnt     int64
 	syncedIndex   uint64
-	lgSender      *LogSender
+	syncedTerm    uint64
+	lgSender      *RemoteLogSender
 	stopping      int32
 	sendCh        chan *BatchInternalRaftRequest
 	sendStop      chan struct{}
@@ -40,8 +41,14 @@ func NewLogSyncerSM(opts *KVOptions, machineConfig MachineConfig, localID uint64
 		store:         store,
 		sendCh:        make(chan *BatchInternalRaftRequest, 10),
 		sendStop:      make(chan struct{}),
+		//dataDir:       path.Join(opts.DataDir, "logsyncer"),
 	}
-	lgSender, err := NewLogSender(lg.fullNS, lg.machineConfig.RemoteSyncCluster)
+
+	var localCluster string
+	if clusterInfo != nil {
+		localCluster = clusterInfo.GetClusterName()
+	}
+	lgSender, err := NewRemoteLogSender(localCluster, lg.fullNS, lg.machineConfig.RemoteSyncCluster)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +82,9 @@ func (sm *logSyncerSM) GetStats() common.NamespaceStats {
 	var ns common.NamespaceStats
 	stat := make(map[string]interface{})
 	stat["role"] = common.LearnerRoleLogSyncer
-	stat["synced"] = atomic.LoadInt64(&sm.synced)
+	stat["synced"] = atomic.LoadInt64(&sm.syncedCnt)
 	stat["synced_index"] = atomic.LoadUint64(&sm.syncedIndex)
+	stat["synced_term"] = atomic.LoadUint64(&sm.syncedTerm)
 	ns.InternalStats = stat
 	return ns
 }
@@ -119,6 +127,10 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 	}()
 	raftLogs := make([]*BatchInternalRaftRequest, 0, 100)
 	var last *BatchInternalRaftRequest
+	state, err := sm.lgSender.getRemoteSyncedRaft(sm.sendStop)
+	if err != nil {
+		sm.Errorf("failed to get the synced state from remote: %v", err)
+	}
 	for {
 		handled := false
 		var err error
@@ -131,7 +143,11 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			}
 			if len(raftLogs) > 100 {
 				handled = true
-				err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
+				if state.SyncedTerm >= last.OrigTerm && state.SyncedIndex >= last.OrigIndex {
+					// remote is already replayed this raft log
+				} else {
+					err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
+				}
 			}
 		default:
 			if len(raftLogs) == 0 {
@@ -148,7 +164,11 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				continue
 			}
 			handled = true
-			err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
+			if state.SyncedTerm >= last.OrigTerm && state.SyncedIndex >= last.OrigIndex {
+				// remote is already replayed this raft log
+			} else {
+				err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
+			}
 
 		}
 		if err != nil {
@@ -161,8 +181,9 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			continue
 		}
 		if handled {
-			atomic.AddInt64(&sm.synced, int64(len(raftLogs)))
+			atomic.AddInt64(&sm.syncedCnt, int64(len(raftLogs)))
 			atomic.StoreUint64(&sm.syncedIndex, last.OrigIndex)
+			atomic.StoreUint64(&sm.syncedTerm, last.OrigTerm)
 			raftLogs = raftLogs[:0]
 		}
 	}
@@ -174,19 +195,28 @@ func (kvsm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, er
 }
 
 func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
-	atomic.StoreUint64(&sm.syncedIndex, raftSnapshot.Metadata.Index)
+	// get (term-index) from the remote cluster, if the remote cluster has
+	// greater (term-index) than snapshot, we can just ignore the snapshot restore
+	// since we already synced the data in snapshot.
+	state, err := sm.lgSender.getRemoteSyncedRaft(stop)
+	if err != nil {
+		return err
+	}
+	if state.SyncedTerm > raftSnapshot.Metadata.Term && state.SyncedIndex > raftSnapshot.Metadata.Index {
+		sm.Infof("ignored restore snapshot since remote has newer raft: %v than %v", state, raftSnapshot.Metadata.String())
+		return nil
+	}
+
+	// TODO: should wait all batched sync raft logs success
 	if sm.clusterInfo == nil {
 		// in test, the cluster coordinator is not enabled, we can just ignore restore.
 		return nil
 	}
-	// TODO: get (term-index) from the remote cluster, if the remote cluster has
-	// greater (term-index) than snapshot, we can just ignore the snapshot restore
-	// since we already synced the data in snapshot.
 
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
-	err := prepareSnapshotForStore(sm.store, sm.machineConfig, sm.clusterInfo, sm.fullNS,
+	err = prepareSnapshotForStore(sm.store, sm.machineConfig, sm.clusterInfo, sm.fullNS,
 		sm.ID, stop, raftSnapshot, 0)
 	if err != nil {
 		sm.Infof("failed to prepare snapshot: %v", err)
@@ -212,6 +242,9 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	reqList.OrigTerm = term
 	reqList.OrigIndex = index
 	reqList.Type = FromClusterSyncer
+	if sm.clusterInfo != nil {
+		reqList.OrigCluster = sm.clusterInfo.GetClusterName()
+	}
 	if reqList.ReqId == 0 {
 		for _, e := range reqList.Reqs {
 			reqList.ReqId = e.Header.ID

@@ -259,6 +259,8 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	assert.Equal(t, 1, len(remoteServers))
 	remoteConn := getTestConnForPort(t, remoteServers[0].redisPort)
 	defer remoteConn.Close()
+	remoteNode := remoteServers[0].server.GetNamespaceFromFullName("default-0")
+	assert.NotNil(t, remoteNode)
 
 	c := getTestClusterConn(t, true)
 	defer c.Close()
@@ -292,6 +294,8 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	time.Sleep(time.Second)
 	leaderci := leaderNode.Node.GetCommittedIndex()
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
+	_, remoteIndex := remoteNode.Node.GetRemoteClusterSyncedRaft("")
+	assert.Equal(t, leaderci, remoteIndex)
 
 	v, err := goredis.String(c.Do("get", key))
 	assert.Nil(t, err)
@@ -309,6 +313,8 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	assert.Equal(t, leaderci+1, newci)
 	leaderci = newci
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
+	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft("")
+	assert.Equal(t, leaderci, remoteIndex)
 
 	n, err := goredis.Int(c.Do("exists", key))
 	assert.Nil(t, err)
@@ -347,6 +353,8 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	leaderci = leaderNode.Node.GetCommittedIndex()
 
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
+	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft("")
+	assert.Equal(t, leaderci, remoteIndex)
 }
 
 func TestRestartFollower(t *testing.T) {
