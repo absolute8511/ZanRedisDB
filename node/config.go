@@ -48,6 +48,7 @@ type MachineConfig struct {
 	KeepWAL           int                   `json:"keep_wal"`
 	LearnerRole       string                `json:"learner_role"`
 	RemoteSyncCluster string                `json:"remote_sync_cluster"`
+	StateMachineType  string                `json:"state_machine_type"`
 	RocksDBOpts       rockredis.RockOptions `json:"rocksdb_opts"`
 }
 

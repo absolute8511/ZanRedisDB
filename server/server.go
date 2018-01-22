@@ -136,6 +136,7 @@ func NewServer(conf ServerConfig) *Server {
 		ElectionTick:      conf.ElectionTick,
 		LearnerRole:       conf.LearnerRole,
 		RemoteSyncCluster: conf.RemoteSyncCluster,
+		StateMachineType:  conf.StateMachineType,
 		RocksDBOpts:       conf.RocksDBOpts,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)

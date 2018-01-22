@@ -34,12 +34,50 @@ type StateMachine interface {
 func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint64,
 	fullNS string, clusterInfo common.IClusterInfo) (StateMachine, error) {
 	if machineConfig.LearnerRole == "" {
+		if machineConfig.StateMachineType == "empty_sm" {
+			return &emptySM{}, nil
+		}
 		return NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo)
 	} else if machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
 		return NewLogSyncerSM(opts, machineConfig, localID, fullNS, clusterInfo)
 	} else {
 		return nil, errors.New("unknown learner role")
 	}
+}
+
+type emptySM struct {
+}
+
+func (esm *emptySM) ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool {
+	return false
+}
+func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
+	var s KVSnapInfo
+	return &s, nil
+}
+func (esm *emptySM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+	return nil
+}
+func (esm *emptySM) Destroy() {
+
+}
+func (esm *emptySM) CleanData() error {
+	return nil
+}
+func (esm *emptySM) Optimize() {
+
+}
+func (esm *emptySM) GetStats() common.NamespaceStats {
+	return common.NamespaceStats{}
+}
+func (esm *emptySM) Start() error {
+	return nil
+}
+func (esm *emptySM) Close() {
+
+}
+func (esm *emptySM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
+	return nil
 }
 
 type kvStoreSM struct {

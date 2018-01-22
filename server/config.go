@@ -21,6 +21,7 @@ type ServerConfig struct {
 	Tags                 map[string]string `json:"tags"`
 	LearnerRole          string            `json:"learner_role"`
 	RemoteSyncCluster    string            `json:"remote_sync_cluster"`
+	StateMachineType     string            `json:"state_machine_type"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`
