@@ -46,11 +46,17 @@ func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint6
 }
 
 type emptySM struct {
+	w wait.Wait
 }
 
-func (esm *emptySM) ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool {
+func (esm *emptySM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool {
+	for _, req := range reqList.Reqs {
+		reqID := req.Header.ID
+		esm.w.Trigger(reqID, nil)
+	}
 	return false
 }
+
 func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
 	var s KVSnapInfo
 	return &s, nil

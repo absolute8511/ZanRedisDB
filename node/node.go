@@ -179,6 +179,9 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		kvsm.w = s.w
 		s.store = kvsm.store
 	}
+	if esm, ok := sm.(*emptySM); ok {
+		esm.w = s.w
+	}
 	s.clusterInfo = clusterInfo
 	s.expireHandler = NewExpireHandler(s)
 
