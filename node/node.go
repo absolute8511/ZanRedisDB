@@ -404,7 +404,7 @@ func (nd *KVNode) handleProposeReq() {
 				reqList.Reqs = reqList.Reqs[:0]
 				continue
 			}
-			lastReq.done = make(chan struct{})
+			//lastReq.done = make(chan struct{})
 			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
@@ -426,31 +426,31 @@ func (nd *KVNode) handleProposeReq() {
 					}
 				} else {
 					//lastReqList = append(lastReqList, lastReq)
-					select {
-					case <-lastReq.done:
-					case <-ctx.Done():
-						err := ctx.Err()
-						waitLeader := false
-						if err == context.DeadlineExceeded {
-							waitLeader = true
-							nd.rn.Infof("propose timeout: %v, %v", err.Error(), len(reqList.Reqs))
-						}
-						if err == context.Canceled {
-							// proposal canceled can be caused by leader transfer or no leader
-							err = ErrProposalCanceled
-							waitLeader = true
-							nd.rn.Infof("propose canceled : %v", len(reqList.Reqs))
-						}
-						for _, r := range reqList.Reqs {
-							nd.w.Trigger(r.Header.ID, err)
-						}
-						if waitLeader {
-							time.Sleep(proposeTimeout/100 + time.Millisecond*100)
-						}
-					case <-nd.stopChan:
-						cancel()
-						return
-					}
+					//select {
+					//case <-lastReq.done:
+					//case <-ctx.Done():
+					//	err := ctx.Err()
+					//	waitLeader := false
+					//	if err == context.DeadlineExceeded {
+					//		waitLeader = true
+					//		nd.rn.Infof("propose timeout: %v, %v", err.Error(), len(reqList.Reqs))
+					//	}
+					//	if err == context.Canceled {
+					//		// proposal canceled can be caused by leader transfer or no leader
+					//		err = ErrProposalCanceled
+					//		waitLeader = true
+					//		nd.rn.Infof("propose canceled : %v", len(reqList.Reqs))
+					//	}
+					//	for _, r := range reqList.Reqs {
+					//		nd.w.Trigger(r.Header.ID, err)
+					//	}
+					//	if waitLeader {
+					//		time.Sleep(proposeTimeout/100 + time.Millisecond*100)
+					//	}
+					//case <-nd.stopChan:
+					//	cancel()
+					//	return
+					//}
 				}
 				cancel()
 				cost = time.Now().UnixNano() - start
