@@ -17,6 +17,7 @@ import (
 var (
 	errInvalidRemoteCluster = errors.New("remote cluster is not valid")
 	errInvalidNamespace     = errors.New("namespace is not valid")
+	rpcTimeout              = time.Second * 5
 )
 
 type ccAPIClient struct {
@@ -65,9 +66,9 @@ func (s *RemoteLogSender) getZanCluster() *zanredisdb.Cluster {
 		return nil
 	}
 	conf := &zanredisdb.Conf{
-		DialTimeout:  time.Second * 2,
-		ReadTimeout:  time.Second * 2,
-		WriteTimeout: time.Second * 2,
+		DialTimeout:  rpcTimeout,
+		ReadTimeout:  rpcTimeout,
+		WriteTimeout: rpcTimeout,
 		TendInterval: 5,
 		Namespace:    s.ns,
 	}
@@ -157,7 +158,7 @@ func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nodeLog.Debugf("sending log : %v", addr, in.String())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
 	defer cancel()
 	rpcErr, err := c.ApplyRaftReqs(ctx, in)
 	if err != nil {
@@ -182,7 +183,7 @@ func (s *RemoteLogSender) getRemoteSyncedRaftOnce() (SyncedState, error) {
 		nodeLog.Infof("failed to get grpc client(%v): %v", addr, err)
 		return state, errors.New("failed to get grpc client")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
 	defer cancel()
 	req := &syncerpb.SyncedRaftReq{ClusterName: s.localCluster, RaftGroupName: s.grpName}
 	rsp, err := c.GetSyncedRaft(ctx, req)
@@ -231,6 +232,7 @@ func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan s
 			wait := time.Millisecond * 100 * time.Duration(retry)
 			if wait > time.Second*30 {
 				wait = time.Second * 30
+				nodeLog.Errorf("failed too much times to send raft log (retried %v): %v, %v", retry, err.Error(), r)
 			}
 			select {
 			case <-stop:
