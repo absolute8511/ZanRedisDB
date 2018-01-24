@@ -343,13 +343,6 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 	return nd.router.GetMergeCmdHandler(cmd)
 }
 
-type waitContext struct {
-	done   chan struct{}
-	ctx    context.Context
-	cancel context.CancelFunc
-	ids    []uint64
-}
-
 func (nd *KVNode) handleProposeReq() {
 	var reqList BatchInternalRaftRequest
 	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
@@ -357,40 +350,7 @@ func (nd *KVNode) handleProposeReq() {
 	// TODO: combine pipeline and batch to improve performance
 	// notice the maxPendingProposals config while using pipeline, avoid
 	// sending too much pipeline which overflow the proposal buffer.
-	pipelineCh := make(chan waitContext, 8)
-	go func() {
-		for {
-			select {
-			case reqCtx := <-pipelineCh:
-				select {
-				case <-reqCtx.done:
-					reqCtx.cancel()
-				case <-reqCtx.ctx.Done():
-					reqCtx.cancel()
-					err := reqCtx.ctx.Err()
-					if err == context.DeadlineExceeded {
-						nd.rn.Infof("propose timeout: %v, %v", err.Error(), len(reqCtx.ids))
-					}
-					if err == context.Canceled {
-						// proposal canceled can be caused by leader transfer or no leader
-						err = ErrProposalCanceled
-						nd.rn.Infof("propose canceled : %v", len(reqCtx.ids))
-					}
-					for _, id := range reqCtx.ids {
-						nd.w.Trigger(id, err)
-					}
-				case <-nd.stopChan:
-					reqCtx.cancel()
-					for _, id := range reqCtx.ids {
-						nd.w.Trigger(id, common.ErrStopped)
-					}
-					return
-				}
-			case <-nd.stopChan:
-				return
-			}
-		}
-	}()
+	//lastReqList := make([]*internalReq, 0, 1024)
 
 	defer func() {
 		if e := recover(); e != nil {
@@ -401,16 +361,6 @@ func (nd *KVNode) handleProposeReq() {
 		}
 		for _, r := range reqList.Reqs {
 			nd.w.Trigger(r.Header.ID, common.ErrStopped)
-		}
-		for {
-			select {
-			case reqCtx := <-pipelineCh:
-				for _, id := range reqCtx.ids {
-					nd.w.Trigger(id, common.ErrStopped)
-				}
-			default:
-				return
-			}
 		}
 		nd.rn.Infof("handle propose loop exit")
 		for {
@@ -454,7 +404,7 @@ func (nd *KVNode) handleProposeReq() {
 				reqList.Reqs = reqList.Reqs[:0]
 				continue
 			}
-			lastReq.done = make(chan struct{})
+			//lastReq.done = make(chan struct{})
 			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
@@ -470,42 +420,12 @@ func (nd *KVNode) handleProposeReq() {
 				ctx, cancel := context.WithTimeout(context.Background(), leftProposeTimeout)
 				err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
 				if err != nil {
-					cancel()
 					nd.rn.Infof("propose failed: %v, err: %v", len(reqList.Reqs), err.Error())
 					for _, r := range reqList.Reqs {
 						nd.w.Trigger(r.Header.ID, err)
 					}
 				} else {
-					ids := make([]uint64, 0, len(reqList.Reqs))
-					for _, r := range reqList.Reqs {
-						ids = append(ids, r.Header.ID)
-					}
-					select {
-					case pipelineCh <- waitContext{done: lastReq.done, ctx: ctx, cancel: cancel, ids: ids}:
-					case <-ctx.Done():
-						cancel()
-						err := ctx.Err()
-						waitLeader := false
-						if err == context.DeadlineExceeded {
-							waitLeader = true
-							nd.rn.Infof("propose timeout: %v, %v", err.Error(), len(reqList.Reqs))
-						}
-						if err == context.Canceled {
-							// proposal canceled can be caused by leader transfer or no leader
-							err = ErrProposalCanceled
-							waitLeader = true
-							nd.rn.Infof("propose canceled : %v", len(reqList.Reqs))
-						}
-						for _, r := range reqList.Reqs {
-							nd.w.Trigger(r.Header.ID, err)
-						}
-						if waitLeader {
-							time.Sleep(proposeTimeout/100 + time.Millisecond*100)
-						}
-					case <-nd.stopChan:
-						cancel()
-						return
-					}
+					//lastReqList = append(lastReqList, lastReq)
 					//select {
 					//case <-lastReq.done:
 					//case <-ctx.Done():
@@ -532,6 +452,7 @@ func (nd *KVNode) handleProposeReq() {
 					//	return
 					//}
 				}
+				cancel()
 				cost = time.Now().UnixNano() - start
 			}
 			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
