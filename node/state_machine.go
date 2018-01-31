@@ -218,6 +218,11 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	if syncAddr == "" && syncDir == "" {
 		return errors.New("no backup available from others")
 	}
+	select {
+	case <-stopChan:
+		return common.ErrStopped
+	default:
+	}
 	// copy backup data from the remote leader node, and recovery backup from it
 	// if local has some old backup data, we should use rsync to sync the data file
 	// use the rocksdb backup/checkpoint interface to backup data

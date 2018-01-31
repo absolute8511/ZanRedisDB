@@ -812,6 +812,8 @@ func (rc *raftNode) serveChannels() {
 	isMeNewLeader := false
 	for {
 		select {
+		case <-rc.stopc:
+			return
 		// store raft entries to wal, then publish over commit channel
 		case rd, ok := <-rc.node.Ready():
 			if !ok {
@@ -905,8 +907,6 @@ func (rc *raftNode) serveChannels() {
 				raftDone <- struct{}{}
 			}
 			rc.node.Advance()
-		case <-rc.stopc:
-			return
 		}
 	}
 }
