@@ -18,14 +18,6 @@ var (
 	proposeTimeout = time.Second * 4
 )
 
-type raftMeta struct {
-	term  uint64
-	index uint64
-}
-type grpcServerInfo struct {
-	lastRaft map[string]raftMeta
-}
-
 func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq) (*syncerpb.SyncedRaftRsp, error) {
 	var rsp syncerpb.SyncedRaftRsp
 	kv := s.GetNamespaceFromFullName(req.RaftGroupName)
