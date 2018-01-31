@@ -178,11 +178,13 @@ func (nd *KVNode) Stop() {
 		return
 	}
 	close(nd.stopChan)
-	go nd.deleteCb()
 	nd.expireHandler.Stop()
 	nd.wg.Wait()
 	nd.rn.StopNode()
 	nd.sm.Close()
+	// deleted cb should be called after stopped, otherwise it
+	// may init the same node after deleted while the node is stopping.
+	go nd.deleteCb()
 	nd.rn.Infof("node %v stopped", nd.ns)
 }
 
@@ -657,9 +659,10 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	return false
 }
 
-func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
+func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) bool {
+	success := true
 	if raft.IsEmptySnap(applyEvent.snapshot) {
-		return
+		return success
 	}
 	// signaled to load snapshot
 	nd.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
@@ -679,11 +682,14 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 				nd.Stop()
 			}
 		}()
+		success = false
+		return success
 	}
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
 	np.snapi = applyEvent.snapshot.Metadata.Index
 	np.appliedi = applyEvent.snapshot.Metadata.Index
+	return success
 }
 
 func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
@@ -718,7 +724,10 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	if lastCommittedIndex > nd.GetCommittedIndex() {
 		nd.SetCommittedIndex(lastCommittedIndex)
 	}
-	nd.applySnapshot(np, applyEvent)
+	ok := nd.applySnapshot(np, applyEvent)
+	if !ok {
+		return false, false
+	}
 	if len(applyEvent.ents) == 0 {
 		return false, false
 	}
@@ -785,6 +794,8 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 	nd.rn.Infof("starting state: %v\n", np)
 	for {
 		select {
+		case <-nd.stopChan:
+			return
 		case ent, ok := <-commitC:
 			if !ok {
 				go func() {
@@ -806,8 +817,6 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 			if ent.applyWaitDone != nil {
 				close(ent.applyWaitDone)
 			}
-		case <-nd.stopChan:
-			return
 		}
 	}
 }

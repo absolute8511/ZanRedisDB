@@ -575,11 +575,14 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 					namespaceMeta.GetDesp(), isrList)
 				done := false
 				if time.Since(lastTransferCheckedTime) >= TransferLeaderWait {
-					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], false)
+					// removing node should transfer leader immediately since others partitions may wait for ready ,
+					// so it may never all ready for transfer. we need transfer by force.
+					_, force := namespaceMeta.Removings[dc.GetMyID()]
+					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], force)
 					lastTransferCheckedTime = time.Now()
 				}
 				if !done {
-					go dc.tryCheckNamespacesIn(TransferLeaderWait)
+					dc.tryCheckNamespacesIn(TransferLeaderWait)
 				}
 				continue
 			}
@@ -597,7 +600,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 					lastTransferCheckedTime = time.Now()
 				}
 				if !done {
-					go dc.tryCheckNamespacesIn(TransferLeaderWait)
+					dc.tryCheckNamespacesIn(TransferLeaderWait)
 				}
 			} else {
 				// check if any replica is not joined to members
@@ -711,6 +714,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 		case <-nsChangedChan:
 			cluster.CoordLog().Infof("trigger check by namespace changed")
 			doWork()
+			time.Sleep(time.Millisecond * 100)
 		}
 	}
 }
@@ -829,8 +833,13 @@ func (dc *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *clus
 }
 
 func (dc *DataCoordinator) tryCheckNamespacesIn(wait time.Duration) {
-	time.Sleep(wait)
-	dc.tryCheckNamespaces()
+	if len(dc.tryCheckUnsynced) > 0 {
+		return
+	}
+	go func() {
+		time.Sleep(wait)
+		dc.tryCheckNamespaces()
+	}()
 }
 
 func (dc *DataCoordinator) tryCheckNamespaces() {
