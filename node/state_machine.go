@@ -266,19 +266,17 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 			continue
 		}
 
-		c := http.Client{Transport: common.NewDeadlineTransport(time.Second)}
 		body, _ := raftSnapshot.Marshal()
 		uri := "http://" + ssi.RemoteAddr + ":" +
 			ssi.HttpAPIPort + common.APICheckBackup + "/" + fullNS
-		req, _ := http.NewRequest("GET", uri, bytes.NewBuffer(body))
-		rsp, err := c.Do(req)
+
+		sc, err := common.APIRequest("GET", uri, bytes.NewBuffer(body), time.Second*3, nil)
 		if err != nil {
 			nodeLog.Infof("request %v error: %v", uri, err)
 			continue
 		}
-		rsp.Body.Close()
-		if rsp.StatusCode != http.StatusOK {
-			nodeLog.Infof("request %v error: %v", uri, rsp)
+		if sc != http.StatusOK {
+			nodeLog.Infof("request %v error: %v", uri, sc)
 			continue
 		}
 		if ssi.RemoteAddr == h {

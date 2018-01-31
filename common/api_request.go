@@ -59,17 +59,16 @@ func APIRequest(method string, endpoint string, body io.Reader, timeout time.Dur
 		return resp.StatusCode, fmt.Errorf("req %v read body error %v",
 			endpoint, err.Error())
 	}
+	if ret == nil {
+		return resp.StatusCode, nil
+	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return resp.StatusCode, fmt.Errorf("req %v got error response %s %q", endpoint, resp.Status, respBody)
 	}
 
 	if len(respBody) == 0 {
 		respBody = []byte("{}")
-	}
-
-	if ret == nil {
-		return resp.StatusCode, nil
 	}
 	return resp.StatusCode, json.Unmarshal(respBody, ret)
 }
