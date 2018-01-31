@@ -889,6 +889,7 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 	var joinErr *cluster.CoordErr
 	retry := 0
 	startCheck := time.Now()
+	requestJoined := make(map[string]bool)
 	for time.Since(startCheck) < time.Second*30 {
 		mems := localNamespace.GetMembers()
 		memsMap := make(map[uint64]*common.MemberInfo)
@@ -941,7 +942,12 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 			if !dc.isNamespaceShouldStart(nsInfo) {
 				return cluster.ErrNamespaceExiting
 			}
-			dc.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
+			if _, ok := requestJoined[remote]; !ok {
+				err := dc.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
+				if err == nil {
+					requestJoined[remote] = true
+				}
+			}
 			select {
 			case <-dc.stopChan:
 				return cluster.ErrNamespaceExiting
