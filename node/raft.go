@@ -77,10 +77,11 @@ type DataStorage interface {
 }
 
 type applyInfo struct {
-	ents          []raftpb.Entry
-	snapshot      raftpb.Snapshot
-	raftDone      chan struct{}
-	applyWaitDone chan struct{}
+	ents                []raftpb.Entry
+	snapshot            raftpb.Snapshot
+	applySnapshotResult chan error
+	raftDone            chan struct{}
+	applyWaitDone       chan struct{}
 }
 
 // A key-value stream backed by raft
@@ -670,10 +671,10 @@ func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) erro
 
 // publishEntries writes committed log entries to commit channel and returns
 // whether all entries could be published.
-func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot,
+func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot, snapResult chan error,
 	raftDone chan struct{}, applyWaitDone chan struct{}) {
 	select {
-	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot,
+	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot, applySnapshotResult: snapResult,
 		raftDone: raftDone, applyWaitDone: applyWaitDone}:
 	case <-rc.stopc:
 		return
@@ -866,7 +867,12 @@ func (rc *raftNode) serveChannels() {
 				}
 			}
 
-			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, raftDone, applyWaitDone)
+			var applySnapshotResult chan error
+			if !raft.IsEmptySnap(rd.Snapshot) {
+				applySnapshotResult = make(chan error, 1)
+			}
+
+			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotResult, raftDone, applyWaitDone)
 			if isMeNewLeader {
 				rc.transport.Send(rc.processMessages(rd.Messages))
 			}
@@ -877,14 +883,28 @@ func (rc *raftNode) serveChannels() {
 				return
 			}
 			if !raft.IsEmptySnap(rd.Snapshot) {
+				// since the snapshot only has metadata, we need rsync the real snapshot data first.
+				// if the real snapshot failed to pull, we need stop raft and retry restart later.
+				rc.Infof("raft begin to apply incoming snapshot : %v", rd.Snapshot.String())
+				select {
+				case applyErr := <-applySnapshotResult:
+					if applyErr != nil {
+						rc.Errorf("wait apply snapshot error: %v", applyErr)
+						go rc.ds.Stop()
+						<-rc.stopc
+						return
+					}
+				case <-rc.stopc:
+					return
+				}
 				if err := rc.persistStorage.SaveSnap(rd.Snapshot); err != nil {
-					nodeLog.Errorf("raft save snap error: %v", err)
+					rc.Errorf("raft save snap error: %v", err)
 					go rc.ds.Stop()
 					<-rc.stopc
 					return
 				}
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
-				rc.Infof("raft applied incoming snapshot at index: %v", rd.Snapshot.String())
+				rc.Infof("raft applied incoming snapshot done: %v", rd.Snapshot.String())
 			}
 			rc.raftStorage.Append(rd.Entries)
 			if !isMeNewLeader {

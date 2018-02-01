@@ -399,3 +399,11 @@ func TestRestartCluster(t *testing.T) {
 func TestRestartWithForceAlone(t *testing.T) {
 	// TODO: test force restart with alone
 }
+
+func TestInstallSnapshotFailed(t *testing.T) {
+	// TODO: test the follower fall behind too much, and the leader send the snapshot to follower,
+	// However, the follower failed to pull the snapshot data from leader. So the raft node should stop
+	// and restart later.
+
+	// test case should make sure the snap will be not persisted to the stable storage since the snapshot data is failed to pull.
+}

@@ -792,10 +792,9 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	return false
 }
 
-func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) bool {
-	success := true
+func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 	if raft.IsEmptySnap(applyEvent.snapshot) {
-		return success
+		return nil
 	}
 	// signaled to load snapshot
 	nd.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
@@ -806,6 +805,9 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) bool {
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
 
+	// the snapshot restore may fail because of the remote snapshot is deleted
+	// and can not rsync from any other nodes.
+	// while starting we can not ignore or delete the snapshot since the wal may be cleaned on other snapshot.
 	if err := nd.RestoreFromSnapshot(false, applyEvent.snapshot); err != nil {
 		nodeLog.Error(err)
 		go func() {
@@ -815,14 +817,14 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) bool {
 				nd.Stop()
 			}
 		}()
-		success = false
-		return success
+		<-nd.stopChan
+		return err
 	}
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
 	np.snapi = applyEvent.snapshot.Metadata.Index
 	np.appliedi = applyEvent.snapshot.Metadata.Index
-	return success
+	return nil
 }
 
 func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
@@ -860,8 +862,16 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	if lastCommittedIndex > nd.GetCommittedIndex() {
 		nd.SetCommittedIndex(lastCommittedIndex)
 	}
-	ok := nd.applySnapshot(np, applyEvent)
-	if !ok {
+	snapErr := nd.applySnapshot(np, applyEvent)
+	if applyEvent.applySnapshotResult != nil {
+		select {
+		case applyEvent.applySnapshotResult <- snapErr:
+		case <-nd.stopChan:
+			return false, false
+		}
+	}
+	if snapErr != nil {
+		nd.rn.Errorf("apply snapshot failed: %v", snapErr.Error())
 		return false, false
 	}
 	if len(applyEvent.ents) == 0 {
@@ -909,6 +919,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 				nd.Stop()
 			}
 		}()
+		<-nd.stopChan
 		return false, false
 	}
 	return confChanged, forceBackup
