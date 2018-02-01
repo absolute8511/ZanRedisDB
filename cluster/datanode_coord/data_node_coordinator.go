@@ -942,6 +942,8 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 			if !dc.isNamespaceShouldStart(nsInfo) {
 				return cluster.ErrNamespaceExiting
 			}
+			// TODO: check if the local node is in the progress of starting or applying the snapshot
+			// in this case, we just wait the start finished.
 			if _, ok := requestJoined[remote]; !ok {
 				err := dc.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
 				if err == nil {
