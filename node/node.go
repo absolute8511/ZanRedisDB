@@ -822,7 +822,11 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 				nodeLog.Panicf("wrong events : %v", ent)
 			}
 			confChanged, forceBackup := nd.applyAll(&np, &ent)
-			<-ent.raftDone
+			select {
+			case <-ent.raftDone:
+			case <-nd.stopChan:
+				return
+			}
 			nd.maybeTriggerSnapshot(&np, confChanged, forceBackup)
 			nd.rn.handleSendSnapshot(&np)
 			if ent.applyWaitDone != nil {
