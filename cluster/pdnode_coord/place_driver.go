@@ -124,9 +124,6 @@ func (dp *DataPlacement) IsRaftNodeFullJoined(nsInfo *cluster.PartitionMetaInfo,
 		return false, nil
 	}
 	for _, remoteNode := range nsInfo.GetISR() {
-		if remoteNode == nid {
-			continue
-		}
 		nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(remoteNode)
 		var rsp []*common.MemberInfo
 		_, err := common.APIRequest("GET",
@@ -147,6 +144,13 @@ func (dp *DataPlacement) IsRaftNodeFullJoined(nsInfo *cluster.PartitionMetaInfo,
 		if !found {
 			cluster.CoordLog().Infof("raft %v not found in the node (%v) members for namespace %v", nid, nip, nsInfo.GetDesp())
 			return false, nil
+		}
+		_, err = common.APIRequest("GET",
+			"http://"+net.JoinHostPort(nip, httpPort)+common.APIIsRaftSynced+"/"+nsInfo.GetDesp(),
+			nil, time.Second*3, nil)
+		if err != nil {
+			cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
+			return false, err
 		}
 	}
 	return true, nil
