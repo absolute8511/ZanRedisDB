@@ -873,15 +873,7 @@ func (rc *raftNode) serveChannels() {
 			}
 
 			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotResult, raftDone, applyWaitDone)
-			if isMeNewLeader {
-				rc.transport.Send(rc.processMessages(rd.Messages))
-			}
-			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
-				nodeLog.Errorf("raft save wal error: %v", err)
-				go rc.ds.Stop()
-				<-rc.stopc
-				return
-			}
+
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				// since the snapshot only has metadata, we need rsync the real snapshot data first.
 				// if the real snapshot failed to pull, we need stop raft and retry restart later.
@@ -897,6 +889,17 @@ func (rc *raftNode) serveChannels() {
 				case <-rc.stopc:
 					return
 				}
+			}
+			if isMeNewLeader {
+				rc.transport.Send(rc.processMessages(rd.Messages))
+			}
+			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
+				nodeLog.Errorf("raft save wal error: %v", err)
+				go rc.ds.Stop()
+				<-rc.stopc
+				return
+			}
+			if !raft.IsEmptySnap(rd.Snapshot) {
 				if err := rc.persistStorage.SaveSnap(rd.Snapshot); err != nil {
 					rc.Errorf("raft save snap error: %v", err)
 					go rc.ds.Stop()
