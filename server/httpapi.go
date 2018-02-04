@@ -89,6 +89,28 @@ func (s *Server) doForceCleanRaftNode(w http.ResponseWriter, req *http.Request, 
 	return nil, nil
 }
 
+func (s *Server) doRemoveNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	sLog.Infof("got remove node request: %v from remote: %v", string(data), req.RemoteAddr)
+	var m common.MemberInfo
+	err = json.Unmarshal(data, &m)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	nsNode := s.GetNamespaceFromFullName(m.GroupName)
+	if nsNode == nil || !nsNode.IsReady() {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: node.ErrNamespacePartitionNotFound.Error()}
+	}
+	err = nsNode.Node.ProposeRemoveMember(m)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
+}
+
 func (s *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
@@ -160,6 +182,20 @@ func (s *Server) checkNodeAllReady(w http.ResponseWriter, req *http.Request, ps 
 	ok := s.nsMgr.IsAllRecoveryDone()
 	if !ok {
 		return nil, common.HttpErr{Code: http.StatusNotAcceptable, Text: "not ready for all"}
+	}
+	return nil, nil
+}
+
+func (s *Server) isRaftNodeSynced(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	v := s.GetNamespaceFromFullName(ns)
+	if v == nil || !v.IsReady() {
+		sLog.Infof("failed to get namespace node - %s", ns)
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
+	}
+	ok := v.IsRaftSynced(false)
+	if !ok {
+		return nil, common.HttpErr{Code: http.StatusNotAcceptable, Text: "raft node is not synced yet"}
 	}
 	return nil, nil
 }
@@ -327,11 +363,13 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APIGetIndexes+"/:namespace/:table", common.Decorate(s.getIndexes, common.V1))
 	router.Handle("GET", common.APIGetIndexes+"/:namespace", common.Decorate(s.getIndexes, common.V1))
 	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, common.V1))
+	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isRaftNodeSynced, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimize, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))
+	router.Handle("POST", common.APIRemoveNode, common.Decorate(s.doRemoveNode, log, common.V1))
 	router.Handle("GET", common.APINodeAllReady, common.Decorate(s.checkNodeAllReady, common.V1))
 
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))

@@ -26,7 +26,7 @@ var (
 )
 
 const (
-	MAX_RAFT_JOIN_RUNNING = 5
+	MaxRaftJoinRunning = 2
 )
 
 func GetNamespacePartitionFileName(namespace string, partition int, suffix string) string {
@@ -872,7 +872,7 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 	// check if in local raft group
 	myRunning := atomic.AddInt32(&dc.catchupRunning, 1)
 	defer atomic.AddInt32(&dc.catchupRunning, -1)
-	if myRunning > MAX_RAFT_JOIN_RUNNING {
+	if myRunning > MaxRaftJoinRunning {
 		cluster.CoordLog().Infof("catching too much running: %v", myRunning)
 		dc.tryCheckNamespaces()
 		return cluster.ErrCatchupRunningBusy

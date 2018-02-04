@@ -12,11 +12,13 @@ import (
 
 const (
 	APIAddNode      = "/cluster/node/add"
+	APIRemoveNode   = "/cluster/node/remove"
 	APIGetMembers   = "/cluster/members"
 	APIGetLeader    = "/cluster/leader"
 	APICheckBackup  = "/cluster/checkbackup"
 	APIGetIndexes   = "/schema/indexes"
 	APINodeAllReady = "/node/allready"
+	APIIsRaftSynced = "/cluster/israftsynced"
 )
 
 const (
