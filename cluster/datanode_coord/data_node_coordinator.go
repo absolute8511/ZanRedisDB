@@ -531,15 +531,18 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 			}
 			namespaceMeta, err := dc.register.GetNamespacePartInfo(namespace, pid)
 			if err != nil {
+				cluster.CoordLog().Infof("got namespace %v meta failed: %v", name, err)
 				if err == cluster.ErrKeyNotFound {
 					cluster.CoordLog().Infof("the namespace should be clean since not found in register: %v", name)
 					_, err = dc.register.GetNamespaceMetaInfo(namespace)
 					if err == cluster.ErrKeyNotFound {
 						dc.forceRemoveLocalNamespace(localNamespace)
 					}
+				} else {
+					dc.tryCheckNamespacesIn(time.Second * 5)
+					return
 				}
-				cluster.CoordLog().Infof("got namespace %v meta failed: %v", name, err)
-				go dc.tryCheckNamespaces()
+				dc.tryCheckNamespacesIn(time.Second * 5)
 				continue
 			}
 			if dc.isNamespaceShouldStop(*namespaceMeta, localNamespace) {
@@ -625,7 +628,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 					}
 				}
 				if anyWaitingJoin || len(members) < len(isrList) {
-					go dc.tryCheckNamespaces()
+					dc.tryCheckNamespacesIn(time.Second * 5)
 					continue
 				}
 				isFullStable := true
@@ -639,7 +642,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 				newestReplicaInfo, err := dc.register.GetRemoteNamespaceReplicaInfo(namespaceMeta.Name, namespaceMeta.Partition)
 				if err != nil {
 					if err != cluster.ErrKeyNotFound {
-						go dc.tryCheckNamespaces()
+						dc.tryCheckNamespacesIn(time.Second)
 					}
 					delete(pendingRemovings, namespaceMeta.GetDesp())
 					continue
@@ -678,7 +681,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 								m:  *m,
 							}
 						}
-						go dc.tryCheckNamespaces()
+						dc.tryCheckNamespacesIn(time.Second)
 					} else {
 						delete(pendings, m.ID)
 						for nid, removing := range newestReplicaInfo.Removings {
