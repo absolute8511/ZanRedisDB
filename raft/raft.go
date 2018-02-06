@@ -886,6 +886,10 @@ func (r *raft) Step(m pb.Message) error {
 		if r.state != StateLeader {
 			ents, err := r.raftLog.slice(r.raftLog.applied+1, r.raftLog.committed+1, noLimit)
 			if err != nil {
+				if err == ErrCompacted {
+					r.logger.Errorf("%x cannot campaign at term %d since log is compacted: %d", r.id, r.Term, r.raftLog.applied)
+					return nil
+				}
 				r.logger.Panicf("unexpected error getting unapplied entries (%v)", err)
 			}
 			if n := numOfPendingConf(ents); n != 0 && r.raftLog.committed > r.raftLog.applied {

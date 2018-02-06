@@ -612,15 +612,11 @@ func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 	}
 }
 
-func (rc *raftNode) beginSnapshot(snapi uint64, confState raftpb.ConfState) error {
+func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftpb.ConfState) error {
 	// here we can just begin snapshot, to freeze the state of storage
 	// and we can copy data async below
 	// TODO: do we need the snapshot while we already make our data stable on disk?
 	// maybe we can just same some meta data.
-	snapTerm, err := rc.raftStorage.Term(snapi)
-	if err != nil {
-		nodeLog.Panicf("failed to get term from apply index: %v", err)
-	}
 	rc.Infof("begin get snapshot at: %v-%v", snapTerm, snapi)
 	sn, err := rc.ds.GetSnapshot(snapTerm, snapi)
 	if err != nil {

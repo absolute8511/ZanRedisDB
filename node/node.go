@@ -48,6 +48,7 @@ const (
 type nodeProgress struct {
 	confState raftpb.ConfState
 	snapi     uint64
+	appliedt  uint64
 	appliedi  uint64
 }
 
@@ -695,6 +696,7 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
 	np.snapi = applyEvent.snapshot.Metadata.Index
+	np.appliedt = applyEvent.snapshot.Metadata.Term
 	np.appliedi = applyEvent.snapshot.Metadata.Index
 	return nil
 }
@@ -773,6 +775,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 			shouldStop = shouldStop || removeSelf
 		}
 		np.appliedi = evnt.Index
+		np.appliedt = evnt.Term
 		if evnt.Index == nd.rn.lastIndex {
 			nd.rn.Infof("replay finished at index: %v\n", evnt.Index)
 			nd.rn.MarkReplayFinished()
@@ -805,6 +808,7 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 	np := nodeProgress{
 		confState: snap.Metadata.ConfState,
 		snapi:     snap.Metadata.Index,
+		appliedt:  snap.Metadata.Term,
 		appliedi:  snap.Metadata.Index,
 	}
 	nd.rn.Infof("starting state: %v\n", np)
@@ -863,7 +867,7 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 	}
 
 	nd.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
-	err := nd.rn.beginSnapshot(np.appliedi, np.confState)
+	err := nd.rn.beginSnapshot(np.appliedt, np.appliedi, np.confState)
 	if err != nil {
 		nd.rn.Infof("begin snapshot failed: %v", err)
 		return
