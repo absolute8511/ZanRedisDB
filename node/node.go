@@ -69,6 +69,7 @@ type KVNode struct {
 	sm                StateMachine
 	stopping          int32
 	stopChan          chan struct{}
+	stopDone          chan struct{}
 	w                 wait.Wait
 	router            *common.CmdRouter
 	deleteCb          func()
@@ -120,6 +121,7 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	s := &KVNode{
 		reqProposeC:      make(chan *internalReq, 200),
 		stopChan:         stopChan,
+		stopDone:         make(chan struct{}),
 		store:            nil,
 		sm:               sm,
 		w:                wait.New(),
@@ -177,6 +179,7 @@ func (nd *KVNode) Stop() {
 	if !atomic.CompareAndSwapInt32(&nd.stopping, 0, 1) {
 		return
 	}
+	defer close(nd.stopDone)
 	close(nd.stopChan)
 	nd.expireHandler.Stop()
 	nd.wg.Wait()
@@ -267,7 +270,9 @@ func (nd *KVNode) GetStats() common.NamespaceStats {
 }
 
 func (nd *KVNode) destroy() error {
+	// should make sure stopped and wait other stopping finish
 	nd.Stop()
+	<-nd.stopDone
 	nd.sm.Destroy()
 	ts := strconv.Itoa(int(time.Now().UnixNano()))
 	return os.Rename(nd.rn.config.DataDir,
@@ -780,7 +785,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 			select {
 			case <-nd.stopChan:
 			default:
-				nd.Stop()
+				nd.destroy()
 			}
 		}()
 		<-nd.stopChan

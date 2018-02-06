@@ -63,11 +63,13 @@ func (s *KVStore) CleanData() error {
 	return s.openDB()
 }
 
+// the caller should make sure call this after close/stop finished.
+// and no any more operation on this store during and after the destroy
 func (s *KVStore) Destroy() error {
 	if s.RockDB != nil {
+		nodeLog.Infof("the store %v is destroyed", s.opts.DataDir)
 		dataPath := s.GetDataDir()
 		s.Close()
-		s.RockDB = nil
 		return os.RemoveAll(dataPath)
 	} else {
 		if s.opts.EngType == rockredis.EngType {
