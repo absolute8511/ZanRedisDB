@@ -209,6 +209,7 @@ type RockDB struct {
 	checkpointDirLock sync.Mutex
 	hasher64          hash.Hash64
 	hllCache          *hllCache
+	stopping          int32
 }
 
 func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
@@ -400,11 +401,8 @@ func (r *RockDB) closeEng() {
 }
 
 func (r *RockDB) Close() {
-	select {
-	case <-r.quit:
-		// already closed
+	if !atomic.CompareAndSwapInt32(&r.stopping, 0, 1) {
 		return
-	default:
 	}
 	close(r.quit)
 	r.expiration.Stop()

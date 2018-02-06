@@ -93,7 +93,15 @@ func (nn *NamespaceNode) IsDataNeedFix() bool {
 	return false
 }
 
-func (nn *NamespaceNode) IsRaftSynced(checkCommitIndex bool) bool {
+// full ready node means: all local commit log replay done and we are aware of leader and
+// maybe we have done all the newest commit log in state machine.
+func (nn *NamespaceNode) IsNsNodeFullReady(checkCommitIndex bool) bool {
+	if !nn.IsReady() {
+		return false
+	}
+	if !nn.Node.rn.IsReplayFinished() {
+		return false
+	}
 	return nn.Node.IsRaftSynced(checkCommitIndex)
 }
 
@@ -231,7 +239,7 @@ func (nsm *NamespaceMgr) IsAllRecoveryDone() bool {
 	done := true
 	nsm.mutex.RLock()
 	for _, n := range nsm.kvNodes {
-		if !n.IsReady() || !n.Node.rn.IsReplayFinished() {
+		if !n.IsNsNodeFullReady(true) {
 			done = false
 			break
 		}

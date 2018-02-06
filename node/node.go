@@ -48,6 +48,7 @@ const (
 type nodeProgress struct {
 	confState raftpb.ConfState
 	snapi     uint64
+	appliedt  uint64
 	appliedi  uint64
 }
 
@@ -113,6 +114,7 @@ type KVNode struct {
 	sm                 StateMachine
 	stopping           int32
 	stopChan           chan struct{}
+	stopDone           chan struct{}
 	w                  wait.Wait
 	router             *common.CmdRouter
 	deleteCb           func()
@@ -165,6 +167,7 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	s := &KVNode{
 		reqProposeC:        make(chan *internalReq, 200),
 		stopChan:           stopChan,
+		stopDone:           make(chan struct{}),
 		store:              nil,
 		sm:                 sm,
 		w:                  wait.New(),
@@ -236,6 +239,7 @@ func (nd *KVNode) Stop() {
 	if !atomic.CompareAndSwapInt32(&nd.stopping, 0, 1) {
 		return
 	}
+	defer close(nd.stopDone)
 	close(nd.stopChan)
 	nd.expireHandler.Stop()
 	nd.wg.Wait()
@@ -269,6 +273,7 @@ func (nd *KVNode) GetRaftStatus() raft.Status {
 	return nd.rn.node.Status()
 }
 
+// this is used for leader to determine whether a follower is up to date.
 func (nd *KVNode) IsReplicaRaftReady(raftID uint64) bool {
 	s := nd.rn.node.Status()
 	pg, ok := s.Progress[raftID]
@@ -326,7 +331,9 @@ func (nd *KVNode) GetStats() common.NamespaceStats {
 }
 
 func (nd *KVNode) destroy() error {
+	// should make sure stopped and wait other stopping finish
 	nd.Stop()
+	<-nd.stopDone
 	nd.sm.Destroy()
 	ts := strconv.Itoa(int(time.Now().UnixNano()))
 	return os.Rename(nd.rn.config.DataDir,
@@ -747,6 +754,10 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 			return false
 		}
 	}
+	if nd.IsLead() {
+		// leader always raft synced.
+		return true
+	}
 	if !checkCommitIndex {
 		return true
 	}
@@ -823,6 +834,7 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
 	np.snapi = applyEvent.snapshot.Metadata.Index
+	np.appliedt = applyEvent.snapshot.Metadata.Term
 	np.appliedi = applyEvent.snapshot.Metadata.Index
 	return nil
 }
@@ -904,6 +916,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 			shouldStop = shouldStop || removeSelf
 		}
 		np.appliedi = evnt.Index
+		np.appliedt = evnt.Term
 		if evnt.Index == nd.rn.lastIndex {
 			nd.rn.Infof("replay finished at index: %v\n", evnt.Index)
 			nd.rn.MarkReplayFinished()
@@ -916,7 +929,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 			select {
 			case <-nd.stopChan:
 			default:
-				nd.Stop()
+				nd.destroy()
 			}
 		}()
 		<-nd.stopChan
@@ -936,6 +949,7 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 	np := nodeProgress{
 		confState: snap.Metadata.ConfState,
 		snapi:     snap.Metadata.Index,
+		appliedt:  snap.Metadata.Term,
 		appliedi:  snap.Metadata.Index,
 	}
 	nd.rn.Infof("starting state: %v\n", np)
@@ -994,7 +1008,7 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 	}
 
 	nd.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
-	err := nd.rn.beginSnapshot(np.appliedi, np.confState)
+	err := nd.rn.beginSnapshot(np.appliedt, np.appliedi, np.confState)
 	if err != nil {
 		nd.rn.Infof("begin snapshot failed: %v", err)
 		return

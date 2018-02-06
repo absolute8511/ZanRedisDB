@@ -611,101 +611,100 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 				if !done {
 					dc.tryCheckNamespacesIn(TransferLeaderWait)
 				}
-			} else {
-				// check if any replica is not joined to members
-				anyWaitingJoin := false
-				for nid, rid := range namespaceMeta.RaftIDs {
-					if _, ok := namespaceMeta.Removings[nid]; ok {
-						continue
-					}
-					found := false
-					for _, m := range members {
-						if m.ID == rid {
-							found = true
-							if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
-								cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
-							}
-							break
-						}
-					}
-					if !found {
-						anyWaitingJoin = true
-						cluster.CoordLog().Infof("namespace %v new node still waiting join raft : %v, %v", namespaceMeta.GetDesp(), rid, nid)
-					}
-				}
-				if anyWaitingJoin || len(members) < len(isrList) {
-					dc.tryCheckNamespacesIn(time.Second * 5)
+				continue
+			}
+			// check if any replica is not joined to members
+			anyWaitingJoin := false
+			for nid, rid := range namespaceMeta.RaftIDs {
+				if _, ok := namespaceMeta.Removings[nid]; ok {
 					continue
 				}
-				isFullStable := true
-				// the members is more than replica, we need to remove the member that is not necessary anymore
-				pendings, ok := pendingRemovings[namespaceMeta.GetDesp()]
-				if !ok {
-					pendings = make(map[uint64]pendingRemoveInfo)
-					pendingRemovings[namespaceMeta.GetDesp()] = pendings
-					isFullStable = false
-				}
-				newestReplicaInfo, err := dc.register.GetRemoteNamespaceReplicaInfo(namespaceMeta.Name, namespaceMeta.Partition)
-				if err != nil {
-					if err != cluster.ErrKeyNotFound {
-						dc.tryCheckNamespacesIn(time.Second)
-					}
-					delete(pendingRemovings, namespaceMeta.GetDesp())
-					continue
-				}
-				namespaceMeta.PartitionReplicaInfo = *newestReplicaInfo
+				found := false
 				for _, m := range members {
-					found := false
-					for nid, rid := range newestReplicaInfo.RaftIDs {
-						if m.ID == rid {
-							found = true
-							if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
-								cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
-							}
-							break
+					if m.ID == rid {
+						found = true
+						if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
+							cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
 						}
+						break
 					}
-					if !found {
-						isFullStable = false
-						cluster.CoordLog().Infof("raft member %v not found in meta: %v", m, newestReplicaInfo.RaftNodes)
-						// here we do not remove other member immediately from raft
-						// it may happen while the namespace info in the register is not updated due to network lag
-						// so the new added node (add by api) may not in the meta info
-						if pendRemove, ok := pendings[m.ID]; ok {
-							if !pendRemove.m.IsEqual(m) {
-								pendings[m.ID] = pendingRemoveInfo{
-									ts: time.Now(),
-									m:  *m,
-								}
-							} else if time.Since(pendRemove.ts) > time.Minute {
-								cluster.CoordLog().Infof("pending removing member %v finally removed since not in meta", pendRemove)
-								dc.removeNamespaceRaftMember(namespaceMeta, m)
-							}
-						} else {
+				}
+				if !found {
+					anyWaitingJoin = true
+					cluster.CoordLog().Infof("namespace %v new node still waiting join raft : %v, %v", namespaceMeta.GetDesp(), rid, nid)
+				}
+			}
+			if anyWaitingJoin || len(members) < len(isrList) {
+				dc.tryCheckNamespacesIn(time.Second * 5)
+				continue
+			}
+			isFullStable := true
+			// the members is more than replica, we need to remove the member that is not necessary anymore
+			pendings, ok := pendingRemovings[namespaceMeta.GetDesp()]
+			if !ok {
+				pendings = make(map[uint64]pendingRemoveInfo)
+				pendingRemovings[namespaceMeta.GetDesp()] = pendings
+				isFullStable = false
+			}
+			newestReplicaInfo, err := dc.register.GetRemoteNamespaceReplicaInfo(namespaceMeta.Name, namespaceMeta.Partition)
+			if err != nil {
+				if err != cluster.ErrKeyNotFound {
+					dc.tryCheckNamespacesIn(time.Second)
+				}
+				delete(pendingRemovings, namespaceMeta.GetDesp())
+				continue
+			}
+			namespaceMeta.PartitionReplicaInfo = *newestReplicaInfo
+			for _, m := range members {
+				found := false
+				for nid, rid := range newestReplicaInfo.RaftIDs {
+					if m.ID == rid {
+						found = true
+						if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
+							cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
+						}
+						break
+					}
+				}
+				if !found {
+					isFullStable = false
+					cluster.CoordLog().Infof("raft member %v not found in meta: %v", m, newestReplicaInfo.RaftNodes)
+					// here we do not remove other member immediately from raft
+					// it may happen while the namespace info in the register is not updated due to network lag
+					// so the new added node (add by api) may not in the meta info
+					if pendRemove, ok := pendings[m.ID]; ok {
+						if !pendRemove.m.IsEqual(m) {
 							pendings[m.ID] = pendingRemoveInfo{
 								ts: time.Now(),
 								m:  *m,
 							}
+						} else if time.Since(pendRemove.ts) > time.Minute {
+							cluster.CoordLog().Infof("pending removing member %v finally removed since not in meta", pendRemove)
+							dc.removeNamespaceRaftMember(namespaceMeta, m)
 						}
-						dc.tryCheckNamespacesIn(time.Second)
 					} else {
-						delete(pendings, m.ID)
-						for nid, removing := range newestReplicaInfo.Removings {
-							isFullStable = false
-							if m.ID == removing.RemoveReplicaID && m.NodeID == cluster.ExtractRegIDFromGenID(nid) {
-								cluster.CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
-								dc.removeNamespaceRaftMember(namespaceMeta, m)
-							}
+						pendings[m.ID] = pendingRemoveInfo{
+							ts: time.Now(),
+							m:  *m,
+						}
+					}
+					dc.tryCheckNamespacesIn(time.Second)
+				} else {
+					delete(pendings, m.ID)
+					for nid, removing := range newestReplicaInfo.Removings {
+						isFullStable = false
+						if m.ID == removing.RemoveReplicaID && m.NodeID == cluster.ExtractRegIDFromGenID(nid) {
+							cluster.CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
+							dc.removeNamespaceRaftMember(namespaceMeta, m)
 						}
 					}
 				}
-				if isFullStable {
-					indexSchemas, ok := allIndexSchemas[namespace]
-					if ok {
-						dc.doSyncSchemaInfo(localNamespace, indexSchemas)
-					}
+			}
+			if isFullStable {
+				indexSchemas, ok := allIndexSchemas[namespace]
+				if ok {
+					dc.doSyncSchemaInfo(localNamespace, indexSchemas)
 				}
-
 			}
 		}
 	}
@@ -917,7 +916,7 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 			}
 		}
 		if alreadyJoined {
-			if localNamespace.IsRaftSynced(firstLoad) {
+			if localNamespace.IsNsNodeFullReady(firstLoad) {
 				joinErr = nil
 				break
 			}
