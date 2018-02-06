@@ -186,14 +186,14 @@ func (s *Server) checkNodeAllReady(w http.ResponseWriter, req *http.Request, ps 
 	return nil, nil
 }
 
-func (s *Server) isRaftNodeSynced(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) isNsNodeFullReady(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := s.GetNamespaceFromFullName(ns)
 	if v == nil || !v.IsReady() {
 		sLog.Infof("failed to get namespace node - %s", ns)
 		return nil, common.HttpErr{Code: http.StatusNotFound, Text: "no namespace found"}
 	}
-	ok := v.IsRaftSynced(false)
+	ok := v.IsNsNodeFullReady(true)
 	if !ok {
 		return nil, common.HttpErr{Code: http.StatusNotAcceptable, Text: "raft node is not synced yet"}
 	}
@@ -363,7 +363,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APIGetIndexes+"/:namespace/:table", common.Decorate(s.getIndexes, common.V1))
 	router.Handle("GET", common.APIGetIndexes+"/:namespace", common.Decorate(s.getIndexes, common.V1))
 	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, common.V1))
-	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isRaftNodeSynced, common.V1))
+	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isNsNodeFullReady, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimize, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))

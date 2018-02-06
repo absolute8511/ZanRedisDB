@@ -214,6 +214,7 @@ func (nd *KVNode) GetRaftStatus() raft.Status {
 	return nd.rn.node.Status()
 }
 
+// this is used for leader to determine whether a follower is up to date.
 func (nd *KVNode) IsReplicaRaftReady(raftID uint64) bool {
 	s := nd.rn.node.Status()
 	pg, ok := s.Progress[raftID]
@@ -619,6 +620,10 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 			nd.rn.maybeTryElection()
 			return false
 		}
+	}
+	if nd.IsLead() {
+		// leader always raft synced.
+		return true
 	}
 	if !checkCommitIndex {
 		return true

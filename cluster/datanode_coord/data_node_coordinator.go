@@ -912,7 +912,7 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 			}
 		}
 		if alreadyJoined {
-			if localNamespace.IsRaftSynced(firstLoad) {
+			if localNamespace.IsNsNodeFullReady(firstLoad) {
 				joinErr = nil
 				break
 			}
