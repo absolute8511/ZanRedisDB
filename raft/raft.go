@@ -1239,7 +1239,9 @@ func stepFollower(r *raft, m pb.Message) bool {
 			return true
 		}
 		m.To = r.lead
-		m.ToGroup = r.getProgress(m.To).group
+		if pr := r.getProgress(m.To); pr != nil {
+			m.ToGroup = pr.group
+		}
 		r.send(m)
 	case pb.MsgTimeoutNow:
 		if r.promotable() {
@@ -1257,7 +1259,9 @@ func stepFollower(r *raft, m pb.Message) bool {
 			return true
 		}
 		m.To = r.lead
-		m.ToGroup = r.getProgress(m.To).group
+		if pr := r.getProgress(m.To); pr != nil {
+			m.ToGroup = pr.group
+		}
 		r.send(m)
 	case pb.MsgReadIndexResp:
 		if len(m.Entries) != 1 {
