@@ -685,14 +685,32 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 
 		if atomic.LoadInt32(&pdCoord.balanceWaiting) == 0 {
 			if aliveCount > nsInfo.Replica && !needMigrate {
+				canRemove := true
+				pdCoord.nodesMutex.RLock()
+				rmNum := len(pdCoord.removingNodes)
+				pdCoord.nodesMutex.RUnlock()
+				if rmNum > 0 {
+					canRemove = false
+				}
+				if canRemove {
+					ok, err := IsAllISRFullReady(&nsInfo)
+					if err != nil {
+						cluster.CoordLog().Infof("namespace %v isr is not full ready: %v", nsInfo.GetDesp(), err.Error())
+					}
+					if !ok {
+						canRemove = false
+					}
+				}
 				//remove the unwanted node in isr
 				cluster.CoordLog().Infof("namespace %v isr %v is more than replicator: %v, %v", nsInfo.GetDesp(),
 					nsInfo.RaftNodes, aliveCount, nsInfo.Replica)
-				removeNode := pdCoord.dpm.decideUnwantedRaftNode(&nsInfo, currentNodes)
-				if removeNode != "" {
-					coordErr := pdCoord.removeNamespaceFromNode(&nsInfo, removeNode)
-					if coordErr == nil {
-						cluster.CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, nsInfo)
+				if canRemove {
+					removeNode := pdCoord.dpm.decideUnwantedRaftNode(&nsInfo, currentNodes)
+					if removeNode != "" {
+						coordErr := pdCoord.removeNamespaceFromNode(&nsInfo, removeNode)
+						if coordErr == nil {
+							cluster.CoordLog().Infof("node %v removed by plan from namespace : %v", removeNode, nsInfo)
+						}
 					}
 				}
 			}
@@ -860,7 +878,7 @@ func (pdCoord *PDCoordinator) removeNamespaceFromRemovings(origNSInfo *cluster.P
 		if time.Now().UnixNano()-rinfo.RemoveTime < waitRemoveRemovingNodeInterval.Nanoseconds() {
 			continue
 		}
-		inRaft, err := pdCoord.dpm.IsRaftNodeJoined(nsInfo, nid)
+		inRaft, err := IsRaftNodeJoined(nsInfo, nid)
 		if inRaft || err != nil {
 			continue
 		}
