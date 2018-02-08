@@ -653,8 +653,8 @@ func (r *raft) appendEntry(es ...pb.Entry) {
 		es[i].Term = r.Term
 		es[i].Index = li + 1 + uint64(i)
 	}
-	r.raftLog.append(es...)
-	r.getProgress(r.id).maybeUpdate(r.raftLog.lastIndex())
+	li = r.raftLog.append(es...)
+	r.getProgress(r.id).maybeUpdate(li)
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
 	r.maybeCommit()
 }
@@ -914,9 +914,14 @@ func (r *raft) Step(m pb.Message) error {
 				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
 			return nil
 		}
-		// The m.Term > r.Term clause is for MsgPreVote. For MsgVote m.Term should
-		// always equal r.Term.
-		if (r.Vote == None || m.Term > r.Term || r.Vote == m.From) && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
+		// We can vote if this is a repeat of a vote we've already cast...
+		canVote := r.Vote == m.From ||
+			// ...we haven't voted and we don't think there's a leader yet in this term...
+			(r.Vote == None && r.lead == None) ||
+			// ...or this is a PreVote for a future term...
+			(m.Type == pb.MsgPreVote && m.Term > r.Term)
+		// ...and we believe the candidate is up to date.
+		if canVote && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
 			r.logger.Infof("%x(%v) [logterm: %d, index: %d, vote: %x] cast %s for %x(%v) [logterm: %d, index: %d] at term %d",
 				r.id, r.group.Name, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type,
 				m.From, m.FromGroup, m.LogTerm, m.Index, r.Term)
