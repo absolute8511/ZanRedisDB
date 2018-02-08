@@ -56,7 +56,7 @@ type PDCoordinator struct {
 	isUpgrading            int32
 	dpm                    *DataPlacement
 	doChecking             int32
-	autoBalance            bool
+	autoBalance            int32
 	stableNodeNum          int32
 	dataDir                string
 }
@@ -76,7 +76,9 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 	coord.dpm = NewDataPlacement(coord)
 	if opts != nil {
 		coord.dpm.SetBalanceInterval(opts.BalanceStart, opts.BalanceEnd)
-		coord.autoBalance = opts.AutoBalanceAndMigrate
+		if opts.AutoBalanceAndMigrate {
+			coord.autoBalance = 1
+		}
 		coord.dataDir = opts.DataDir
 	}
 	return coord
@@ -84,6 +86,10 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 
 func (pdCoord *PDCoordinator) SetRegister(r cluster.PDRegister) {
 	pdCoord.register = r
+}
+
+func (pdCoord *PDCoordinator) AutoBalanceEnabled() bool {
+	return atomic.LoadInt32(&pdCoord.autoBalance) == 1
 }
 
 func (pdCoord *PDCoordinator) Start() error {
@@ -290,6 +296,13 @@ func (pdCoord *PDCoordinator) getCurrentNodesWithRemoving() (map[string]cluster.
 	currentNodesEpoch := atomic.LoadInt64(&pdCoord.nodesEpoch)
 	pdCoord.nodesMutex.RUnlock()
 	return currentNodes, currentNodesEpoch
+}
+
+func (pdCoord *PDCoordinator) hasRemovingNode() bool {
+	pdCoord.nodesMutex.RLock()
+	num := len(pdCoord.removingNodes)
+	pdCoord.nodesMutex.RUnlock()
+	return num > 0
 }
 
 func (pdCoord *PDCoordinator) getCurrentNodesWithEpoch(tags map[string]interface{}) (map[string]cluster.NodeInfo, int64) {
@@ -655,7 +668,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 			pdCoord.removeNamespaceFromRemovings(&nsInfo)
 		}
 
-		if needMigrate && pdCoord.autoBalance {
+		if needMigrate && pdCoord.AutoBalanceEnabled() {
 			if _, ok := partitions[nsInfo.Partition]; !ok {
 				partitions[nsInfo.Partition] = time.Now()
 				// migrate next time
@@ -701,10 +714,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 		if atomic.LoadInt32(&pdCoord.balanceWaiting) == 0 {
 			if aliveCount > nsInfo.Replica && !needMigrate {
 				canRemove := true
-				pdCoord.nodesMutex.RLock()
-				rmNum := len(pdCoord.removingNodes)
-				pdCoord.nodesMutex.RUnlock()
-				if rmNum > 0 {
+				if pdCoord.hasRemovingNode() {
 					canRemove = false
 				}
 				if canRemove {
