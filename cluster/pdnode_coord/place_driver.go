@@ -76,20 +76,8 @@ func getNodeNameList(currentNodes map[string]cluster.NodeInfo) []SortableStrings
 	return nodeNameList
 }
 
-type DataPlacement struct {
-	balanceInterval [2]int
-	pdCoord         *PDCoordinator
-}
-
-func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
-	return &DataPlacement{
-		pdCoord:         coord,
-		balanceInterval: [2]int{2, 4},
-	}
-}
-
-// query the raft peers if the nid already in the raft group for the namespace
-func (dp *DataPlacement) IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
+// query the raft peers if the nid already in the raft group for the namespace in all raft peers
+func IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
 	if len(nsInfo.RaftNodes) == 0 {
 		return false, nil
 	}
@@ -119,7 +107,19 @@ func (dp *DataPlacement) IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid
 	return false, lastErr
 }
 
-func (dp *DataPlacement) IsRaftNodeFullJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
+// query the raft peers if the nid already in the raft group for the namespace and all logs synced in all peers
+func IsAllISRFullReady(nsInfo *cluster.PartitionMetaInfo) (bool, error) {
+	for _, nid := range nsInfo.GetISR() {
+		ok, err := IsRaftNodeFullReady(nsInfo, nid)
+		if err != nil || !ok {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// query the raft peers if the nid already in the raft group for the namespace and all logs synced in all peers
+func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
 	if len(nsInfo.RaftNodes) == 0 {
 		return false, nil
 	}
@@ -154,6 +154,18 @@ func (dp *DataPlacement) IsRaftNodeFullJoined(nsInfo *cluster.PartitionMetaInfo,
 		}
 	}
 	return true, nil
+}
+
+type DataPlacement struct {
+	balanceInterval [2]int
+	pdCoord         *PDCoordinator
+}
+
+func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
+	return &DataPlacement{
+		pdCoord:         coord,
+		balanceInterval: [2]int{2, 4},
+	}
 }
 
 func (dp *DataPlacement) SetBalanceInterval(start int, end int) {
@@ -238,7 +250,7 @@ func (dp *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{
 		if err != nil {
 			cluster.CoordLog().Infof("failed to get namespace %v info: %v", fullName, err)
 		} else {
-			if inRaft, _ := dp.IsRaftNodeFullJoined(nInfo, nid); inRaft {
+			if inRaft, _ := IsRaftNodeFullReady(nInfo, nid); inRaft {
 				break
 			} else if cluster.FindSlice(nInfo.RaftNodes, nid) != -1 {
 				// wait ready
