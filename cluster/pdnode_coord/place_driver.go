@@ -200,7 +200,7 @@ func (dp *DataPlacement) DoBalance(monitorChan chan struct{}) {
 				cluster.CoordLog().Infof("no balance since cluster is not stable while checking balance")
 				continue
 			}
-			if !dp.pdCoord.autoBalance {
+			if !dp.pdCoord.AutoBalanceEnabled() {
 				continue
 			}
 			cluster.CoordLog().Infof("begin checking balance of namespace data...")
@@ -399,6 +399,9 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 		}
 		if !dp.pdCoord.IsMineLeader() {
 			return moved, true
+		}
+		if dp.pdCoord.hasRemovingNode() {
+			return moved, false
 		}
 		// balance only one namespace once
 		if movedNamespace != "" && movedNamespace != namespaceInfo.Name {

@@ -37,6 +37,16 @@ func (pdCoord *PDCoordinator) GetAllNamespaces() (map[string]map[int]cluster.Par
 	return ns, int64(epoch), err
 }
 
+func (pdCoord *PDCoordinator) SwitchAutoBalance(enable bool) {
+	if enable {
+		atomic.StoreInt32(&pdCoord.autoBalance, 1)
+		cluster.CoordLog().Infof("balance enabled")
+	} else {
+		atomic.StoreInt32(&pdCoord.autoBalance, 0)
+		cluster.CoordLog().Infof("balance disabled")
+	}
+}
+
 func (pdCoord *PDCoordinator) SetClusterStableNodeNum(num int) error {
 	if int32(num) > atomic.LoadInt32(&pdCoord.stableNodeNum) {
 		return errors.New("cluster stable node number can not be increased by manunal, only decrease allowed")

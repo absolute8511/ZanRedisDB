@@ -75,6 +75,7 @@ func (s *Server) initHttpHandler() {
 
 	// cluster prefix url means only handled by leader of pd
 	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
+	router.Handle("POST", "/cluster/balance", common.Decorate(s.doClusterSwitchBalance, log, common.V1))
 	router.Handle("POST", "/cluster/pd/tombstone", common.Decorate(s.doClusterTombstonePD, log, common.V1))
 	router.Handle("POST", "/cluster/node/remove", common.Decorate(s.doClusterRemoveDataNode, log, common.V1))
 	router.Handle("POST", "/cluster/upgrade/begin", common.Decorate(s.doClusterBeginUpgrade, log, common.V1))
@@ -250,6 +251,28 @@ func (s *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps htt
 	}, nil
 }
 
+func (s *Server) doClusterSwitchBalance(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	if !s.pdCoord.IsMineLeader() {
+		sLog.Infof("request from remote %v should request to leader", req.RemoteAddr)
+		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
+	}
+	enable := reqParams.Get("enable")
+	if enable == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG"}
+	}
+	if enable == "true" {
+		s.pdCoord.SwitchAutoBalance(true)
+	} else {
+		s.pdCoord.SwitchAutoBalance(false)
+	}
+	return nil, nil
+}
+
 func (s *Server) doClusterTombstonePD(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -370,7 +393,7 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 
 	var meta cluster.NamespaceMetaInfo
 	optimizedFsync := reqParams.Get("optimizedfsync")
-	if optimizedFsync == "" || optimizedFsync == "true"{
+	if optimizedFsync == "" || optimizedFsync == "true" {
 		meta.OptimizedFsync = true
 	}
 
