@@ -422,7 +422,6 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 		case <-monitorChan:
 			return
 		case <-ticker.C:
-			//
 			anyStateChanged := false
 			pdCoord.nodesMutex.RLock()
 			removingNodes := make(map[string]string)
@@ -447,6 +446,8 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 				// only check the namespace with one replica left
 				// because the doCheckNamespaces will check the others
 				// we add a new replica for the removing node
+
+				// to avoid too much migration, we break early if any pending migration found
 				for _, namespacePartList := range allNamespaces {
 					for _, namespaceInfo := range namespacePartList {
 						if cluster.FindSlice(namespaceInfo.RaftNodes, nid) == -1 {
@@ -454,7 +455,12 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 						}
 						if _, ok := namespaceInfo.Removings[nid]; ok {
 							cluster.CoordLog().Infof("namespace %v data on node %v is in removing, waiting", namespaceInfo.GetDesp(), nid)
-							continue
+							anyPending = true
+							break
+						}
+						if anyPending {
+							// waiting other pending
+							break
 						}
 						if len(namespaceInfo.GetISR()) <= namespaceInfo.Replica {
 							anyPending = true
@@ -464,7 +470,7 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 								nodeNameList)
 							if err != nil {
 								cluster.CoordLog().Infof("namespace %v data on node %v transferred failed, waiting next time", namespaceInfo.GetDesp(), nid)
-								continue
+								break
 							} else if newInfo != nil {
 								namespaceInfo = *newInfo
 							}
@@ -472,19 +478,20 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							anyStateChanged = true
 						}
 						ok, err := IsAllISRFullReady(&namespaceInfo)
-						if err != nil {
-							cluster.CoordLog().Infof("namespace %v isr is not full ready: %v", namespaceInfo.GetDesp(), err.Error())
-						}
-						if ok {
-							err := pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
-							if err != nil {
-								anyPending = true
-							}
-						} else {
+						if err != nil || !ok {
+							cluster.CoordLog().Infof("namespace %v isr is not full ready: %v", namespaceInfo.GetDesp(), err)
 							anyPending = true
-							removingNodes[nid] = "pending"
-							anyStateChanged = true
-							cluster.CoordLog().Infof("namespace %v isr is not full ready", namespaceInfo.GetDesp())
+							if removingNodes[nid] != "pending" {
+								removingNodes[nid] = "pending"
+								anyStateChanged = true
+							}
+							break
+						}
+						coordErr := pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
+						if coordErr != nil {
+							anyPending = true
+						} else if _, waitingRemove := namespaceInfo.Removings[nid]; waitingRemove {
+							anyPending = true
 						}
 					}
 					if !anyPending {
