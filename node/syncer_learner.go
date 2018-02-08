@@ -222,6 +222,8 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		sm.Infof("failed to prepare snapshot: %v", err)
 		return err
 	}
+	// TODO: we do not need pull store local, we can just notify the remote cluster
+	// to get synced from the real leader and just wait transfer done.
 	err = sm.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 	if err != nil {
 		sm.Infof("failed to restore snapshot: %v", err)
