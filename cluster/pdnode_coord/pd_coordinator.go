@@ -439,6 +439,10 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 						if cluster.FindSlice(namespaceInfo.RaftNodes, nid) == -1 {
 							continue
 						}
+						if _, ok := namespaceInfo.Removings[nid]; ok {
+							cluster.CoordLog().Infof("namespace %v data on node %v is in removing, waiting", namespaceInfo.GetDesp(), nid)
+							continue
+						}
 						if len(namespaceInfo.GetISR()) <= namespaceInfo.Replica {
 							anyPending = true
 							// find new catchup and wait isr ready
@@ -454,9 +458,20 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							cluster.CoordLog().Infof("namespace %v data on node %v transferred success", namespaceInfo.GetDesp(), nid)
 							anyStateChanged = true
 						}
-						err := pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
+						ok, err := IsAllISRFullReady(&namespaceInfo)
 						if err != nil {
+							cluster.CoordLog().Infof("namespace %v isr is not full ready: %v", namespaceInfo.GetDesp(), err.Error())
+						}
+						if ok {
+							err := pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
+							if err != nil {
+								anyPending = true
+							}
+						} else {
 							anyPending = true
+							removingNodes[nid] = "pending"
+							anyStateChanged = true
+							cluster.CoordLog().Infof("namespace %v isr is not full ready", namespaceInfo.GetDesp())
 						}
 					}
 					if !anyPending {
