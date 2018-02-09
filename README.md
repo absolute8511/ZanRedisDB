@@ -9,6 +9,7 @@ ZanRedisDB is a distributed redis cluster with strong consistency.
 - Namespace and set supported: You can use the namespace and set as prefix to isolate different data to make operation more easily. 
 - Strong consistence and persistence: Use raft and rocksdb to make sure all the data have the consistence replication and persistent on stable storage.
 - Scalability: You can easily increase the cluster capacity just by adding more machines.
+- Multi-DC support: multi data centers deployment can be supported with rackaware feature.
 
 ## Build
 
