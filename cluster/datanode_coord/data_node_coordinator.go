@@ -694,8 +694,15 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 					for nid, removing := range newestReplicaInfo.Removings {
 						isFullStable = false
 						if m.ID == removing.RemoveReplicaID && m.NodeID == cluster.ExtractRegIDFromGenID(nid) {
-							cluster.CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
-							dc.removeNamespaceRaftMember(namespaceMeta, m)
+							if m.NodeID == leader {
+								cluster.CoordLog().Infof("raft leader member %v is marked as removing in meta: %v, waiting transfer", m, newestReplicaInfo.Removings)
+								// leader should not remove self, otherwise there maybe sometimes no leader for rw
+								// so leader need wait transfer self to others and wait removed by other leader
+								dc.tryCheckNamespacesIn(TransferLeaderWait)
+							} else {
+								cluster.CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
+								dc.removeNamespaceRaftMember(namespaceMeta, m)
+							}
 						}
 					}
 				}
@@ -1016,7 +1023,7 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 			return nil, &cluster.CoordErr{ErrMsg: checkErr.Error(), ErrCode: cluster.RpcNoErr, ErrType: cluster.CoordLocalErr}
 		}
 	}
-	if localNode == nil {
+	if localNode == nil || localErr != nil {
 		cluster.CoordLog().Warningf("local namespace %v init failed: %v", nsInfo.GetDesp(), localErr)
 		return nil, cluster.ErrLocalInitNamespaceFailed
 	}
@@ -1051,6 +1058,9 @@ func (dc *DataCoordinator) RestartAsStandalone(fullNamespace string) error {
 	}
 	cluster.CoordLog().Warningf("namespace %v restart as standalone cluster", fullNamespace)
 	localNs.Close()
+	// wait delete from namespace manager
+	time.Sleep(time.Second)
+
 	_, coordErr := dc.updateLocalNamespace(nsInfo, true)
 	if coordErr != nil {
 		return coordErr.ToErrorType()
@@ -1163,8 +1173,10 @@ func (dc *DataCoordinator) prepareLeavingCluster() {
 				if newLeader == dc.GetMyID() {
 					continue
 				}
-				dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, true, false)
-				break
+				done := dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, true, false)
+				if done {
+					break
+				}
 			}
 		}
 	}

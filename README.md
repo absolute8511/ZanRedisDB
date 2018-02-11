@@ -3,6 +3,14 @@
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/3288ed77f27c4f8a998e35ef936edc6f)](https://www.codacy.com/app/cool8511/ZanRedisDB?utm_source=github.com&utm_medium=referral&utm_content=absolute8511/ZanRedisDB&utm_campaign=badger)
 [![Build Status](https://travis-ci.org/absolute8511/ZanRedisDB.svg?branch=master)](https://travis-ci.org/absolute8511/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/absolute8511/ZanRedisDB.svg)](https://github.com/absolute8511/ZanRedisDB/releases/latest) [![codecov](https://codecov.io/gh/absolute8511/ZanRedisDB/branch/master/graph/badge.svg)](https://codecov.io/gh/absolute8511/ZanRedisDB) [![Go Report Card](https://goreportcard.com/badge/github.com/absolute8511/ZanRedisDB)](https://goreportcard.com/report/github.com/absolute8511/ZanRedisDB)
 
+## What is ZanRedisDB
+ZanRedisDB is a distributed redis cluster with strong consistency.
+- Compatible with redis protocol: most redis command is supported in ZanRedisDB, so you can replace Redis with ZanRedisDB and get a more powerful cluster with unlimited data.
+- Namespace and set supported: You can use the namespace and set as prefix to isolate different data to make operation more easily. 
+- Strong consistence and persistence: Use raft and rocksdb to make sure all the data have the consistence replication and persistent on stable storage.
+- Scalability: You can easily increase the cluster capacity just by adding more machines.
+- Multi-DC support: multi data centers deployment can be supported with rackaware feature.
+
 ## Build
 
 Install the compress library
@@ -77,6 +85,9 @@ storage server also support the redis apis for read/write :
 Golang client SDK : [client-sdk] , a redis proxy can be deployed 
 based on this golang sdk if you want use the redis client in other language.
 
+## Architechture
+
+![arch](doc/resource/zankv-arch.png)
 ## Roadmap
 * Redis data structures
   - [x] KV

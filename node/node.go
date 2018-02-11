@@ -672,6 +672,9 @@ func (nd *KVNode) ProposeAddMember(m common.MemberInfo) error {
 	if m.NodeID == nd.machineConfig.NodeID {
 		nd.FillMyMemberInfo(&m)
 	}
+	if nd.rn.IsMember(m) {
+		return nil
+	}
 	data, _ := json.Marshal(m)
 	cc := raftpb.ConfChange{
 		Type:      raftpb.ConfChangeAddNode,
