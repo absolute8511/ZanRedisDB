@@ -1169,8 +1169,10 @@ func (dc *DataCoordinator) prepareLeavingCluster() {
 				if newLeader == dc.GetMyID() {
 					continue
 				}
-				dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, true, false)
-				break
+				done := dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, true, false)
+				if done {
+					break
+				}
 			}
 		}
 	}
