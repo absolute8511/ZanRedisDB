@@ -690,10 +690,15 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 					for nid, removing := range newestReplicaInfo.Removings {
 						isFullStable = false
 						if m.ID == removing.RemoveReplicaID && m.NodeID == cluster.ExtractRegIDFromGenID(nid) {
-							cluster.CoordLog().Infof("raft leader member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
-							// leader should not remove self, otherwise there maybe sometimes no leader for rw
-							// so leader need wait transfer self to others and wait removed by other leader
-							dc.tryCheckNamespacesIn(time.Second)
+							if m.NodeID == leader {
+								cluster.CoordLog().Infof("raft leader member %v is marked as removing in meta: %v, waiting transfer", m, newestReplicaInfo.Removings)
+								// leader should not remove self, otherwise there maybe sometimes no leader for rw
+								// so leader need wait transfer self to others and wait removed by other leader
+								dc.tryCheckNamespacesIn(TransferLeaderWait)
+							} else {
+								cluster.CoordLog().Infof("raft member %v is marked as removing in meta: %v", m, newestReplicaInfo.Removings)
+								dc.removeNamespaceRaftMember(namespaceMeta, m)
+							}
 						}
 					}
 				}
