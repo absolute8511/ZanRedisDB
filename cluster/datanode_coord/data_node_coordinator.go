@@ -1019,7 +1019,7 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 			return nil, &cluster.CoordErr{ErrMsg: checkErr.Error(), ErrCode: cluster.RpcNoErr, ErrType: cluster.CoordLocalErr}
 		}
 	}
-	if localNode == nil {
+	if localNode == nil || localErr != nil {
 		cluster.CoordLog().Warningf("local namespace %v init failed: %v", nsInfo.GetDesp(), localErr)
 		return nil, cluster.ErrLocalInitNamespaceFailed
 	}
@@ -1054,6 +1054,9 @@ func (dc *DataCoordinator) RestartAsStandalone(fullNamespace string) error {
 	}
 	cluster.CoordLog().Warningf("namespace %v restart as standalone cluster", fullNamespace)
 	localNs.Close()
+	// wait delete from namespace manager
+	time.Sleep(time.Second)
+
 	_, coordErr := dc.updateLocalNamespace(nsInfo, true)
 	if coordErr != nil {
 		return coordErr.ToErrorType()
