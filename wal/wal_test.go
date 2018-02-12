@@ -23,10 +23,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
 	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
 	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/wal/walpb"
 )
 
 func TestNew(t *testing.T) {
@@ -556,7 +556,7 @@ func TestReleaseLockTo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-		// release nothing if no files
+	// release nothing if no files
 	err = w.ReleaseLockTo(10)
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)

@@ -178,9 +178,9 @@ func setPeerURLsHeader(req *http.Request, urls types.URLs) {
 
 // addRemoteFromRequest adds a remote peer according to an http request header
 func addRemoteFromRequest(tr Transporter, r *http.Request) {
-		if from, err := types.IDFromString(r.Header.Get("X-Server-From")); err == nil {
-			if urls := r.Header.Get("X-PeerURLs"); urls != "" {
-				tr.AddRemote(from, strings.Split(urls, ","))
-			}
+	if from, err := types.IDFromString(r.Header.Get("X-Server-From")); err == nil {
+		if urls := r.Header.Get("X-PeerURLs"); urls != "" {
+			tr.AddRemote(from, strings.Split(urls, ","))
 		}
 	}
+}

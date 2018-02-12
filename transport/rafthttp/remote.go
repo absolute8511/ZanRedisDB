@@ -15,8 +15,8 @@
 package rafthttp
 
 import (
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 )
 
 type remote struct {

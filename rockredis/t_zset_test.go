@@ -147,7 +147,7 @@ func TestDBZSet(t *testing.T) {
 	}
 
 	if s, err := db.ZScore(key, bin("zzz")); err != errScoreMiss {
-		t.Fatal(fmt.Sprintf("s=[%d] err=[%s]", s, err))
+		t.Fatal(fmt.Sprintf("s=[%v] err=[%s]", s, err))
 	}
 
 	// {c':2, 'd':3}

@@ -20,10 +20,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
 	"github.com/absolute8511/ZanRedisDB/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/stats"
 )
 
 const (

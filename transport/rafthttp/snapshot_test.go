@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
 )
 
 type strReaderCloser struct{ *strings.Reader }

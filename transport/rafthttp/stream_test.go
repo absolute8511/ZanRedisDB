@@ -25,10 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
 	"github.com/absolute8511/ZanRedisDB/pkg/types"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/go-semver/semver"
 )
