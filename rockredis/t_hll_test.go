@@ -52,7 +52,7 @@ func TestHLLPlusPerf(t *testing.T) {
 	assert.Nil(t, err)
 	for i := 0; i < 100000; i++ {
 		hllp, _ := hll2.NewPlus(14)
-		err = hllp.GobDecode(b)
+		hllp.GobDecode(b)
 		hasher64.Write([]byte(strconv.Itoa(i)))
 		hllp.Add(hasher64)
 		hasher64.Reset()
@@ -151,7 +151,7 @@ func TestDBHLLOp(t *testing.T) {
 			lastC2 = c2
 			select {
 			case <-stopC:
-				return
+				break
 			default:
 				time.Sleep(time.Microsecond)
 			}

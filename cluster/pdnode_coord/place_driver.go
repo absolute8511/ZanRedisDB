@@ -60,11 +60,11 @@ func getNodeNameList(currentNodes map[string]cluster.NodeInfo) []SortableStrings
 		dcInfo := ""
 		dc, ok := ninfo.Tags[cluster.DCInfoTag]
 		if ok {
-			dcInfo, ok = dc.(string)
+			dcInfo, _ = dc.(string)
 		}
 		nodeNameMap[dcInfo] = append(nodeNameMap[dcInfo], nid)
 	}
-	for dcInfo, _ := range nodeNameMap {
+	for dcInfo := range nodeNameMap {
 		dcInfoList = append(dcInfoList, dcInfo)
 	}
 	sort.Sort(dcInfoList)

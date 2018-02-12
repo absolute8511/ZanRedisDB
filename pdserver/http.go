@@ -210,7 +210,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 				version = n.Version
 				dc, ok := n.Tags[cluster.DCInfoTag]
 				if ok {
-					dcInfo, ok = dc.(string)
+					dcInfo, _ = dc.(string)
 				}
 			}
 			dn := node{
