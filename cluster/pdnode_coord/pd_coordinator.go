@@ -189,7 +189,7 @@ func (pdCoord *PDCoordinator) saveClusterToFile(newNamespaces map[string]map[int
 		d, _ := json.Marshal(meta)
 		ioutil.WriteFile(prefix+".meta.cluster", d, common.FILE_PERM)
 	}
-	for ns, _ := range newNamespaces {
+	for ns := range newNamespaces {
 		schemas, err := pdCoord.register.GetNamespaceSchemas(ns)
 		if err != nil {
 			cluster.CoordLog().Infof("namespace schemas failed: %v", err.Error())

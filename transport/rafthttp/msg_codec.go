@@ -19,8 +19,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 )
 
 // messageEncoder is a encoder that can encode all kinds of messages.

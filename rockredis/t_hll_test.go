@@ -134,7 +134,8 @@ func TestDBHLLOp(t *testing.T) {
 		var lastC1 int64
 		var lastC2 int64
 		var cnt int64
-		for {
+		loop := true
+		for loop {
 			c1, err := db.PFCount(0, key1)
 			assert.Nil(t, err)
 			c2, err := db.PFCount(0, key2)
@@ -151,6 +152,7 @@ func TestDBHLLOp(t *testing.T) {
 			lastC2 = c2
 			select {
 			case <-stopC:
+				loop = false
 				break
 			default:
 				time.Sleep(time.Microsecond)

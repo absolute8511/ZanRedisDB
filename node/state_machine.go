@@ -418,8 +418,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	}
 	// TODO: add test case for this
 	if batching {
-		batching = false
-		batchReqIDList, batchReqRspList, dupCheckMap = kvsm.processBatching(lastBatchCmd, reqList, batchStart,
+		kvsm.processBatching(lastBatchCmd, reqList, batchStart,
 			batchReqIDList, batchReqRspList, dupCheckMap)
 	}
 	for _, req := range reqList.Reqs {

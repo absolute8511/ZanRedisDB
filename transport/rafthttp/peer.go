@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"github.com/absolute8511/ZanRedisDB/raft"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/snap"
 	"github.com/absolute8511/ZanRedisDB/stats"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
 	"golang.org/x/net/context"
 )
 
@@ -37,7 +37,7 @@ const (
 	ConnReadTimeout  = 5 * time.Second
 	ConnWriteTimeout = 5 * time.Second
 
-	recvBufSize = 4096*8
+	recvBufSize = 4096 * 8
 	// maxPendingProposals holds the proposals during one leader election process.
 	// Generally one leader election takes at most 1 sec. It should have
 	// 0-2 election conflicts, and each one takes 0.5 sec.
@@ -47,7 +47,7 @@ const (
 
 	// since we are using the transport in multi-raft, we need more buffer to hold
 	// all proposals in all raft group
-	maxPendingProposals = 4096*16
+	maxPendingProposals = 4096 * 16
 
 	streamAppV2 = "streamMsgAppV2"
 	streamMsg   = "streamMsg"

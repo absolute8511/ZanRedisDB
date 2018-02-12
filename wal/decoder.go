@@ -21,13 +21,14 @@ import (
 	"io"
 	"sync"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
 	"github.com/absolute8511/ZanRedisDB/pkg/crc"
 	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/absolute8511/ZanRedisDB/wal/walpb"
 )
 
 const minSectorSize = 512
+
 // frameSizeBytes is frame size in bytes, including record size and padding size.
 const frameSizeBytes = 8
 
