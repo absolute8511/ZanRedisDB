@@ -262,6 +262,10 @@ func (dp *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{
 				}
 				continue
 			} else {
+				if ok, err := IsAllISRFullReady(nInfo); err != nil || !ok {
+					cluster.CoordLog().Infof("namespace %v isr %v are not full ready while adding node", nInfo.GetDesp(), nInfo.RaftNodes)
+					return nInfo, fmt.Errorf("namespace %v isr are not full ready", nInfo.GetDesp())
+				}
 				cluster.CoordLog().Infof("node: %v is added for namespace %v: (%v)", nid, nInfo.GetDesp(), nInfo.RaftNodes)
 				coordErr = dp.pdCoord.addNamespaceToNode(nInfo, nid)
 				if coordErr != nil {
@@ -408,6 +412,9 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			continue
 		}
 		if len(namespaceInfo.Removings) > 0 {
+			continue
+		}
+		if ok, err := IsAllISRFullReady(&namespaceInfo); err != nil || !ok {
 			continue
 		}
 		currentNodes := dp.pdCoord.getCurrentNodes(namespaceInfo.Tags)
