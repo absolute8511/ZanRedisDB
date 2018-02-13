@@ -732,6 +732,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 			if ok, err := IsAllISRFullReady(&nsInfo); err != nil || !ok {
 				checkOK = false
 				atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+				cluster.CoordLog().Infof("namespace %v isr is not full ready", nsInfo.GetDesp())
 				continue
 			}
 		}

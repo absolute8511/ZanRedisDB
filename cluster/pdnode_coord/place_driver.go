@@ -415,6 +415,7 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			continue
 		}
 		if ok, err := IsAllISRFullReady(&namespaceInfo); err != nil || !ok {
+			cluster.CoordLog().Infof("namespace %v isr is not full ready while balancing", namespaceInfo.GetDesp())
 			continue
 		}
 		currentNodes := dp.pdCoord.getCurrentNodes(namespaceInfo.Tags)
