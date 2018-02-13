@@ -55,3 +55,13 @@ func TestInstallSnapshotFailed(t *testing.T) {
 
 	// test case should make sure the snap will be not persisted to the stable storage since the snapshot data is failed to pull.
 }
+
+func TestClusterBalanceWhileNewNodeAdd(t *testing.T) {
+	// TODO: while replica is not enough, we will add new replica node while check namespace,
+	// and then it should wait the new replica is raft synced before we can start to balance
+}
+
+func TestClusterAddReplicaOneByOne(t *testing.T) {
+	// TODO: while replica is not enough, we will add new replica node while check namespace.
+	// If two replica are removed, we need add new replica one by one to avoid 2 failed node in raft.
+}

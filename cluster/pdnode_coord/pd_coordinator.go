@@ -585,6 +585,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 		allNamespaces, _, commonErr := pdCoord.register.GetAllNamespaces()
 		if commonErr != nil {
 			cluster.CoordLog().Infof("scan namespaces failed. %v", commonErr)
+			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 			return
 		}
 		for n, parts := range allNamespaces {
@@ -603,6 +604,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 		t, err = pdCoord.register.GetNamespacePartInfo(failedInfo.NamespaceName, failedInfo.NamespacePartition)
 		if err != nil {
 			cluster.CoordLog().Infof("get namespace info failed: %v, %v", failedInfo, err)
+			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 			return
 		}
 		namespaces = append(namespaces, *t)
@@ -614,9 +616,20 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 	currentNodes, currentNodesEpoch := pdCoord.getCurrentNodesWithRemoving()
 	cluster.CoordLog().Infof("do check namespaces (%v), current nodes: %v, ...", len(namespaces), len(currentNodes))
 	checkOK := true
+	defer func() {
+		if checkOK {
+			if fullCheck {
+				atomic.StoreInt32(&pdCoord.isClusterUnstable, 0)
+				pdCoord.doSchemaCheck()
+			}
+		} else {
+			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+		}
+	}()
 	for _, nsInfo := range namespaces {
 		if currentNodesEpoch != atomic.LoadInt64(&pdCoord.nodesEpoch) {
 			cluster.CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&pdCoord.nodesEpoch))
+			checkOK = false
 			return
 		}
 		select {
@@ -645,13 +658,12 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 		}
 		if currentNodesEpoch != atomic.LoadInt64(&pdCoord.nodesEpoch) {
 			cluster.CoordLog().Infof("nodes changed while checking namespaces: %v, %v", currentNodesEpoch, atomic.LoadInt64(&pdCoord.nodesEpoch))
-			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+			checkOK = false
 			return
 		}
 		if len(currentNodes) < 3 || int32(len(currentNodes)) <= atomic.LoadInt32(&pdCoord.stableNodeNum)/2 {
 			checkOK = false
 			cluster.CoordLog().Infof("nodes not enough while checking: %v, stable need: %v", currentNodes, atomic.LoadInt32(&pdCoord.stableNodeNum))
-			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 			return
 		}
 		_, regErr := pdCoord.register.GetRemoteNamespaceReplicaInfo(nsInfo.Name, nsInfo.Partition)
@@ -697,6 +709,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 				}
 				cluster.CoordLog().Infof("begin migrate the namespace :%v", nsInfo.GetDesp())
 				if coordErr := pdCoord.handleNamespaceMigrate(&nsInfo, aliveNodes, aliveEpoch); coordErr != nil {
+					atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
 					if emergency {
 						go pdCoord.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second*3)
 					}
@@ -716,6 +729,12 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 			}
 		} else {
 			delete(partitions, nsInfo.Partition)
+			if ok, err := IsAllISRFullReady(&nsInfo); err != nil || !ok {
+				checkOK = false
+				atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+				cluster.CoordLog().Infof("namespace %v isr is not full ready", nsInfo.GetDesp())
+				continue
+			}
 		}
 
 		if atomic.LoadInt32(&pdCoord.balanceWaiting) == 0 {
@@ -748,14 +767,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 			}
 		}
 	}
-	if checkOK {
-		if fullCheck {
-			atomic.StoreInt32(&pdCoord.isClusterUnstable, 0)
-			pdCoord.doSchemaCheck()
-		}
-	} else {
-		atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
-	}
+
 }
 
 func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.PartitionMetaInfo,
@@ -795,20 +807,27 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 	}
 
 	if len(nsInfo.Removings) == 0 {
-		for i := aliveReplicas; i < nsInfo.Replica; i++ {
-			n, err := pdCoord.dpm.allocNodeForNamespace(nsInfo, currentNodes)
-			if err != nil {
-				cluster.CoordLog().Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
-			} else {
-				nsInfo.MaxRaftID++
-				nsInfo.RaftIDs[n.GetID()] = uint64(nsInfo.MaxRaftID)
-				nsInfo.RaftNodes = append(nsInfo.RaftNodes, n.GetID())
-				isrChanged = true
+		ok, err := IsAllISRFullReady(nsInfo)
+		if err != nil || !ok {
+			cluster.CoordLog().Infof("namespace: %v isr not full ready while add new raft node", nsInfo.GetDesp())
+		} else {
+			for i := aliveReplicas; i < nsInfo.Replica; i++ {
+				n, err := pdCoord.dpm.allocNodeForNamespace(nsInfo, currentNodes)
+				if err != nil {
+					cluster.CoordLog().Infof("failed to get a new raft node for namespace: %v", nsInfo.GetDesp())
+				} else {
+					nsInfo.MaxRaftID++
+					nsInfo.RaftIDs[n.GetID()] = uint64(nsInfo.MaxRaftID)
+					nsInfo.RaftNodes = append(nsInfo.RaftNodes, n.GetID())
+					isrChanged = true
+				}
+				// add raft node one by one to avoid 2 un-synced raft nodes
+				break
 			}
 		}
 	}
 
-	if isrChanged && nsInfo.IsISRQuorum() {
+	if isrChanged {
 		if len(nsInfo.Removings) > 1 {
 			cluster.CoordLog().Infof("namespace should not have two removing nodes: %v", nsInfo)
 			return cluster.ErrNamespaceConfInvalid
@@ -827,6 +846,7 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 	return nil
 }
 
+// make sure check raft synced before add new node to isr to avoid 2 un-synced raft nodes
 func (pdCoord *PDCoordinator) addNamespaceToNode(origNSInfo *cluster.PartitionMetaInfo, nid string) *cluster.CoordErr {
 	if len(origNSInfo.Removings) > 0 {
 		// we do not add new node until the removing node is actually removed
