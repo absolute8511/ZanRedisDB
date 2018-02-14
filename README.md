@@ -41,7 +41,7 @@ gpm get
 </pre>
 
 
-Build zankv and placedriver from the source (only support go version 1.7.4+, gcc 4.9+ or xcode-command-line-tools on Mac):
+Build zankv and placedriver from the source (only support go version 1.8+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
 make
 </pre>

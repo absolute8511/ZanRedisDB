@@ -15,7 +15,7 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
-type node struct {
+type nodeInfo struct {
 	BroadcastAddress string `json:"broadcast_address"`
 	Hostname         string `json:"hostname"`
 	RedisPort        string `json:"redis_port"`
@@ -25,8 +25,8 @@ type node struct {
 }
 
 type PartitionNodeInfo struct {
-	Leader   node   `json:"leader"`
-	Replicas []node `json:"replicas"`
+	Leader   nodeInfo   `json:"leader"`
+	Replicas []nodeInfo `json:"replicas"`
 }
 
 func GetValidPartitionNum(numStr string) (int, error) {
@@ -122,12 +122,12 @@ func (s *Server) getNamespaces(w http.ResponseWriter, req *http.Request, ps http
 }
 
 func (s *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	nodes := make([]*node, 0)
+	nodes := make([]*nodeInfo, 0)
 	dns, epoch := s.pdCoord.GetAllDataNodes()
 	for _, n := range dns {
 		dc, _ := n.Tags[cluster.DCInfoTag]
 		dcInfo, _ := dc.(string)
-		dn := &node{
+		dn := &nodeInfo{
 			BroadcastAddress: n.NodeIP,
 			Hostname:         n.Hostname,
 			Version:          n.Version,
@@ -213,7 +213,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 					dcInfo, _ = dc.(string)
 				}
 			}
-			dn := node{
+			dn := nodeInfo{
 				BroadcastAddress: ip,
 				Hostname:         hostname,
 				Version:          version,

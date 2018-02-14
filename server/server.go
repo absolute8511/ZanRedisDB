@@ -162,11 +162,21 @@ func (s *Server) Stop() {
 	} else {
 		s.nsMgr.Stop()
 	}
+	select {
+	case <-s.stopC:
+		sLog.Infof("server already stopped")
+		return
+	default:
+	}
 	close(s.stopC)
 	s.raftTransport.Stop()
 	<-s.raftHttpDoneC
 	s.wg.Wait()
 	sLog.Infof("server stopped")
+}
+
+func (s *Server) GetCoord() *datanode_coord.DataCoordinator {
+	return s.dataCoord
 }
 
 func (s *Server) GetNamespace(ns string, pk []byte) (*node.NamespaceNode, error) {

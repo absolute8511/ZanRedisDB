@@ -18,11 +18,12 @@ import (
 )
 
 var (
-	MaxRetryWait         = time.Second * 3
-	ErrNamespaceNotReady = cluster.NewCoordErr("namespace node is not ready", cluster.CoordLocalErr)
-	ErrNamespaceInvalid  = errors.New("namespace name is invalid")
-	ErrNamespaceNotFound = errors.New("namespace is not found")
-	TransferLeaderWait   = time.Second * 20
+	MaxRetryWait          = time.Second * 3
+	ErrNamespaceNotReady  = cluster.NewCoordErr("namespace node is not ready", cluster.CoordLocalErr)
+	ErrNamespaceInvalid   = errors.New("namespace name is invalid")
+	ErrNamespaceNotFound  = errors.New("namespace is not found")
+	TransferLeaderWait    = time.Second * 20
+	CheckUnsyncedInterval = time.Minute * 5
 )
 
 const (
@@ -478,7 +479,7 @@ func (dc *DataCoordinator) isReplicaReadyForRaft(nsNode *node.NamespaceNode, toR
 }
 
 func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
-	ticker := time.NewTicker(time.Minute * 5)
+	ticker := time.NewTicker(CheckUnsyncedInterval)
 	defer dc.wg.Done()
 	type pendingRemoveInfo struct {
 		ts time.Time
