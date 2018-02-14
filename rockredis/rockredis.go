@@ -531,7 +531,9 @@ func (r *RockDB) backupLoop() {
 				cost := time.Now().Sub(start)
 				dbLog.Infof("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
 				// purge some old checkpoint
+				r.checkpointDirLock.Lock()
 				purgeOldCheckpoint(MAX_CHECKPOINT_NUM, r.GetBackupDir())
+				r.checkpointDirLock.Unlock()
 			}()
 		case <-r.quit:
 			return
@@ -561,6 +563,8 @@ func (r *RockDB) IsLocalBackupOK(term uint64, index uint64) (bool, error) {
 		dbLog.Infof("checkpoint not exist: %v", fullPath)
 		return false, err
 	}
+	dbLog.Infof("begin check local checkpoint : %v", fullPath)
+	defer dbLog.Infof("check local checkpoint : %v done", fullPath)
 	r.checkpointDirLock.Lock()
 	defer r.checkpointDirLock.Unlock()
 	ro := *r.dbOpts
