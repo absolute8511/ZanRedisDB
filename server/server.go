@@ -44,7 +44,6 @@ type Server struct {
 	mutex         sync.Mutex
 	conf          ServerConfig
 	stopC         chan struct{}
-	raftHttpDoneC chan struct{}
 	wg            sync.WaitGroup
 	router        http.Handler
 	raftTransport *rafthttp.Transport
@@ -109,11 +108,9 @@ func NewServer(conf ServerConfig) *Server {
 	os.MkdirAll(conf.DataDir, common.DIR_PERM)
 
 	s := &Server{
-		conf:          conf,
-		stopC:         make(chan struct{}),
-		raftHttpDoneC: make(chan struct{}),
-		startTime:     time.Now(),
-		maxScanJob:    conf.MaxScanJob,
+		conf:       conf,
+		startTime:  time.Now(),
+		maxScanJob: conf.MaxScanJob,
 	}
 
 	ts := &stats.TransportStats{}
@@ -164,11 +161,20 @@ func (s *Server) Stop() {
 	} else {
 		s.nsMgr.Stop()
 	}
+	select {
+	case <-s.stopC:
+		sLog.Infof("server already stopped")
+		return
+	default:
+	}
 	close(s.stopC)
 	s.raftTransport.Stop()
-	<-s.raftHttpDoneC
 	s.wg.Wait()
 	sLog.Infof("server stopped")
+}
+
+func (s *Server) GetCoord() *datanode_coord.DataCoordinator {
+	return s.dataCoord
 }
 
 func (s *Server) GetNamespace(ns string, pk []byte) (*node.NamespaceNode, error) {
@@ -206,10 +212,11 @@ func (s *Server) RestartAsStandalone(fullNamespace string) error {
 
 func (s *Server) Start() {
 	s.raftTransport.Start()
+	s.stopC = make(chan struct{})
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.serveRaft()
+		s.serveRaft(s.stopC)
 	}()
 	s.wg.Add(1)
 	// redis api enable first, because there are many partitions, some partitions may recover first
@@ -270,23 +277,22 @@ func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (common.CommandF
 	return h, cmd, nil
 }
 
-func (s *Server) serveRaft() {
+func (s *Server) serveRaft(stopCh <-chan struct{}) {
 	url, err := url.Parse(s.conf.LocalRaftAddr)
 	if err != nil {
 		sLog.Fatalf("failed parsing raft url: %v", err)
 	}
-	ln, err := common.NewStoppableListener(url.Host, s.stopC)
+	ln, err := common.NewStoppableListener(url.Host, stopCh)
 	if err != nil {
 		sLog.Fatalf("failed to listen rafthttp : %v", err)
 	}
 	err = (&http.Server{Handler: s.raftTransport.Handler()}).Serve(ln)
 	select {
-	case <-s.stopC:
+	case <-stopCh:
 	default:
 		sLog.Fatalf("failed to serve rafthttp : %v", err)
 	}
 	sLog.Infof("raft http transport exit")
-	close(s.raftHttpDoneC)
 }
 
 // implement the Raft interface for transport

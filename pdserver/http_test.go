@@ -95,12 +95,20 @@ func startTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) 
 	return pd, kvList, clusterTmpDir
 }
 
-func cleanAllCluster(t *testing.T) {
+func cleanAllCluster(ret int) {
 	for _, kv := range gkvList {
 		kv.s.Stop()
 	}
-	gpdServer.Stop()
-	os.RemoveAll(gtmpDir)
+	if gpdServer != nil {
+		gpdServer.Stop()
+	}
+
+	if ret == 0 {
+		if strings.Contains(gtmpDir, "rocksdb-test") {
+			fmt.Println("removing: ", gtmpDir)
+			os.RemoveAll(gtmpDir)
+		}
+	}
 }
 
 func getTestClient(t *testing.T) *zanredisdb.ZanRedisClient {
@@ -119,7 +127,7 @@ func getTestClient(t *testing.T) *zanredisdb.ZanRedisClient {
 }
 
 func startTestClusterAndCheck(t *testing.T) (*Server, []dataNodeWrapper, string) {
-	pd, kvList, tmpDir := startTestCluster(t, 3)
+	pd, kvList, tmpDir := startTestCluster(t, 5)
 	time.Sleep(time.Second)
 	pduri := "http://127.0.0.1:" + pdHttpPort
 	uri := fmt.Sprintf("%s/datanodes", pduri)
@@ -182,17 +190,8 @@ func ensureClusterReady(t *testing.T) {
 	},
 	)
 }
-func TestClusterInitStart(t *testing.T) {
-	ensureClusterReady(t)
-}
-func TestClusterSchemaAddIndex(t *testing.T) {
-	ensureClusterReady(t)
 
-	time.Sleep(time.Second)
-	ns := "test_schema_ns"
-	partNum := 2
-
-	pduri := "http://127.0.0.1:" + pdHttpPort
+func ensureDataNodesReady(t *testing.T, pduri string, expect int) {
 	uri := fmt.Sprintf("%s/datanodes", pduri)
 	start := time.Now()
 	type dataNodeResp struct {
@@ -218,14 +217,18 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 			assert.FailNow(t, "nodes rsp error: "+string(d)+err.Error())
 		}
 		assert.Nil(t, err)
-		if len(nodesRsp.Nodes) != len(gkvList) {
+		t.Log(nodesRsp)
+		if len(nodesRsp.Nodes) != expect {
 			time.Sleep(time.Second)
 			t.Logf(string(d))
 			continue
 		}
 		break
 	}
-	uri = fmt.Sprintf("%s/cluster/namespace/create?namespace=%s&partition_num=%d&replicator=2", pduri, ns, partNum)
+}
+
+func ensureNamespace(t *testing.T, pduri string, ns string, partNum int) {
+	uri := fmt.Sprintf("%s/cluster/namespace/create?namespace=%s&partition_num=%d&replicator=3", pduri, ns, partNum)
 	rsp, err := http.Post(uri, "", nil)
 	assert.Nil(t, err)
 	if rsp.StatusCode != 200 {
@@ -234,10 +237,10 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 	assert.Equal(t, 200, rsp.StatusCode)
 	rsp.Body.Close()
 	time.Sleep(time.Second)
-	start = time.Now()
+	start := time.Now()
 	var nsList map[string][]string
 	for {
-		if time.Since(start) > time.Second*10 {
+		if time.Since(start) > time.Minute {
 			assert.FailNow(t, "should init namespace")
 			break
 		}
@@ -255,8 +258,18 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 			time.Sleep(time.Second)
 			continue
 		}
-		assert.Equal(t, 1, len(nsList["namespaces"]))
-		assert.Equal(t, ns, nsList["namespaces"][0])
+		t.Log(nsList)
+		found := false
+		for _, n := range nsList["namespaces"] {
+			if ns == n {
+				found = true
+				break
+			}
+		}
+		if !found {
+			time.Sleep(time.Second)
+			continue
+		}
 		break
 	}
 	// query the namespace datanodes
@@ -268,8 +281,8 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 	}
 	start = time.Now()
 	for {
-		if time.Since(start) > time.Second*10 {
-			assert.FailNow(t, "should discovery namespace on all nodes")
+		if time.Since(start) > time.Minute {
+			assert.FailNow(t, "should discovery namespace on all replica nodes")
 			break
 		}
 		rsp, err := http.Get(pduri + "/query/" + ns)
@@ -286,13 +299,42 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 		var queryRsp queryNsInfo
 		err = json.Unmarshal(d, &queryRsp)
 		assert.Nil(t, err)
+		t.Log(queryRsp)
 		if len(queryRsp.PartNodes) != partNum {
 			time.Sleep(time.Second)
 			continue
 		}
-		assert.Equal(t, 2, len(queryRsp.PartNodes[0].Replicas))
+		assert.Equal(t, 3, len(queryRsp.PartNodes[0].Replicas))
 		break
 	}
+}
+
+func ensureDeleteNamespace(t *testing.T, pduri string, ns string) {
+	uri := fmt.Sprintf("%s/cluster/namespace/delete?namespace=%s&partition=**", pduri, ns)
+	req, err := http.NewRequest("DELETE", uri, nil)
+	assert.Nil(t, err)
+	rsp, err := http.DefaultClient.Do(req)
+	assert.Nil(t, err)
+	assert.Equal(t, 200, rsp.StatusCode)
+	rsp.Body.Close()
+}
+
+func TestClusterInitStart(t *testing.T) {
+	ensureClusterReady(t)
+}
+func TestClusterSchemaAddIndex(t *testing.T) {
+	ensureClusterReady(t)
+
+	time.Sleep(time.Second)
+	ns := "test_schema_ns"
+	partNum := 2
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+	uri := fmt.Sprintf("%s/datanodes", pduri)
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	ensureNamespace(t, pduri, ns, partNum)
+
 	indexTable := "test_hash_table"
 	uri = fmt.Sprintf("%s/cluster/schema/index/add?namespace=%s&table=%s&indextype=hash_secondary", pduri, ns, indexTable)
 	var hindex common.HsetIndexSchema
@@ -300,12 +342,12 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 	hindex.IndexField = "hash_index_field"
 	hindex.ValueType = common.Int64V
 	hindexData, _ := json.Marshal(hindex)
-	rsp, err = http.Post(uri, "", bytes.NewBuffer(hindexData))
+	rsp, err := http.Post(uri, "", bytes.NewBuffer(hindexData))
 	assert.Nil(t, err)
 	assert.Equal(t, 200, rsp.StatusCode)
 	rsp.Body.Close()
 	time.Sleep(time.Second)
-	start = time.Now()
+	start := time.Now()
 	for {
 		if time.Since(start) > time.Second*60 {
 			assert.Fail(t, "should init table index schema")
@@ -356,4 +398,6 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 200, rsp.StatusCode)
 	rsp.Body.Close()
+
+	ensureDeleteNamespace(t, pduri, ns)
 }

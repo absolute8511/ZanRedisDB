@@ -31,11 +31,21 @@ var (
 	ErrNamespaceMigrateWaiting   = cluster.NewCoordErr("the migrate is waiting", cluster.CoordTmpErr)
 )
 
-const (
+var (
 	waitMigrateInterval            = time.Minute * 16
 	waitEmergencyMigrateInterval   = time.Second * 60
 	waitRemoveRemovingNodeInterval = time.Minute * 5
+	nsCheckInterval                = time.Minute
+	balanceCheckInterval           = time.Minute * 10
 )
+
+func ChangeIntervalForTest() {
+	waitMigrateInterval = time.Second * 3
+	waitEmergencyMigrateInterval = time.Second
+	waitRemoveRemovingNodeInterval = time.Second * 3
+	nsCheckInterval = time.Second
+	balanceCheckInterval = time.Second * 5
+}
 
 type PDCoordinator struct {
 	register               cluster.PDRegister
@@ -84,6 +94,10 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 	return coord
 }
 
+func (pdCoord *PDCoordinator) SetBalanceInterval(start, end int) {
+	pdCoord.dpm.SetBalanceInterval(start, end)
+}
+
 func (pdCoord *PDCoordinator) SetRegister(r cluster.PDRegister) {
 	pdCoord.register = r
 }
@@ -95,6 +109,7 @@ func (pdCoord *PDCoordinator) AutoBalanceEnabled() bool {
 func (pdCoord *PDCoordinator) Start() error {
 	if pdCoord.register != nil {
 		pdCoord.register.InitClusterID(pdCoord.clusterKey)
+		pdCoord.register.Start()
 		err := pdCoord.register.Register(&pdCoord.myNode)
 		if err != nil {
 			cluster.CoordLog().Warningf("failed to register pd coordinator: %v", err)
@@ -541,7 +556,7 @@ func (pdCoord *PDCoordinator) triggerCheckNamespaces(namespace string, part int,
 // check if replication is enough
 // check any unexpected state.
 func (pdCoord *PDCoordinator) checkNamespaces(monitorChan chan struct{}) {
-	ticker := time.NewTicker(time.Second * 60)
+	ticker := time.NewTicker(nsCheckInterval)
 	waitingMigrateNamespace := make(map[string]map[int]time.Time)
 	defer func() {
 		ticker.Stop()
@@ -827,7 +842,11 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 		}
 	}
 
-	if isrChanged {
+	// to avoid (1,2) become (1), make sure we always have quorum replicas in raft.
+	// So we should add new replica before we continue remove replica.
+	// However, if there is a failed node in (1, 2) replicas, we can not add new because we can not have quorum voters in raft.
+	// In this way, we need wait failed node restart or we manual force recovery with standalone node.
+	if isrChanged && nsInfo.IsISRQuorum() {
 		if len(nsInfo.Removings) > 1 {
 			cluster.CoordLog().Infof("namespace should not have two removing nodes: %v", nsInfo)
 			return cluster.ErrNamespaceConfInvalid

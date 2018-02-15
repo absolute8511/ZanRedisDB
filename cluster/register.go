@@ -153,6 +153,7 @@ type SchemaInfo struct {
 
 type Register interface {
 	InitClusterID(id string)
+	Start()
 	// all registered pd nodes.
 	GetAllPDNodes() ([]NodeInfo, error)
 	// should return both the meta info for namespace and the replica info for partition

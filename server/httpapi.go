@@ -362,7 +362,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APIGetMembers+"/:namespace", common.Decorate(s.getMembers, common.V1))
 	router.Handle("GET", common.APIGetIndexes+"/:namespace/:table", common.Decorate(s.getIndexes, common.V1))
 	router.Handle("GET", common.APIGetIndexes+"/:namespace", common.Decorate(s.getIndexes, common.V1))
-	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, common.V1))
+	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, log, common.V1))
 	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isNsNodeFullReady, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimize, log, common.V1))
