@@ -243,7 +243,9 @@ func (dc *DataCoordinator) loadLocalNamespaceData() error {
 				if len(nsInfo.GetISR()) >= nsInfo.Replica && localNamespace != nil {
 					dc.removeLocalNamespaceFromRaft(localNamespace, false)
 				}
-				cluster.CoordLog().Infof("%v namespace %v ignore to load ", dc.GetMyID(), nsInfo.GetDesp())
+				if localNamespace != nil {
+					cluster.CoordLog().Infof("%v namespace %v ignore to load ", dc.GetMyID(), nsInfo.GetDesp())
+				}
 				continue
 			}
 			if localNamespace != nil {
