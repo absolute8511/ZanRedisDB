@@ -30,6 +30,7 @@ var (
 	// the wait interval allowed while changing leader in the same raft group
 	// to avoid change the leader in the same raft too much
 	ChangeLeaderInRaftWait = time.Minute
+	removeNotInMetaPending = time.Minute
 )
 
 func ChangeIntervalForTest() {
@@ -37,6 +38,7 @@ func ChangeIntervalForTest() {
 	CheckUnsyncedInterval = time.Second * 3
 	EnsureJoinCheckWait = time.Second * 2
 	ChangeLeaderInRaftWait = time.Second * 2
+	removeNotInMetaPending = time.Second * 5
 }
 
 const (
@@ -728,7 +730,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 								ts: time.Now(),
 								m:  *m,
 							}
-						} else if time.Since(pendRemove.ts) > time.Minute {
+						} else if time.Since(pendRemove.ts) > removeNotInMetaPending {
 							cluster.CoordLog().Infof("pending removing member %v finally removed since not in meta", pendRemove)
 							dc.removeNamespaceRaftMember(namespaceMeta, m)
 						}

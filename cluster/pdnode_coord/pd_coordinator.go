@@ -40,11 +40,11 @@ var (
 )
 
 func ChangeIntervalForTest() {
-	waitMigrateInterval = time.Second * 5
+	waitMigrateInterval = time.Second * 3
 	waitEmergencyMigrateInterval = time.Second
 	waitRemoveRemovingNodeInterval = time.Second * 3
 	nsCheckInterval = time.Second
-	balanceCheckInterval = time.Second * 10
+	balanceCheckInterval = time.Second * 5
 }
 
 type PDCoordinator struct {
