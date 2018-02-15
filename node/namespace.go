@@ -160,7 +160,6 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 		raftTransport: transport,
 		machineConf:   conf,
 		newLeaderChan: make(chan string, 2048),
-		stopC:         make(chan struct{}),
 	}
 	regID, err := ns.LoadMachineRegID()
 	if err != nil {
@@ -198,6 +197,8 @@ func (nsm *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 }
 
 func (nsm *NamespaceMgr) Start() {
+	nsm.stopC = make(chan struct{})
+	atomic.StoreInt32(&nsm.stopping, 0)
 	nsm.mutex.Lock()
 	for _, kv := range nsm.kvNodes {
 		kv.Start(false)

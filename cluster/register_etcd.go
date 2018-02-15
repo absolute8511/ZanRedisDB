@@ -117,16 +117,17 @@ type EtcdRegister struct {
 	allNamespaceInfos    map[string]map[int]PartitionMetaInfo
 	nsEpoch              EpochType
 	ifNamespaceChanged   int32
-	watchNamespaceStopCh chan bool
+	watchNamespaceStopCh chan struct{}
 	nsChangedChan        chan struct{}
 	triggerScanCh        chan struct{}
+	wg                   sync.WaitGroup
 }
 
 func NewEtcdRegister(host string) *EtcdRegister {
 	client := etcdlock.NewEClient(host)
 	r := &EtcdRegister{
 		allNamespaceInfos:    make(map[string]map[int]PartitionMetaInfo),
-		watchNamespaceStopCh: make(chan bool),
+		watchNamespaceStopCh: make(chan struct{}),
 		client:               client,
 		ifNamespaceChanged:   1,
 		nsChangedChan:        make(chan struct{}, 3),
@@ -140,14 +141,32 @@ func (etcdReg *EtcdRegister) InitClusterID(id string) {
 	etcdReg.namespaceRoot = etcdReg.getNamespaceRootPath()
 	etcdReg.clusterPath = etcdReg.getClusterPath()
 	etcdReg.pdNodeRootPath = etcdReg.getPDNodeRootPath()
-	go etcdReg.watchNamespaces()
-	go etcdReg.refreshNamespaces()
+}
+
+func (etcdReg *EtcdRegister) Start() {
+	etcdReg.watchNamespaceStopCh = make(chan struct{})
+	etcdReg.wg.Add(2)
+	go func() {
+		defer etcdReg.wg.Done()
+		etcdReg.watchNamespaces(etcdReg.watchNamespaceStopCh)
+	}()
+	go func() {
+		defer etcdReg.wg.Done()
+		etcdReg.refreshNamespaces(etcdReg.watchNamespaceStopCh)
+	}()
 }
 
 func (etcdReg *EtcdRegister) Stop() {
+	coordLog.Infof("stopping etcd register")
+	defer coordLog.Infof("stopped etcd register")
 	if etcdReg.watchNamespaceStopCh != nil {
-		close(etcdReg.watchNamespaceStopCh)
+		select {
+		case <-etcdReg.watchNamespaceStopCh:
+		default:
+			close(etcdReg.watchNamespaceStopCh)
+		}
 	}
+	etcdReg.wg.Wait()
 }
 
 func (etcdReg *EtcdRegister) GetAllPDNodes() ([]NodeInfo, error) {
@@ -208,12 +227,12 @@ func (etcdReg *EtcdRegister) GetNamespacesNotifyChan() chan struct{} {
 	return etcdReg.nsChangedChan
 }
 
-func (etcdReg *EtcdRegister) refreshNamespaces() {
+func (etcdReg *EtcdRegister) refreshNamespaces(stopC <-chan struct{}) {
 	ticker := time.NewTicker(time.Second * 3)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-etcdReg.watchNamespaceStopCh:
+		case <-stopC:
 			return
 		case <-etcdReg.triggerScanCh:
 			if atomic.LoadInt32(&etcdReg.ifNamespaceChanged) == 1 {
@@ -227,12 +246,12 @@ func (etcdReg *EtcdRegister) refreshNamespaces() {
 	}
 }
 
-func (etcdReg *EtcdRegister) watchNamespaces() {
+func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 	watcher := etcdReg.client.Watch(etcdReg.namespaceRoot, 0, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
-		case <-etcdReg.watchNamespaceStopCh:
+		case <-stopC:
 			cancel()
 		}
 	}()
@@ -568,15 +587,13 @@ type PDEtcdRegister struct {
 	nodeKey           string
 	nodeValue         string
 
-	refreshStopCh    chan bool
-	watchNodesStopCh chan bool
+	refreshStopCh chan bool
 }
 
 func NewPDEtcdRegister(host string) *PDEtcdRegister {
 	return &PDEtcdRegister{
-		EtcdRegister:     NewEtcdRegister(host),
-		watchNodesStopCh: make(chan bool, 1),
-		refreshStopCh:    make(chan bool, 1),
+		EtcdRegister:  NewEtcdRegister(host),
+		refreshStopCh: make(chan bool, 1),
 	}
 }
 
@@ -637,14 +654,6 @@ func (etcdReg *PDEtcdRegister) Unregister(value *NodeInfo) error {
 	}
 
 	return nil
-}
-
-func (etcdReg *PDEtcdRegister) Stop() {
-	//	etcdReg.Unregister()
-	if etcdReg.watchNodesStopCh != nil {
-		close(etcdReg.watchNodesStopCh)
-	}
-	etcdReg.EtcdRegister.Stop()
 }
 
 func (etcdReg *PDEtcdRegister) PrepareNamespaceMinGID() (int64, error) {
@@ -764,8 +773,6 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 	go func() {
 		select {
 		case <-stop:
-			cancel()
-		case <-etcdReg.watchNodesStopCh:
 			cancel()
 		}
 	}()
