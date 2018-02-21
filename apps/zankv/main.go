@@ -32,7 +32,7 @@ func main() {
 	defer log.Printf("main exit")
 	prg := &program{}
 	if err := svc.Run(prg, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGINT); err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 }
 
