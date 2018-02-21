@@ -282,7 +282,7 @@ func (s *Server) serveRaft(stopCh <-chan struct{}) {
 	select {
 	case <-stopCh:
 	default:
-		sLog.Fatalf("failed to serve rafthttp : %v", err)
+		sLog.Errorf("failed to serve rafthttp : %v", err)
 	}
 	sLog.Infof("raft http transport exit")
 }
