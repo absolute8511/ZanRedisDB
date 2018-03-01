@@ -14,6 +14,7 @@ import (
 	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 )
 
 var testOnceFullScan sync.Once
@@ -89,9 +90,41 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 	time.Sleep(time.Second)
 	return kv, redisportFullScan, tmpDir
 }
+
+func waitScanServerForLeader(t *testing.T, w time.Duration) {
+	start := time.Now()
+	for {
+		leaderNum := 0
+		replicaNode := kvsFullScan.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNum++
+		}
+		replicaNode = kvsFullScan.GetNamespaceFromFullName("default-1")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNum++
+		}
+		replicaNode = kvsFullScan.GetNamespaceFromFullName("default-2")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNum++
+		}
+		if leaderNum >= 3 {
+			return
+		}
+		if time.Since(start) > w {
+			t.Fatalf("\033[31m timed out %v for wait leader \033[39m\n", time.Since(start))
+			break
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 func getFullScanConn(t *testing.T) *goredis.PoolConn {
 	testOnceFullScan.Do(func() {
 		kvsFullScan, redisportFullScan, gtmpScanDir = startFullScanTestServer(t)
+		waitScanServerForLeader(t, time.Second*10)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisportFullScan), "")

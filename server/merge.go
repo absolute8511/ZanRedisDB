@@ -125,7 +125,7 @@ func (s *Server) getHandlersForKeys(cmdName string,
 		if !isWrite && !nsNode.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 			// read only to leader to avoid stale read
 			// TODO: also read command can request the raft read index if not leader
-			return nil, nil, hasWrite, node.ErrNamespaceNoLeader
+			return nil, nil, hasWrite, node.ErrNamespaceNotLeader
 		}
 		handlerMap[nsNode.FullName()] = f
 		cmdArgs, ok := cmdArgMap[nsNode.FullName()]

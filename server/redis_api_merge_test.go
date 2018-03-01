@@ -89,15 +89,45 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 
 	kv.Start()
 	time.Sleep(time.Second)
+	t.Logf("start test server done at: %v", time.Now())
 	testNamespaces[nsConf.Name] = n
 	testNamespaces[nsConf1.Name] = n1
 	testNamespaces[nsConf2.Name] = n2
 	return kv, redisportMerge, tmpDir
 }
-
+func waitMergeServerForLeader(t *testing.T, w time.Duration) {
+	start := time.Now()
+	for {
+		leaderNum := 0
+		replicaNode := kvsMerge.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNum++
+		}
+		replicaNode = kvsMerge.GetNamespaceFromFullName("default-1")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNum++
+		}
+		replicaNode = kvsMerge.GetNamespaceFromFullName("default-2")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			leaderNum++
+		}
+		if leaderNum >= 3 {
+			return
+		}
+		if time.Since(start) > w {
+			t.Fatalf("\033[31m timed out %v for wait leader \033[39m\n", time.Since(start))
+			break
+		}
+		time.Sleep(time.Second)
+	}
+}
 func getMergeTestConn(t *testing.T) *goredis.PoolConn {
 	testOnceMerge.Do(func() {
 		kvsMerge, redisportMerge, gtmpMergeDir = startMergeTestServer(t)
+		waitMergeServerForLeader(t, time.Second*10)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisportMerge), "")

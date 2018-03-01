@@ -959,8 +959,9 @@ func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 	return msgs
 }
 
-func (rc *raftNode) Lead() uint64 { return atomic.LoadUint64(&rc.lead) }
-func (rc *raftNode) IsLead() bool { return atomic.LoadUint64(&rc.lead) == uint64(rc.config.ID) }
+func (rc *raftNode) Lead() uint64  { return atomic.LoadUint64(&rc.lead) }
+func (rc *raftNode) HasLead() bool { return atomic.LoadUint64(&rc.lead) != raft.None }
+func (rc *raftNode) IsLead() bool  { return atomic.LoadUint64(&rc.lead) == uint64(rc.config.ID) }
 
 type memberSorter []*common.MemberInfo
 

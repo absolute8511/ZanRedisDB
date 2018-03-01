@@ -28,7 +28,7 @@ var (
 	ErrNamespaceNotFound          = errors.New("ERR_CLUSTER_CHANGED: namespace is not found")
 	ErrNamespacePartitionNotFound = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not found")
 	ErrNamespaceNotLeader         = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace is not leader on the node")
-	ErrNamespaceNoLeader          = errors.New("ERR_CLUSTER_CHANGED: partition of the namespace has no leader")
+	ErrNodeNoLeader               = errors.New("ERR_CLUSTER_CHANGED: partition of the node has no leader")
 	ErrRaftGroupNotReady          = errors.New("ERR_CLUSTER_CHANGED: raft group not ready")
 	ErrProposalCanceled           = errors.New("ERR_CLUSTER_CHANGED: raft proposal " + context.Canceled.Error())
 	errNamespaceConfInvalid       = errors.New("namespace config is invalid")
@@ -372,9 +372,6 @@ func (nsm *NamespaceMgr) GetNamespaceNodes(nsBaseName string, leaderOnly bool) (
 		ns, _ := common.GetNamespaceAndPartition(k)
 		if ns == nsBaseName && v.IsReady() {
 			if leaderOnly && !v.Node.IsLead() {
-				if v.Node.GetLeadMember() == nil {
-					return nil, ErrNamespaceNoLeader
-				}
 				continue
 			}
 			nsNodes[k] = v
