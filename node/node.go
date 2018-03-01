@@ -30,7 +30,7 @@ var (
 	errSyntaxError          = errors.New("syntax error")
 	errUnknownData          = errors.New("unknown request data type")
 	errTooMuchBatchSize     = errors.New("the batch size exceed the limit")
-	errRaftNotReadyForWrite = errors.New("the raft is not ready for write")
+	errRaftNotReadyForWrite = errors.New("ERR_CLUSTER_CHANGED: the raft is not ready for write")
 )
 
 const (
@@ -556,6 +556,9 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	if !nd.IsWriteReady() {
 		return nil, errRaftNotReadyForWrite
+	}
+	if !nd.rn.HasLead() {
+		return nil, ErrNodeNoLeader
 	}
 	start := time.Now()
 	req.reqData.Header.Timestamp = start.UnixNano()

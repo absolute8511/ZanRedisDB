@@ -86,13 +86,29 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 	}
 
 	kv.Start()
-	time.Sleep(time.Second * 3)
+	time.Sleep(time.Second)
 	return kv, redisport, tmpDir
+}
+func waitServerForLeader(t *testing.T, w time.Duration) {
+	start := time.Now()
+	for {
+		replicaNode := kvs.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		if replicaNode.Node.IsLead() {
+			return
+		}
+		if time.Since(start) > w {
+			t.Fatalf("\033[31m timed out %v for wait leader \033[39m\n", time.Since(start))
+			break
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 func getTestConn(t *testing.T) *goredis.PoolConn {
 	testOnce.Do(func() {
 		kvs, redisport, gtmpDir = startTestServer(t)
+		waitServerForLeader(t, time.Second*10)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisport), "")
