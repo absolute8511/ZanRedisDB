@@ -11,7 +11,7 @@
 set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export GOPATH=$DIR/.godeps:$GOPATH
+export GOPATH=$DIR/.godeps:$(go env GOPATH)
 echo $GOPATH
 
 arch=$(go env GOARCH)
@@ -22,10 +22,12 @@ goversion=$(go version | awk '{print $3}')
 echo "... building v$version for $os/$arch"
 BUILD=$(mktemp -d -t zankvXXXXXX)
 TARGET="zankv-$version.$os-$arch.$goversion"
+LATEST="zankv-latest.$os-$arch.$goversion"
 GOOS=$os GOARCH=$arch \
     make DESTDIR=$BUILD PREFIX=/$TARGET install
 pushd $BUILD
 tar czvf $TARGET.tar.gz $TARGET
+cp -fp $TARGET.tar.gz $DIR/dist/$LATEST.tar.gz
 mv $TARGET.tar.gz $DIR/dist/
 popd
 make clean
