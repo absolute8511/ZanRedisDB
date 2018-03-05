@@ -157,14 +157,14 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 }
 
 type DataPlacement struct {
-	balanceInterval [2]int
+	balanceInterval [2]int32
 	pdCoord         *PDCoordinator
 }
 
 func NewDataPlacement(coord *PDCoordinator) *DataPlacement {
 	return &DataPlacement{
 		pdCoord:         coord,
-		balanceInterval: [2]int{2, 4},
+		balanceInterval: [2]int32{2, 4},
 	}
 }
 
@@ -172,8 +172,8 @@ func (dp *DataPlacement) SetBalanceInterval(start int, end int) {
 	if start == end && start == 0 {
 		return
 	}
-	dp.balanceInterval[0] = start
-	dp.balanceInterval[1] = end
+	atomic.StoreInt32(&dp.balanceInterval[0], int32(start))
+	atomic.StoreInt32(&dp.balanceInterval[1], int32(end))
 }
 
 func (dp *DataPlacement) DoBalance(monitorChan chan struct{}) {
@@ -189,7 +189,8 @@ func (dp *DataPlacement) DoBalance(monitorChan chan struct{}) {
 			return
 		case <-ticker.C:
 			// only balance at given interval
-			if time.Now().Hour() > dp.balanceInterval[1] || time.Now().Hour() < dp.balanceInterval[0] {
+			if time.Now().Hour() > int(atomic.LoadInt32(&dp.balanceInterval[1])) ||
+				time.Now().Hour() < int(atomic.LoadInt32(&dp.balanceInterval[0])) {
 				continue
 			}
 			if !dp.pdCoord.IsMineLeader() {
@@ -387,7 +388,7 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 	namespaceList := make([]cluster.PartitionMetaInfo, 0)
 	for _, parts := range allNamespaces {
 		for _, p := range parts {
-			namespaceList = append(namespaceList, p)
+			namespaceList = append(namespaceList, *(p.GetCopy()))
 		}
 	}
 	movedNamespace := ""
@@ -478,7 +479,10 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 					if nid == expectLeader {
 						cluster.CoordLog().Infof("need move leader for namespace %v since %v not expected leader: %v",
 							namespaceInfo.GetDesp(), namespaceInfo.RaftNodes, expectLeader)
-						namespaceInfo.RaftNodes[0], namespaceInfo.RaftNodes[index] = namespaceInfo.RaftNodes[index], namespaceInfo.RaftNodes[0]
+						newNodes := make([]string, len(namespaceInfo.RaftNodes))
+						copy(newNodes, namespaceInfo.RaftNodes)
+						newNodes[0], newNodes[index] = newNodes[index], newNodes[0]
+						namespaceInfo.RaftNodes = newNodes
 						err := dp.pdCoord.register.UpdateNamespacePartReplicaInfo(namespaceInfo.Name, namespaceInfo.Partition,
 							&namespaceInfo.PartitionReplicaInfo, namespaceInfo.PartitionReplicaInfo.Epoch())
 						moved = true

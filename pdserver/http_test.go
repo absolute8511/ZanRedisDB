@@ -67,6 +67,7 @@ func startTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) 
 	opts.BroadcastAddr = "127.0.0.1"
 	opts.ClusterID = "unit-test"
 	opts.ClusterLeadershipAddresses = testEtcdServers
+	opts.BalanceInterval = []string{"0", "24"}
 	pd := NewServer(opts)
 	pd.Start()
 

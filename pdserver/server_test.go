@@ -38,7 +38,7 @@ func enableAutoBalance(t *testing.T, pduri string, enable bool) {
 	}
 	assert.Equal(t, 200, rsp.StatusCode)
 	rsp.Body.Close()
-	gpdServer.pdCoord.SetBalanceInterval(0, 24)
+	//gpdServer.pdCoord.SetBalanceInterval(0, 24)
 }
 
 func waitForLeader(t *testing.T, ns string, part int) (*ds.Server, *node.NamespaceNode) {

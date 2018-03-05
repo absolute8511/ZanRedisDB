@@ -100,6 +100,30 @@ func (self *PartitionReplicaInfo) Epoch() EpochType {
 	return self.epoch
 }
 
+func (self *PartitionReplicaInfo) DeepClone() PartitionReplicaInfo {
+	tmp := PartitionReplicaInfo{
+		RaftNodes:    make([]string, len(self.RaftNodes)),
+		RaftIDs:      make(map[string]uint64),
+		Removings:    make(map[string]RemovingInfo),
+		MaxRaftID:    self.MaxRaftID,
+		LearnerNodes: make(map[string][]string),
+		epoch:        self.epoch,
+	}
+	copy(tmp.RaftNodes, self.RaftNodes)
+	for k, v := range self.RaftIDs {
+		tmp.RaftIDs[k] = v
+	}
+	for k, v := range self.Removings {
+		tmp.Removings[k] = v
+	}
+	for k, v := range self.LearnerNodes {
+		ln := make([]string, len(v))
+		copy(ln, v)
+		tmp.LearnerNodes[k] = ln
+	}
+	return tmp
+}
+
 type RealLeader struct {
 	Leader string
 	epoch  EpochType
@@ -132,6 +156,11 @@ func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
 	newp.Removings = make(map[string]RemovingInfo, len(self.Removings))
 	for k, v := range self.Removings {
 		newp.Removings[k] = v
+	}
+	for k, v := range self.LearnerNodes {
+		ln := make([]string, len(v))
+		copy(ln, v)
+		newp.LearnerNodes[k] = ln
 	}
 	return &newp
 }

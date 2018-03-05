@@ -464,7 +464,8 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 
 				// to avoid too much migration, we break early if any pending migration found
 				for _, namespacePartList := range allNamespaces {
-					for _, namespaceInfo := range namespacePartList {
+					for _, tmpNsInfo := range namespacePartList {
+						namespaceInfo := *(tmpNsInfo.GetCopy())
 						if cluster.FindSlice(namespaceInfo.RaftNodes, nid) == -1 {
 							continue
 						}
@@ -608,7 +609,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 				continue
 			}
 			for _, p := range parts {
-				namespaces = append(namespaces, p)
+				namespaces = append(namespaces, *(p.GetCopy()))
 			}
 		}
 		cluster.CoordLog().Debugf("scan found namespaces: %v", namespaces)
