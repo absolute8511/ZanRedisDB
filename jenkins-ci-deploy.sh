@@ -53,7 +53,6 @@ if [ ! -f "`pwd`/etcd-v2.3.8-linux-amd64/etcd" ]; then
 fi
 
 cp -fp `go env GOPATH`/src/github.com/absolute8511/ZanRedisDB/dist/$LATEST.tar.gz .
-tar -xvzf $LATEST.tar.gz && mv $LATEST zankv
 killall zankv || true
 killall placedriver || true
 killall etcd || true
@@ -64,6 +63,7 @@ rm -rf zankv-data
 rm -rf test-etcd
 rm -rf pd.config
 rm -rf zankv.config
+tar -xvzf $LATEST.tar.gz && mv $LATEST zankv
 
 cat <<EOF >> pd.config
 
