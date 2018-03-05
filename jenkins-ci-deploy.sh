@@ -23,7 +23,6 @@ goversion=$(go version | awk '{print $3}')
 LATEST="zankv-latest.$os-$arch.$goversion"
 
 scl enable devtoolset-3 bash
-g++ --version
 
 rocksdb=`pwd`/rocksdb
 if [ ! -f "$rocksdb/Makefile" ]; then
@@ -31,6 +30,7 @@ if [ ! -f "$rocksdb/Makefile" ]; then
   git clone https://github.com/absolute8511/rocksdb.git $rocksdb
 fi
 pushd $rocksdb
+git pull
 CC=/opt/rh/devtoolset-3/root/usr/bin/gcc CXX=/opt/rh/devtoolset-3/root/usr/bin/g++ LD=/opt/rh/devtoolset-3/root/usr/bin/ld USE_SSE=1 make static_lib
 popd
 
