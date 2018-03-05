@@ -53,11 +53,17 @@ if [ ! -f "`pwd`/etcd-v2.3.8-linux-amd64/etcd" ]; then
 fi
 
 cp -fp `go env GOPATH`/src/github.com/absolute8511/ZanRedisDB/dist/$LATEST.tar.gz .
+tar -xvzf $LATEST.tar.gz && mv $LATEST zankv
+killall zankv || true
+killall placedriver || true
+killall etcd || true
+sleep 3
+
 rm -rf zankv
 rm -rf zankv-data
+rm -rf test-etcd
 rm -rf pd.config
 rm -rf zankv.config
-tar -xvzf $LATEST.tar.gz && mv $LATEST zankv
 
 cat <<EOF >> pd.config
 
@@ -101,7 +107,7 @@ EOF
 
 mkdir zankv-data
 
-BUILD_ID=dontKillMe nohup ./etcd-v2.3.8-linux-amd64/etcd -name=test-etcd0 -initial-advertise-peer-urls=http://127.0.0.1:2380 -listen-client-urls=http://127.0.0.1:2379 -advertise-client-urls=http://127.0.0.1:2379 -listen-peer-urls=http://127.0.0.1:2380 -initial-cluster="test-etcd0=http://127.0.0.1:2380" -initial-cluster-state=new --data-dir ./test-etcd0 > etcd.log 2>&1 &
+BUILD_ID=dontKillMe nohup ./etcd-v2.3.8-linux-amd64/etcd -name=test-etcd0 -initial-advertise-peer-urls=http://127.0.0.1:2380 -listen-client-urls=http://127.0.0.1:2379 -advertise-client-urls=http://127.0.0.1:2379 -listen-peer-urls=http://127.0.0.1:2380 -initial-cluster="test-etcd0=http://127.0.0.1:2380" -initial-cluster-state=new --data-dir ./test-etcd > etcd.log 2>&1 &
 sleep 3
 BUILD_ID=dontKillMe nohup ./zankv/bin/placedriver -config=./pd.config > pd.log 2>&1 &
 sleep 3
