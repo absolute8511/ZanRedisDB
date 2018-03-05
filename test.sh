@@ -4,10 +4,10 @@ echo "" > coverage.txt
 echo $TEST_RACE
 
 if [ "$TEST_RACE" = "false" ]; then
-    GOMAXPROCS=1 go test -timeout 900s `go list ./... | grep -v pdserver`
+    GOMAXPROCS=1 go test -timeout 900s `go list ./...`
 else
-    GOMAXPROCS=4 go test -i -timeout 900s -race `go list ./... | grep -v pdserver`
-    for d in $(go list ./... | grep -v pdserver | grep -v vendor); do 
+    GOMAXPROCS=4 go test -i -timeout 900s -race `go list ./...`
+    for d in $(go list ./... | grep -v vendor); do 
         GOMAXPROCS=4 go test -timeout 900s -race -coverprofile=profile.out -covermode=atomic $d
         if [ -f profile.out ]; then
             cat profile.out >> coverage.txt
