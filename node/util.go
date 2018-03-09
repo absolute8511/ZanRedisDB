@@ -8,7 +8,7 @@ import (
 	"github.com/absolute8511/redcon"
 )
 
-var nodeLog = common.NewLevelLogger(common.LOG_DEBUG, common.NewDefaultLogger("node"))
+var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("node"))
 
 func SetLogLevel(level int) {
 	nodeLog.SetLevel(int32(level))

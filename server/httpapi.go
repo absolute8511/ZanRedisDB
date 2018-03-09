@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
@@ -234,10 +236,27 @@ func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps http
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "BAD_LEVEL_STRING"}
 	}
-	sLog.SetLevel(int32(level))
-	rafthttp.SetLogLevel(level)
-	node.SetLogLevel(level)
-	cluster.SetLogLevel(level)
+	mode := reqParams.Get("logmode")
+	switch mode {
+	case "":
+		sLog.SetLevel(int32(level))
+		rafthttp.SetLogLevel(level)
+		node.SetLogLevel(level)
+		cluster.SetLogLevel(level)
+		rockredis.SetLogLevel(int32(level))
+	case "server":
+		sLog.SetLevel(int32(level))
+	case "node":
+		node.SetLogLevel(level)
+	case "cluster":
+		cluster.SetLogLevel(level)
+	case "db":
+		rockredis.SetLogLevel(int32(level))
+	case "rafthttp":
+		rafthttp.SetLogLevel(level)
+	default:
+		sLog.Infof("unknown log mode: %v, available(server,node,cluster,db,rafthttp)", mode)
+	}
 	return nil, nil
 }
 
