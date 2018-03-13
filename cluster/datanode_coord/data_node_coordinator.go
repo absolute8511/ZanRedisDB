@@ -1176,36 +1176,28 @@ func (dc *DataCoordinator) IsRemovingMember(m common.MemberInfo) (bool, error) {
 	return false, nil
 }
 
-func (dc *DataCoordinator) GetNamespaceLeader(fullNS string) (uint64, int64, error) {
+func (dc *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string) error {
 	namespace, pid := common.GetNamespaceAndPartition(fullNS)
 	if namespace == "" {
 		cluster.CoordLog().Warningf("namespace invalid: %v", fullNS)
-		return 0, 0, ErrNamespaceInvalid
+		return ErrNamespaceInvalid
 	}
-	nid, epoch, err := dc.register.GetNamespaceLeader(namespace, pid)
+	nid, oldEpoch, err := dc.register.GetNamespaceLeader(namespace, pid)
 	if err != nil {
-		if err == cluster.ErrKeyNotFound {
-			return 0, 0, nil
+		if err != cluster.ErrKeyNotFound {
+			return err
 		}
-		return 0, 0, err
-	}
-	if nid == "" {
-		return 0, int64(epoch), nil
-	}
-	regID := cluster.ExtractRegIDFromGenID(nid)
-	return regID, int64(epoch), nil
-}
-
-func (dc *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string, oldEpoch int64) (int64, error) {
-	namespace, pid := common.GetNamespaceAndPartition(fullNS)
-	if namespace == "" {
-		cluster.CoordLog().Warningf("namespace invalid: %v", fullNS)
-		return 0, ErrNamespaceInvalid
 	}
 	var rl cluster.RealLeader
 	rl.Leader = dc.GetMyID()
-	epoch, err := dc.register.UpdateNamespaceLeader(namespace, pid, rl, cluster.EpochType(oldEpoch))
-	return int64(epoch), err
+	if nid != "" {
+		regID := cluster.ExtractRegIDFromGenID(nid)
+		if regID == dc.GetMyRegID() && nid == rl.Leader {
+			return nil
+		}
+	}
+	_, err = dc.register.UpdateNamespaceLeader(namespace, pid, rl, cluster.EpochType(oldEpoch))
+	return err
 }
 
 // before shutdown, we transfer the leader to others to reduce
