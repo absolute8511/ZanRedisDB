@@ -18,6 +18,16 @@ var (
 	proposeTimeout = time.Second * 4
 )
 
+var applyStatusMapping = map[int]syncerpb.RaftApplySnapStatus{
+	0: syncerpb.ApplyUnknown,
+	1: syncerpb.ApplyWaitingTransfer,
+	2: syncerpb.ApplyWaitingTransfer,
+	3: syncerpb.ApplyTransferSuccess,
+	4: syncerpb.ApplyWaiting,
+	5: syncerpb.ApplySuccess,
+	6: syncerpb.ApplyFailed,
+}
+
 func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq) (*syncerpb.SyncedRaftRsp, error) {
 	var rsp syncerpb.SyncedRaftRsp
 	kv := s.GetNamespaceFromFullName(req.RaftGroupName)
@@ -39,11 +49,16 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		kv := s.GetNamespaceFromFullName(r.RaftGroupName)
 		if kv == nil || !kv.IsReady() {
 			rpcErr.ErrCode = http.StatusNotFound
-			rpcErr.ErrMsg = "namespace node not found"
+			rpcErr.ErrMsg = errRaftGroupNotReady.Error()
 			return &rpcErr, nil
 		}
 		if r.Type != syncerpb.EntryNormalRaw {
 			// unsupported other type
+		}
+		term, index := kv.Node.GetRemoteClusterSyncedRaft(r.ClusterName)
+		if r.Term < term || r.Index <= index {
+			sLog.Infof("raft log already applied : %v, synced: %v-%v", r.String(), term, index)
+			continue
 		}
 
 		// raft timestamp should be the same with the real raft request in data
@@ -66,6 +81,65 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		_ = syncLatency
 	}
 	return &rpcErr, nil
+}
+
+func (s *Server) NotifyTransferSnap(ctx context.Context, req *syncerpb.RaftApplySnapReq) (*syncerpb.RpcErr, error) {
+	var rpcErr syncerpb.RpcErr
+	kv := s.GetNamespaceFromFullName(req.RaftGroupName)
+	if kv == nil || !kv.IsReady() {
+		rpcErr.ErrCode = http.StatusNotFound
+		rpcErr.ErrMsg = errRaftGroupNotReady.Error()
+		return &rpcErr, errRaftGroupNotReady
+	}
+	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	if req.Term < term || req.Index <= index {
+		sLog.Infof("raft already applied : %v, synced: %v-%v", req.String(), term, index)
+		return &rpcErr, nil
+	}
+	sLog.Infof("raft need transfer snapshot from remote: %v", req.String())
+	kv.Node.BeginTransferRemoteSnap(req.ClusterName, req.Term, req.Index, req.SyncAddr, req.SyncPath)
+	return &rpcErr, nil
+}
+
+func (s *Server) NotifyApplySnap(ctx context.Context, req *syncerpb.RaftApplySnapReq) (*syncerpb.RpcErr, error) {
+	var rpcErr syncerpb.RpcErr
+	kv := s.GetNamespaceFromFullName(req.RaftGroupName)
+	if kv == nil || !kv.IsReady() {
+		rpcErr.ErrCode = http.StatusNotFound
+		rpcErr.ErrMsg = errRaftGroupNotReady.Error()
+		return &rpcErr, errRaftGroupNotReady
+	}
+	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	if req.Term < term || req.Index <= index {
+		sLog.Infof("raft already applied : %v, synced: %v-%v", req.String(), term, index)
+		return &rpcErr, nil
+	}
+	sLog.Infof("raft need apply snapshot from remote: %v", req.String())
+	kv.Node.ApplyRemoteSnapshot(req.ClusterName, req.Term, req.Index)
+	return &rpcErr, nil
+}
+
+func (s *Server) GetApplySnapStatus(ctx context.Context, req *syncerpb.RaftApplySnapStatusReq) (*syncerpb.RaftApplySnapStatusRsp, error) {
+	var status syncerpb.RaftApplySnapStatusRsp
+	kv := s.GetNamespaceFromFullName(req.RaftGroupName)
+	if kv == nil || !kv.IsReady() {
+		return &status, errRaftGroupNotReady
+	}
+	// if another is transferring, just return status for waiting
+	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	if term >= req.Term && index >= req.Index {
+		status.Status = syncerpb.ApplySuccess
+	} else {
+		ss, ok := kv.Node.GetApplyRemoteSnapStatus(req.ClusterName)
+		if !ok {
+			status.Status = syncerpb.ApplyMissing
+		} else {
+			status.Status, _ = applyStatusMapping[ss.StatusCode]
+			status.StatusMsg = ss.Status
+		}
+	}
+	sLog.Infof("raft apply snapshot from remote %v , status: %v", req.String(), status)
+	return &status, nil
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.

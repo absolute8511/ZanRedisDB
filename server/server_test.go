@@ -18,6 +18,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var clusterName = "cluster-unittest-server"
+
+type fakeClusterInfo struct {
+	clusterName string
+	snapSyncs   []common.SnapshotSyncInfo
+}
+
+func (ci *fakeClusterInfo) GetClusterName() string {
+	return ci.clusterName
+}
+
+func (ci *fakeClusterInfo) GetSnapshotSyncInfo(fullNS string) ([]common.SnapshotSyncInfo, error) {
+	return ci.snapSyncs, nil
+}
+
+func (ci *fakeClusterInfo) UpdateMeForNamespaceLeader(fullNS string) error {
+	return nil
+}
+
 type testClusterInfo struct {
 	server    *Server
 	nsConf    *node.NamespaceConfig
@@ -30,11 +49,17 @@ var kvsCluster []testClusterInfo
 var learnerServers []*Server
 var gtmpClusterDir string
 var seedNodes []node.ReplicaInfo
+var remoteClusterBasePort = 51845
+
+//
+var testSnap = 10
+var testSnapCatchup = 3
 
 func TestMain(m *testing.M) {
 	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+	node.EnableForTest()
 
 	if testing.Verbose() {
 		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
@@ -90,6 +115,8 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 	rport := portBase
 	raftPort := portBase - 100
 	tmpSeeds := make([]node.ReplicaInfo, 0, replicaNum)
+	fakeCI := &fakeClusterInfo{}
+	fakeCI.clusterName = clusterName
 	for index := 0; index < replicaNum; index++ {
 		raftAddr := "http://127.0.0.1:" + strconv.Itoa(raftPort+index)
 		var replica node.ReplicaInfo
@@ -97,7 +124,15 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 		replica.ReplicaID = uint64(1 + index)
 		replica.RaftAddr = raftAddr
 		tmpSeeds = append(tmpSeeds, replica)
+		var ssi common.SnapshotSyncInfo
+		ssi.NodeID = replica.NodeID
+		ssi.ReplicaID = replica.ReplicaID
+		ssi.RemoteAddr = "127.0.0.1"
+		ssi.HttpAPIPort = strconv.Itoa(rport - 210 + index)
+		ssi.DataRoot = path.Join(ctmpDir, strconv.Itoa(index))
+		fakeCI.snapSyncs = append(fakeCI.snapSyncs, ssi)
 	}
+
 	for index := 0; index < replicaNum+syncLearnerNum; index++ {
 		tmpDir := path.Join(ctmpDir, strconv.Itoa(index))
 		os.MkdirAll(tmpDir, 0700)
@@ -108,6 +143,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 		raftAddr := "http://127.0.0.1:" + strconv.Itoa(raftPort+index)
 		redisport := rport + index
 		grpcPort := rport - 110 + index
+		httpPort := rport - 210 + index
 		var replica node.ReplicaInfo
 		replica.NodeID = uint64(1 + index)
 		replica.ReplicaID = uint64(1 + index)
@@ -117,6 +153,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 			DataDir:       tmpDir,
 			RedisAPIPort:  redisport,
 			GrpcAPIPort:   grpcPort,
+			HttpAPIPort:   httpPort,
 			LocalRaftAddr: raftAddr,
 			BroadcastAddr: "127.0.0.1",
 			TickMs:        20,
@@ -125,7 +162,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer
 			// use test:// will ignore the remote cluster fail
-			kvOpts.RemoteSyncCluster = "test://127.0.0.1:" + strconv.Itoa(51845-110)
+			kvOpts.RemoteSyncCluster = "test://127.0.0.1:" + strconv.Itoa(remoteClusterBasePort-110)
 		}
 
 		nsConf := node.NewNSConfig()
@@ -133,11 +170,14 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 		nsConf.BaseName = "default"
 		nsConf.EngType = rockredis.EngType
 		nsConf.PartitionNum = 1
+		nsConf.SnapCount = testSnap
+		nsConf.SnapCatchup = testSnapCatchup
 		nsConf.Replicator = replicaNum
 		nsConf.RaftGroupConf.GroupID = 1000
 		nsConf.RaftGroupConf.SeedNodes = tmpSeeds
 		nsConf.ExpirationPolicy = "consistency_deletion"
 		kv := NewServer(kvOpts)
+		kv.nsMgr.SetClusterInfoInterface(fakeCI)
 		if _, err := kv.InitKVNamespace(replica.ReplicaID, nsConf, false); err != nil {
 			t.Fatalf("failed to init namespace: %v", err)
 		}
@@ -249,7 +289,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	remoteServers, _, _, remoteDir := startTestClusterWithBasePort(t, 51845, 1, 0)
+	remoteServers, _, _, remoteDir := startTestClusterWithBasePort(t, remoteClusterBasePort, 1, 0)
 	defer func() {
 		for _, remote := range remoteServers {
 			remote.server.Stop()
@@ -286,6 +326,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	assert.Equal(t, true, learnerNode.IsReady())
 
 	key := "default:test-cluster:a"
+	keySnapTest := "default:test-cluster:a-snaptest"
 	rsp, err := goredis.String(c.Do("set", key, "1234"))
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
@@ -294,7 +335,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	time.Sleep(time.Second)
 	leaderci := leaderNode.Node.GetCommittedIndex()
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
-	_, remoteIndex := remoteNode.Node.GetRemoteClusterSyncedRaft("")
+	_, remoteIndex := remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
 
 	v, err := goredis.String(c.Do("get", key))
@@ -312,8 +353,9 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	newci := leaderNode.Node.GetCommittedIndex()
 	assert.Equal(t, leaderci+1, newci)
 	leaderci = newci
+	t.Logf("current leader commit: %v", leaderci)
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
-	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft("")
+	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
 
 	n, err := goredis.Int(c.Do("exists", key))
@@ -335,7 +377,19 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 
 	_, err = goredis.Int(c.Do("del", key))
 	assert.Nil(t, err)
+	if testSnap <= 10 {
+		// test restart from snap and transfer snap to remote
+		for i := 0; i < testSnap; i++ {
+			rsp, err := goredis.String(c.Do("set", key, "12345"))
+			assert.Nil(t, err)
+			assert.Equal(t, OK, rsp)
+			rsp, err = goredis.String(c.Do("set", keySnapTest, "12346"))
+			assert.Nil(t, err)
+			assert.Equal(t, OK, rsp)
+		}
+	}
 
+	time.Sleep(time.Second)
 	// restart will replay all logs
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
@@ -343,6 +397,8 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	nsConf.EngType = rockredis.EngType
 	nsConf.PartitionNum = 1
 	nsConf.Replicator = 3
+	nsConf.SnapCount = testSnap
+	nsConf.SnapCatchup = testSnapCatchup
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.ExpirationPolicy = "consistency_deletion"
 	learnerNode, err = learnerServers[0].InitKVNamespace(m.ID, nsConf, true)
@@ -351,10 +407,27 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	assert.Nil(t, err)
 
 	leaderci = leaderNode.Node.GetCommittedIndex()
+	t.Logf("current leader commit: %v", leaderci)
 
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
-	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft("")
+	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
+
+	v, err = goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "12345", v)
+
+	v, err = goredis.String(remoteConn.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "12345", v)
+
+	v, err = goredis.String(c.Do("get", keySnapTest))
+	assert.Nil(t, err)
+	assert.Equal(t, "12346", v)
+
+	v, err = goredis.String(remoteConn.Do("get", keySnapTest))
+	assert.Nil(t, err)
+	assert.Equal(t, "12346", v)
 }
 
 func TestRestartFollower(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/syncerpb"
 	"github.com/absolute8511/go-zanredisdb"
 	"google.golang.org/grpc"
@@ -132,6 +133,29 @@ func (s *RemoteLogSender) getClient() (syncerpb.CrossClusterAPIClient, string, e
 	return c, addr, nil
 }
 
+func (s *RemoteLogSender) getAllAddressesForPart() ([]string, error) {
+	var addrs []string
+	if strings.HasPrefix(s.remoteClusterAddr, "test://") {
+		addrs = append(addrs, s.remoteClusterAddr[len("test://"):])
+	} else {
+		if s.zanCluster == nil {
+			s.zanCluster = s.getZanCluster()
+			if s.zanCluster == nil {
+				return nil, errors.New("failed to init remote zankv cluster")
+			}
+		}
+		hlist, err := s.zanCluster.GetAllHostsByPart(s.pid)
+		if err != nil {
+			nodeLog.Infof("failed to get all hosts address :%v", err.Error())
+			return nil, err
+		}
+		for _, h := range hlist {
+			addrs = append(addrs, h.Addr())
+		}
+	}
+	return addrs, nil
+}
+
 func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 	if s.remoteClusterAddr == "" {
 		nodeLog.Infof("sending log with no remote: %v", r)
@@ -168,7 +192,154 @@ func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 	if rpcErr != nil && rpcErr.ErrCode != http.StatusOK &&
 		rpcErr.ErrCode != 0 {
 		nodeLog.Infof("sending(%v) log failed: %v,  %v", addr, rpcErr, in.String())
-		return errors.New(rpcErr.ErrMsg)
+		return errors.New(rpcErr.String())
+	}
+	return nil
+}
+
+func (s *RemoteLogSender) notifyTransferSnap(raftSnapshot raftpb.Snapshot, syncAddr string, syncPath string) error {
+	if s.remoteClusterAddr == "" {
+		return nil
+	}
+	c, addr, err := s.getClient()
+	if c == nil {
+		nodeLog.Infof("failed to get grpc client(%v): %v", addr, err)
+		return errors.New("failed to get grpc client")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	defer cancel()
+	req := &syncerpb.RaftApplySnapReq{
+		ClusterName:   s.localCluster,
+		RaftGroupName: s.grpName,
+		Term:          raftSnapshot.Metadata.Term,
+		Index:         raftSnapshot.Metadata.Index,
+		SyncAddr:      syncAddr,
+		SyncPath:      syncPath,
+	}
+	rsp, err := c.NotifyTransferSnap(ctx, req)
+	if err != nil {
+		return err
+	}
+	if rsp != nil && rsp.ErrCode != 0 && rsp.ErrCode != http.StatusOK {
+		nodeLog.Infof("notify apply snapshot failed: %v,  %v", addr, rsp)
+		return errors.New(rsp.String())
+	}
+	return nil
+}
+
+func (s *RemoteLogSender) notifyApplySnap(raftSnapshot raftpb.Snapshot) error {
+	if s.remoteClusterAddr == "" {
+		return nil
+	}
+	c, addr, err := s.getClient()
+	if c == nil {
+		nodeLog.Infof("failed to get grpc client(%v): %v", addr, err)
+		return errors.New("failed to get grpc client")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	defer cancel()
+	req := &syncerpb.RaftApplySnapReq{
+		ClusterName:   s.localCluster,
+		RaftGroupName: s.grpName,
+		Term:          raftSnapshot.Metadata.Term,
+		Index:         raftSnapshot.Metadata.Index,
+	}
+	rsp, err := c.NotifyApplySnap(ctx, req)
+	if err != nil {
+		return err
+	}
+	if rsp != nil && rsp.ErrCode != 0 && rsp.ErrCode != http.StatusOK {
+		nodeLog.Infof("notify apply snapshot failed: %v,  %v", addr, rsp)
+		return errors.New(rsp.String())
+	}
+	return nil
+}
+
+func (s *RemoteLogSender) getApplySnapStatus(raftSnapshot raftpb.Snapshot, addr string) (*syncerpb.RaftApplySnapStatusRsp, error) {
+	var applyStatus syncerpb.RaftApplySnapStatusRsp
+	if s.remoteClusterAddr == "" {
+		return &applyStatus, nil
+	}
+	c := s.getClientFromAddr(addr)
+	if c == nil {
+		nodeLog.Infof("failed to get grpc client(%v)", addr)
+		return &applyStatus, errors.New("failed to get grpc client")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	defer cancel()
+	req := &syncerpb.RaftApplySnapStatusReq{
+		ClusterName:   s.localCluster,
+		RaftGroupName: s.grpName,
+		Term:          raftSnapshot.Metadata.Term,
+		Index:         raftSnapshot.Metadata.Index,
+	}
+	rsp, err := c.GetApplySnapStatus(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if rsp == nil {
+		return &applyStatus, errors.New("nil snap status rsp")
+	}
+	nodeLog.Infof("apply snapshot status: %v,  %v", addr, rsp.String())
+	applyStatus = *rsp
+	return &applyStatus, nil
+}
+
+func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+	// first, query and wait all replicas to finish snapshot transfer
+	// if all done, notify apply the transferred snapshot and wait all done
+	// then wait all apply done.
+	for {
+		select {
+		case <-stop:
+			return common.ErrStopped
+		default:
+		}
+		addrs, err := s.getAllAddressesForPart()
+		if err != nil {
+			return err
+		}
+		// wait all became ApplyTransferSuccess or ApplySuccess
+		allReady := true
+		allTransferReady := true
+		needWait := false
+		for _, addr := range addrs {
+			applyStatus, err := s.getApplySnapStatus(raftSnapshot, addr)
+			if err != nil {
+				return err
+			}
+			if applyStatus.Status != syncerpb.ApplySuccess {
+				allReady = false
+			}
+			if applyStatus.Status != syncerpb.ApplySuccess && applyStatus.Status != syncerpb.ApplyTransferSuccess {
+				allTransferReady = false
+			}
+			if applyStatus.Status == syncerpb.ApplyWaiting || applyStatus.Status == syncerpb.ApplyWaitingTransfer ||
+				applyStatus.Status == syncerpb.ApplyUnknown {
+				needWait = true
+			}
+			if applyStatus.Status == syncerpb.ApplyFailed {
+				nodeLog.Infof("node %v failed to apply snapshot : %v", addr, applyStatus)
+				return errors.New("some node failed to apply snapshot")
+			}
+		}
+		if needWait {
+			select {
+			case <-stop:
+				return common.ErrStopped
+			case <-time.After(time.Second):
+				continue
+			}
+		}
+		if allReady {
+			break
+		}
+		if allTransferReady {
+			s.notifyApplySnap(raftSnapshot)
+			time.Sleep(time.Second)
+		} else {
+			return errors.New("some node failed to apply snapshot")
+		}
 	}
 	return nil
 }

@@ -128,7 +128,7 @@ func getTestClient(t *testing.T) *zanredisdb.ZanRedisClient {
 }
 
 func startTestClusterAndCheck(t *testing.T) (*Server, []dataNodeWrapper, string) {
-	pd, kvList, tmpDir := startTestCluster(t, 5)
+	pd, kvList, tmpDir := startTestCluster(t, 4)
 	time.Sleep(time.Second)
 	pduri := "http://127.0.0.1:" + pdHttpPort
 	uri := fmt.Sprintf("%s/datanodes", pduri)

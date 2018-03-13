@@ -2,45 +2,49 @@ package node
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 )
 
+var enableTest = false
+
+func EnableForTest() {
+	enableTest = true
+}
+
 type logSyncerSM struct {
-	store         *KVStore
-	clusterInfo   common.IClusterInfo
-	fullNS        string
-	machineConfig MachineConfig
-	ID            uint64
-	syncedCnt     int64
-	syncedIndex   uint64
-	syncedTerm    uint64
-	lgSender      *RemoteLogSender
-	stopping      int32
-	sendCh        chan *BatchInternalRaftRequest
-	sendStop      chan struct{}
-	wg            sync.WaitGroup
+	clusterInfo    common.IClusterInfo
+	fullNS         string
+	machineConfig  MachineConfig
+	ID             uint64
+	syncedCnt      int64
+	syncedIndex    uint64
+	syncedTerm     uint64
+	lgSender       *RemoteLogSender
+	stopping       int32
+	sendCh         chan *BatchInternalRaftRequest
+	sendStop       chan struct{}
+	wg             sync.WaitGroup
+	waitSendLogChs chan chan struct{}
 }
 
 func NewLogSyncerSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, fullNS string,
 	clusterInfo common.IClusterInfo) (StateMachine, error) {
-	store, err := NewKVStore(opts)
-	if err != nil {
-		return nil, err
-	}
 
 	lg := &logSyncerSM{
-		fullNS:        fullNS,
-		machineConfig: machineConfig,
-		ID:            localID,
-		clusterInfo:   clusterInfo,
-		store:         store,
-		sendCh:        make(chan *BatchInternalRaftRequest, 10),
-		sendStop:      make(chan struct{}),
+		fullNS:         fullNS,
+		machineConfig:  machineConfig,
+		ID:             localID,
+		clusterInfo:    clusterInfo,
+		sendCh:         make(chan *BatchInternalRaftRequest, 10),
+		sendStop:       make(chan struct{}),
+		waitSendLogChs: make(chan chan struct{}),
 		//dataDir:       path.Join(opts.DataDir, "logsyncer"),
 	}
 
@@ -90,11 +94,10 @@ func (sm *logSyncerSM) GetStats() common.NamespaceStats {
 }
 
 func (sm *logSyncerSM) CleanData() error {
-	return sm.store.CleanData()
+	return nil
 }
 
 func (sm *logSyncerSM) Destroy() {
-	sm.store.Destroy()
 }
 
 func (sm *logSyncerSM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
@@ -117,7 +120,6 @@ func (sm *logSyncerSM) Close() {
 	}
 	close(sm.sendStop)
 	sm.wg.Wait()
-	sm.store.Close()
 }
 
 func (sm *logSyncerSM) handlerRaftLogs() {
@@ -160,6 +162,9 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 					if nodeLog.Level() >= common.LOG_DETAIL {
 						sm.Debugf("batching raft log: %v in batch: %v", req.String(), len(raftLogs))
 					}
+				case waitCh := <-sm.waitSendLogChs:
+					sm.Infof("wake up waiting buffered send logs")
+					close(waitCh)
 				}
 				continue
 			}
@@ -169,7 +174,6 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			} else {
 				err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
 			}
-
 		}
 		if err != nil {
 			select {
@@ -198,6 +202,7 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	// get (term-index) from the remote cluster, if the remote cluster has
 	// greater (term-index) than snapshot, we can just ignore the snapshot restore
 	// since we already synced the data in snapshot.
+	sm.Infof("restore snapshot : %v", raftSnapshot.Metadata.String())
 	state, err := sm.lgSender.getRemoteSyncedRaft(stop)
 	if err != nil {
 		return err
@@ -210,33 +215,67 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	// TODO: should wait all batched sync raft logs success
 	if sm.clusterInfo == nil {
 		// in test, the cluster coordinator is not enabled, we can just ignore restore.
+		sm.Infof("nil cluster info, only for test: %v", raftSnapshot.Metadata.String())
 		return nil
 	}
 
+	waitCh := make(chan struct{})
+	sm.Infof("wait buffered send logs")
+	select {
+	case sm.waitSendLogChs <- waitCh:
+	case <-stop:
+		return common.ErrStopped
+	}
+	select {
+	case <-waitCh:
+	case <-stop:
+		return common.ErrStopped
+	}
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
-	err = prepareSnapshotForStore(sm.store, sm.machineConfig, sm.clusterInfo, sm.fullNS,
-		sm.ID, stop, raftSnapshot, 0)
+	retry := 0
+	for retry < 3 {
+		forceRemote := true
+		if enableTest {
+			// for test we use local
+			forceRemote = false
+		}
+		syncAddr, syncDir := GetValidBackupInfo(sm.machineConfig, sm.clusterInfo, sm.fullNS, sm.ID, stop, raftSnapshot, retry, forceRemote)
+		// note the local sync path not supported, so we need try another replica if syncAddr is empty
+		if syncAddr == "" && syncDir == "" {
+			err = errors.New("no backup available from others")
+		} else {
+			err = sm.lgSender.notifyTransferSnap(raftSnapshot, syncAddr, syncDir)
+			if err != nil {
+				sm.Infof("notify apply snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, err)
+			} else {
+				err := sm.lgSender.waitApplySnapStatus(raftSnapshot, stop)
+				if err != nil {
+					sm.Infof("wait apply snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, err)
+				} else {
+					break
+				}
+			}
+		}
+		retry++
+		select {
+		case <-stop:
+			return err
+		case <-time.After(time.Second):
+		}
+	}
 	if err != nil {
-		sm.Infof("failed to prepare snapshot: %v", err)
 		return err
 	}
-	// TODO: we do not need pull store local, we can just notify the remote cluster
-	// to get synced from the real leader and just wait transfer done.
-	err = sm.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
-	if err != nil {
-		sm.Infof("failed to restore snapshot: %v", err)
-	}
-	// TODO: since we can not restore from checkpoint on leader in the remote cluster, we need send
-	// clear request to remote and then scan the db and send all keys to the remote cluster to restore
-	// from a clean state.
 
-	// load synced offset from snapshot, so we can just send logs from the newest
-	return err
+	sm.Infof("apply snap done %v", raftSnapshot.Metadata)
+	atomic.StoreUint64(&sm.syncedIndex, raftSnapshot.Metadata.Index)
+	atomic.StoreUint64(&sm.syncedTerm, raftSnapshot.Metadata.Term)
+	return nil
 }
 
-func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool {
+func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		sm.Debugf("applying in log syncer: %v at (%v, %v)", reqList.String(), term, index)
 	}
@@ -257,13 +296,13 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 		sm.Errorf("miss timestamp in raft request: %v", reqList)
 	}
 	for _, req := range reqList.Reqs {
-		if req.Header.DataType == int32(HTTPReq) {
-			var p httpProposeData
+		if req.Header.DataType == int32(CustomReq) {
+			var p customProposeData
 			err := json.Unmarshal(req.Data, &p)
 			if err != nil {
 				sm.Infof("failed to unmarshal http propose: %v", req.String())
 			}
-			if p.ProposeOp == HttpProposeOp_Backup {
+			if p.ProposeOp == ProposeOp_Backup {
 				sm.Infof("got force backup request")
 				forceBackup = true
 				break
@@ -273,10 +312,10 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	select {
 	case sm.sendCh <- &reqList:
 	case <-stop:
-		return false
+		return false, nil
 	case <-sm.sendStop:
-		return false
+		return false, nil
 	}
 
-	return forceBackup
+	return forceBackup, nil
 }

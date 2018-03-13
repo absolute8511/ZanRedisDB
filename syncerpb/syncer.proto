@@ -12,6 +12,9 @@ option (gogoproto.goproto_enum_prefix_all) = false;
 service CrossClusterAPI {
     rpc ApplyRaftReqs(RaftReqs) returns (RpcErr) {}
     rpc GetSyncedRaft(SyncedRaftReq) returns (SyncedRaftRsp) {}
+    rpc NotifyTransferSnap(RaftApplySnapReq) returns (RpcErr) {}
+    rpc NotifyApplySnap(RaftApplySnapReq) returns (RpcErr) {}
+    rpc GetApplySnapStatus(RaftApplySnapStatusReq) returns (RaftApplySnapStatusRsp) {}
 }
 
 message RpcErr {
@@ -26,11 +29,22 @@ enum RaftLogType {
     EntrySnapshotRawKV = 1;
 }
 
+enum RaftApplySnapStatus {
+    ApplyUnknown = 0;
+    ApplyWaitingTransfer = 1;
+    ApplyTransferSuccess = 2;
+    ApplyWaiting = 3;
+    ApplySuccess = 4;
+    ApplyFailed = 5;
+    ApplyMissing = 6;
+    ApplyOutofdate = 7;
+}
+
 message RaftLogData {
     RaftLogType type = 1;
     // the name for source cluster, if there are multi different source clusters for syncer,
     // we can separate them.
-    uint64 cluster_name =2;
+    string cluster_name =2;
     // raft group for different partition has different name, so
     // we can make sure (term-index) is increased in same raft group.
     // (term-index) will be checked while replaying in remote cluster
@@ -43,6 +57,40 @@ message RaftLogData {
 
 message RaftReqs {
     repeated RaftLogData raft_log = 1;
+}
+
+message RaftApplySnapReq {
+    // the name for source cluster, if there are multi different source clusters for syncer,
+    // we can separate them.
+    string cluster_name =2;
+    // raft group for different partition has different name, so
+    // we can make sure (term-index) is increased in same raft group.
+    // (term-index) will be checked while replaying in remote cluster
+    string raft_group_name = 3;
+    uint64 term = 4;
+    uint64 index = 5;
+    int64 raft_timestamp = 6;
+    string sync_addr = 7;
+    string sync_path = 8;
+    bytes data = 9;
+}
+
+message RaftApplySnapStatusReq {
+    // the name for source cluster, if there are multi different source clusters for syncer,
+    // we can separate them.
+    string cluster_name =2;
+    // raft group for different partition has different name, so
+    // we can make sure (term-index) is increased in same raft group.
+    // (term-index) will be checked while replaying in remote cluster
+    string raft_group_name = 3;
+    uint64 term = 4;
+    uint64 index = 5;
+}
+
+message RaftApplySnapStatusRsp {
+    RaftApplySnapStatus status = 1;
+    uint64 progress = 2;
+    string status_msg = 3;
 }
 
 message SyncedRaftReq {

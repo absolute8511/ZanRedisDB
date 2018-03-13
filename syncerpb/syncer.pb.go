@@ -11,6 +11,9 @@
 		RpcErr
 		RaftLogData
 		RaftReqs
+		RaftApplySnapReq
+		RaftApplySnapStatusReq
+		RaftApplySnapStatusRsp
 		SyncedRaftReq
 		SyncedRaftRsp
 */
@@ -59,6 +62,45 @@ func (x RaftLogType) String() string {
 }
 func (RaftLogType) EnumDescriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{0} }
 
+type RaftApplySnapStatus int32
+
+const (
+	ApplyUnknown         RaftApplySnapStatus = 0
+	ApplyWaitingTransfer RaftApplySnapStatus = 1
+	ApplyTransferSuccess RaftApplySnapStatus = 2
+	ApplyWaiting         RaftApplySnapStatus = 3
+	ApplySuccess         RaftApplySnapStatus = 4
+	ApplyFailed          RaftApplySnapStatus = 5
+	ApplyMissing         RaftApplySnapStatus = 6
+	ApplyOutofdate       RaftApplySnapStatus = 7
+)
+
+var RaftApplySnapStatus_name = map[int32]string{
+	0: "ApplyUnknown",
+	1: "ApplyWaitingTransfer",
+	2: "ApplyTransferSuccess",
+	3: "ApplyWaiting",
+	4: "ApplySuccess",
+	5: "ApplyFailed",
+	6: "ApplyMissing",
+	7: "ApplyOutofdate",
+}
+var RaftApplySnapStatus_value = map[string]int32{
+	"ApplyUnknown":         0,
+	"ApplyWaitingTransfer": 1,
+	"ApplyTransferSuccess": 2,
+	"ApplyWaiting":         3,
+	"ApplySuccess":         4,
+	"ApplyFailed":          5,
+	"ApplyMissing":         6,
+	"ApplyOutofdate":       7,
+}
+
+func (x RaftApplySnapStatus) String() string {
+	return proto.EnumName(RaftApplySnapStatus_name, int32(x))
+}
+func (RaftApplySnapStatus) EnumDescriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{1} }
+
 type RpcErr struct {
 	ErrType int32  `protobuf:"varint,1,opt,name=err_type,json=errType,proto3" json:"err_type,omitempty"`
 	ErrCode int32  `protobuf:"varint,2,opt,name=err_code,json=errCode,proto3" json:"err_code,omitempty"`
@@ -74,7 +116,7 @@ type RaftLogData struct {
 	Type RaftLogType `protobuf:"varint,1,opt,name=type,proto3,enum=syncerpb.RaftLogType" json:"type,omitempty"`
 	// the name for source cluster, if there are multi different source clusters for syncer,
 	// we can separate them.
-	ClusterName uint64 `protobuf:"varint,2,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`
+	ClusterName string `protobuf:"bytes,2,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`
 	// raft group for different partition has different name, so
 	// we can make sure (term-index) is increased in same raft group.
 	// (term-index) will be checked while replaying in remote cluster
@@ -99,6 +141,55 @@ func (m *RaftReqs) String() string            { return proto.CompactTextString(m
 func (*RaftReqs) ProtoMessage()               {}
 func (*RaftReqs) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{2} }
 
+type RaftApplySnapReq struct {
+	// the name for source cluster, if there are multi different source clusters for syncer,
+	// we can separate them.
+	ClusterName string `protobuf:"bytes,2,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`
+	// raft group for different partition has different name, so
+	// we can make sure (term-index) is increased in same raft group.
+	// (term-index) will be checked while replaying in remote cluster
+	RaftGroupName string `protobuf:"bytes,3,opt,name=raft_group_name,json=raftGroupName,proto3" json:"raft_group_name,omitempty"`
+	Term          uint64 `protobuf:"varint,4,opt,name=term,proto3" json:"term,omitempty"`
+	Index         uint64 `protobuf:"varint,5,opt,name=index,proto3" json:"index,omitempty"`
+	RaftTimestamp int64  `protobuf:"varint,6,opt,name=raft_timestamp,json=raftTimestamp,proto3" json:"raft_timestamp,omitempty"`
+	SyncAddr      string `protobuf:"bytes,7,opt,name=sync_addr,json=syncAddr,proto3" json:"sync_addr,omitempty"`
+	SyncPath      string `protobuf:"bytes,8,opt,name=sync_path,json=syncPath,proto3" json:"sync_path,omitempty"`
+	Data          []byte `protobuf:"bytes,9,opt,name=data,proto3" json:"data,omitempty"`
+}
+
+func (m *RaftApplySnapReq) Reset()                    { *m = RaftApplySnapReq{} }
+func (m *RaftApplySnapReq) String() string            { return proto.CompactTextString(m) }
+func (*RaftApplySnapReq) ProtoMessage()               {}
+func (*RaftApplySnapReq) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{3} }
+
+type RaftApplySnapStatusReq struct {
+	// the name for source cluster, if there are multi different source clusters for syncer,
+	// we can separate them.
+	ClusterName string `protobuf:"bytes,2,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`
+	// raft group for different partition has different name, so
+	// we can make sure (term-index) is increased in same raft group.
+	// (term-index) will be checked while replaying in remote cluster
+	RaftGroupName string `protobuf:"bytes,3,opt,name=raft_group_name,json=raftGroupName,proto3" json:"raft_group_name,omitempty"`
+	Term          uint64 `protobuf:"varint,4,opt,name=term,proto3" json:"term,omitempty"`
+	Index         uint64 `protobuf:"varint,5,opt,name=index,proto3" json:"index,omitempty"`
+}
+
+func (m *RaftApplySnapStatusReq) Reset()                    { *m = RaftApplySnapStatusReq{} }
+func (m *RaftApplySnapStatusReq) String() string            { return proto.CompactTextString(m) }
+func (*RaftApplySnapStatusReq) ProtoMessage()               {}
+func (*RaftApplySnapStatusReq) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{4} }
+
+type RaftApplySnapStatusRsp struct {
+	Status    RaftApplySnapStatus `protobuf:"varint,1,opt,name=status,proto3,enum=syncerpb.RaftApplySnapStatus" json:"status,omitempty"`
+	Progress  uint64              `protobuf:"varint,2,opt,name=progress,proto3" json:"progress,omitempty"`
+	StatusMsg string              `protobuf:"bytes,3,opt,name=status_msg,json=statusMsg,proto3" json:"status_msg,omitempty"`
+}
+
+func (m *RaftApplySnapStatusRsp) Reset()                    { *m = RaftApplySnapStatusRsp{} }
+func (m *RaftApplySnapStatusRsp) String() string            { return proto.CompactTextString(m) }
+func (*RaftApplySnapStatusRsp) ProtoMessage()               {}
+func (*RaftApplySnapStatusRsp) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{5} }
+
 type SyncedRaftReq struct {
 	ClusterName   string `protobuf:"bytes,1,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`
 	RaftGroupName string `protobuf:"bytes,2,opt,name=raft_group_name,json=raftGroupName,proto3" json:"raft_group_name,omitempty"`
@@ -107,7 +198,7 @@ type SyncedRaftReq struct {
 func (m *SyncedRaftReq) Reset()                    { *m = SyncedRaftReq{} }
 func (m *SyncedRaftReq) String() string            { return proto.CompactTextString(m) }
 func (*SyncedRaftReq) ProtoMessage()               {}
-func (*SyncedRaftReq) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{3} }
+func (*SyncedRaftReq) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{6} }
 
 type SyncedRaftRsp struct {
 	Term  uint64 `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
@@ -117,15 +208,19 @@ type SyncedRaftRsp struct {
 func (m *SyncedRaftRsp) Reset()                    { *m = SyncedRaftRsp{} }
 func (m *SyncedRaftRsp) String() string            { return proto.CompactTextString(m) }
 func (*SyncedRaftRsp) ProtoMessage()               {}
-func (*SyncedRaftRsp) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{4} }
+func (*SyncedRaftRsp) Descriptor() ([]byte, []int) { return fileDescriptorSyncer, []int{7} }
 
 func init() {
 	proto.RegisterType((*RpcErr)(nil), "syncerpb.RpcErr")
 	proto.RegisterType((*RaftLogData)(nil), "syncerpb.RaftLogData")
 	proto.RegisterType((*RaftReqs)(nil), "syncerpb.RaftReqs")
+	proto.RegisterType((*RaftApplySnapReq)(nil), "syncerpb.RaftApplySnapReq")
+	proto.RegisterType((*RaftApplySnapStatusReq)(nil), "syncerpb.RaftApplySnapStatusReq")
+	proto.RegisterType((*RaftApplySnapStatusRsp)(nil), "syncerpb.RaftApplySnapStatusRsp")
 	proto.RegisterType((*SyncedRaftReq)(nil), "syncerpb.SyncedRaftReq")
 	proto.RegisterType((*SyncedRaftRsp)(nil), "syncerpb.SyncedRaftRsp")
 	proto.RegisterEnum("syncerpb.RaftLogType", RaftLogType_name, RaftLogType_value)
+	proto.RegisterEnum("syncerpb.RaftApplySnapStatus", RaftApplySnapStatus_name, RaftApplySnapStatus_value)
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -141,6 +236,9 @@ const _ = grpc.SupportPackageIsVersion4
 type CrossClusterAPIClient interface {
 	ApplyRaftReqs(ctx context.Context, in *RaftReqs, opts ...grpc.CallOption) (*RpcErr, error)
 	GetSyncedRaft(ctx context.Context, in *SyncedRaftReq, opts ...grpc.CallOption) (*SyncedRaftRsp, error)
+	NotifyTransferSnap(ctx context.Context, in *RaftApplySnapReq, opts ...grpc.CallOption) (*RpcErr, error)
+	NotifyApplySnap(ctx context.Context, in *RaftApplySnapReq, opts ...grpc.CallOption) (*RpcErr, error)
+	GetApplySnapStatus(ctx context.Context, in *RaftApplySnapStatusReq, opts ...grpc.CallOption) (*RaftApplySnapStatusRsp, error)
 }
 
 type crossClusterAPIClient struct {
@@ -169,11 +267,41 @@ func (c *crossClusterAPIClient) GetSyncedRaft(ctx context.Context, in *SyncedRaf
 	return out, nil
 }
 
+func (c *crossClusterAPIClient) NotifyTransferSnap(ctx context.Context, in *RaftApplySnapReq, opts ...grpc.CallOption) (*RpcErr, error) {
+	out := new(RpcErr)
+	err := grpc.Invoke(ctx, "/syncerpb.CrossClusterAPI/NotifyTransferSnap", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *crossClusterAPIClient) NotifyApplySnap(ctx context.Context, in *RaftApplySnapReq, opts ...grpc.CallOption) (*RpcErr, error) {
+	out := new(RpcErr)
+	err := grpc.Invoke(ctx, "/syncerpb.CrossClusterAPI/NotifyApplySnap", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *crossClusterAPIClient) GetApplySnapStatus(ctx context.Context, in *RaftApplySnapStatusReq, opts ...grpc.CallOption) (*RaftApplySnapStatusRsp, error) {
+	out := new(RaftApplySnapStatusRsp)
+	err := grpc.Invoke(ctx, "/syncerpb.CrossClusterAPI/GetApplySnapStatus", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for CrossClusterAPI service
 
 type CrossClusterAPIServer interface {
 	ApplyRaftReqs(context.Context, *RaftReqs) (*RpcErr, error)
 	GetSyncedRaft(context.Context, *SyncedRaftReq) (*SyncedRaftRsp, error)
+	NotifyTransferSnap(context.Context, *RaftApplySnapReq) (*RpcErr, error)
+	NotifyApplySnap(context.Context, *RaftApplySnapReq) (*RpcErr, error)
+	GetApplySnapStatus(context.Context, *RaftApplySnapStatusReq) (*RaftApplySnapStatusRsp, error)
 }
 
 func RegisterCrossClusterAPIServer(s *grpc.Server, srv CrossClusterAPIServer) {
@@ -216,6 +344,60 @@ func _CrossClusterAPI_GetSyncedRaft_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CrossClusterAPI_NotifyTransferSnap_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RaftApplySnapReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CrossClusterAPIServer).NotifyTransferSnap(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/syncerpb.CrossClusterAPI/NotifyTransferSnap",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CrossClusterAPIServer).NotifyTransferSnap(ctx, req.(*RaftApplySnapReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CrossClusterAPI_NotifyApplySnap_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RaftApplySnapReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CrossClusterAPIServer).NotifyApplySnap(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/syncerpb.CrossClusterAPI/NotifyApplySnap",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CrossClusterAPIServer).NotifyApplySnap(ctx, req.(*RaftApplySnapReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CrossClusterAPI_GetApplySnapStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RaftApplySnapStatusReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CrossClusterAPIServer).GetApplySnapStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/syncerpb.CrossClusterAPI/GetApplySnapStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CrossClusterAPIServer).GetApplySnapStatus(ctx, req.(*RaftApplySnapStatusReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _CrossClusterAPI_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "syncerpb.CrossClusterAPI",
 	HandlerType: (*CrossClusterAPIServer)(nil),
@@ -227,6 +409,18 @@ var _CrossClusterAPI_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSyncedRaft",
 			Handler:    _CrossClusterAPI_GetSyncedRaft_Handler,
+		},
+		{
+			MethodName: "NotifyTransferSnap",
+			Handler:    _CrossClusterAPI_NotifyTransferSnap_Handler,
+		},
+		{
+			MethodName: "NotifyApplySnap",
+			Handler:    _CrossClusterAPI_NotifyApplySnap_Handler,
+		},
+		{
+			MethodName: "GetApplySnapStatus",
+			Handler:    _CrossClusterAPI_GetApplySnapStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -287,10 +481,11 @@ func (m *RaftLogData) MarshalTo(dAtA []byte) (int, error) {
 		i++
 		i = encodeVarintSyncer(dAtA, i, uint64(m.Type))
 	}
-	if m.ClusterName != 0 {
-		dAtA[i] = 0x10
+	if len(m.ClusterName) > 0 {
+		dAtA[i] = 0x12
 		i++
-		i = encodeVarintSyncer(dAtA, i, uint64(m.ClusterName))
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.ClusterName)))
+		i += copy(dAtA[i:], m.ClusterName)
 	}
 	if len(m.RaftGroupName) > 0 {
 		dAtA[i] = 0x1a
@@ -348,6 +543,143 @@ func (m *RaftReqs) MarshalTo(dAtA []byte) (int, error) {
 			}
 			i += n
 		}
+	}
+	return i, nil
+}
+
+func (m *RaftApplySnapReq) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RaftApplySnapReq) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.ClusterName) > 0 {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.ClusterName)))
+		i += copy(dAtA[i:], m.ClusterName)
+	}
+	if len(m.RaftGroupName) > 0 {
+		dAtA[i] = 0x1a
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.RaftGroupName)))
+		i += copy(dAtA[i:], m.RaftGroupName)
+	}
+	if m.Term != 0 {
+		dAtA[i] = 0x20
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(m.Term))
+	}
+	if m.Index != 0 {
+		dAtA[i] = 0x28
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(m.Index))
+	}
+	if m.RaftTimestamp != 0 {
+		dAtA[i] = 0x30
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(m.RaftTimestamp))
+	}
+	if len(m.SyncAddr) > 0 {
+		dAtA[i] = 0x3a
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.SyncAddr)))
+		i += copy(dAtA[i:], m.SyncAddr)
+	}
+	if len(m.SyncPath) > 0 {
+		dAtA[i] = 0x42
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.SyncPath)))
+		i += copy(dAtA[i:], m.SyncPath)
+	}
+	if len(m.Data) > 0 {
+		dAtA[i] = 0x4a
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.Data)))
+		i += copy(dAtA[i:], m.Data)
+	}
+	return i, nil
+}
+
+func (m *RaftApplySnapStatusReq) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RaftApplySnapStatusReq) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.ClusterName) > 0 {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.ClusterName)))
+		i += copy(dAtA[i:], m.ClusterName)
+	}
+	if len(m.RaftGroupName) > 0 {
+		dAtA[i] = 0x1a
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.RaftGroupName)))
+		i += copy(dAtA[i:], m.RaftGroupName)
+	}
+	if m.Term != 0 {
+		dAtA[i] = 0x20
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(m.Term))
+	}
+	if m.Index != 0 {
+		dAtA[i] = 0x28
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(m.Index))
+	}
+	return i, nil
+}
+
+func (m *RaftApplySnapStatusRsp) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RaftApplySnapStatusRsp) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.Status != 0 {
+		dAtA[i] = 0x8
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(m.Status))
+	}
+	if m.Progress != 0 {
+		dAtA[i] = 0x10
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(m.Progress))
+	}
+	if len(m.StatusMsg) > 0 {
+		dAtA[i] = 0x1a
+		i++
+		i = encodeVarintSyncer(dAtA, i, uint64(len(m.StatusMsg)))
+		i += copy(dAtA[i:], m.StatusMsg)
 	}
 	return i, nil
 }
@@ -441,8 +773,9 @@ func (m *RaftLogData) Size() (n int) {
 	if m.Type != 0 {
 		n += 1 + sovSyncer(uint64(m.Type))
 	}
-	if m.ClusterName != 0 {
-		n += 1 + sovSyncer(uint64(m.ClusterName))
+	l = len(m.ClusterName)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
 	}
 	l = len(m.RaftGroupName)
 	if l > 0 {
@@ -472,6 +805,77 @@ func (m *RaftReqs) Size() (n int) {
 			l = e.Size()
 			n += 1 + l + sovSyncer(uint64(l))
 		}
+	}
+	return n
+}
+
+func (m *RaftApplySnapReq) Size() (n int) {
+	var l int
+	_ = l
+	l = len(m.ClusterName)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
+	}
+	l = len(m.RaftGroupName)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
+	}
+	if m.Term != 0 {
+		n += 1 + sovSyncer(uint64(m.Term))
+	}
+	if m.Index != 0 {
+		n += 1 + sovSyncer(uint64(m.Index))
+	}
+	if m.RaftTimestamp != 0 {
+		n += 1 + sovSyncer(uint64(m.RaftTimestamp))
+	}
+	l = len(m.SyncAddr)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
+	}
+	l = len(m.SyncPath)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
+	}
+	l = len(m.Data)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
+	}
+	return n
+}
+
+func (m *RaftApplySnapStatusReq) Size() (n int) {
+	var l int
+	_ = l
+	l = len(m.ClusterName)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
+	}
+	l = len(m.RaftGroupName)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
+	}
+	if m.Term != 0 {
+		n += 1 + sovSyncer(uint64(m.Term))
+	}
+	if m.Index != 0 {
+		n += 1 + sovSyncer(uint64(m.Index))
+	}
+	return n
+}
+
+func (m *RaftApplySnapStatusRsp) Size() (n int) {
+	var l int
+	_ = l
+	if m.Status != 0 {
+		n += 1 + sovSyncer(uint64(m.Status))
+	}
+	if m.Progress != 0 {
+		n += 1 + sovSyncer(uint64(m.Progress))
+	}
+	l = len(m.StatusMsg)
+	if l > 0 {
+		n += 1 + l + sovSyncer(uint64(l))
 	}
 	return n
 }
@@ -681,10 +1085,10 @@ func (m *RaftLogData) Unmarshal(dAtA []byte) error {
 				}
 			}
 		case 2:
-			if wireType != 0 {
+			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field ClusterName", wireType)
 			}
-			m.ClusterName = 0
+			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowSyncer
@@ -694,11 +1098,21 @@ func (m *RaftLogData) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.ClusterName |= (uint64(b) & 0x7F) << shift
+				stringLen |= (uint64(b) & 0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ClusterName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field RaftGroupName", wireType)
@@ -896,6 +1310,523 @@ func (m *RaftReqs) Unmarshal(dAtA []byte) error {
 			if err := m.RaftLog[len(m.RaftLog)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipSyncer(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RaftApplySnapReq) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowSyncer
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RaftApplySnapReq: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RaftApplySnapReq: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ClusterName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ClusterName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RaftGroupName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RaftGroupName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Term", wireType)
+			}
+			m.Term = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Term |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
+			}
+			m.Index = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Index |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RaftTimestamp", wireType)
+			}
+			m.RaftTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RaftTimestamp |= (int64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SyncAddr", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SyncAddr = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SyncPath", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SyncPath = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Data", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Data = append(m.Data[:0], dAtA[iNdEx:postIndex]...)
+			if m.Data == nil {
+				m.Data = []byte{}
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipSyncer(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RaftApplySnapStatusReq) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowSyncer
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RaftApplySnapStatusReq: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RaftApplySnapStatusReq: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ClusterName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ClusterName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RaftGroupName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RaftGroupName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Term", wireType)
+			}
+			m.Term = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Term |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
+			}
+			m.Index = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Index |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipSyncer(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RaftApplySnapStatusRsp) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowSyncer
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RaftApplySnapStatusRsp: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RaftApplySnapStatusRsp: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Status", wireType)
+			}
+			m.Status = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Status |= (RaftApplySnapStatus(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Progress", wireType)
+			}
+			m.Progress = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Progress |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StatusMsg", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowSyncer
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthSyncer
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.StatusMsg = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -1222,35 +2153,51 @@ var (
 func init() { proto.RegisterFile("syncer.proto", fileDescriptorSyncer) }
 
 var fileDescriptorSyncer = []byte{
-	// 476 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x84, 0x53, 0xcd, 0x6e, 0xd3, 0x4c,
-	0x14, 0xf5, 0xe4, 0xaf, 0xf9, 0x6e, 0x7e, 0x35, 0xea, 0x47, 0x4d, 0x16, 0x96, 0xb1, 0x04, 0x32,
-	0x2c, 0x02, 0x2a, 0x0b, 0x54, 0x89, 0x4d, 0x09, 0x55, 0x85, 0x80, 0x0a, 0x4d, 0x2b, 0x90, 0xd8,
-	0x44, 0xd3, 0x78, 0x6a, 0x2a, 0xc5, 0x9e, 0xe1, 0xce, 0x54, 0xc5, 0x4f, 0xc1, 0x96, 0x47, 0xea,
-	0xb2, 0x8f, 0x40, 0xc3, 0x86, 0xc7, 0x40, 0x33, 0x4e, 0xdc, 0x46, 0x44, 0x62, 0x77, 0xef, 0xb9,
-	0x47, 0xe7, 0xce, 0x39, 0xbe, 0x86, 0xae, 0x2e, 0xf2, 0x99, 0xc0, 0xb1, 0x42, 0x69, 0x24, 0x6d,
-	0x97, 0x9d, 0x3a, 0x1d, 0x6d, 0xa7, 0x32, 0x95, 0x0e, 0x7c, 0x6a, 0xab, 0x72, 0x1e, 0x7d, 0x82,
-	0x16, 0x53, 0xb3, 0x03, 0x44, 0x7a, 0x1f, 0xda, 0x02, 0x71, 0x6a, 0x0a, 0x25, 0x7c, 0x12, 0x92,
-	0xb8, 0xc9, 0xb6, 0x04, 0xe2, 0x49, 0xa1, 0xc4, 0x6a, 0x34, 0x93, 0x89, 0xf0, 0x6b, 0xd5, 0x68,
-	0x22, 0x13, 0x41, 0x77, 0xc0, 0x96, 0xd3, 0x4c, 0xa7, 0x7e, 0x3d, 0x24, 0xf1, 0x7f, 0xac, 0x25,
-	0x10, 0xdf, 0xeb, 0x34, 0xfa, 0x4d, 0xa0, 0xc3, 0xf8, 0x99, 0x79, 0x27, 0xd3, 0xd7, 0xdc, 0x70,
-	0xfa, 0x18, 0x1a, 0x95, 0x74, 0x7f, 0xf7, 0xff, 0xf1, 0xea, 0x5d, 0xe3, 0x25, 0xc9, 0x2e, 0x62,
-	0x8e, 0x42, 0x1f, 0x40, 0x77, 0x36, 0xbf, 0xd0, 0x46, 0xe0, 0x34, 0xe7, 0x59, 0xb9, 0xb2, 0xc1,
-	0x3a, 0x4b, 0xec, 0x88, 0x67, 0x82, 0x3e, 0x82, 0x01, 0xf2, 0x33, 0x33, 0x4d, 0x51, 0x5e, 0xa8,
-	0x92, 0x55, 0xae, 0xef, 0x59, 0xf8, 0xd0, 0xa2, 0x8e, 0x47, 0xa1, 0x61, 0x04, 0x66, 0x7e, 0xc3,
-	0x49, 0xb8, 0x9a, 0x6e, 0x43, 0xf3, 0x3c, 0x4f, 0xc4, 0x37, 0xbf, 0xe9, 0xc0, 0xb2, 0xa1, 0x0f,
-	0xa1, 0xef, 0x14, 0xcd, 0x79, 0x26, 0xb4, 0xe1, 0x99, 0xf2, 0x5b, 0x21, 0x89, 0xeb, 0xa5, 0xe0,
-	0xc9, 0x0a, 0xb4, 0x82, 0x09, 0x37, 0xdc, 0x1f, 0x84, 0x24, 0xee, 0x32, 0x57, 0x47, 0x2f, 0xa1,
-	0x6d, 0x4d, 0x30, 0xf1, 0x55, 0xd3, 0x67, 0xd0, 0x76, 0x32, 0x73, 0x99, 0xfa, 0x24, 0xac, 0xc7,
-	0x9d, 0x0d, 0x56, 0x6d, 0x1e, 0x6c, 0x0b, 0xcb, 0x26, 0xfa, 0x0c, 0xbd, 0x63, 0x4b, 0x48, 0x96,
-	0x1a, 0x7f, 0xd9, 0x27, 0xce, 0xd8, 0xbf, 0xec, 0xd7, 0x36, 0xd8, 0x8f, 0xf6, 0xd6, 0xb4, 0xb5,
-	0xaa, 0xf2, 0x20, 0x9b, 0xf2, 0xa8, 0xdd, 0xc9, 0xe3, 0xc9, 0x5e, 0xf5, 0xf9, 0xdc, 0x09, 0x50,
-	0xe8, 0x1f, 0xe4, 0x06, 0x8b, 0x23, 0x89, 0x19, 0x9f, 0x33, 0x7e, 0x39, 0xf4, 0xe8, 0x3d, 0xa0,
-	0x0e, 0x3b, 0xce, 0xb9, 0xd2, 0x5f, 0xa4, 0x61, 0xfc, 0xf2, 0xed, 0xc7, 0x21, 0xd9, 0xfd, 0x4e,
-	0x60, 0x30, 0x41, 0xa9, 0xf5, 0xa4, 0x7c, 0xf2, 0xfe, 0x87, 0x37, 0xf4, 0x05, 0xf4, 0xf6, 0x95,
-	0x9a, 0x17, 0x55, 0x50, 0x74, 0x3d, 0x16, 0x8b, 0x8d, 0x86, 0x77, 0x30, 0x77, 0x94, 0x91, 0x47,
-	0x27, 0xd0, 0x3b, 0x14, 0xe6, 0xd6, 0x05, 0xdd, 0xb9, 0x25, 0xad, 0xe5, 0x36, 0xda, 0x3c, 0xd0,
-	0x2a, 0xf2, 0x5e, 0xf9, 0x57, 0x37, 0x81, 0x77, 0x7d, 0x13, 0x78, 0x57, 0x8b, 0x80, 0x5c, 0x2f,
-	0x02, 0xf2, 0x73, 0x11, 0x90, 0x1f, 0xbf, 0x02, 0xef, 0xb4, 0xe5, 0x7e, 0x83, 0xe7, 0x7f, 0x02,
-	0x00, 0x00, 0xff, 0xff, 0xb8, 0x4b, 0x7f, 0x06, 0x36, 0x03, 0x00, 0x00,
+	// 727 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xcc, 0x55, 0xcd, 0x6e, 0x13, 0x3d,
+	0x14, 0x8d, 0xf3, 0x9f, 0x9b, 0xa4, 0x19, 0xf9, 0xeb, 0xd7, 0x0e, 0x41, 0x8d, 0xc2, 0x48, 0xa0,
+	0xd0, 0x45, 0x41, 0x45, 0x08, 0x55, 0x62, 0x13, 0xd2, 0x52, 0x21, 0x68, 0xa9, 0x26, 0x85, 0x4a,
+	0xdd, 0x44, 0x6e, 0xc6, 0x99, 0x46, 0x24, 0x63, 0xd7, 0x76, 0x54, 0xf2, 0x0a, 0x48, 0xec, 0x79,
+	0x12, 0x9e, 0xa1, 0xcb, 0x3e, 0x02, 0x2d, 0x1b, 0x1e, 0x80, 0x25, 0x0b, 0x64, 0x4f, 0x32, 0x49,
+	0x68, 0xca, 0xcf, 0x0a, 0x76, 0xf6, 0xb9, 0xc7, 0xe7, 0xfa, 0x1e, 0xdf, 0x3b, 0x03, 0x05, 0x39,
+	0x0c, 0xda, 0x54, 0xac, 0x71, 0xc1, 0x14, 0xc3, 0xd9, 0x70, 0xc7, 0x8f, 0xca, 0x8b, 0x3e, 0xf3,
+	0x99, 0x01, 0xef, 0xe9, 0x55, 0x18, 0x77, 0x0e, 0x20, 0xed, 0xf2, 0xf6, 0x96, 0x10, 0xf8, 0x06,
+	0x64, 0xa9, 0x10, 0x2d, 0x35, 0xe4, 0xd4, 0x46, 0x55, 0x54, 0x4b, 0xb9, 0x19, 0x2a, 0xc4, 0xfe,
+	0x90, 0xd3, 0x71, 0xa8, 0xcd, 0x3c, 0x6a, 0xc7, 0xa3, 0x50, 0x83, 0x79, 0x14, 0x2f, 0x83, 0x5e,
+	0xb6, 0xfa, 0xd2, 0xb7, 0x13, 0x55, 0x54, 0xcb, 0xb9, 0x69, 0x2a, 0xc4, 0x8e, 0xf4, 0x9d, 0x2f,
+	0x08, 0xf2, 0x2e, 0xe9, 0xa8, 0x17, 0xcc, 0xdf, 0x24, 0x8a, 0xe0, 0xbb, 0x90, 0x8c, 0xa4, 0x17,
+	0xd6, 0xff, 0x5f, 0x1b, 0xdf, 0x6b, 0x6d, 0x44, 0xd2, 0x89, 0x5c, 0x43, 0xc1, 0xb7, 0xa0, 0xd0,
+	0xee, 0x0d, 0xa4, 0xa2, 0xa2, 0x15, 0x90, 0x7e, 0x98, 0x32, 0xe7, 0xe6, 0x47, 0xd8, 0x2e, 0xe9,
+	0x53, 0x7c, 0x07, 0x4a, 0x82, 0x74, 0x54, 0xcb, 0x17, 0x6c, 0xc0, 0x43, 0x56, 0x98, 0xbe, 0xa8,
+	0xe1, 0x6d, 0x8d, 0x1a, 0x1e, 0x86, 0xa4, 0xa2, 0xa2, 0x6f, 0x27, 0xab, 0xa8, 0x96, 0x74, 0xcd,
+	0x1a, 0x2f, 0x42, 0xaa, 0x1b, 0x78, 0xf4, 0xad, 0x9d, 0x32, 0x60, 0xb8, 0xc1, 0xb7, 0x61, 0xc1,
+	0x28, 0xaa, 0x6e, 0x9f, 0x4a, 0x45, 0xfa, 0xdc, 0x4e, 0x57, 0x51, 0x2d, 0x11, 0x0a, 0xee, 0x8f,
+	0x41, 0x2d, 0xe8, 0x11, 0x45, 0xec, 0x52, 0x15, 0xd5, 0x0a, 0xae, 0x59, 0x3b, 0x8f, 0x21, 0xab,
+	0x8b, 0x70, 0xe9, 0x89, 0xc4, 0xf7, 0x21, 0x6b, 0x64, 0x7a, 0xcc, 0xb7, 0x51, 0x35, 0x51, 0xcb,
+	0xcf, 0x29, 0x55, 0xfb, 0xe1, 0x66, 0x44, 0xb8, 0x71, 0xbe, 0x21, 0xb0, 0x74, 0xa0, 0xce, 0x79,
+	0x6f, 0xd8, 0x0c, 0x08, 0x77, 0xe9, 0xc9, 0x3f, 0x6d, 0xc1, 0x4d, 0xc8, 0xe9, 0x8a, 0x5a, 0xc4,
+	0xf3, 0x84, 0x9d, 0x31, 0x29, 0x4d, 0x97, 0xd5, 0x3d, 0x4f, 0x44, 0x41, 0x4e, 0xd4, 0xb1, 0x9d,
+	0x9d, 0x04, 0xf7, 0x88, 0x3a, 0x8e, 0xcc, 0xcb, 0x4d, 0x99, 0xf7, 0x1e, 0xc1, 0xd2, 0x4c, 0xf9,
+	0x4d, 0x45, 0xd4, 0x40, 0xfe, 0x2d, 0x13, 0x9c, 0x77, 0xd7, 0xdc, 0x47, 0x72, 0xfc, 0x10, 0xd2,
+	0xd2, 0x6c, 0x46, 0x4d, 0xbc, 0x32, 0xfb, 0xb2, 0x3f, 0x9e, 0x18, 0x91, 0x71, 0x19, 0xb2, 0x5c,
+	0x30, 0x5f, 0x50, 0x29, 0x4d, 0x09, 0x49, 0x37, 0xda, 0xe3, 0x15, 0x80, 0x90, 0x35, 0x35, 0x41,
+	0xb9, 0x10, 0xd1, 0x43, 0x74, 0x08, 0xc5, 0xa6, 0x4e, 0xe1, 0x8d, 0xfa, 0xeb, 0x8a, 0x25, 0xe8,
+	0xb7, 0x2c, 0x89, 0xcf, 0xb1, 0xc4, 0xd9, 0x98, 0xd1, 0x96, 0x3c, 0xf2, 0x08, 0xcd, 0xf3, 0x28,
+	0x3e, 0xe5, 0xd1, 0xea, 0x46, 0x34, 0xda, 0xe6, 0xf3, 0x80, 0x61, 0x61, 0x2b, 0x50, 0x62, 0xb8,
+	0xcb, 0x44, 0x9f, 0xf4, 0x5c, 0x72, 0x6a, 0xc5, 0xf0, 0x12, 0x60, 0x83, 0x69, 0x3f, 0xe4, 0x31,
+	0x53, 0x2e, 0x39, 0x7d, 0xfe, 0xda, 0x42, 0xab, 0x1f, 0x11, 0xfc, 0x37, 0xc7, 0x2c, 0x6c, 0x41,
+	0xc1, 0x40, 0xaf, 0x82, 0x37, 0x01, 0x3b, 0x0d, 0xac, 0x18, 0xb6, 0x61, 0xd1, 0x20, 0x07, 0xa4,
+	0xab, 0xba, 0x81, 0xbf, 0x2f, 0x48, 0x20, 0x3b, 0x54, 0x58, 0x28, 0x8a, 0x8c, 0xa1, 0xe6, 0xa0,
+	0xdd, 0xa6, 0x52, 0x5a, 0xf1, 0x48, 0x65, 0x74, 0xc6, 0x4a, 0x44, 0xc8, 0x98, 0x93, 0xc4, 0x25,
+	0xc8, 0x1b, 0xe4, 0x29, 0xe9, 0xf6, 0xa8, 0x67, 0xa5, 0x22, 0xca, 0x4e, 0x57, 0x4a, 0x7d, 0x28,
+	0xad, 0x0b, 0x32, 0xc8, 0xcb, 0x81, 0x62, 0x1d, 0x8f, 0x28, 0x6a, 0x65, 0xd6, 0xbf, 0xc6, 0xa1,
+	0xd4, 0x10, 0x4c, 0xca, 0x46, 0xe8, 0x75, 0x7d, 0xef, 0x19, 0x7e, 0x04, 0x45, 0xc3, 0x8b, 0xa6,
+	0x1f, 0xcf, 0x76, 0x84, 0xc6, 0xca, 0xd6, 0x14, 0x66, 0xbe, 0xb4, 0x4e, 0x0c, 0x37, 0xa0, 0xb8,
+	0x4d, 0xd5, 0xc4, 0x7e, 0xbc, 0x3c, 0x21, 0xcd, 0x3c, 0x78, 0x79, 0x7e, 0x40, 0x72, 0x27, 0x86,
+	0x37, 0x01, 0xef, 0x32, 0xd5, 0xed, 0x4c, 0x7c, 0x08, 0x08, 0xc7, 0xe5, 0x6b, 0x9a, 0x52, 0x8b,
+	0xcd, 0xbb, 0x4a, 0x1d, 0x4a, 0xa1, 0x4a, 0xc4, 0xfc, 0x63, 0x89, 0x43, 0xc0, 0xdb, 0xf4, 0xca,
+	0x8b, 0x56, 0x7f, 0x3e, 0x1d, 0xf4, 0xa4, 0xfc, 0x0b, 0x86, 0x2e, 0xf2, 0x89, 0x7d, 0x76, 0x51,
+	0x89, 0x9d, 0x5f, 0x54, 0x62, 0x67, 0x97, 0x15, 0x74, 0x7e, 0x59, 0x41, 0x9f, 0x2e, 0x2b, 0xe8,
+	0xc3, 0xe7, 0x4a, 0xec, 0x28, 0x6d, 0x7e, 0x60, 0x0f, 0xbe, 0x07, 0x00, 0x00, 0xff, 0xff, 0x1d,
+	0x48, 0xec, 0xbe, 0xf0, 0x06, 0x00, 0x00,
 }

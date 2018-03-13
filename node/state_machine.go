@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -18,8 +19,18 @@ import (
 	"github.com/coreos/etcd/pkg/wait"
 )
 
+const (
+	maxDBBatchCmdNum = 100
+	dbWriteSlow      = time.Millisecond * 200
+)
+
+// this error is used while the raft is applying the remote raft logs and notify we should
+// not update the remote raft term-index state.
+var errIgnoredRemoteApply = errors.New("remote raft apply should be ignored")
+var errRemoteSnapTransferFailed = errors.New("remote raft snapshot transfer failed")
+
 type StateMachine interface {
-	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool
+	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
 	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
@@ -49,12 +60,12 @@ type emptySM struct {
 	w wait.Wait
 }
 
-func (esm *emptySM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool {
+func (esm *emptySM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	for _, req := range reqList.Reqs {
 		reqID := req.Header.ID
 		esm.w.Trigger(reqID, nil)
 	}
-	return false
+	return false, nil
 }
 
 func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
@@ -214,7 +225,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	if clusterInfo == nil {
 		return errors.New("cluster info is not available.")
 	}
-	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, fullNS, localID, stopChan, raftSnapshot, retry)
+	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, fullNS, localID, stopChan, raftSnapshot, retry, false)
 	if syncAddr == "" && syncDir == "" {
 		return errors.New("no backup available from others")
 	}
@@ -237,7 +248,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 func GetValidBackupInfo(machineConfig MachineConfig,
 	clusterInfo common.IClusterInfo, fullNS string,
 	localID uint64, stopChan chan struct{},
-	raftSnapshot raftpb.Snapshot, retryIndex int) (string, string) {
+	raftSnapshot raftpb.Snapshot, retryIndex int, useRsyncForLocal bool) (string, string) {
 	// we need find the right backup data match with the raftsnapshot
 	// for each cluster member, it need check the term+index and the backup meta to
 	// make sure the data is valid
@@ -290,9 +301,14 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 				nodeLog.Infof("data dir can not be same if on local: %v, %v", ssi, machineConfig)
 				continue
 			}
-			// local node with different directory
-			syncAddrList = append(syncAddrList, "")
-			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, fullNS))
+			if useRsyncForLocal {
+				syncAddrList = append(syncAddrList, ssi.RemoteAddr)
+				syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, fullNS))
+			} else {
+				// local node with different directory
+				syncAddrList = append(syncAddrList, "")
+				syncDirList = append(syncDirList, path.Join(ssi.DataRoot, fullNS))
+			}
 		} else {
 			// for remote snapshot, we do rsync from remote module
 			syncAddrList = append(syncAddrList, ssi.RemoteAddr)
@@ -334,7 +350,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	return errors.New("failed to restore from snapshot")
 }
 
-func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) bool {
+func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	forceBackup := false
 	start := time.Now()
 	batching := false
@@ -348,19 +364,20 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 		if nodeLog.Level() >= common.LOG_DETAIL {
 			kvsm.Debugf("recv write from cluster syncer at (%v-%v): %v", term, index, reqList.String())
 		}
-		// TODO: check original term and index
-		// if less or equal than last, we need log and skip
-
 		// TODO: here we need compare the key timestamp in this cluster and the timestamp from raft request to handle
 		// the conflict change between two cluster.
 		//
 	}
+	var retErr error
 	for reqIndex, req := range reqList.Reqs {
 		reqTs := ts
 		if reqTs == 0 {
 			reqTs = req.Header.Timestamp
 		}
 		reqID := req.Header.ID
+		if reqID == 0 {
+			reqID = reqList.ReqId
+		}
 		if req.Header.DataType == 0 {
 			cmd, err := redcon.Parse(req.Data)
 			if err != nil {
@@ -371,9 +388,8 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 				_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
 				_, ok := dupCheckMap[string(pk)]
 				handled := false
-				// TODO: table counter can be batched???
-				if kvsm.store.IsBatchableWrite(cmdName) &&
-					len(batchReqIDList) < maxBatchCmdNum &&
+				if rockredis.IsBatchableWrite(cmdName) &&
+					len(batchReqIDList) < maxDBBatchCmdNum &&
 					!ok {
 					if !batching {
 						err := kvsm.store.BeginBatchWrite()
@@ -431,8 +447,8 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 				} else {
 					v, err := h(cmd, reqTs)
 					cmdCost := time.Since(cmdStart)
-					if cmdCost >= time.Second || nodeLog.Level() > common.LOG_DETAIL ||
-						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > time.Millisecond*100) {
+					if cmdCost > dbWriteSlow || nodeLog.Level() > common.LOG_DETAIL ||
+						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
 						kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 					}
 					kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
@@ -451,20 +467,8 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 				batchReqIDList, batchReqRspList, dupCheckMap = kvsm.processBatching(lastBatchCmd, reqList, batchStart,
 					batchReqIDList, batchReqRspList, dupCheckMap)
 			}
-			if req.Header.DataType == int32(HTTPReq) {
-				var p httpProposeData
-				err := json.Unmarshal(req.Data, &p)
-				if err != nil {
-					kvsm.Infof("failed to unmarshal http propose: %v", req.String())
-					kvsm.w.Trigger(reqID, err)
-				}
-				if p.ProposeOp == HttpProposeOp_Backup {
-					kvsm.Infof("got force backup request")
-					forceBackup = true
-					kvsm.w.Trigger(reqID, nil)
-				} else {
-					kvsm.w.Trigger(reqID, errUnknownData)
-				}
+			if req.Header.DataType == int32(CustomReq) {
+				forceBackup, retErr = kvsm.handleCustomRequest(req, reqID)
 			} else if req.Header.DataType == int32(SchemaChangeReq) {
 				kvsm.Infof("handle schema change: %v", string(req.Data))
 				var sc SchemaChange
@@ -497,14 +501,101 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	if cost >= proposeTimeout/2 {
 		kvsm.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
 	}
-	if reqList.Type == FromClusterSyncer {
-		// TODO: update the orig term-index
-	}
 	// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
 	if reqList.ReqId > 0 {
 		kvsm.w.Trigger(reqList.ReqId, nil)
 	}
-	return forceBackup
+	return forceBackup, retErr
+}
+
+func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint64) (bool, error) {
+	var p customProposeData
+	var forceBackup bool
+	var retErr error
+	err := json.Unmarshal(req.Data, &p)
+	if err != nil {
+		kvsm.Infof("failed to unmarshal custom propose: %v, err: %v", req.String(), err)
+		kvsm.w.Trigger(reqID, err)
+		return forceBackup, retErr
+	}
+	if p.ProposeOp == ProposeOp_Backup {
+		kvsm.Infof("got force backup request")
+		forceBackup = true
+		kvsm.w.Trigger(reqID, nil)
+	} else if p.ProposeOp == ProposeOp_TransferRemoteSnap {
+		localPath := path.Join(kvsm.store.GetBackupDir(), "remote")
+		kvsm.Infof("transfer remote snap request: %v to local: %v", p, localPath)
+		retErr = errRemoteSnapTransferFailed
+		err := os.MkdirAll(localPath, common.DIR_PERM)
+		// trigger early to allow client api return quickly
+		// the transfer status already be saved.
+		kvsm.w.Trigger(reqID, err)
+		if err == nil {
+			// how to make sure the client is not timeout while transferring
+			err = common.RunFileSync(p.SyncAddr,
+				path.Join(rockredis.GetBackupDir(p.SyncPath),
+					rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)),
+				localPath,
+			)
+			if err != nil {
+				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)
+			} else {
+				// TODO: check the transferred snapshot file
+				//rockredis.IsLocalBackupOK()
+				retErr = nil
+			}
+		}
+	} else if p.ProposeOp == ProposeOp_ApplyRemoteSnap {
+		kvsm.Infof("begin apply remote snap : %v", p)
+		retErr = errIgnoredRemoteApply
+		// check if there is the same term-index backup on local
+		// if not, we can just rename remote snap to this name.
+		// if already exist, we need handle rename
+		backupDir := kvsm.store.GetBackupDir()
+		checkpointDir := rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)
+		fullPath := path.Join(backupDir, checkpointDir)
+		remotePath := path.Join(backupDir, "remote", checkpointDir)
+		tmpLocalPath := path.Join(fullPath, "tmplocal")
+		_, err := os.Stat(remotePath)
+		if err != nil {
+			kvsm.Infof("apply remote snap failed : %v", err)
+			kvsm.w.Trigger(reqID, err)
+			return forceBackup, retErr
+		}
+		oldOK, err := kvsm.store.IsLocalBackupOK(p.RemoteTerm, p.RemoteIndex)
+		if oldOK {
+			err = os.Rename(fullPath, tmpLocalPath)
+			if err != nil {
+				kvsm.Infof("apply remote snap failed : %v", err)
+				kvsm.w.Trigger(reqID, err)
+				return forceBackup, retErr
+			}
+			defer os.Rename(tmpLocalPath, fullPath)
+		}
+		err = os.Rename(remotePath, fullPath)
+		if err != nil {
+			kvsm.Infof("apply remote snap failed : %v", err)
+			kvsm.w.Trigger(reqID, err)
+			return forceBackup, retErr
+		}
+		defer os.Rename(fullPath, remotePath)
+		newOK, err := kvsm.store.IsLocalBackupOK(p.RemoteTerm, p.RemoteIndex)
+		if err != nil || !newOK {
+			kvsm.Infof("apply remote snap failed : %v", err)
+			kvsm.w.Trigger(reqID, err)
+			return forceBackup, retErr
+		}
+		err = kvsm.store.Restore(p.RemoteTerm, p.RemoteIndex)
+		kvsm.w.Trigger(reqID, err)
+		if err != nil {
+			kvsm.Infof("apply remote snap failed: %v", err)
+		} else {
+			retErr = nil
+		}
+	} else {
+		kvsm.w.Trigger(reqID, errUnknownData)
+	}
+	return forceBackup, retErr
 }
 
 // return if configure changed and whether need force backup
@@ -524,7 +615,7 @@ func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaft
 			kvsm.w.Trigger(rid, batchReqRspList[idx])
 		}
 	}
-	if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
+	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
 		kvsm.Infof("slow batch write command: %v, batch: %v, cost: %v",
 			cmdName, len(batchReqIDList), batchCost)
 	}
