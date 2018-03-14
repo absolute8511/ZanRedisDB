@@ -620,7 +620,7 @@ func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaft
 			cmdName, len(batchReqIDList), batchCost)
 	}
 	if len(batchReqIDList) > 0 {
-		kvsm.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+		kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Nanoseconds()/1000, int64(len(batchReqIDList)))
 	}
 	batchReqIDList = batchReqIDList[:0]
 	batchReqRspList = batchReqRspList[:0]

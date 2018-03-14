@@ -18,6 +18,10 @@ func EnableForTest() {
 	enableTest = true
 }
 
+const (
+	logSendBufferLen = 100
+)
+
 type logSyncerSM struct {
 	clusterInfo    common.IClusterInfo
 	fullNS         string
@@ -42,9 +46,9 @@ func NewLogSyncerSM(opts *KVOptions, machineConfig MachineConfig, localID uint64
 		machineConfig:  machineConfig,
 		ID:             localID,
 		clusterInfo:    clusterInfo,
-		sendCh:         make(chan *BatchInternalRaftRequest, 10),
+		sendCh:         make(chan *BatchInternalRaftRequest, logSendBufferLen),
 		sendStop:       make(chan struct{}),
-		waitSendLogChs: make(chan chan struct{}),
+		waitSendLogChs: make(chan chan struct{}, 1),
 		//dataDir:       path.Join(opts.DataDir, "logsyncer"),
 	}
 
@@ -127,7 +131,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 		sm.lgSender.Stop()
 		sm.Infof("raft log syncer send loop exit")
 	}()
-	raftLogs := make([]*BatchInternalRaftRequest, 0, 100)
+	raftLogs := make([]*BatchInternalRaftRequest, 0, logSendBufferLen)
 	var last *BatchInternalRaftRequest
 	state, err := sm.lgSender.getRemoteSyncedRaft(sm.sendStop)
 	if err != nil {
@@ -140,16 +144,8 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 		case req := <-sm.sendCh:
 			last = req
 			raftLogs = append(raftLogs, req)
-			if nodeLog.Level() >= common.LOG_DETAIL {
+			if nodeLog.Level() > common.LOG_DETAIL {
 				sm.Debugf("batching raft log: %v in batch: %v", req.String(), len(raftLogs))
-			}
-			if len(raftLogs) > 100 {
-				handled = true
-				if state.SyncedTerm >= last.OrigTerm && state.SyncedIndex >= last.OrigIndex {
-					// remote is already replayed this raft log
-				} else {
-					err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
-				}
 			}
 		default:
 			if len(raftLogs) == 0 {
@@ -163,8 +159,21 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 						sm.Debugf("batching raft log: %v in batch: %v", req.String(), len(raftLogs))
 					}
 				case waitCh := <-sm.waitSendLogChs:
-					sm.Infof("wake up waiting buffered send logs")
-					close(waitCh)
+					select {
+					case req := <-sm.sendCh:
+						last = req
+						raftLogs = append(raftLogs, req)
+						go func() {
+							select {
+							// put back to wait next again
+							case sm.waitSendLogChs <- waitCh:
+							case <-sm.sendStop:
+							}
+						}()
+					default:
+						sm.Infof("wake up waiting buffered send logs since no more logs")
+						close(waitCh)
+					}
 				}
 				continue
 			}
@@ -193,9 +202,37 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 	}
 }
 
-func (kvsm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
+func (sm *logSyncerSM) waitBufferedLogs(timeout time.Duration) error {
+	waitCh := make(chan struct{})
+	sm.Infof("wait buffered send logs")
+	var waitT <-chan time.Time
+	if timeout > 0 {
+		tm := time.NewTimer(timeout)
+		defer tm.Stop()
+		waitT = tm.C
+	}
+	select {
+	case sm.waitSendLogChs <- waitCh:
+	case <-waitT:
+		return errors.New("wait log commit timeout")
+	case <-sm.sendStop:
+		return common.ErrStopped
+	}
+	select {
+	case <-waitCh:
+	case <-waitT:
+		return errors.New("wait log commit timeout")
+	case <-sm.sendStop:
+		return common.ErrStopped
+	}
+	return nil
+}
+
+// snapshot should wait all buffered commit logs
+func (sm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
 	var si KVSnapInfo
-	return &si, nil
+	err := sm.waitBufferedLogs(time.Second * 10)
+	return &si, err
 }
 
 func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
@@ -219,18 +256,12 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		return nil
 	}
 
-	waitCh := make(chan struct{})
-	sm.Infof("wait buffered send logs")
-	select {
-	case sm.waitSendLogChs <- waitCh:
-	case <-stop:
-		return common.ErrStopped
+	sm.Infof("wait buffered send logs while restore from snapshot")
+	err = sm.waitBufferedLogs(0)
+	if err != nil {
+		return err
 	}
-	select {
-	case <-waitCh:
-	case <-stop:
-		return common.ErrStopped
-	}
+
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
