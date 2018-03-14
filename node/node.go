@@ -60,147 +60,12 @@ type internalReq struct {
 }
 
 type customProposeData struct {
-	ProposeOp     int
-	NeedBackup    bool
-	SyncAddr      string
-	SyncPath      string
-	RemoteTerm    uint64
-	RemoteIndex   uint64
-	RemoteCluster string
-}
-
-type SyncedState struct {
-	SyncedTerm  uint64 `json:"synced_term,omitempty"`
-	SyncedIndex uint64 `json:"synced_index,omitempty"`
-}
-
-const (
-	ApplySnapUnknown int = iota
-	ApplySnapBegin
-	ApplySnapTransferring
-	ApplySnapTransferred
-	ApplySnapApplying
-	ApplySnapDone
-	ApplySnapFailed
-)
-
-var applyStatusMsgs = []string{
-	"unknown",
-	"begin",
-	"transferring",
-	"transferred",
-	"applying",
-	"done",
-	"failed",
-}
-
-type SnapApplyStatus struct {
-	SS          SyncedState
-	StatusCode  int
-	Status      string
-	UpdatedTime time.Time
-}
-type remoteSyncedStateMgr struct {
-	sync.RWMutex
-	remoteSyncedStates      map[string]SyncedState
-	remoteSnapshotsApplying map[string]*SnapApplyStatus
-}
-
-func newRemoteSyncedStateMgr() *remoteSyncedStateMgr {
-	return &remoteSyncedStateMgr{
-		remoteSyncedStates:      make(map[string]SyncedState),
-		remoteSnapshotsApplying: make(map[string]*SnapApplyStatus),
-	}
-}
-
-func (rss *remoteSyncedStateMgr) RemoveApplyingSnap(name string, state SyncedState) {
-	rss.Lock()
-	sas, ok := rss.remoteSnapshotsApplying[name]
-	if ok && sas.SS == state {
-		delete(rss.remoteSnapshotsApplying, name)
-	}
-	rss.Unlock()
-}
-
-func (rss *remoteSyncedStateMgr) AddApplyingSnap(name string, state SyncedState) (*SnapApplyStatus, bool) {
-	added := false
-	rss.Lock()
-	sas, ok := rss.remoteSnapshotsApplying[name]
-	canAdd := false
-	if !ok {
-		canAdd = true
-	} else if sas.StatusCode == ApplySnapDone {
-		delete(rss.remoteSnapshotsApplying, name)
-		canAdd = true
-	} else if sas.StatusCode == ApplySnapBegin || sas.StatusCode == ApplySnapFailed || sas.StatusCode == ApplySnapApplying {
-		// begin -> transferring, may lost if proposal dropped,
-		// so we check the time and restart
-		if time.Since(sas.UpdatedTime) > proposeTimeout*10 {
-			delete(rss.remoteSnapshotsApplying, name)
-			canAdd = true
-		}
-	}
-	if canAdd {
-		sas = &SnapApplyStatus{
-			SS:          state,
-			StatusCode:  ApplySnapBegin,
-			Status:      applyStatusMsgs[1],
-			UpdatedTime: time.Now(),
-		}
-		rss.remoteSnapshotsApplying[name] = sas
-		added = true
-	}
-	rss.Unlock()
-	return sas, added
-}
-
-func (rss *remoteSyncedStateMgr) UpdateApplyingSnapStatus(name string, ss SyncedState, status int) {
-	rss.Lock()
-	sas, ok := rss.remoteSnapshotsApplying[name]
-	if ok && status < len(applyStatusMsgs) && ss == sas.SS {
-		if sas.StatusCode != status {
-			sas.StatusCode = status
-			sas.Status = applyStatusMsgs[status]
-			sas.UpdatedTime = time.Now()
-		}
-	}
-	rss.Unlock()
-}
-
-func (rss *remoteSyncedStateMgr) GetApplyingSnap(name string) (*SnapApplyStatus, bool) {
-	rss.Lock()
-	sas, ok := rss.remoteSnapshotsApplying[name]
-	rss.Unlock()
-	return sas, ok
-}
-
-func (rss *remoteSyncedStateMgr) UpdateState(name string, state SyncedState) {
-	rss.Lock()
-	rss.remoteSyncedStates[name] = state
-	rss.Unlock()
-}
-func (rss *remoteSyncedStateMgr) GetState(name string) (SyncedState, bool) {
-	rss.RLock()
-	state, ok := rss.remoteSyncedStates[name]
-	rss.RUnlock()
-	return state, ok
-}
-func (rss *remoteSyncedStateMgr) RestoreStates(ss map[string]SyncedState) {
-	rss.Lock()
-	rss.remoteSyncedStates = make(map[string]SyncedState, len(ss))
-	for k, v := range rss.remoteSyncedStates {
-		rss.remoteSyncedStates[k] = v
-	}
-	rss.Unlock()
-}
-func (rss *remoteSyncedStateMgr) Clone() map[string]SyncedState {
-	rss.RLock()
-	clone := make(map[string]SyncedState, len(rss.remoteSyncedStates))
-	for k, v := range rss.remoteSyncedStates {
-		clone[k] = v
-	}
-	rss.RUnlock()
-	return clone
+	ProposeOp   int
+	NeedBackup  bool
+	SyncAddr    string
+	SyncPath    string
+	RemoteTerm  uint64
+	RemoteIndex uint64
 }
 
 // a key-value node backed by raft
@@ -961,61 +826,19 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
 
 		isRemoteSnapTransfer := false
 		isRemoteSnapApply := false
-		var cr customProposeData
-		ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex}
 		if reqList.Type == FromClusterSyncer {
-			oldState, ok := nd.remoteSyncedStates.GetState(reqList.OrigCluster)
-			if ok {
-				// check if retrying duplicate req, we can just ignore old retry
-				if reqList.OrigTerm < oldState.SyncedTerm {
-					nd.rn.Infof("request %v ignored since older than synced:%v",
-						reqList.OrigTerm, oldState)
-					return false
-				}
-				if reqList.OrigIndex <= oldState.SyncedIndex {
-					nd.rn.Infof("request %v ignored since older than synced index :%v",
-						reqList.OrigIndex, oldState.SyncedIndex)
-					return false
-				}
+			isApplied := nd.isAlreadyApplied(reqList)
+			// check if retrying duplicate req, we can just ignore old retry
+			if isApplied {
+				nd.rn.Infof("request %v-%v ignored since older than synced", reqList.OrigTerm, reqList.OrigIndex)
+				return false
 			}
-			for _, req := range reqList.Reqs {
-				if req.Header.DataType == int32(CustomReq) {
-					err := json.Unmarshal(req.Data, &cr)
-					if err != nil {
-						nd.rn.Infof("failed to unmarshal custom propose: %v, err:%v", req.String(), err)
-					}
-					if cr.ProposeOp == ProposeOp_TransferRemoteSnap {
-						isRemoteSnapTransfer = true
-						nd.remoteSyncedStates.UpdateApplyingSnapStatus(cr.RemoteCluster, ss, ApplySnapTransferring)
-						break
-					} else if cr.ProposeOp == ProposeOp_ApplyRemoteSnap {
-						isRemoteSnapApply = true
-					}
-				}
-			}
+			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
 		}
 		var retErr error
 		forceBackup, retErr = nd.sm.ApplyRaftRequest(reqList, evnt.Term, evnt.Index, nd.stopChan)
 		if reqList.Type == FromClusterSyncer {
-			// for remote snapshot transfer, we need wait apply success before update sync state
-			if !isRemoteSnapTransfer {
-				if retErr != errIgnoredRemoteApply {
-					nd.remoteSyncedStates.UpdateState(reqList.OrigCluster, ss)
-					if isRemoteSnapApply {
-						nd.remoteSyncedStates.UpdateApplyingSnapStatus(cr.RemoteCluster, ss, ApplySnapDone)
-					}
-				} else {
-					if isRemoteSnapApply {
-						nd.remoteSyncedStates.UpdateApplyingSnapStatus(cr.RemoteCluster, ss, ApplySnapFailed)
-					}
-				}
-			} else {
-				status := ApplySnapTransferred
-				if retErr == errRemoteSnapTransferFailed {
-					status = ApplySnapFailed
-				}
-				nd.remoteSyncedStates.UpdateApplyingSnapStatus(cr.RemoteCluster, ss, status)
-			}
+			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
 		}
 	}
 	return forceBackup
@@ -1175,11 +998,6 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 	np.snapi = np.appliedi
 }
 
-func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64) {
-	state, _ := nd.remoteSyncedStates.GetState(name)
-	return state.SyncedTerm, state.SyncedIndex
-}
-
 func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 	si, err := nd.sm.GetSnapshot(term, index)
 	if err != nil {
@@ -1189,104 +1007,6 @@ func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 	si.RemoteSyncedStates = nd.remoteSyncedStates.Clone()
 	si.Learners = nd.rn.GetLearners()
 	return si, nil
-}
-
-func (nd *KVNode) ApplyRemoteSnapshot(name string, term uint64, index uint64) error {
-	// restore the state machine from transferred snap data when transfer success.
-	// we do not need restore other cluster member info here.
-	nd.rn.Infof("begin recovery from remote cluster %v snapshot here: %v-%v", name, term, index)
-	oldS, ok := nd.remoteSyncedStates.GetApplyingSnap(name)
-	if !ok {
-		return errors.New("no remote snapshot waiting apply")
-	}
-	if oldS.SS.SyncedTerm != term || oldS.SS.SyncedIndex != index {
-		nd.rn.Infof("remote cluster %v snapshot mismatch: %v-%v, old: %v", name, term, index, oldS)
-		return errors.New("apply remote snapshot term-index mismatch")
-	}
-	if oldS.StatusCode != ApplySnapTransferred {
-		nd.rn.Infof("remote cluster %v snapshot not ready for apply: %v", name, oldS)
-		return errors.New("apply remote snapshot status invalid")
-	}
-	// set the snap status to applying and the snap status will be updated if apply done or failed
-	nd.remoteSyncedStates.UpdateApplyingSnapStatus(name, oldS.SS, ApplySnapApplying)
-	var reqList BatchInternalRaftRequest
-	reqList.OrigCluster = name
-	reqList.ReqNum = 1
-	reqList.Timestamp = time.Now().UnixNano()
-	p := &customProposeData{
-		ProposeOp:     ProposeOp_ApplyRemoteSnap,
-		NeedBackup:    true,
-		RemoteTerm:    term,
-		RemoteIndex:   index,
-		RemoteCluster: name,
-	}
-	d, _ := json.Marshal(p)
-	h := &RequestHeader{
-		ID:       0,
-		DataType: int32(CustomReq),
-	}
-	raftReq := InternalRaftRequest{
-		Header: h,
-		Data:   d,
-	}
-	reqList.Reqs = append(reqList.Reqs, &raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
-	if err != nil {
-		nd.rn.Infof("cluster %v applying snap %v-%v failed", name, term, index)
-		// just wait next retry
-	} else {
-		nd.rn.Infof("cluster %v applying snap %v-%v done", name, term, index)
-	}
-	return nil
-}
-
-func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64, syncAddr string, syncPath string) error {
-	ss := SyncedState{SyncedTerm: term, SyncedIndex: index}
-	// set the snap status to begin and the snap status will be updated if transfer begin
-	// if transfer failed to propose, after some timeout it will be removed while adding
-	old, added := nd.remoteSyncedStates.AddApplyingSnap(name, ss)
-	if !added {
-		nd.rn.Infof("cluster %v applying snap %v already running while apply %v", name, old, ss)
-		return nil
-	}
-
-	p := &customProposeData{
-		ProposeOp:     ProposeOp_TransferRemoteSnap,
-		NeedBackup:    false,
-		SyncAddr:      syncAddr,
-		SyncPath:      syncPath,
-		RemoteTerm:    term,
-		RemoteIndex:   index,
-		RemoteCluster: name,
-	}
-	d, _ := json.Marshal(p)
-	var reqList BatchInternalRaftRequest
-	reqList.OrigCluster = name
-	reqList.ReqNum = 1
-	reqList.Timestamp = time.Now().UnixNano()
-
-	h := &RequestHeader{
-		ID:       0,
-		DataType: int32(CustomReq),
-	}
-	raftReq := InternalRaftRequest{
-		Header: h,
-		Data:   d,
-	}
-	reqList.Reqs = append(reqList.Reqs, &raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
-	if err != nil {
-		nd.rn.Infof("cluster %v applying transfer snap %v failed", name, ss)
-	} else {
-		nd.rn.Infof("cluster %v applying transfer snap %v done", name, ss)
-	}
-	return nil
-}
-
-func (nd *KVNode) GetApplyRemoteSnapStatus(name string) (*SnapApplyStatus, bool) {
-	return nd.remoteSyncedStates.GetApplyingSnap(name)
 }
 
 func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
