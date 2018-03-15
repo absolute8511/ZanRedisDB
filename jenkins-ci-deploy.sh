@@ -22,6 +22,8 @@ os=$(go env GOOS)
 goversion=$(go version | awk '{print $3}')
 LATEST="zankv-latest.$os-$arch.$goversion"
 
+etcdurl=$ETCD_URL
+
 scl enable devtoolset-3 bash
 
 rocksdb=`pwd`/rocksdb
@@ -46,11 +48,18 @@ git pull
 ./dist.sh
 popd
 
-if [ ! -f "`pwd`/etcd-v2.3.8-linux-amd64/etcd" ]; then
+if [ ! -f "`pwd`/etcd-v2.3.8-linux-amd64/etcd" ] && [ -z "$etcdurl" ]; then
   rm -rf etcd-v2.3.8-linux-amd64
   wget -c https://github.com/coreos/etcd/releases/download/v2.3.8/etcd-v2.3.8-linux-amd64.tar.gz
   tar -xvzf etcd-v2.3.8-linux-amd64.tar.gz 
 fi
+
+if [ -z "$etcdurl" ]; then
+  etcdurl="http://127.0.0.1:2379"
+fi
+
+echo $etcdurl
+echo $ETCD_URL
 
 cp -fp `go env GOPATH`/src/github.com/absolute8511/ZanRedisDB/dist/$LATEST.tar.gz .
 killall zankv || true
@@ -65,13 +74,13 @@ rm -rf pd.config
 rm -rf zankv.config
 tar -xvzf $LATEST.tar.gz && mv $LATEST zankv
 
-cat <<EOF >> pd.config
+cat <<EOF > pd.config
 
 http_address = "0.0.0.0:18001"
 broadcast_interface = "eth0"
 cluster_id = "jenkins-test-zanredis-deploy"
 
-cluster_leadership_addresses = "http://127.0.0.1:2379"
+cluster_leadership_addresses = "$etcdurl"
 
 log_level = 3
 
@@ -82,12 +91,12 @@ auto_balance_and_migrate = true
 balance_interval = ["1", "23"]
 EOF
 
-cat <<EOF >> zankv.config
+cat <<EOF > zankv.config
 {
     "server_conf": {
         "broadcast_interface":"eth0",
         "cluster_id":"jenkins-test-zanredis-deploy",
-        "etcd_cluster_addresses":"http://127.0.0.1:2379",
+        "etcd_cluster_addresses":"$etcdurl",
         "data_dir":"./zankv-data",
         "data_rsync_module":"zankv",
         "redis_api_port": 12381,
@@ -107,8 +116,11 @@ EOF
 
 mkdir zankv-data
 
-BUILD_ID=dontKillMe nohup ./etcd-v2.3.8-linux-amd64/etcd -name=test-etcd0 -initial-advertise-peer-urls=http://127.0.0.1:2380 -listen-client-urls=http://127.0.0.1:2379 -advertise-client-urls=http://127.0.0.1:2379 -listen-peer-urls=http://127.0.0.1:2380 -initial-cluster="test-etcd0=http://127.0.0.1:2380" -initial-cluster-state=new --data-dir ./test-etcd > etcd.log 2>&1 &
-sleep 3
+if [ -z "$ETCD_URL" ]; then
+  BUILD_ID=dontKillMe nohup ./etcd-v2.3.8-linux-amd64/etcd -name=test-etcd0 -initial-advertise-peer-urls=http://127.0.0.1:2380 -listen-client-urls=http://127.0.0.1:2379 -advertise-client-urls=http://127.0.0.1:2379 -listen-peer-urls=http://127.0.0.1:2380 -initial-cluster="test-etcd0=http://127.0.0.1:2380" -initial-cluster-state=new --data-dir ./test-etcd > etcd.log 2>&1 &
+  sleep 3
+fi
+
 BUILD_ID=dontKillMe nohup ./zankv/bin/placedriver -config=./pd.config > pd.log 2>&1 &
 sleep 3
 BUILD_ID=dontKillMe nohup ./zankv/bin/zankv -config=./zankv.config > zankv.log 2>&1 &
