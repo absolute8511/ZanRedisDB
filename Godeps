@@ -19,7 +19,6 @@ github.com/siddontang/goredis
 github.com/mreiferson/go-options
 github.com/BurntSushi/toml
 github.com/shirou/gopsutil
-golang.org/x/sys
 github.com/stretchr/testify/assert
 github.com/tidwall/gjson
 github.com/tidwall/sjson
