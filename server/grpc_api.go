@@ -18,6 +18,9 @@ var (
 	proposeTimeout = time.Second * 4
 )
 
+var syncClusterNetStats common.WriteStats
+var syncClusterTotalStats common.WriteStats
+
 var applyStatusMapping = map[int]syncerpb.RaftApplySnapStatus{
 	0: syncerpb.ApplyUnknown,
 	1: syncerpb.ApplyWaitingTransfer,
@@ -42,6 +45,7 @@ func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq)
 
 func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*syncerpb.RpcErr, error) {
 	var rpcErr syncerpb.RpcErr
+	receivedTs := time.Now()
 	for _, r := range reqs.RaftLog {
 		if sLog.Level() >= common.LOG_DETAIL {
 			sLog.Debugf("applying raft log from remote cluster syncer: %v", r.String())
@@ -63,8 +67,8 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 
 		// raft timestamp should be the same with the real raft request in data
 		logStart := r.RaftTimestamp
-		localStart := time.Now().UnixNano()
-		var cost int64
+		syncNetLatency := receivedTs.UnixNano() - logStart
+		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / 1000)
 		err := kv.Node.ProposeRawAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
 		if err != nil {
 			sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
@@ -72,13 +76,8 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 			rpcErr.ErrMsg = err.Error()
 			return &rpcErr, nil
 		}
-		cost = time.Now().UnixNano() - localStart
-		if cost >= int64(proposeTimeout.Nanoseconds())/2 {
-			sLog.Infof("slow for batch propose: %v, cost %v", r.RaftGroupName, cost)
-		}
-		// TODO: store log sync latency between clusters
-		syncLatency := cost + localStart - logStart
-		_ = syncLatency
+		syncLatency := time.Now().UnixNano() - logStart
+		syncClusterTotalStats.UpdateLatencyStats(syncLatency / 1000)
 	}
 	return &rpcErr, nil
 }

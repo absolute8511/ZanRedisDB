@@ -361,6 +361,15 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
+func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	netStat := syncClusterNetStats.Copy()
+	totalStat := syncClusterTotalStats.Copy()
+	return struct {
+		SyncNetLatency *common.WriteStats `json:"sync_net_latency"`
+		SyncAllLatency *common.WriteStats `json:"sync_all_latency"`
+	}{netStat, totalStat}, nil
+}
+
 func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -398,6 +407,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
+	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 

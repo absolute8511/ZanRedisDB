@@ -479,16 +479,17 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 			return err
 		}
 	}
+	start := time.Now()
 	ch := nd.w.Register(reqList.ReqId)
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
 	}
+	defer cancel()
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
 	if err != nil {
 		return err
 	}
-	defer cancel()
 	var ok bool
 	var rsp interface{}
 	select {
@@ -510,6 +511,15 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 			err = ErrProposalCanceled
 			nd.rn.Infof("propose canceled ")
 		}
+	}
+	cost := time.Since(start).Nanoseconds()
+	for _, req := range reqList.Reqs {
+		if req.Header.DataType == int32(RedisReq) {
+			nd.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), cost/1000)
+		}
+	}
+	if cost >= int64(proposeTimeout.Nanoseconds())/2 {
+		nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
 	}
 	return err
 }
