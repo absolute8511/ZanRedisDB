@@ -173,7 +173,10 @@ func GenNodeID(n *NodeInfo, extra string) string {
 	tmpbuf.WriteString(":")
 	tmpbuf.WriteString(n.NodeIP)
 	tmpbuf.WriteString(":")
-	tmpbuf.WriteString(n.RpcPort)
+	// rpc port is not used in older version,
+	// in order to make it compatible we should keep rpc port empty
+	// it is enough to identify the node id with ip+redisport+httpport
+	//tmpbuf.WriteString(n.RpcPort)
 	tmpbuf.WriteString(":")
 	tmpbuf.WriteString(n.RedisPort)
 	tmpbuf.WriteString(":")

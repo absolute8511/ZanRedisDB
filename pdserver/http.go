@@ -246,7 +246,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 func (s *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	stable := false
 	if !s.pdCoord.IsMineLeader() {
-		sLog.Infof("request from remote %v should request to leader", req.RemoteAddr)
+		sLog.Debugf("request from remote %v should request to leader", req.RemoteAddr)
 		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
 	}
 	stable = s.pdCoord.IsClusterStable()
