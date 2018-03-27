@@ -81,6 +81,13 @@ type NamespaceStats struct {
 	IsLeader          bool                   `json:"is_leader"`
 }
 
+type LogSyncStats struct {
+	Name     string `json:"name"`
+	Term     uint64 `json:"term"`
+	Index    uint64 `json:"index"`
+	IsLeader bool   `json:"is_leader"`
+}
+
 type ScanStats struct {
 	ScanCount uint64 `json:"scan_count"`
 	// <1024us, 2ms, 4ms, 8ms, 16ms, 32ms, 64ms, 128ms, 256ms, 512ms, 1024ms, 2048ms, 4s, 8s

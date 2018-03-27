@@ -442,6 +442,34 @@ func (nsm *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
 	return nsStats
 }
 
+func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string) []common.LogSyncStats {
+	if srcClusterName == "" {
+		return nil
+	}
+	nsm.mutex.RLock()
+	nsStats := make([]common.LogSyncStats, 0, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
+		term, index := n.Node.GetRemoteClusterSyncedRaft(srcClusterName)
+		if term == 0 && index == 0 {
+			continue
+		}
+		var s common.LogSyncStats
+		s.Name = k
+		s.IsLeader = n.Node.IsLead()
+		s.Term = term
+		s.Index = index
+		nsStats = append(nsStats, s)
+	}
+	nsm.mutex.RUnlock()
+	return nsStats
+}
+
 func (nsm *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
 	nsm.mutex.RLock()
 	nsStats := make([]common.NamespaceStats, 0, len(nsm.kvNodes))

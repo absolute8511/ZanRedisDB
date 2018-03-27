@@ -388,10 +388,19 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	netStat := syncClusterNetStats.Copy()
 	totalStat := syncClusterTotalStats.Copy()
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+	logSyncedStats := s.GetLogSyncStats(leaderOnly, reqParams.Get("cluster"))
 	return struct {
-		SyncNetLatency *common.WriteStats `json:"sync_net_latency"`
-		SyncAllLatency *common.WriteStats `json:"sync_all_latency"`
-	}{netStat, totalStat}, nil
+		SyncNetLatency *common.WriteStats    `json:"sync_net_latency"`
+		SyncAllLatency *common.WriteStats    `json:"sync_all_latency"`
+		LogSynced      []common.LogSyncStats `json:"log_synced,omitempty"`
+	}{netStat, totalStat, logSyncedStats}, nil
 }
 
 func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
