@@ -2,6 +2,7 @@ package pdnode_coord
 
 import (
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -301,4 +302,30 @@ func (pdCoord *PDCoordinator) AddHIndexSchema(namespace string, table string, hi
 
 func (pdCoord *PDCoordinator) DelHIndexSchema(namespace string, table string, hindexName string) error {
 	return pdCoord.delHIndexSchema(namespace, table, hindexName)
+}
+
+func (pdCoord *PDCoordinator) RemoveLearnerFromNs(ns string, pidStr string, nid string) error {
+	if pidStr == "**" {
+		oldMeta, err := pdCoord.register.GetNamespaceMetaInfo(ns)
+		if err != nil {
+			cluster.CoordLog().Infof("get namespace key %v failed :%v", ns, err)
+			return err
+		}
+		for i := 0; i < oldMeta.PartitionNum; i++ {
+			err = pdCoord.removeNsLearnerFromNode(ns, i, nid)
+			if err != nil {
+				cluster.CoordLog().Infof("namespace %v-%v remove learner %v failed :%v", ns, i, nid, err)
+				return err
+			}
+		}
+		return nil
+	}
+	if pidStr == "" {
+		return errors.New("missing partition")
+	}
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return err
+	}
+	return pdCoord.removeNsLearnerFromNode(ns, pid, nid)
 }

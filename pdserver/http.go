@@ -73,6 +73,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/datanodes", common.Decorate(s.getDataNodes, common.V1))
 	router.Handle("GET", "/listpd", common.Decorate(s.listPDNodes, common.V1))
 	router.Handle("GET", "/query/:namespace", common.Decorate(s.doQueryNamespace, debugLog, common.V1))
+	router.Handle("DELETE", "/namespace/rmlearner", common.Decorate(s.doRemoveNamespaceLearner, log, common.V1))
 
 	// cluster prefix url means only handled by leader of pd
 	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
@@ -602,6 +603,32 @@ func (s *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request,
 	}
 	return nil, nil
 
+}
+
+func (s *Server) doRemoveNamespaceLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	ns := reqParams.Get("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
+	}
+
+	if !common.IsValidNamespaceName(ns) {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
+	}
+
+	pidStr := reqParams.Get("partition")
+	nid := reqParams.Get("nid")
+
+	err = s.pdCoord.RemoveLearnerFromNs(ns, pidStr, nid)
+	if err != nil {
+		sLog.Infof("namespace %v remove learner %v failed: %v", ns, nid, err)
+		return nil, common.HttpErr{Code: 400, Text: err.Error()}
+	}
+	return nil, nil
 }
 
 func (s *Server) doSetStableNodeNum(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {

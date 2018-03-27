@@ -190,10 +190,6 @@ func (dc *DataCoordinator) GetCurrentPD() cluster.NodeInfo {
 	return dc.pdLeader
 }
 
-func (dc *DataCoordinator) GetAllPDNodes() ([]cluster.NodeInfo, error) {
-	return dc.register.GetAllPDNodes()
-}
-
 func (dc *DataCoordinator) watchPD() {
 	defer dc.wg.Done()
 	leaderChan := make(chan *cluster.NodeInfo, 1)

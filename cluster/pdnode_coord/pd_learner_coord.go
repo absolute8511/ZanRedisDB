@@ -1,6 +1,7 @@
 package pdnode_coord
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -160,12 +161,21 @@ func (pdCoord *PDCoordinator) addNsLearnerToNode(origNSInfo *cluster.PartitionMe
 }
 
 // remove learner should be manual since learner is not expected to change too often
-func (pdCoord *PDCoordinator) removeNsLearnerFromNode(origNSInfo *cluster.PartitionMetaInfo, nid string) *cluster.CoordErr {
+func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid string) error {
+	origNSInfo, err := pdCoord.register.GetNamespacePartInfo(ns, pid)
+	if err != nil {
+		return err
+	}
 	if _, ok := origNSInfo.RaftIDs[nid]; !ok {
-		return ErrNamespaceRaftIDNotFound
+		return ErrNamespaceRaftIDNotFound.ToErrorType()
+	}
+	nsInfo := origNSInfo.GetCopy()
+	currentNodes, _ := pdCoord.getCurrentLearnerNodes()
+	if _, ok := currentNodes[nid]; ok {
+		cluster.CoordLog().Infof("namespace %v: mark learner node %v removing before stopped", nsInfo.GetDesp(), nid)
+		return errors.New("removing learner node should be stopped first")
 	}
 	role := pdCoord.learnerRole
-	nsInfo := origNSInfo.GetCopy()
 	cluster.CoordLog().Infof("namespace %v: mark learner role %v node %v removing , current : %v", nsInfo.GetDesp(), role, nid,
 		nsInfo.LearnerNodes)
 
@@ -182,11 +192,11 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(origNSInfo *cluster.Partit
 	nsInfo.LearnerNodes[role] = old
 	delete(nsInfo.RaftIDs, nid)
 
-	err := pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+	err = pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
 		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
 	if err != nil {
 		cluster.CoordLog().Infof("update namespace %v replica info failed: %v", nsInfo.GetDesp(), err.Error())
-		return &cluster.CoordErr{ErrMsg: err.Error(), ErrCode: cluster.RpcNoErr, ErrType: cluster.CoordRegisterErr}
+		return err
 	} else {
 		cluster.CoordLog().Infof("namespace %v: mark learner role %v removing from node:%v done", nsInfo.GetDesp(),
 			role, nid, nsInfo.GetISR())
