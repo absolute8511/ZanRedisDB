@@ -236,6 +236,7 @@ func (dc *DataCoordinator) loadLocalNamespaceData() error {
 		if err == cluster.ErrKeyNotFound {
 			return nil
 		}
+		cluster.CoordLog().Infof("load namespace failed: %v", err)
 		return err
 	}
 	sortedParts := make(PartitionList, 0)
@@ -246,6 +247,7 @@ func (dc *DataCoordinator) loadLocalNamespaceData() error {
 		}
 		sort.Sort(sortedParts)
 		for _, nsInfo := range sortedParts {
+			cluster.CoordLog().Debugf("found namespace: %v", nsInfo)
 			localNamespace := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 			shouldLoad := dc.isNamespaceShouldStart(nsInfo, localNamespace)
 			if !shouldLoad {
