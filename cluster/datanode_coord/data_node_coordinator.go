@@ -1188,20 +1188,20 @@ func (dc *DataCoordinator) IsRemovingMember(m common.MemberInfo) (bool, error) {
 	return false, nil
 }
 
-func (dc *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string) error {
+func (dc *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string) (bool, error) {
 	if dc.learnerRole != "" {
 		cluster.CoordLog().Warningf("should never update me for leader in learner role: %v", fullNS)
-		return nil
+		return false, nil
 	}
 	namespace, pid := common.GetNamespaceAndPartition(fullNS)
 	if namespace == "" {
 		cluster.CoordLog().Warningf("namespace invalid: %v", fullNS)
-		return ErrNamespaceInvalid
+		return false, ErrNamespaceInvalid
 	}
 	nid, oldEpoch, err := dc.register.GetNamespaceLeader(namespace, pid)
 	if err != nil {
 		if err != cluster.ErrKeyNotFound {
-			return err
+			return false, err
 		}
 	}
 	var rl cluster.RealLeader
@@ -1209,11 +1209,11 @@ func (dc *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string) error {
 	if nid != "" {
 		regID := cluster.ExtractRegIDFromGenID(nid)
 		if regID == dc.GetMyRegID() && nid == rl.Leader {
-			return nil
+			return false, nil
 		}
 	}
 	_, err = dc.register.UpdateNamespaceLeader(namespace, pid, rl, cluster.EpochType(oldEpoch))
-	return err
+	return true, err
 }
 
 // before shutdown, we transfer the leader to others to reduce

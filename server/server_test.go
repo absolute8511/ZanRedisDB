@@ -33,8 +33,8 @@ func (ci *fakeClusterInfo) GetSnapshotSyncInfo(fullNS string) ([]common.Snapshot
 	return ci.snapSyncs, nil
 }
 
-func (ci *fakeClusterInfo) UpdateMeForNamespaceLeader(fullNS string) error {
-	return nil
+func (ci *fakeClusterInfo) UpdateMeForNamespaceLeader(fullNS string) (bool, error) {
+	return false, nil
 }
 
 type testClusterInfo struct {

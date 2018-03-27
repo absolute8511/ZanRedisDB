@@ -572,7 +572,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		tmpLocalPath := path.Join(fullPath, "tmplocal")
 		_, err := os.Stat(remotePath)
 		if err != nil {
-			kvsm.Infof("apply remote snap failed : %v", err)
+			kvsm.Infof("apply remote snap %v failed since backup data error: %v", p, err)
 			kvsm.w.Trigger(reqID, err)
 			return forceBackup, retErr
 		}
@@ -580,7 +580,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		if oldOK {
 			err = os.Rename(fullPath, tmpLocalPath)
 			if err != nil {
-				kvsm.Infof("apply remote snap failed : %v", err)
+				kvsm.Infof("apply remote snap %v failed to rename path : %v", p, err)
 				kvsm.w.Trigger(reqID, err)
 				return forceBackup, retErr
 			}
@@ -588,21 +588,21 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		}
 		err = os.Rename(remotePath, fullPath)
 		if err != nil {
-			kvsm.Infof("apply remote snap failed : %v", err)
+			kvsm.Infof("apply remote snap %v failed : %v", p, err)
 			kvsm.w.Trigger(reqID, err)
 			return forceBackup, retErr
 		}
 		defer os.Rename(fullPath, remotePath)
 		newOK, err := kvsm.store.IsLocalBackupOK(p.RemoteTerm, p.RemoteIndex)
 		if err != nil || !newOK {
-			kvsm.Infof("apply remote snap failed : %v", err)
+			kvsm.Errorf("apply remote snap failed since remote backup is not ok: %v", err)
 			kvsm.w.Trigger(reqID, err)
 			return forceBackup, retErr
 		}
 		err = kvsm.store.Restore(p.RemoteTerm, p.RemoteIndex)
 		kvsm.w.Trigger(reqID, err)
 		if err != nil {
-			kvsm.Infof("apply remote snap failed: %v", err)
+			kvsm.Errorf("apply remote snap failed to restore backup: %v", err)
 		} else {
 			retErr = nil
 		}

@@ -1073,10 +1073,10 @@ func (nd *KVNode) ReportMeLeaderToCluster() {
 		return
 	}
 	if nd.rn.IsLead() {
-		err := nd.clusterInfo.UpdateMeForNamespaceLeader(nd.ns)
+		changed, err := nd.clusterInfo.UpdateMeForNamespaceLeader(nd.ns)
 		if err != nil {
 			nd.rn.Infof("update raft leader to me failed: %v", err)
-		} else {
+		} else if changed {
 			nd.rn.Infof("update %v raft leader to me : %v", nd.ns, nd.rn.config.ID)
 		}
 	}

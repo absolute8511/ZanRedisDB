@@ -324,7 +324,7 @@ type SnapshotSyncInfo struct {
 type IClusterInfo interface {
 	GetClusterName() string
 	GetSnapshotSyncInfo(fullNS string) ([]SnapshotSyncInfo, error)
-	UpdateMeForNamespaceLeader(fullNS string) error
+	UpdateMeForNamespaceLeader(fullNS string) (bool, error)
 }
 
 type ScanResult struct {
