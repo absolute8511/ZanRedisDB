@@ -36,6 +36,7 @@ var (
 	waitEmergencyMigrateInterval   = time.Second * 60
 	waitRemoveRemovingNodeInterval = time.Minute * 5
 	nsCheckInterval                = time.Minute
+	nsCheckLearnerInterval         = time.Second * 10
 	balanceCheckInterval           = time.Minute * 10
 )
 
@@ -69,9 +70,15 @@ type PDCoordinator struct {
 	autoBalance            int32
 	stableNodeNum          int32
 	dataDir                string
+	learnerRole            string
 }
 
 func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Options) *PDCoordinator {
+	if n.LearnerRole == "" {
+		n.ID = cluster.GenNodeID(n, "pd")
+	} else {
+		n.ID = cluster.GenNodeID(n, "pd-learner-"+n.LearnerRole)
+	}
 	coord := &PDCoordinator{
 		clusterKey:             clusterID,
 		myNode:                 *n,
@@ -82,6 +89,7 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 		checkNamespaceFailChan: make(chan cluster.NamespaceNameInfo, 3),
 		stopChan:               make(chan struct{}),
 		monitorChan:            make(chan struct{}),
+		learnerRole:            n.LearnerRole,
 	}
 	coord.dpm = NewDataPlacement(coord)
 	if opts != nil {
@@ -116,8 +124,22 @@ func (pdCoord *PDCoordinator) Start() error {
 			return err
 		}
 	}
-	pdCoord.wg.Add(1)
-	go pdCoord.handleLeadership()
+
+	if pdCoord.learnerRole != "" {
+		pdCoord.wg.Add(1)
+		go func() {
+			defer pdCoord.wg.Done()
+			pdCoord.handleDataNodes(pdCoord.stopChan, false)
+		}()
+		pdCoord.wg.Add(1)
+		go func() {
+			defer pdCoord.wg.Done()
+			pdCoord.checkNamespacesForLearner(pdCoord.stopChan)
+		}()
+	} else {
+		pdCoord.wg.Add(1)
+		go pdCoord.handleLeadership()
+	}
 	return nil
 }
 
@@ -308,6 +330,14 @@ func (pdCoord *PDCoordinator) getCurrentNodes(tags map[string]interface{}) map[s
 func (pdCoord *PDCoordinator) getCurrentNodesWithRemoving() (map[string]cluster.NodeInfo, int64) {
 	pdCoord.nodesMutex.RLock()
 	currentNodes := pdCoord.dataNodes
+	currentNodesEpoch := atomic.LoadInt64(&pdCoord.nodesEpoch)
+	pdCoord.nodesMutex.RUnlock()
+	return currentNodes, currentNodesEpoch
+}
+
+func (pdCoord *PDCoordinator) getCurrentLearnerNodes() (map[string]cluster.NodeInfo, int64) {
+	pdCoord.nodesMutex.RLock()
+	currentNodes := pdCoord.learnerNodes
 	currentNodesEpoch := atomic.LoadInt64(&pdCoord.nodesEpoch)
 	pdCoord.nodesMutex.RUnlock()
 	return currentNodes, currentNodesEpoch

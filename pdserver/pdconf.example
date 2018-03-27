@@ -27,3 +27,7 @@ auto_balance_and_migrate = true
 
 ## the time period (in hour) that the balance is allowed.
 balance_interval = ["4", "5"]
+
+## learner role is used for learner placement, currently only role_log_syncer supported
+## learner role will never became master and never balance data node which is not learner.
+#learner_role = "role_log_syncer"

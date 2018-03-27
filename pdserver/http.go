@@ -20,6 +20,7 @@ type nodeInfo struct {
 	Hostname         string `json:"hostname"`
 	RedisPort        string `json:"redis_port"`
 	HTTPPort         string `json:"http_port"`
+	GrpcPort         string `json:"grpc_port"`
 	Version          string `json:"version"`
 	DCInfo           string `json:"dc_info"`
 }
@@ -133,6 +134,7 @@ func (s *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httpr
 			Version:          n.Version,
 			RedisPort:        n.RedisPort,
 			HTTPPort:         n.HttpPort,
+			GrpcPort:         n.RpcPort,
 			DCInfo:           dcInfo,
 		}
 		nodes = append(nodes, dn)
@@ -205,9 +207,11 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 			hostname := ""
 			version := ""
 			dcInfo := ""
+			grpcPort := ""
 			if ok {
 				hostname = n.Hostname
 				version = n.Version
+				grpcPort = n.RpcPort
 				dc, ok := n.Tags[cluster.DCInfoTag]
 				if ok {
 					dcInfo, _ = dc.(string)
@@ -219,6 +223,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 				Version:          version,
 				RedisPort:        redisPort,
 				HTTPPort:         httpPort,
+				GrpcPort:         grpcPort,
 				DCInfo:           dcInfo,
 			}
 			if nsInfo.GetRealLeader() == nid {

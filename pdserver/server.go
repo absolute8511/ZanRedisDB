@@ -40,9 +40,10 @@ func NewServer(conf *ServerConfig) *Server {
 	}
 
 	myNode := &cluster.NodeInfo{
-		NodeIP:   conf.BroadcastAddr,
-		Hostname: hname,
-		Version:  common.VerBinary,
+		NodeIP:      conf.BroadcastAddr,
+		Hostname:    hname,
+		Version:     common.VerBinary,
+		LearnerRole: conf.LearnerRole,
 	}
 
 	if conf.ClusterID == "" {
@@ -66,7 +67,6 @@ func NewServer(conf *ServerConfig) *Server {
 	}
 
 	sLog.Infof("Start with broadcast ip:%s", myNode.NodeIP)
-	myNode.ID = cluster.GenNodeID(myNode, "pd")
 
 	clusterOpts := &cluster.Options{}
 	clusterOpts.DataDir = conf.DataDir
