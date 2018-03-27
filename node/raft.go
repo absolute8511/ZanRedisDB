@@ -1000,6 +1000,19 @@ func (rc *raftNode) GetMembersAndLeader() ([]*common.MemberInfo, *common.MemberI
 	return mems, lm
 }
 
+func (rc *raftNode) IsLearnerMember(m common.MemberInfo) bool {
+	rc.memMutex.Lock()
+	mm, ok := rc.learnerMems[m.ID]
+	rc.memMutex.Unlock()
+	if !ok {
+		return false
+	}
+	if mm.ID == m.ID && mm.NodeID == m.NodeID && mm.GroupID == m.GroupID {
+		return true
+	}
+	return false
+}
+
 func (rc *raftNode) IsMember(m common.MemberInfo) bool {
 	rc.memMutex.Lock()
 	mm, ok := rc.members[m.ID]

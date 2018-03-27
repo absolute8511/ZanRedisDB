@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -349,6 +350,107 @@ func TestFollowerLost(t *testing.T) {
 	// should have different replica id
 	followerNode = follower.GetNamespaceFromFullName(ns + "-0")
 	assert.NotEqual(t, followerNode.GetRaftID(), oldFollowerReplicaID)
+}
+
+func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
+	node.EnableForTest()
+	ensureClusterReady(t)
+
+	time.Sleep(time.Second)
+	ns := "test_add_learner"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	leader, leaderNode := waitForLeader(t, ns, 0)
+	assert.NotNil(t, leader)
+
+	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 3)
+	defer func() {
+		for _, kv := range remoteSrvs {
+			kv.s.Stop()
+		}
+		if remotePD != nil {
+			remotePD.Stop()
+		}
+		if strings.Contains(remoteTmpDir, "rocksdb-test") {
+			t.Logf("removing: %v", remoteTmpDir)
+			os.RemoveAll(remoteTmpDir)
+		}
+	}()
+	pduri = "http://127.0.0.1:" + pdRemoteHttpPort
+	ensureDataNodesReady(t, pduri, len(remoteSrvs))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	learnerPD, learnerSrvs, tmpDir := startTestClusterForLearner(t, 2)
+	defer func() {
+		for _, kv := range learnerSrvs {
+			kv.s.Stop()
+		}
+		if learnerPD != nil {
+			learnerPD.Stop()
+		}
+		if strings.Contains(tmpDir, "learner-test") {
+			t.Logf("removing: %v", tmpDir)
+			os.RemoveAll(tmpDir)
+		}
+	}()
+	start := time.Now()
+	remoteNode := remoteSrvs[0].s.GetNamespaceFromFullName(ns + "-0")
+	assert.NotNil(t, remoteNode)
+	time.Sleep(time.Second * 3)
+	for {
+		time.Sleep(time.Second)
+		if time.Since(start) > time.Minute {
+			t.Errorf("timeout waiting add learner")
+			break
+		}
+		commitID := leaderNode.Node.GetCommittedIndex()
+		done := 0
+		for _, srv := range learnerSrvs {
+			nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
+			if nsNode != nil {
+				lrns := nsNode.GetLearners()
+				t.Log(lrns)
+				if len(lrns) == len(learnerSrvs) {
+					found := false
+					for _, l := range lrns {
+						t.Log(*l)
+						if l.NodeID == srv.s.GetCoord().GetMyRegID() {
+							found = true
+							assert.Equal(t, nsNode.GetRaftID(), l.ID)
+						}
+					}
+					assert.True(t, found, "should found myself in learners")
+					_, remoteIndex := remoteNode.Node.GetRemoteClusterSyncedRaft(TestClusterName)
+					learnerCI := nsNode.Node.GetCommittedIndex()
+					t.Logf("commit %v , current remote :%v, learner: %v", commitID, remoteIndex, learnerCI)
+					if remoteIndex >= commitID && learnerCI == remoteIndex {
+						time.Sleep(time.Second)
+						done++
+					}
+				} else {
+					break
+				}
+			}
+		}
+		if done >= len(learnerSrvs) {
+			break
+		}
+	}
+	commitID := leaderNode.Node.GetCommittedIndex()
+	for _, srv := range learnerSrvs {
+		nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
+		assert.Equal(t, commitID, nsNode.Node.GetCommittedIndex())
+		stats := nsNode.Node.GetStats()
+		assert.Equal(t, commitID, stats.InternalStats["synced_index"].(uint64))
+	}
 }
 
 func TestMigrateLeader(t *testing.T) {

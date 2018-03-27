@@ -36,6 +36,8 @@ type logSyncerSM struct {
 	sendStop       chan struct{}
 	wg             sync.WaitGroup
 	waitSendLogChs chan chan struct{}
+	// control if we need send the log to remote really
+	ignoreSend int32
 }
 
 func NewLogSyncerSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, fullNS string,
@@ -66,17 +68,17 @@ func NewLogSyncerSM(opts *KVOptions, machineConfig MachineConfig, localID uint64
 
 func (sm *logSyncerSM) Debugf(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.DebugDepth(1, fmt.Sprintf("%v: %s", sm.fullNS, msg))
+	nodeLog.DebugDepth(1, fmt.Sprintf("%v-%v: %s", sm.fullNS, sm.ID, msg))
 }
 
 func (sm *logSyncerSM) Infof(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.InfoDepth(1, fmt.Sprintf("%v: %s", sm.fullNS, msg))
+	nodeLog.InfoDepth(1, fmt.Sprintf("%v-%v: %s", sm.fullNS, sm.ID, msg))
 }
 
 func (sm *logSyncerSM) Errorf(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", sm.fullNS, msg))
+	nodeLog.ErrorDepth(1, fmt.Sprintf("%v-%v: %s", sm.fullNS, sm.ID, msg))
 }
 
 func (sm *logSyncerSM) Optimize() {
@@ -126,10 +128,32 @@ func (sm *logSyncerSM) Close() {
 	sm.wg.Wait()
 }
 
+func (sm *logSyncerSM) switchIgnoreSend(send bool) {
+	old := atomic.LoadInt32(&sm.ignoreSend)
+
+	syncedTerm := atomic.LoadUint64(&sm.syncedTerm)
+	syncedIndex := atomic.LoadUint64(&sm.syncedIndex)
+	if send {
+		if old == 0 {
+			return
+		}
+		sm.Infof("switch to send log really at: %v-%v", syncedTerm, syncedIndex)
+		atomic.StoreInt32(&sm.ignoreSend, 0)
+	} else {
+		if old == 1 {
+			return
+		}
+		sm.Infof("switch to ignore send log at: %v-%v", syncedTerm, syncedIndex)
+		atomic.StoreInt32(&sm.ignoreSend, 1)
+	}
+}
+
 func (sm *logSyncerSM) handlerRaftLogs() {
 	defer func() {
 		sm.lgSender.Stop()
-		sm.Infof("raft log syncer send loop exit")
+		syncedTerm := atomic.LoadUint64(&sm.syncedTerm)
+		syncedIndex := atomic.LoadUint64(&sm.syncedIndex)
+		sm.Infof("raft log syncer send loop exit at synced: %v-%v", syncedTerm, syncedIndex)
 	}()
 	raftLogs := make([]*BatchInternalRaftRequest, 0, logSendBufferLen)
 	var last *BatchInternalRaftRequest
@@ -178,7 +202,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				continue
 			}
 			handled = true
-			if state.SyncedTerm >= last.OrigTerm && state.SyncedIndex >= last.OrigIndex {
+			if state.IsNewer2(last.OrigTerm, last.OrigIndex) {
 				// remote is already replayed this raft log
 			} else {
 				err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
@@ -235,6 +259,34 @@ func (sm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, erro
 	return &si, err
 }
 
+func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop chan struct{}) (bool, error) {
+	for {
+		if atomic.LoadInt32(&sm.ignoreSend) == 1 {
+			state, err := sm.lgSender.getRemoteSyncedRaft(sm.sendStop)
+			if err != nil {
+				sm.Infof("failed to get the synced state from remote: %v", err)
+			} else {
+				if state.IsNewer2(term, index) {
+					atomic.StoreUint64(&sm.syncedIndex, index)
+					atomic.StoreUint64(&sm.syncedTerm, term)
+					return true, nil
+				}
+			}
+			t := time.NewTimer(time.Second)
+			select {
+			case <-stop:
+				return true, common.ErrStopped
+			case <-sm.sendStop:
+				return true, common.ErrStopped
+			case <-t.C:
+				t.Stop()
+			}
+		} else {
+			return false, nil
+		}
+	}
+}
+
 func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	// get (term-index) from the remote cluster, if the remote cluster has
 	// greater (term-index) than snapshot, we can just ignore the snapshot restore
@@ -244,8 +296,10 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	if err != nil {
 		return err
 	}
-	if state.SyncedTerm > raftSnapshot.Metadata.Term && state.SyncedIndex > raftSnapshot.Metadata.Index {
+	if state.IsNewer2(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index) {
 		sm.Infof("ignored restore snapshot since remote has newer raft: %v than %v", state, raftSnapshot.Metadata.String())
+		atomic.StoreUint64(&sm.syncedIndex, raftSnapshot.Metadata.Index)
+		atomic.StoreUint64(&sm.syncedTerm, raftSnapshot.Metadata.Term)
 		return nil
 	}
 
@@ -260,6 +314,14 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	err = sm.waitBufferedLogs(0)
 	if err != nil {
 		return err
+	}
+
+	ignore, err := sm.waitIgnoreUntilChanged(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, stop)
+	if err != nil {
+		return err
+	}
+	if ignore {
+		return nil
 	}
 
 	// while startup we can use the local snapshot to restart,
@@ -306,6 +368,29 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	return nil
 }
 
+// raft config change request should be send to the remote cluster since this will update the term-index for raft logs.
+func (sm *logSyncerSM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error {
+	var reqList BatchInternalRaftRequest
+	reqList.Timestamp = time.Now().UnixNano()
+	reqList.ReqNum = 1
+	var rreq InternalRaftRequest
+	var p customProposeData
+	p.ProposeOp = ProposeOp_RemoteConfChange
+	p.RemoteTerm = term
+	p.RemoteIndex = index
+	p.Data, _ = req.Marshal()
+	rreq.Data, _ = json.Marshal(p)
+	rreq.Header = &RequestHeader{
+		DataType:  int32(CustomReq),
+		ID:        0,
+		Timestamp: reqList.Timestamp,
+	}
+	reqList.Reqs = append(reqList.Reqs, &rreq)
+	reqList.ReqId = rreq.Header.ID
+	_, err := sm.ApplyRaftRequest(reqList, term, index, stop)
+	return err
+}
+
 func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		sm.Debugf("applying in log syncer: %v at (%v, %v)", reqList.String(), term, index)
@@ -317,6 +402,14 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	if sm.clusterInfo != nil {
 		reqList.OrigCluster = sm.clusterInfo.GetClusterName()
 	}
+	ignore, err := sm.waitIgnoreUntilChanged(term, index, stop)
+	if err != nil {
+		return forceBackup, err
+	}
+	if ignore {
+		return forceBackup, nil
+	}
+
 	if reqList.ReqId == 0 {
 		for _, e := range reqList.Reqs {
 			reqList.ReqId = e.Header.ID

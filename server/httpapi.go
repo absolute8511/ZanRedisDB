@@ -147,6 +147,30 @@ func (s *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprout
 	return nil, nil
 }
 
+func (s *Server) doAddLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	sLog.Infof("got add learner node request: %v from remote: %v", string(data), req.RemoteAddr)
+
+	var m common.MemberInfo
+	err = json.Unmarshal(data, &m)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+
+	nsNode := s.GetNamespaceFromFullName(m.GroupName)
+	if nsNode == nil || !nsNode.IsReady() {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: node.ErrNamespacePartitionNotFound.Error()}
+	}
+	err = nsNode.Node.ProposeAddLearner(m)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
+}
+
 func (s *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := s.GetNamespaceFromFullName(ns)
@@ -397,6 +421,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))
+	router.Handle("POST", common.APIAddLearnerNode, common.Decorate(s.doAddLearner, log, common.V1))
 	router.Handle("POST", common.APIRemoveNode, common.Decorate(s.doRemoveNode, log, common.V1))
 	router.Handle("GET", common.APINodeAllReady, common.Decorate(s.checkNodeAllReady, common.V1))
 

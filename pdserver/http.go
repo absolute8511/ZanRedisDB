@@ -155,7 +155,8 @@ func (s *Server) listPDNodes(w http.ResponseWriter, req *http.Request, ps httpro
 	}
 	filteredNodes := nodes[:0]
 	for _, n := range nodes {
-		if !s.IsTombstonePDNode(n.GetID()) {
+		// should ignore learner role node
+		if !s.IsTombstonePDNode(n.GetID()) && n.LearnerRole == "" {
 			filteredNodes = append(filteredNodes, n)
 		}
 	}

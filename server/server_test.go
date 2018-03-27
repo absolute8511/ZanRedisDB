@@ -177,7 +177,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 		nsConf.RaftGroupConf.SeedNodes = tmpSeeds
 		nsConf.ExpirationPolicy = "consistency_deletion"
 		kv := NewServer(kvOpts)
-		kv.nsMgr.SetClusterInfoInterface(fakeCI)
+		kv.nsMgr.SetIClusterInfo(fakeCI)
 		if _, err := kv.InitKVNamespace(replica.ReplicaID, nsConf, false); err != nil {
 			t.Fatalf("failed to init namespace: %v", err)
 		}

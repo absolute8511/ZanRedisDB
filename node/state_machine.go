@@ -31,6 +31,7 @@ var errRemoteSnapTransferFailed = errors.New("remote raft snapshot transfer fail
 
 type StateMachine interface {
 	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
+	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
 	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
@@ -66,6 +67,10 @@ func (esm *emptySM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint
 		esm.w.Trigger(reqID, nil)
 	}
 	return false, nil
+}
+
+func (esm *emptySM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error {
+	return nil
 }
 
 func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
@@ -350,6 +355,10 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	return errors.New("failed to restore from snapshot")
 }
 
+func (kvsm *kvStoreSM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error {
+	return nil
+}
+
 func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	forceBackup := false
 	start := time.Now()
@@ -521,6 +530,11 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 	if p.ProposeOp == ProposeOp_Backup {
 		kvsm.Infof("got force backup request")
 		forceBackup = true
+		kvsm.w.Trigger(reqID, nil)
+	} else if p.ProposeOp == ProposeOp_RemoteConfChange {
+		var cc raftpb.ConfChange
+		cc.Unmarshal(p.Data)
+		kvsm.Infof("remote config changed: %v, %v ", p, cc.String())
 		kvsm.w.Trigger(reqID, nil)
 	} else if p.ProposeOp == ProposeOp_TransferRemoteSnap {
 		localPath := path.Join(kvsm.store.GetBackupDir(), "remote")

@@ -11,15 +11,20 @@ import (
 )
 
 const (
-	APIAddNode      = "/cluster/node/add"
-	APIRemoveNode   = "/cluster/node/remove"
-	APIGetMembers   = "/cluster/members"
-	APIGetLeader    = "/cluster/leader"
-	APICheckBackup  = "/cluster/checkbackup"
-	APIGetIndexes   = "/schema/indexes"
-	APINodeAllReady = "/node/allready"
+	// api used by data node
+	APIAddNode        = "/cluster/node/add"
+	APIAddLearnerNode = "/cluster/node/addlearner"
+	APIRemoveNode     = "/cluster/node/remove"
+	APIGetMembers     = "/cluster/members"
+	APIGetLeader      = "/cluster/leader"
+	APICheckBackup    = "/cluster/checkbackup"
+	APIGetIndexes     = "/schema/indexes"
+	APINodeAllReady   = "/node/allready"
 	// check if the namespace raft node is synced and can be elected as leader immediately
 	APIIsRaftSynced = "/cluster/israftsynced"
+
+	// below api for pd
+	APIGetSnapshotSyncInfo = "/pd/snapshot_sync_info"
 )
 
 const (

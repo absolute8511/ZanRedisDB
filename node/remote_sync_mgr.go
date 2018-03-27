@@ -12,6 +12,20 @@ type SyncedState struct {
 	SyncedIndex uint64 `json:"synced_index,omitempty"`
 }
 
+func (ss *SyncedState) IsNewer(other *SyncedState) bool {
+	if ss.SyncedTerm >= other.SyncedTerm && ss.SyncedIndex >= other.SyncedIndex {
+		return true
+	}
+	return false
+}
+
+func (ss *SyncedState) IsNewer2(term uint64, index uint64) bool {
+	if ss.SyncedTerm >= term && ss.SyncedIndex >= index {
+		return true
+	}
+	return false
+}
+
 const (
 	ApplySnapUnknown int = iota
 	ApplySnapBegin
@@ -170,6 +184,9 @@ func (nd *KVNode) preprocessRemoteSnapApply(reqList BatchInternalRaftRequest) (b
 				nd.rn.Infof("failed to unmarshal custom propose: %v, err:%v", req.String(), err)
 			}
 			if cr.ProposeOp == ProposeOp_TransferRemoteSnap {
+				// for replica which is not leader, the applying status is not added,
+				// so we add here is ok. leader will handle the duplicate.
+				nd.remoteSyncedStates.AddApplyingSnap(reqList.OrigCluster, ss)
 				nd.remoteSyncedStates.UpdateApplyingSnapStatus(reqList.OrigCluster, ss, ApplySnapTransferring)
 				return true, false
 			} else if cr.ProposeOp == ProposeOp_ApplyRemoteSnap {

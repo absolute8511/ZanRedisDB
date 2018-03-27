@@ -127,7 +127,7 @@ func (s *RemoteLogSender) getClient() (syncerpb.CrossClusterAPIClient, string, e
 			nodeLog.Infof("failed to get host address :%v", err.Error())
 			return nil, addr, err
 		}
-		addr = h.Addr()
+		addr = h.GrpcAddr()
 	}
 	c := s.getClientFromAddr(addr)
 	return c, addr, nil
@@ -150,7 +150,7 @@ func (s *RemoteLogSender) getAllAddressesForPart() ([]string, error) {
 			return nil, err
 		}
 		for _, h := range hlist {
-			addrs = append(addrs, h.Addr())
+			addrs = append(addrs, h.GrpcAddr())
 		}
 	}
 	return addrs, nil
@@ -218,6 +218,7 @@ func (s *RemoteLogSender) notifyTransferSnap(raftSnapshot raftpb.Snapshot, syncA
 	}
 	rsp, err := c.NotifyTransferSnap(ctx, req)
 	if err != nil {
+		nodeLog.Infof("failed to notify transfer snap from: %v, %v", addr, err)
 		return err
 	}
 	if rsp != nil && rsp.ErrCode != 0 && rsp.ErrCode != http.StatusOK {
@@ -246,6 +247,7 @@ func (s *RemoteLogSender) notifyApplySnap(raftSnapshot raftpb.Snapshot) error {
 	}
 	rsp, err := c.NotifyApplySnap(ctx, req)
 	if err != nil {
+		nodeLog.Infof("failed to notify apply snap from: %v, %v", addr, err)
 		return err
 	}
 	if rsp != nil && rsp.ErrCode != 0 && rsp.ErrCode != http.StatusOK {
@@ -275,6 +277,7 @@ func (s *RemoteLogSender) getApplySnapStatus(raftSnapshot raftpb.Snapshot, addr 
 	}
 	rsp, err := c.GetApplySnapStatus(ctx, req)
 	if err != nil {
+		nodeLog.Infof("failed to get apply snap status from: %v, %v", addr, err)
 		return nil, err
 	}
 	if rsp == nil {
@@ -359,6 +362,7 @@ func (s *RemoteLogSender) getRemoteSyncedRaftOnce() (SyncedState, error) {
 	req := &syncerpb.SyncedRaftReq{ClusterName: s.localCluster, RaftGroupName: s.grpName}
 	rsp, err := c.GetSyncedRaft(ctx, req)
 	if err != nil {
+		nodeLog.Infof("failed to get synced raft from: %v, %v", addr, err)
 		return state, err
 	}
 	if rsp == nil {

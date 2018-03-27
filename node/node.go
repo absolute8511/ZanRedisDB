@@ -45,6 +45,7 @@ const (
 	ProposeOp_Backup             int = 1
 	ProposeOp_TransferRemoteSnap int = 2
 	ProposeOp_ApplyRemoteSnap    int = 3
+	ProposeOp_RemoteConfChange   int = 4
 )
 
 type nodeProgress struct {
@@ -66,6 +67,7 @@ type customProposeData struct {
 	SyncPath    string
 	RemoteTerm  uint64
 	RemoteIndex uint64
+	Data        []byte
 }
 
 // a key-value node backed by raft
@@ -225,6 +227,13 @@ func (nd *KVNode) OptimizeDB() {
 	}
 	d, _ := json.Marshal(p)
 	nd.CustomPropose(d)
+}
+
+func (nd *KVNode) switchForLearnerLeader(isLearnerLeader bool) {
+	logsm, ok := nd.sm.(*logSyncerSM)
+	if ok {
+		logsm.switchIgnoreSend(isLearnerLeader)
+	}
 }
 
 func (nd *KVNode) IsLead() bool {
@@ -630,6 +639,9 @@ func (nd *KVNode) ProposeAddLearner(m common.MemberInfo) error {
 	if m.NodeID == nd.machineConfig.NodeID {
 		nd.FillMyMemberInfo(&m)
 	}
+	if nd.rn.IsLearnerMember(m) {
+		return nil
+	}
 	data, _ := json.Marshal(m)
 	cc := raftpb.ConfChange{
 		Type:      raftpb.ConfChangeAddLearnerNode,
@@ -818,6 +830,15 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 	return nil
 }
 
+// return (self removed, any conf changed, error)
+func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.ConfState) (bool, bool, error) {
+	var cc raftpb.ConfChange
+	cc.Unmarshal(evnt.Data)
+	removeSelf, changed, err := nd.rn.applyConfChange(cc, confState)
+	nd.sm.ApplyRaftConfRequest(cc, evnt.Term, evnt.Index, nd.stopChan)
+	return removeSelf, changed, err
+}
+
 func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
 	forceBackup := false
 	if evnt.Data != nil {
@@ -900,9 +921,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		case raftpb.EntryNormal:
 			forceBackup = nd.applyEntry(evnt)
 		case raftpb.EntryConfChange:
-			var cc raftpb.ConfChange
-			cc.Unmarshal(evnt.Data)
-			removeSelf, changed, _ := nd.rn.applyConfChange(cc, &np.confState)
+			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
 			confChanged = changed
 			shouldStop = shouldStop || removeSelf
 		}

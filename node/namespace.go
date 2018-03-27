@@ -48,6 +48,10 @@ func (nn *NamespaceNode) FullName() string {
 	return nn.conf.Name
 }
 
+func (nn *NamespaceNode) SwitchForLearnerLeader(isLearnerLeader bool) {
+	nn.Node.switchForLearnerLeader(isLearnerLeader)
+}
+
 func (nn *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 }
 
@@ -103,6 +107,10 @@ func (nn *NamespaceNode) IsNsNodeFullReady(checkCommitIndex bool) bool {
 		return false
 	}
 	return nn.Node.IsRaftSynced(checkCommitIndex)
+}
+
+func (nn *NamespaceNode) GetLearners() []*common.MemberInfo {
+	return nn.Node.GetLearners()
 }
 
 func (nn *NamespaceNode) GetMembers() []*common.MemberInfo {
@@ -170,7 +178,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	return ns
 }
 
-func (nsm *NamespaceMgr) SetClusterInfoInterface(clusterInfo common.IClusterInfo) {
+func (nsm *NamespaceMgr) SetIClusterInfo(clusterInfo common.IClusterInfo) {
 	nsm.clusterInfo = clusterInfo
 }
 

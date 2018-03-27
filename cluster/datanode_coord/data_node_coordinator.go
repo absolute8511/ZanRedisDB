@@ -29,8 +29,9 @@ var (
 	EnsureJoinCheckWait   = time.Second * 30
 	// the wait interval allowed while changing leader in the same raft group
 	// to avoid change the leader in the same raft too much
-	ChangeLeaderInRaftWait = time.Minute
-	removeNotInMetaPending = time.Minute
+	ChangeLeaderInRaftWait       = time.Minute
+	removeNotInMetaPending       = time.Minute
+	CheckUnsyncedLearnerInterval = time.Second * 5
 )
 
 func ChangeIntervalForTest() {
@@ -80,6 +81,7 @@ type DataCoordinator struct {
 	stopping         int32
 	catchupRunning   int32
 	localNSMgr       *node.NamespaceMgr
+	learnerRole      string
 }
 
 func NewDataCoordinator(cluster string, nodeInfo *cluster.NodeInfo, nsMgr *node.NamespaceMgr) *DataCoordinator {
@@ -89,6 +91,7 @@ func NewDataCoordinator(cluster string, nodeInfo *cluster.NodeInfo, nsMgr *node.
 		myNode:           *nodeInfo,
 		tryCheckUnsynced: make(chan bool, 1),
 		localNSMgr:       nsMgr,
+		learnerRole:      nodeInfo.LearnerRole,
 	}
 
 	return coord
@@ -123,8 +126,12 @@ func (dc *DataCoordinator) SetRegister(l cluster.DataNodeRegister) error {
 				return err
 			}
 		}
-		dc.myNode.ID = cluster.GenNodeID(&dc.myNode, "datanode")
-		cluster.CoordLog().Infof("node start with register id: %v", dc.myNode.RegID)
+		if dc.learnerRole == "" {
+			dc.myNode.ID = cluster.GenNodeID(&dc.myNode, "datanode")
+		} else {
+			dc.myNode.ID = cluster.GenNodeID(&dc.myNode, "datanode-learner-"+dc.learnerRole)
+		}
+		cluster.CoordLog().Infof("node start with register id: %v, learner role: %v", dc.myNode.RegID, dc.learnerRole)
 	}
 	return nil
 }
@@ -150,15 +157,21 @@ func (dc *DataCoordinator) Start() error {
 	dc.wg.Add(1)
 	go dc.watchPD()
 
-	err := dc.loadLocalNamespaceData()
-	if err != nil {
-		cluster.CoordLog().Infof("load local error : %v", err.Error())
-		close(dc.stopChan)
-		return err
-	}
+	if dc.learnerRole == "" {
+		err := dc.loadLocalNamespaceData()
+		if err != nil {
+			cluster.CoordLog().Infof("load local error : %v", err.Error())
+			close(dc.stopChan)
+			return err
+		}
 
-	dc.wg.Add(1)
-	go dc.checkForUnsyncedNamespaces()
+		dc.wg.Add(1)
+		go dc.checkForUnsyncedNamespaces()
+	} else if dc.learnerRole == common.LearnerRoleLogSyncer {
+		dc.loadLocalNamespaceForLearners()
+		dc.wg.Add(1)
+		go dc.checkForUnsyncedLogSyncers()
+	}
 	return nil
 }
 
@@ -673,7 +686,8 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 			}
 			// check if any replica is not joined to members
 			anyWaitingJoin := false
-			for nid, rid := range namespaceMeta.RaftIDs {
+			for _, nid := range namespaceMeta.GetISR() {
+				rid := namespaceMeta.RaftIDs[nid]
 				if _, ok := namespaceMeta.Removings[nid]; ok {
 					continue
 				}
@@ -715,7 +729,8 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 			namespaceMeta.PartitionReplicaInfo = *newestReplicaInfo
 			for _, m := range members {
 				found := false
-				for nid, rid := range newestReplicaInfo.RaftIDs {
+				for _, nid := range newestReplicaInfo.RaftNodes {
+					rid := newestReplicaInfo.RaftIDs[nid]
 					if m.ID == rid {
 						found = true
 						if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
@@ -829,12 +844,7 @@ func (dc *DataCoordinator) getRaftAddrForNode(nid string) (string, *cluster.Coor
 	return node.RaftTransportAddr, nil
 }
 
-func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInfo) (*node.NamespaceConfig, *cluster.CoordErr) {
-	raftID, ok := nsInfo.RaftIDs[dc.GetMyID()]
-	if !ok {
-		cluster.CoordLog().Warningf("namespace %v has no raft id for local: %v", nsInfo.GetDesp(), nsInfo)
-		return nil, cluster.ErrNamespaceConfInvalid
-	}
+func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInfo, raftID uint64) (*node.NamespaceConfig, *cluster.CoordErr) {
 	var err *cluster.CoordErr
 	nsConf := node.NewNSConfig()
 	nsConf.BaseName = nsInfo.Name
@@ -882,7 +892,7 @@ func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInf
 }
 
 func (dc *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *cluster.PartitionMetaInfo,
-	localNamespace *node.NamespaceNode, remoteNode string) error {
+	localNamespace *node.NamespaceNode, remoteNode string, joinAsLearner bool) error {
 	var m common.MemberInfo
 	m.ID = raftID
 	m.NodeID = dc.GetMyRegID()
@@ -895,8 +905,12 @@ func (dc *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *clus
 	}
 	nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(remoteNode)
 	d, _ := json.Marshal(m)
+	uri := "http://" + net.JoinHostPort(nip, httpPort) + common.APIAddNode
+	if joinAsLearner {
+		uri = "http://" + net.JoinHostPort(nip, httpPort) + common.APIAddLearnerNode
+	}
 	_, err := common.APIRequest("POST",
-		"http://"+net.JoinHostPort(nip, httpPort)+common.APIAddNode,
+		uri,
 		bytes.NewReader(d), time.Second*3, nil)
 	if err != nil {
 		cluster.CoordLog().Infof("failed to request join namespace: %v", err)
@@ -1018,7 +1032,7 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 			// TODO: check if the local node is in the progress of starting or applying the snapshot
 			// in this case, we just wait the start finished.
 			if _, ok := requestJoined[remote]; !ok {
-				err := dc.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote)
+				err := dc.requestJoinNamespaceGroup(raftID, &nsInfo, localNamespace, remote, false)
 				if err == nil {
 					requestJoined[remote] = true
 				}
@@ -1046,7 +1060,7 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 		cluster.CoordLog().Warningf("namespace %v has no raft id for local", nsInfo.GetDesp(), nsInfo.RaftIDs)
 		return nil, cluster.ErrNamespaceConfInvalid
 	}
-	nsConf, err := dc.prepareNamespaceConf(nsInfo)
+	nsConf, err := dc.prepareNamespaceConf(nsInfo, raftID)
 	if err != nil {
 		cluster.CoordLog().Warningf("prepare join namespace %v failed: %v", nsInfo.GetDesp(), err)
 		return nil, err
@@ -1177,6 +1191,10 @@ func (dc *DataCoordinator) IsRemovingMember(m common.MemberInfo) (bool, error) {
 }
 
 func (dc *DataCoordinator) UpdateMeForNamespaceLeader(fullNS string) error {
+	if dc.learnerRole != "" {
+		cluster.CoordLog().Warningf("should never update me for leader in learner role: %v", fullNS)
+		return nil
+	}
 	namespace, pid := common.GetNamespaceAndPartition(fullNS)
 	if namespace == "" {
 		cluster.CoordLog().Warningf("namespace invalid: %v", fullNS)

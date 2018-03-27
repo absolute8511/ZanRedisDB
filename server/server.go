@@ -76,6 +76,7 @@ func NewServer(conf ServerConfig) *Server {
 		Hostname:    hname,
 		RedisPort:   strconv.Itoa(conf.RedisAPIPort),
 		HttpPort:    strconv.Itoa(conf.HttpAPIPort),
+		RpcPort:     strconv.Itoa(conf.GrpcAPIPort),
 		Version:     common.VerBinary,
 		Tags:        make(map[string]interface{}),
 		DataRoot:    conf.DataDir,
@@ -146,7 +147,7 @@ func NewServer(conf ServerConfig) *Server {
 			sLog.Fatalf("failed to init register for coordinator: %v", err)
 		}
 		s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
-		s.nsMgr.SetClusterInfoInterface(s.dataCoord)
+		s.nsMgr.SetIClusterInfo(s.dataCoord)
 	} else {
 		s.raftTransport.ID = types.ID(myNode.RegID)
 	}
