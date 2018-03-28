@@ -539,15 +539,71 @@ func (dc *DataCoordinator) isReplicaReadyForRaft(nsNode *node.NamespaceNode, toR
 	return false
 }
 
+type pendingRemoveInfo struct {
+	ts time.Time
+	m  common.MemberInfo
+}
+
+func checkRemoveNode(pendings map[uint64]pendingRemoveInfo,
+	newestReplicaInfo *cluster.PartitionReplicaInfo,
+	m *common.MemberInfo, isLearner bool) (bool, bool) {
+	found := false
+	if isLearner {
+		for _, nids := range newestReplicaInfo.LearnerNodes {
+			for _, nid := range nids {
+				rid := newestReplicaInfo.RaftIDs[nid]
+				regNodeID := cluster.ExtractRegIDFromGenID(nid)
+				if m.ID == rid && m.NodeID == regNodeID {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+	} else {
+		for _, nid := range newestReplicaInfo.RaftNodes {
+			rid := newestReplicaInfo.RaftIDs[nid]
+			if m.ID == rid {
+				found = true
+				if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
+					cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
+				}
+				break
+			}
+		}
+	}
+	if found {
+		delete(pendings, m.ID)
+	} else {
+		cluster.CoordLog().Infof("raft node %v not found in meta: %v", m, newestReplicaInfo.LearnerNodes)
+		if pendRemove, ok := pendings[m.ID]; ok {
+			if !pendRemove.m.IsEqual(m) {
+				pendings[m.ID] = pendingRemoveInfo{
+					ts: time.Now(),
+					m:  *m,
+				}
+			} else if time.Since(pendRemove.ts) > removeNotInMetaPending {
+				cluster.CoordLog().Infof("pending removing node %v finally removed since not in meta", pendRemove)
+				return true, false
+			}
+		} else {
+			pendings[m.ID] = pendingRemoveInfo{
+				ts: time.Now(),
+				m:  *m,
+			}
+		}
+	}
+	return false, found
+}
+
 func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 	ticker := time.NewTicker(CheckUnsyncedInterval)
 	cluster.CoordLog().Infof("%v begin to check for unsynced namespace", dc.GetMyID())
 	defer cluster.CoordLog().Infof("%v check for unsynced namespace quit", dc.GetMyID())
 	defer dc.wg.Done()
-	type pendingRemoveInfo struct {
-		ts time.Time
-		m  common.MemberInfo
-	}
+
 	pendingRemovings := make(map[string]map[uint64]pendingRemoveInfo)
 	// avoid transfer too much partitions in the same time
 	lastTransferCheckedTime := time.Now()
@@ -725,44 +781,30 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 				delete(pendingRemovings, namespaceMeta.GetDesp())
 				continue
 			}
+			// begin handle the member which may be removed but still in raft group
 			namespaceMeta.PartitionReplicaInfo = *newestReplicaInfo
+			lrns := localNamespace.GetLearners()
+			for _, lrn := range lrns {
+				needRemove, found := checkRemoveNode(pendings, newestReplicaInfo, lrn, true)
+				cluster.CoordLog().Infof("pending removing learner %v finally removed since not in meta", lrn)
+				if needRemove {
+					dc.removeNamespaceRaftMember(namespaceMeta, lrn)
+				}
+				// some learner is not found, we need check later
+				if !found {
+					dc.tryCheckNamespacesIn(time.Second)
+				}
+			}
 			for _, m := range members {
-				found := false
-				for _, nid := range newestReplicaInfo.RaftNodes {
-					rid := newestReplicaInfo.RaftIDs[nid]
-					if m.ID == rid {
-						found = true
-						if m.NodeID != cluster.ExtractRegIDFromGenID(nid) {
-							cluster.CoordLog().Infof("found raft member %v mismatch the replica node: %v", m, nid)
-						}
-						break
-					}
+				needRemove, found := checkRemoveNode(pendings, newestReplicaInfo, m, false)
+				if needRemove {
+					dc.removeNamespaceRaftMember(namespaceMeta, m)
 				}
 				if !found {
-					isFullStable = false
-					cluster.CoordLog().Infof("raft member %v not found in meta: %v", m, newestReplicaInfo.RaftNodes)
-					// here we do not remove other member immediately from raft
-					// it may happen while the namespace info in the register is not updated due to network lag
-					// so the new added node (add by api) may not in the meta info
-					if pendRemove, ok := pendings[m.ID]; ok {
-						if !pendRemove.m.IsEqual(m) {
-							pendings[m.ID] = pendingRemoveInfo{
-								ts: time.Now(),
-								m:  *m,
-							}
-						} else if time.Since(pendRemove.ts) > removeNotInMetaPending {
-							cluster.CoordLog().Infof("pending removing member %v finally removed since not in meta", pendRemove)
-							dc.removeNamespaceRaftMember(namespaceMeta, m)
-						}
-					} else {
-						pendings[m.ID] = pendingRemoveInfo{
-							ts: time.Now(),
-							m:  *m,
-						}
-					}
 					dc.tryCheckNamespacesIn(time.Second)
 				} else {
-					delete(pendings, m.ID)
+					// still in raft group, check if in removing
+					// removing node can be removed immediately without wait pending
 					for nid, removing := range newestReplicaInfo.Removings {
 						isFullStable = false
 						if m.ID == removing.RemoveReplicaID && m.NodeID == cluster.ExtractRegIDFromGenID(nid) {
