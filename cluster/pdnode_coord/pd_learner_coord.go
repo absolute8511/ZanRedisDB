@@ -166,9 +166,7 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 	if err != nil {
 		return err
 	}
-	if _, ok := origNSInfo.RaftIDs[nid]; !ok {
-		return ErrNamespaceRaftIDNotFound.ToErrorType()
-	}
+
 	nsInfo := origNSInfo.GetCopy()
 	currentNodes, _ := pdCoord.getCurrentLearnerNodes()
 	if _, ok := currentNodes[nid]; ok {
@@ -180,16 +178,20 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 		nsInfo.LearnerNodes)
 
 	old := nsInfo.LearnerNodes[role]
+	newLrns := make([]string, 0, len(old))
 	for _, oid := range old {
 		if oid == nid {
 			continue
 		}
-		old = append(old, nid)
+		newLrns = append(newLrns, nid)
+	}
+	if len(old) == len(newLrns) {
+		return errors.New("remove node id is not in learners")
 	}
 	if nsInfo.LearnerNodes == nil {
 		nsInfo.LearnerNodes = make(map[string][]string)
 	}
-	nsInfo.LearnerNodes[role] = old
+	nsInfo.LearnerNodes[role] = newLrns
 	delete(nsInfo.RaftIDs, nid)
 
 	err = pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
@@ -199,7 +201,7 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 		return err
 	} else {
 		cluster.CoordLog().Infof("namespace %v: mark learner role %v removing from node:%v done", nsInfo.GetDesp(),
-			role, nid, nsInfo.GetISR())
+			role, nid)
 		*origNSInfo = *nsInfo
 	}
 	return nil
