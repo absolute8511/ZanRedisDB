@@ -786,8 +786,8 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 			lrns := localNamespace.GetLearners()
 			for _, lrn := range lrns {
 				needRemove, found := checkRemoveNode(pendings, newestReplicaInfo, lrn, true)
-				cluster.CoordLog().Infof("pending removing learner %v finally removed since not in meta", lrn)
 				if needRemove {
+					cluster.CoordLog().Infof("pending removing learner %v finally removed since not in meta", lrn)
 					dc.removeNamespaceRaftMember(namespaceMeta, lrn)
 				}
 				// some learner is not found, we need check later
