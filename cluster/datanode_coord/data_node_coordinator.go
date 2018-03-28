@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -317,7 +318,7 @@ func (dc *DataCoordinator) isLocalRaftInRaftGroup(nsInfo *cluster.PartitionMetaI
 			nil, time.Second*3, &rsp)
 		if err != nil {
 			cluster.CoordLog().Infof("failed to get members from %v for namespace: %v, %v", destAddress, nsInfo.GetDesp(), err)
-			if code == 404 {
+			if code == http.StatusNotFound {
 				lastErr = ErrNamespaceNotFound
 			} else {
 				lastErr = err

@@ -391,7 +391,7 @@ func (n *node) run(r *raft) {
 						from.group = m.FromGroup
 					}
 				}
-				err := r.Step(m) // raft never returns an error
+				err := r.Step(m)
 				if err == errMsgDropped && mdrop.dropCB != nil {
 					mdrop.dropCB()
 				}

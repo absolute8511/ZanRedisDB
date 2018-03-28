@@ -124,7 +124,8 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	config.nodeConfig = machineConfig
 
 	stopChan := make(chan struct{})
-	sm, err := NewStateMachine(kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo)
+	w := wait.New()
+	sm, err := NewStateMachine(kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo, w)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +135,7 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		stopDone:           make(chan struct{}),
 		store:              nil,
 		sm:                 sm,
-		w:                  wait.New(),
+		w:                  w,
 		router:             common.NewCmdRouter(),
 		deleteCb:           deleteCb,
 		ns:                 config.GroupName,
@@ -143,12 +144,9 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		remoteSyncedStates: newRemoteSyncedStateMgr(),
 	}
 	if kvsm, ok := sm.(*kvStoreSM); ok {
-		kvsm.w = s.w
 		s.store = kvsm.store
 	}
-	if esm, ok := sm.(*emptySM); ok {
-		esm.w = s.w
-	}
+
 	s.clusterInfo = clusterInfo
 	s.expireHandler = NewExpireHandler(s)
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/pkg/wait"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 )
 
@@ -38,10 +39,11 @@ type logSyncerSM struct {
 	waitSendLogChs chan chan struct{}
 	// control if we need send the log to remote really
 	ignoreSend int32
+	w          wait.Wait
 }
 
 func NewLogSyncerSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, fullNS string,
-	clusterInfo common.IClusterInfo) (StateMachine, error) {
+	clusterInfo common.IClusterInfo) (*logSyncerSM, error) {
 
 	lg := &logSyncerSM{
 		fullNS:         fullNS,
@@ -403,6 +405,9 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 		reqList.OrigCluster = sm.clusterInfo.GetClusterName()
 	}
 	ignore, err := sm.waitIgnoreUntilChanged(term, index, stop)
+	for _, e := range reqList.Reqs {
+		sm.w.Trigger(e.Header.ID, err)
+	}
 	if err != nil {
 		return forceBackup, err
 	}

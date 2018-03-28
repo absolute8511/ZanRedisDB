@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/pkg/wait"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/redcon"
-	"github.com/coreos/etcd/pkg/wait"
 )
 
 const (
@@ -44,14 +44,24 @@ type StateMachine interface {
 }
 
 func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint64,
-	fullNS string, clusterInfo common.IClusterInfo) (StateMachine, error) {
+	fullNS string, clusterInfo common.IClusterInfo, w wait.Wait) (StateMachine, error) {
 	if machineConfig.LearnerRole == "" {
 		if machineConfig.StateMachineType == "empty_sm" {
-			return &emptySM{}, nil
+			return &emptySM{w: w}, nil
 		}
-		return NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo)
+		kvsm, err := NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo)
+		if err != nil {
+			return nil, err
+		}
+		kvsm.w = w
+		return kvsm, err
 	} else if machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
-		return NewLogSyncerSM(opts, machineConfig, localID, fullNS, clusterInfo)
+		lssm, err := NewLogSyncerSM(opts, machineConfig, localID, fullNS, clusterInfo)
+		if err != nil {
+			return nil, err
+		}
+		lssm.w = w
+		return lssm, err
 	} else {
 		return nil, errors.New("unknown learner role")
 	}
@@ -116,7 +126,7 @@ type kvStoreSM struct {
 }
 
 func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
-	clusterInfo common.IClusterInfo) (StateMachine, error) {
+	clusterInfo common.IClusterInfo) (*kvStoreSM, error) {
 	store, err := NewKVStore(opts)
 	if err != nil {
 		return nil, err
