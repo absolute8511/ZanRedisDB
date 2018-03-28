@@ -183,7 +183,7 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 		if oid == nid {
 			continue
 		}
-		newLrns = append(newLrns, nid)
+		newLrns = append(newLrns, oid)
 	}
 	if len(old) == len(newLrns) {
 		return errors.New("remove node id is not in learners")

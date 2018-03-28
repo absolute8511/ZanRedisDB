@@ -707,7 +707,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 			checkOK = false
 			return
 		}
-		if len(currentNodes) < 3 || int32(len(currentNodes)) <= atomic.LoadInt32(&pdCoord.stableNodeNum)/2 {
+		if int32(len(currentNodes)) <= atomic.LoadInt32(&pdCoord.stableNodeNum)/2 {
 			checkOK = false
 			cluster.CoordLog().Infof("nodes not enough while checking: %v, stable need: %v", currentNodes, atomic.LoadInt32(&pdCoord.stableNodeNum))
 			return
