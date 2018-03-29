@@ -264,13 +264,19 @@ func (sm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, erro
 func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop chan struct{}) (bool, error) {
 	for {
 		if atomic.LoadInt32(&sm.ignoreSend) == 1 {
+			// check local to avoid call rpc too much
+			syncTerm := atomic.LoadUint64(&sm.syncedTerm)
+			syncIndex := atomic.LoadUint64(&sm.syncedIndex)
+			if syncTerm >= term && syncIndex >= index {
+				return true, nil
+			}
 			state, err := sm.lgSender.getRemoteSyncedRaft(sm.sendStop)
 			if err != nil {
 				sm.Infof("failed to get the synced state from remote: %v", err)
 			} else {
 				if state.IsNewer2(term, index) {
-					atomic.StoreUint64(&sm.syncedIndex, index)
-					atomic.StoreUint64(&sm.syncedTerm, term)
+					atomic.StoreUint64(&sm.syncedIndex, state.SyncedIndex)
+					atomic.StoreUint64(&sm.syncedTerm, state.SyncedTerm)
 					return true, nil
 				}
 			}
