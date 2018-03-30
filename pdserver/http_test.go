@@ -283,8 +283,8 @@ func ensureDataNodesReady(t *testing.T, pduri string, expect int) {
 	}
 }
 
-func ensureNamespace(t *testing.T, pduri string, ns string, partNum int) {
-	uri := fmt.Sprintf("%s/cluster/namespace/create?namespace=%s&partition_num=%d&replicator=3", pduri, ns, partNum)
+func ensureNamespace(t *testing.T, pduri string, ns string, partNum int, replica int) {
+	uri := fmt.Sprintf("%s/cluster/namespace/create?namespace=%s&partition_num=%d&replicator=%d", pduri, ns, partNum, replica)
 	rsp, err := http.Post(uri, "", nil)
 	assert.Nil(t, err)
 	if rsp.StatusCode != 200 {
@@ -360,7 +360,7 @@ func ensureNamespace(t *testing.T, pduri string, ns string, partNum int) {
 			time.Sleep(time.Second)
 			continue
 		}
-		assert.Equal(t, 3, len(queryRsp.PartNodes[0].Replicas))
+		assert.Equal(t, replica, len(queryRsp.PartNodes[0].Replicas))
 		break
 	}
 }
@@ -389,7 +389,7 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 	uri := fmt.Sprintf("%s/datanodes", pduri)
 
 	ensureDataNodesReady(t, pduri, len(gkvList))
-	ensureNamespace(t, pduri, ns, partNum)
+	ensureNamespace(t, pduri, ns, partNum, 3)
 
 	indexTable := "test_hash_table"
 	uri = fmt.Sprintf("%s/cluster/schema/index/add?namespace=%s&table=%s&indextype=hash_secondary", pduri, ns, indexTable)

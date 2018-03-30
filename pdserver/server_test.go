@@ -257,7 +257,7 @@ func TestLeaderLost(t *testing.T) {
 
 	ensureDataNodesReady(t, pduri, len(gkvList))
 	enableAutoBalance(t, pduri, true)
-	ensureNamespace(t, pduri, ns, partNum)
+	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
 	leader, nsNode := waitForLeader(t, ns, 0)
@@ -314,7 +314,7 @@ func TestFollowerLost(t *testing.T) {
 
 	ensureDataNodesReady(t, pduri, len(gkvList))
 	enableAutoBalance(t, pduri, true)
-	ensureNamespace(t, pduri, ns, partNum)
+	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
 	leader, nsNode := waitForLeader(t, ns, 0)
@@ -363,13 +363,13 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 	pduri := "http://127.0.0.1:" + pdHttpPort
 	ensureDataNodesReady(t, pduri, len(gkvList))
 	enableAutoBalance(t, pduri, true)
-	ensureNamespace(t, pduri, ns, partNum)
+	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
 	leader, leaderNode := waitForLeader(t, ns, 0)
 	assert.NotNil(t, leader)
 
-	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 3)
+	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 2)
 	defer func() {
 		for _, kv := range remoteSrvs {
 			kv.s.Stop()
@@ -385,7 +385,7 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 	pduri = "http://127.0.0.1:" + pdRemoteHttpPort
 	ensureDataNodesReady(t, pduri, len(remoteSrvs))
 	enableAutoBalance(t, pduri, true)
-	ensureNamespace(t, pduri, ns, partNum)
+	ensureNamespace(t, pduri, ns, partNum, 2)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
 	learnerPD, learnerSrvs, tmpDir := startTestClusterForLearner(t, 2)
