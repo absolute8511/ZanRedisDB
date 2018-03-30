@@ -221,6 +221,9 @@ func (nd *KVNode) postprocessRemoteSnapApply(reqList BatchInternalRaftRequest,
 	}
 }
 
+func (nd *KVNode) SetRemoteClusterSyncedRaft(name string, term uint64, index uint64) {
+	nd.remoteSyncedStates.UpdateState(name, SyncedState{SyncedTerm: term, SyncedIndex: index})
+}
 func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64) {
 	state, _ := nd.remoteSyncedStates.GetState(name)
 	return state.SyncedTerm, state.SyncedIndex

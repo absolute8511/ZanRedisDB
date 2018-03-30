@@ -317,6 +317,49 @@ func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps htt
 	}
 	return nil, nil
 }
+
+func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	param := reqParams.Get("enable")
+	if param == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG"}
+	}
+	if param == "true" {
+		node.SetSyncerOnly(true)
+	} else {
+		node.SetSyncerOnly(false)
+	}
+	return nil, nil
+}
+
+func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	fromCluster := ps.ByName("clustername")
+	if fromCluster == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "cluster name needed"}
+	}
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	var ss []common.LogSyncStats
+	err = json.Unmarshal(data, &ss)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	for _, sync := range ss {
+		v := s.GetNamespaceFromFullName(sync.Name)
+		if v == nil || !v.IsReady() {
+			continue
+		}
+		v.Node.SetRemoteClusterSyncedRaft(fromCluster, sync.Term, sync.Index)
+		sLog.Infof("set syncer index to: %v ", sync)
+	}
+	return nil, nil
+}
+
 func (s *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -438,7 +481,9 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
 	router.Handle("POST", "/costlevel/set", common.Decorate(s.doSetCostLevel, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
+	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
+	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
 	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))

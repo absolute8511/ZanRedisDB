@@ -311,6 +311,23 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	return err
 }
 
+func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
+	if err := checkHashKFSize(key, field); err != nil {
+		return 0, err
+	}
+
+	dbKey, err := convertRedisKeyToDBHKey(key, field)
+	if err != nil {
+		return 0, err
+	}
+	var ts uint64
+	v, err := db.eng.GetBytes(db.defaultReadOpts, dbKey)
+	if len(v) >= tsLen {
+		ts, err = Uint64(v[len(v)-tsLen:], err)
+	}
+	return int64(ts), err
+}
+
 func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 	if err := checkHashKFSize(key, field); err != nil {
 		return nil, err

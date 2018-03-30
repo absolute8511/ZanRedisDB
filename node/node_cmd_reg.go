@@ -189,3 +189,43 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterWriteMerge("plset", wrapWriteMergeCommandKVKV(nd, nd.plsetCommand))
 
 }
+
+func (kvsm *kvStoreSM) registerConflictHandlers() {
+	// only write command
+	kvsm.cRouter.Register("del", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("set", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("setnx", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("incr", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("incrby", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("plset", kvsm.checkKVKVConflict)
+	// hll
+	kvsm.cRouter.Register("pfadd", kvsm.checkHLLConflict)
+	// hash
+	kvsm.cRouter.Register("hset", kvsm.checkHashKFVConflict)
+	kvsm.cRouter.Register("hsetnx", kvsm.checkHashKFVConflict)
+	kvsm.cRouter.Register("hincrby", kvsm.checkHashKFVConflict)
+	kvsm.cRouter.Register("hmset", kvsm.checkHashKFVConflict)
+	kvsm.cRouter.Register("hdel", kvsm.checkHashKFFConflict)
+
+	// list
+	kvsm.cRouter.Register("lpop", kvsm.checkListConflict)
+	kvsm.cRouter.Register("lpush", kvsm.checkListConflict)
+	kvsm.cRouter.Register("lset", kvsm.checkListConflict)
+	kvsm.cRouter.Register("ltrim", kvsm.checkListConflict)
+	kvsm.cRouter.Register("rpop", kvsm.checkListConflict)
+	kvsm.cRouter.Register("rpush", kvsm.checkListConflict)
+	// zset
+	kvsm.cRouter.Register("zadd", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zincrby", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zrem", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zremrangebyrank", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zremrangebyscore", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zremrangebylex", kvsm.checkZSetConflict)
+	// set
+	kvsm.cRouter.Register("sadd", kvsm.checkSetConflict)
+	kvsm.cRouter.Register("srem", kvsm.checkSetConflict)
+	// expire
+	kvsm.cRouter.Register("setex", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("expire", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("persist", kvsm.checkKVConflict)
+}

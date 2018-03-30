@@ -252,34 +252,34 @@ func (s *Server) Start() {
 	}()
 }
 
-func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (common.CommandFunc, redcon.Command, error) {
+func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (bool, common.CommandFunc, redcon.Command, error) {
 	if len(cmd.Args) < 2 {
-		return nil, cmd, common.ErrInvalidArgs
+		return false, nil, cmd, common.ErrInvalidArgs
 	}
 	rawKey := cmd.Args[1]
 
 	namespace, pk, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
 		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return nil, cmd, err
+		return false, nil, cmd, err
 	}
 	// we need decide the partition id from the primary key
 	// if the command need cross multi partitions, we need handle separate
 	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
 	if err != nil {
-		return nil, cmd, err
+		return false, nil, cmd, err
 	}
 	// TODO: for multi primary keys such as mset, mget, we need make sure they are all in the same partition
 	h, isWrite, ok := n.Node.GetHandler(cmdName)
 	if !ok {
-		return nil, cmd, common.ErrInvalidCommand
+		return isWrite, nil, cmd, common.ErrInvalidCommand
 	}
 	if !isWrite && !n.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 		// read only to leader to avoid stale read
 		// TODO: also read command can request the raft read index if not leader
-		return nil, cmd, node.ErrNamespaceNotLeader
+		return isWrite, nil, cmd, node.ErrNamespaceNotLeader
 	}
-	return h, cmd, nil
+	return isWrite, h, cmd, nil
 }
 
 func (s *Server) serveRaft(stopCh <-chan struct{}) {

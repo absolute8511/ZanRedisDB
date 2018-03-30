@@ -584,7 +584,7 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 	h := &RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
-		DataType: 0,
+		DataType: int32(RedisReq),
 	}
 	raftReq := InternalRaftRequest{
 		Header: h,

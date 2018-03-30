@@ -123,6 +123,7 @@ type kvStoreSM struct {
 	w             wait.Wait
 	router        *common.SMCmdRouter
 	stopping      int32
+	cRouter       *conflictRouter
 }
 
 func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
@@ -138,8 +139,10 @@ func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, 
 		clusterInfo:   clusterInfo,
 		store:         store,
 		router:        common.NewSMCmdRouter(),
+		cRouter:       NewConflictRouter(),
 	}
 	sm.registerHandlers()
+	sm.registerConflictHandlers()
 	return sm, nil
 }
 
@@ -369,6 +372,15 @@ func (kvsm *kvStoreSM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, 
 	return nil
 }
 
+func (kvsm *kvStoreSM) preCheckConflict(cmd redcon.Command, reqTs int64) bool {
+	cmdName := strings.ToLower(string(cmd.Args[0]))
+	h, ok := kvsm.cRouter.GetHandler(cmdName)
+	if !ok {
+		return true
+	}
+	return h(cmd, reqTs)
+}
+
 func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	forceBackup := false
 	start := time.Now()
@@ -397,11 +409,18 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 		if reqID == 0 {
 			reqID = reqList.ReqId
 		}
-		if req.Header.DataType == 0 {
+		if req.Header.DataType == int32(RedisReq) {
 			cmd, err := redcon.Parse(req.Data)
 			if err != nil {
 				kvsm.w.Trigger(reqID, err)
 			} else {
+				if reqList.Type == FromClusterSyncer && !IsSyncerOnly() {
+					// syncer only no need check conflict since it will be no write from redis api
+					conflict := kvsm.preCheckConflict(cmd, reqTs)
+					if conflict {
+						kvsm.Infof("conflict sync: %v, %v, %v", string(cmd.Raw), req.String(), reqTs)
+					}
+				}
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
 				_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
