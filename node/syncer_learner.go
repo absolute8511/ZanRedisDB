@@ -215,7 +215,10 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			case <-sm.sendStop:
 				return
 			default:
-				sm.Errorf("failed to send raft log to remote: %v, %v", err, raftLogs)
+				syncedTerm := atomic.LoadUint64(&sm.syncedTerm)
+				syncedIndex := atomic.LoadUint64(&sm.syncedIndex)
+				sm.Errorf("failed to send raft log to remote: %v, %v, current: %v-%v",
+					err, raftLogs, syncedTerm, syncedIndex)
 			}
 			continue
 		}
@@ -272,7 +275,7 @@ func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop ch
 			}
 			state, err := sm.lgSender.getRemoteSyncedRaft(sm.sendStop)
 			if err != nil {
-				sm.Infof("failed to get the synced state from remote: %v", err)
+				sm.Infof("failed to get the synced state from remote: %v, at %v-%v", err, term, index)
 			} else {
 				if state.IsNewer2(term, index) {
 					atomic.StoreUint64(&sm.syncedIndex, state.SyncedIndex)
@@ -418,9 +421,15 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 		return forceBackup, err
 	}
 	if ignore {
+		if nodeLog.Level() >= common.LOG_DEBUG {
+			sm.Debugf("ignored on slave, %v-%v:%v", reqList.String())
+		}
 		return forceBackup, nil
 	}
 
+	if nodeLog.Level() >= common.LOG_DEBUG {
+		sm.Debugf("begin sync, %v-%v:%v", reqList.String())
+	}
 	if reqList.ReqId == 0 {
 		for _, e := range reqList.Reqs {
 			reqList.ReqId = e.Header.ID
@@ -430,6 +439,7 @@ func (sm *logSyncerSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	if reqList.Timestamp == 0 {
 		sm.Errorf("miss timestamp in raft request: %v", reqList)
 	}
+	// TODO: stats latency raft write begin to begin sync.
 	for _, req := range reqList.Reqs {
 		if req.Header.DataType == int32(CustomReq) {
 			var p customProposeData

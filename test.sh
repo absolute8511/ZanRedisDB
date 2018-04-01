@@ -3,11 +3,19 @@ set -e
 echo "" > coverage.txt
 echo $TEST_RACE
 
-if [ "$TEST_RACE" = "false" ]; then
-    GOMAXPROCS=1 go test -timeout 900s `go list ./...`
+if [ "$TEST_PD" = "true" ]; then
+  TESTDIRS=`go list ./... | grep -v vendor`
 else
-    GOMAXPROCS=4 go test -i -timeout 900s -race `go list ./...`
-    for d in $(go list ./... | grep -v vendor); do 
+  TESTDIRS=`go list ./... | grep -v pdserver | grep -v vendor`
+fi
+
+echo $TESTDIRS
+
+if [ "$TEST_RACE" = "false" ]; then
+    GOMAXPROCS=1 go test -timeout 900s $TESTDIRS
+else
+    GOMAXPROCS=4 go test -i -timeout 900s -race $TESTDIRS
+    for d in $TESTDIRS; do 
         GOMAXPROCS=4 go test -timeout 900s -race -coverprofile=profile.out -covermode=atomic $d
         if [ -f profile.out ]; then
             cat profile.out >> coverage.txt

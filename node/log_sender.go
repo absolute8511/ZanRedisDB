@@ -398,12 +398,17 @@ func (s *RemoteLogSender) getRemoteSyncedRaft(stop chan struct{}) (SyncedState, 
 }
 
 func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
+	if len(r) == 0 {
+		return nil
+	}
+	first := r[0]
 	retry := 0
 	for {
 		retry++
 		err := s.doSendOnce(r)
 		if err != nil {
-			nodeLog.Infof("failed to send raft log (retried %v): %v", retry, err.Error())
+			nodeLog.Infof("failed to send raft log (retried %v): %v, at %v-%v",
+				retry, err.Error(), first.OrigTerm, first.OrigIndex)
 			wait := time.Millisecond * 100 * time.Duration(retry)
 			if wait > time.Second*30 {
 				wait = time.Second * 30
