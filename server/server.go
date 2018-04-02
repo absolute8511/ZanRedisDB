@@ -71,6 +71,11 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.ProfilePort == 0 {
 		conf.ProfilePort = 7666
 	}
+
+	if conf.SyncerWriteOnly {
+		node.SetSyncerOnly(true)
+	}
+
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
 		Hostname:    hname,

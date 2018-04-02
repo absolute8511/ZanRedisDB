@@ -837,7 +837,7 @@ func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.Conf
 	return removeSelf, changed, err
 }
 
-func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
+func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 	forceBackup := false
 	if evnt.Data != nil {
 		// try redis command
@@ -865,7 +865,7 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
 			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
 		}
 		var retErr error
-		forceBackup, retErr = nd.sm.ApplyRaftRequest(reqList, evnt.Term, evnt.Index, nd.stopChan)
+		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, reqList, evnt.Term, evnt.Index, nd.stopChan)
 		if reqList.Type == FromClusterSyncer {
 			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
 		}
@@ -915,9 +915,10 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	forceBackup := false
 	for i := range ents {
 		evnt := ents[i]
+		isReplaying := evnt.Index <= nd.rn.lastIndex
 		switch evnt.Type {
 		case raftpb.EntryNormal:
-			forceBackup = nd.applyEntry(evnt)
+			forceBackup = nd.applyEntry(evnt, isReplaying)
 		case raftpb.EntryConfChange:
 			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
 			confChanged = changed

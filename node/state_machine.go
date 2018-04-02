@@ -30,7 +30,7 @@ var errIgnoredRemoteApply = errors.New("remote raft apply should be ignored")
 var errRemoteSnapTransferFailed = errors.New("remote raft snapshot transfer failed")
 
 type StateMachine interface {
-	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
+	ApplyRaftRequest(isReplaying bool, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
 	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
@@ -71,7 +71,7 @@ type emptySM struct {
 	w wait.Wait
 }
 
-func (esm *emptySM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+func (esm *emptySM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	for _, req := range reqList.Reqs {
 		reqID := req.Header.ID
 		esm.w.Trigger(reqID, nil)
@@ -381,7 +381,7 @@ func (kvsm *kvStoreSM) preCheckConflict(cmd redcon.Command, reqTs int64) bool {
 	return h(cmd, reqTs)
 }
 
-func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	forceBackup := false
 	start := time.Now()
 	batching := false
@@ -414,7 +414,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 			if err != nil {
 				kvsm.w.Trigger(reqID, err)
 			} else {
-				if reqList.Type == FromClusterSyncer && !IsSyncerOnly() {
+				if !isReplaying && reqList.Type == FromClusterSyncer && !IsSyncerOnly() {
 					// syncer only no need check conflict since it will be no write from redis api
 					conflict := kvsm.preCheckConflict(cmd, reqTs)
 					if conflict {
