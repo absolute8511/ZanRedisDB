@@ -885,7 +885,7 @@ func (dc *DataCoordinator) getRaftAddrForNode(nid string) (string, *cluster.Coor
 	return node.RaftTransportAddr, nil
 }
 
-func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInfo, raftID uint64) (*node.NamespaceConfig, *cluster.CoordErr) {
+func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInfo, raftID uint64, join bool) (*node.NamespaceConfig, *cluster.CoordErr) {
 	var err *cluster.CoordErr
 	nsConf := node.NewNSConfig()
 	nsConf.BaseName = nsInfo.Name
@@ -929,7 +929,7 @@ func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInf
 		cluster.CoordLog().Warningf("can not found any seed nodes for namespace: %v", nsInfo)
 		return nil, cluster.ErrNamespaceConfInvalid
 	}
-	if len(nsConf.RaftGroupConf.SeedNodes) <= nsInfo.Replica/2 {
+	if !join && len(nsConf.RaftGroupConf.SeedNodes) <= nsInfo.Replica/2 {
 		cluster.CoordLog().Warningf("seed nodes for namespace %v not enough: %v", nsInfo.GetDesp(), nsConf.RaftGroupConf)
 		return nil, cluster.ErrNamespaceConfInvalid
 	}
@@ -1105,13 +1105,8 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 		cluster.CoordLog().Warningf("namespace %v has no raft id for local", nsInfo.GetDesp(), nsInfo.RaftIDs)
 		return nil, cluster.ErrNamespaceConfInvalid
 	}
-	nsConf, err := dc.prepareNamespaceConf(nsInfo, raftID)
-	if err != nil {
-		cluster.CoordLog().Warningf("prepare join namespace %v failed: %v", nsInfo.GetDesp(), err)
-		return nil, err
-	}
 
-	// TODO: handle if we need join the existing cluster
+	// handle if we need join the existing cluster
 	// we should not create new cluster except for the init
 	// if something wrong while disaster, we need re-init cluster but that
 	// should be used by setting manual flag for re-init
@@ -1126,13 +1121,20 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 		}
 		if nid == "" && epoch == 0 {
 			join = false
-			cluster.CoordLog().Infof("my node will create new cluster for namespace: %v since first init: %v",
-				nsInfo.GetDesp(), nsConf)
+			cluster.CoordLog().Infof("my node will create new cluster for namespace: %v since first init",
+				nsInfo.GetDesp())
 		}
 	}
 	if forceStandaloneCluster {
 		join = false
 	}
+	nsConf, err := dc.prepareNamespaceConf(nsInfo, raftID, join)
+	if err != nil {
+		go dc.tryCheckNamespaces()
+		cluster.CoordLog().Warningf("prepare join namespace %v failed: %v", nsInfo.GetDesp(), err)
+		return nil, err
+	}
+
 	localNode, localErr := dc.localNSMgr.InitNamespaceNode(nsConf, raftID, join)
 	if localNode != nil {
 		if checkErr := localNode.CheckRaftConf(raftID, nsConf); checkErr != nil {
