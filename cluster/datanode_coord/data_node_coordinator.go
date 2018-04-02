@@ -929,6 +929,10 @@ func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInf
 		cluster.CoordLog().Warningf("can not found any seed nodes for namespace: %v", nsInfo)
 		return nil, cluster.ErrNamespaceConfInvalid
 	}
+	if len(nsConf.RaftGroupConf.SeedNodes) <= nsInfo.Replica/2 {
+		cluster.CoordLog().Warningf("seed nodes for namespace %v not enough: %v", nsInfo.GetDesp(), nsConf.RaftGroupConf)
+		return nil, cluster.ErrNamespaceConfInvalid
+	}
 	return nsConf, nil
 }
 
