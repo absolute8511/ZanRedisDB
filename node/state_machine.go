@@ -258,7 +258,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	err := common.RunFileSync(syncAddr,
 		path.Join(rockredis.GetBackupDir(syncDir),
 			rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
-		store.GetBackupDir())
+		store.GetBackupDir(), stopChan)
 
 	return err
 }
@@ -578,7 +578,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 			err = common.RunFileSync(p.SyncAddr,
 				path.Join(rockredis.GetBackupDir(p.SyncPath),
 					rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)),
-				localPath,
+				localPath, nil,
 			)
 			if err != nil {
 				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)

@@ -406,6 +406,10 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		sm.Debugf("applying in log syncer: %v at (%v, %v)", reqList.String(), term, index)
 	}
+	if reqList.Type == FromClusterSyncer && reqList.OrigCluster != sm.clusterInfo.GetClusterName() {
+		sm.Infof("ignore sync from cluster syncer, %v-%v:%v", term, index, reqList.String())
+		return false, nil
+	}
 	forceBackup := false
 	reqList.OrigTerm = term
 	reqList.OrigIndex = index
@@ -422,13 +426,13 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 	}
 	if ignore {
 		if nodeLog.Level() >= common.LOG_DEBUG {
-			sm.Debugf("ignored on slave, %v-%v:%v", reqList.String())
+			sm.Debugf("ignored on slave, %v-%v:%v", term, index, reqList.String())
 		}
 		return forceBackup, nil
 	}
 
 	if nodeLog.Level() >= common.LOG_DEBUG {
-		sm.Debugf("begin sync, %v-%v:%v", reqList.String())
+		sm.Debugf("begin sync, %v-%v:%v", term, index, reqList.String())
 	}
 	if reqList.ReqId == 0 {
 		for _, e := range reqList.Reqs {
