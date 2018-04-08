@@ -17,6 +17,7 @@ if [ ! -d "$GoDep/sys" ]; then
 fi
 
 googleDep=`go env GOPATH`/src/google.golang.org
+mkdir -p $googleDep
 if [ ! -d "$googleDep/grpc" ]; then
   pushd $googleDep && git clone https://github.com/grpc/grpc-go.git grpc && popd
 fi
