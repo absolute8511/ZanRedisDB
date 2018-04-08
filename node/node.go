@@ -35,14 +35,18 @@ var (
 
 const (
 	RedisReq        int8 = 0
-	HTTPReq         int8 = 1
+	CustomReq       int8 = 1
 	SchemaChangeReq int8 = 2
 	proposeTimeout       = time.Second * 4
-	maxBatchCmdNum       = 500
+	proposeQueueLen      = 500
 )
 
 const (
-	HttpProposeOp_Backup int = 1
+	ProposeOp_Backup                 int = 1
+	ProposeOp_TransferRemoteSnap     int = 2
+	ProposeOp_ApplyRemoteSnap        int = 3
+	ProposeOp_RemoteConfChange       int = 4
+	ProposeOp_ApplySkippedRemoteSnap int = 5
 )
 
 type nodeProgress struct {
@@ -57,41 +61,48 @@ type internalReq struct {
 	done    chan struct{}
 }
 
-type httpProposeData struct {
-	ProposeOp  int
-	NeedBackup bool
+type customProposeData struct {
+	ProposeOp   int
+	NeedBackup  bool
+	SyncAddr    string
+	SyncPath    string
+	RemoteTerm  uint64
+	RemoteIndex uint64
+	Data        []byte
 }
 
 // a key-value node backed by raft
 type KVNode struct {
-	reqProposeC       chan *internalReq
-	rn                *raftNode
-	store             *KVStore
-	sm                StateMachine
-	stopping          int32
-	stopChan          chan struct{}
-	stopDone          chan struct{}
-	w                 wait.Wait
-	router            *common.CmdRouter
-	deleteCb          func()
-	clusterWriteStats common.WriteStats
-	ns                string
-	machineConfig     *MachineConfig
-	wg                sync.WaitGroup
-	commitC           <-chan applyInfo
-	committedIndex    uint64
-	clusterInfo       common.IClusterInfo
-	expireHandler     *ExpireHandler
-	expirationPolicy  common.ExpirationPolicy
+	reqProposeC        chan *internalReq
+	rn                 *raftNode
+	store              *KVStore
+	sm                 StateMachine
+	stopping           int32
+	stopChan           chan struct{}
+	stopDone           chan struct{}
+	w                  wait.Wait
+	router             *common.CmdRouter
+	deleteCb           func()
+	clusterWriteStats  common.WriteStats
+	ns                 string
+	machineConfig      *MachineConfig
+	wg                 sync.WaitGroup
+	commitC            <-chan applyInfo
+	committedIndex     uint64
+	clusterInfo        common.IClusterInfo
+	expireHandler      *ExpireHandler
+	expirationPolicy   common.ExpirationPolicy
+	remoteSyncedStates *remoteSyncedStateMgr
 }
 
 type KVSnapInfo struct {
 	*rockredis.BackupInfo
-	Ver        int                  `json:"version"`
-	BackupMeta []byte               `json:"backup_meta"`
-	LeaderInfo *common.MemberInfo   `json:"leader_info"`
-	Members    []*common.MemberInfo `json:"members"`
-	Learners   []*common.MemberInfo `json:"learners"`
+	Ver                int                    `json:"version"`
+	BackupMeta         []byte                 `json:"backup_meta"`
+	LeaderInfo         *common.MemberInfo     `json:"leader_info"`
+	Members            []*common.MemberInfo   `json:"members"`
+	Learners           []*common.MemberInfo   `json:"learners"`
+	RemoteSyncedStates map[string]SyncedState `json:"remote_synced_states"`
 }
 
 func (si *KVSnapInfo) GetData() ([]byte, error) {
@@ -114,28 +125,29 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 	config.nodeConfig = machineConfig
 
 	stopChan := make(chan struct{})
-	fullName := config.GroupName + "-" + strconv.Itoa(int(config.ID))
-	sm, err := NewStateMachine(fullName, kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo, stopChan)
+	w := wait.New()
+	sm, err := NewStateMachine(kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo, w)
 	if err != nil {
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:      make(chan *internalReq, 200),
-		stopChan:         stopChan,
-		stopDone:         make(chan struct{}),
-		store:            nil,
-		sm:               sm,
-		w:                wait.New(),
-		router:           common.NewCmdRouter(),
-		deleteCb:         deleteCb,
-		ns:               config.GroupName,
-		machineConfig:    machineConfig,
-		expirationPolicy: kvopts.ExpirationPolicy,
+		reqProposeC:        make(chan *internalReq, proposeQueueLen),
+		stopChan:           stopChan,
+		stopDone:           make(chan struct{}),
+		store:              nil,
+		sm:                 sm,
+		w:                  w,
+		router:             common.NewCmdRouter(),
+		deleteCb:           deleteCb,
+		ns:                 config.GroupName,
+		machineConfig:      machineConfig,
+		expirationPolicy:   kvopts.ExpirationPolicy,
+		remoteSyncedStates: newRemoteSyncedStateMgr(),
 	}
 	if kvsm, ok := sm.(*kvStoreSM); ok {
-		kvsm.w = s.w
 		s.store = kvsm.store
 	}
+
 	s.clusterInfo = clusterInfo
 	s.expireHandler = NewExpireHandler(s)
 
@@ -152,7 +164,17 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 }
 
 func (nd *KVNode) Start(standalone bool) error {
-	err := nd.rn.startRaft(nd, standalone)
+	// handle start/stop carefully
+	// if the object has self start()/stop() interface, and do not use the stopChan in KVNode,
+	// then we should call start() directly without put into waitgroup, and call stop() when the KVNode.Stop() is invoked.
+	// Otherwise, any other goroutine should be added into waitgroup and watch stopChan to
+	// get notify for stop and we will wait goroutines in waitgroup when the KVNode.Stop() is invoked.
+
+	err := nd.sm.Start()
+	if err != nil {
+		return err
+	}
+	err = nd.rn.startRaft(nd, standalone)
 	if err != nil {
 		return err
 	}
@@ -198,12 +220,19 @@ func (nd *KVNode) OptimizeDB() {
 	nd.rn.Infof("node %v end optimize db", nd.ns)
 	// since we can not know whether leader or follower is done on optimize
 	// we backup anyway after optimize
-	p := &httpProposeData{
-		ProposeOp:  HttpProposeOp_Backup,
+	p := &customProposeData{
+		ProposeOp:  ProposeOp_Backup,
 		NeedBackup: true,
 	}
 	d, _ := json.Marshal(p)
-	nd.HTTPPropose(d)
+	nd.CustomPropose(d)
+}
+
+func (nd *KVNode) switchForLearnerLeader(isLearnerLeader bool) {
+	logsm, ok := nd.sm.(*logSyncerSM)
+	if ok {
+		logsm.switchIgnoreSend(isLearnerLeader)
+	}
 }
 
 func (nd *KVNode) IsLead() bool {
@@ -324,7 +353,7 @@ func (nd *KVNode) handleProposeReq() {
 	}()
 	for {
 		pc := nd.reqProposeC
-		if len(reqList.Reqs) >= 1000 {
+		if len(reqList.Reqs) >= proposeQueueLen*4 {
 			pc = nil
 		}
 		select {
@@ -342,6 +371,7 @@ func (nd *KVNode) handleProposeReq() {
 				}
 			}
 			reqList.ReqNum = int32(len(reqList.Reqs))
+			reqList.Timestamp = time.Now().UnixNano()
 			buffer, err := reqList.Marshal()
 			// buffer will be reused by raft?
 			// TODO:buffer, err := reqList.MarshalTo()
@@ -357,7 +387,7 @@ func (nd *KVNode) handleProposeReq() {
 			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
-			cost := time.Now().UnixNano() - start
+			cost := reqList.Timestamp - start
 			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
 				nd.rn.Infof("ignore slow for begin propose too late: %v, cost %v", len(reqList.Reqs), cost)
 				for _, r := range reqList.Reqs {
@@ -420,6 +450,88 @@ func (nd *KVNode) IsWriteReady() bool {
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(nd.rn.config.Replicator/2)
 }
 
+func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
+	var reqList BatchInternalRaftRequest
+	err := reqList.Unmarshal(buffer)
+	if err != nil {
+		nd.rn.Infof("propose raw failed: %v at (%v-%v)", err.Error(), term, index)
+		return err
+	}
+	if nodeLog.Level() >= common.LOG_DETAIL {
+		nd.rn.Infof("propose raw (%v): %v at (%v-%v)", len(buffer), buffer, term, index)
+	}
+	reqList.Type = FromClusterSyncer
+	reqList.ReqId = nd.rn.reqIDGen.Next()
+	reqList.OrigTerm = term
+	reqList.OrigIndex = index
+	if reqList.Timestamp != raftTs {
+		return fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
+	}
+
+	for _, req := range reqList.Reqs {
+		// re-generate the req id to override the id from log
+		req.Header.ID = nd.rn.reqIDGen.Next()
+	}
+	dataLen := reqList.Size()
+	if dataLen <= len(buffer) {
+		n, err := reqList.MarshalTo(buffer[:dataLen])
+		if err != nil {
+			return err
+		}
+		if n != dataLen {
+			return errors.New("marshal length mismatch")
+		}
+	} else {
+		buffer, err = reqList.Marshal()
+		if err != nil {
+			return err
+		}
+	}
+	start := time.Now()
+	ch := nd.w.Register(reqList.ReqId)
+	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
+	if nodeLog.Level() >= common.LOG_DETAIL {
+		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
+	}
+	defer cancel()
+	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
+	if err != nil {
+		return err
+	}
+	var ok bool
+	var rsp interface{}
+	select {
+	case rsp = <-ch:
+		if err, ok = rsp.(error); ok {
+			rsp = nil
+		} else {
+			err = nil
+		}
+	case <-nd.stopChan:
+		err = common.ErrStopped
+	case <-ctx.Done():
+		err = ctx.Err()
+		if err == context.DeadlineExceeded {
+			nd.rn.Infof("propose timeout: %v", err.Error())
+		}
+		if err == context.Canceled {
+			// proposal canceled can be caused by leader transfer or no leader
+			err = ErrProposalCanceled
+			nd.rn.Infof("propose canceled ")
+		}
+	}
+	cost := time.Since(start).Nanoseconds()
+	for _, req := range reqList.Reqs {
+		if req.Header.DataType == int32(RedisReq) {
+			nd.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), cost/1000)
+		}
+	}
+	if cost >= int64(proposeTimeout.Nanoseconds())/2 {
+		nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
+	}
+	return err
+}
+
 func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	if !nd.IsWriteReady() {
 		return nil, errRaftNotReadyForWrite
@@ -459,11 +571,13 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		rsp = nil
 		err = common.ErrStopped
 	}
-	nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), time.Since(start).Nanoseconds()/1000)
-	if err == nil && !nd.IsWriteReady() {
-		nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
-			req.reqData.String())
-		return nil, errRaftNotReadyForWrite
+	if req.reqData.Header.DataType == int32(RedisReq) {
+		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), time.Since(start).Nanoseconds()/1000)
+		if err == nil && !nd.IsWriteReady() {
+			nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
+				req.reqData.String())
+			return nil, errRaftNotReadyForWrite
+		}
 	}
 	return rsp, err
 }
@@ -471,7 +585,7 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 	h := &RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
-		DataType: 0,
+		DataType: int32(RedisReq),
 	}
 	raftReq := InternalRaftRequest{
 		Header: h,
@@ -483,10 +597,10 @@ func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 	return nd.queueRequest(req)
 }
 
-func (nd *KVNode) HTTPPropose(buf []byte) (interface{}, error) {
+func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
 	h := &RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
-		DataType: int32(HTTPReq),
+		DataType: int32(CustomReq),
 	}
 	raftReq := InternalRaftRequest{
 		Header: h,
@@ -523,6 +637,9 @@ func (nd *KVNode) FillMyMemberInfo(m *common.MemberInfo) {
 func (nd *KVNode) ProposeAddLearner(m common.MemberInfo) error {
 	if m.NodeID == nd.machineConfig.NodeID {
 		nd.FillMyMemberInfo(&m)
+	}
+	if nd.rn.IsLearnerMember(m) {
+		return nil
 	}
 	data, _ := json.Marshal(m)
 	cc := raftpb.ConfChange{
@@ -712,7 +829,16 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 	return nil
 }
 
-func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
+// return (self removed, any conf changed, error)
+func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.ConfState) (bool, bool, error) {
+	var cc raftpb.ConfChange
+	cc.Unmarshal(evnt.Data)
+	removeSelf, changed, err := nd.rn.applyConfChange(cc, confState)
+	nd.sm.ApplyRaftConfRequest(cc, evnt.Term, evnt.Index, nd.stopChan)
+	return removeSelf, changed, err
+}
+
+func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 	forceBackup := false
 	if evnt.Data != nil {
 		// try redis command
@@ -721,14 +847,29 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry) bool {
 		if parseErr != nil {
 			nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
 				parseErr, len(evnt.Data), evnt,
-				string(evnt.Data))
+				evnt.String())
 		}
 		if len(reqList.Reqs) != int(reqList.ReqNum) {
 			nd.rn.Infof("request check failed %v, real len:%v",
 				reqList, len(reqList.Reqs))
 		}
 
-		forceBackup = nd.sm.ApplyRaftRequest(reqList, evnt.Term, evnt.Index)
+		isRemoteSnapTransfer := false
+		isRemoteSnapApply := false
+		if reqList.Type == FromClusterSyncer {
+			isApplied := nd.isAlreadyApplied(reqList)
+			// check if retrying duplicate req, we can just ignore old retry
+			if isApplied {
+				nd.rn.Infof("request %v-%v ignored since older than synced", reqList.OrigTerm, reqList.OrigIndex)
+				return false
+			}
+			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
+		}
+		var retErr error
+		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, reqList, evnt.Term, evnt.Index, nd.stopChan)
+		if reqList.Type == FromClusterSyncer {
+			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
+		}
 	}
 	return forceBackup
 }
@@ -775,13 +916,12 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	forceBackup := false
 	for i := range ents {
 		evnt := ents[i]
+		isReplaying := evnt.Index <= nd.rn.lastIndex
 		switch evnt.Type {
 		case raftpb.EntryNormal:
-			forceBackup = nd.applyEntry(evnt)
+			forceBackup = nd.applyEntry(evnt, isReplaying)
 		case raftpb.EntryConfChange:
-			var cc raftpb.ConfChange
-			cc.Unmarshal(evnt.Data)
-			removeSelf, changed, _ := nd.rn.applyConfChange(cc, &np.confState)
+			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
 			confChanged = changed
 			shouldStop = shouldStop || removeSelf
 		}
@@ -893,6 +1033,7 @@ func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 		return nil, err
 	}
 	si.Members, si.LeaderInfo = nd.rn.GetMembersAndLeader()
+	si.RemoteSyncedStates = nd.remoteSyncedStates.Clone()
 	si.Learners = nd.rn.GetLearners()
 	return si, nil
 }
@@ -906,7 +1047,8 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 	}
 	nd.rn.RestoreMembers(si)
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
-	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot)
+	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot, nd.stopChan)
+	nd.remoteSyncedStates.RestoreStates(si.RemoteSyncedStates)
 	return err
 }
 
@@ -931,19 +1073,10 @@ func (nd *KVNode) ReportMeLeaderToCluster() {
 		return
 	}
 	if nd.rn.IsLead() {
-		nid, epoch, err := nd.clusterInfo.GetNamespaceLeader(nd.ns)
-		if err != nil {
-			nd.rn.Infof("get raft leader from cluster failed: %v", err)
-			return
-		}
-
-		if nd.rn.config.nodeConfig.NodeID == nid {
-			return
-		}
-		_, err = nd.clusterInfo.UpdateMeForNamespaceLeader(nd.ns, epoch)
+		changed, err := nd.clusterInfo.UpdateMeForNamespaceLeader(nd.ns)
 		if err != nil {
 			nd.rn.Infof("update raft leader to me failed: %v", err)
-		} else {
+		} else if changed {
 			nd.rn.Infof("update %v raft leader to me : %v", nd.ns, nd.rn.config.ID)
 		}
 	}

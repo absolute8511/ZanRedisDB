@@ -122,6 +122,8 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// fixme: if del is batched, the deleted key may be in write batch while removing cache
+	// and removed cache may be reload by read before the write batch is committed.
 	db.delPFCache(rawKey)
 	return delCnt, nil
 }
@@ -196,6 +198,19 @@ func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
 		}
 	}
 	return cnt, nil
+}
+
+func (db *RockDB) KVGetVer(key []byte) (int64, error) {
+	_, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return 0, err
+	}
+	var ts uint64
+	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
+	if len(v) >= tsLen {
+		ts, err = Uint64(v[len(v)-tsLen:], err)
+	}
+	return int64(ts), err
 }
 
 func (db *RockDB) KVGet(key []byte) ([]byte, error) {

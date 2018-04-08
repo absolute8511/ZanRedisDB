@@ -383,6 +383,7 @@ func (etcdReg *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 		if key == NAMESPACE_REPLICA_INFO {
 			var rInfo PartitionReplicaInfo
 			if err := json.Unmarshal([]byte(node.Value), &rInfo); err != nil {
+				coordLog.Infof("unmarshal replica info %v failed: %v", node.Value, err)
 				continue
 			}
 			rInfo.epoch = EpochType(node.ModifiedIndex)

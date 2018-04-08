@@ -71,9 +71,6 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		ElectionTick:  5,
 	}
 
-	node.SetLogger(2, newTestLogger(t))
-	rockredis.SetLogger(2, newTestLogger(t))
-
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
 	nsConf.BaseName = "default"
@@ -336,9 +333,7 @@ func TestKVIncrDecr(t *testing.T) {
 }
 
 func TestKVBatch(t *testing.T) {
-	if testing.Verbose() {
-		node.SetLogLevel(int(common.LOG_DETAIL))
-	}
+
 	var wg sync.WaitGroup
 	concurrency := 100
 	poolList := make([]*goredis.PoolConn, concurrency)

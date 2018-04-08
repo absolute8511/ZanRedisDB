@@ -69,7 +69,7 @@ func TestDBZSetWithEmptyMember(t *testing.T) {
 	defer db.Close()
 
 	key := bin("test:testdb_zset_empty")
-	if n, err := db.ZAdd(key, pair("a", 0), pair("b", 1),
+	if n, err := db.ZAdd(0, key, pair("a", 0), pair("b", 1),
 		pair("c", 2), pair("", 3)); err != nil {
 		t.Fatal(err)
 	} else if n != 4 {
@@ -88,13 +88,13 @@ func TestDBZSetWithEmptyMember(t *testing.T) {
 		t.Fatal(s)
 	}
 
-	if n, err := db.ZRem(key, bin("a"), bin("b")); err != nil {
+	if n, err := db.ZRem(0, key, bin("a"), bin("b")); err != nil {
 		t.Fatal(err)
 	} else if n != 2 {
 		t.Fatal(n)
 	}
 
-	if n, err := db.ZRem(key, bin("a"), bin("b")); err != nil {
+	if n, err := db.ZRem(0, key, bin("a"), bin("b")); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
@@ -127,7 +127,7 @@ func TestDBZSet(t *testing.T) {
 	key := bin("test:testdb_zset_a")
 
 	// {'a':0, 'b':1, 'c':2, 'd':3}
-	if n, err := db.ZAdd(key, pair("a", 0), pair("b", 1),
+	if n, err := db.ZAdd(0, key, pair("a", 0), pair("b", 1),
 		pair("c", 2), pair("d", 3)); err != nil {
 		t.Fatal(err)
 	} else if n != 4 {
@@ -151,13 +151,13 @@ func TestDBZSet(t *testing.T) {
 	}
 
 	// {c':2, 'd':3}
-	if n, err := db.ZRem(key, bin("a"), bin("b")); err != nil {
+	if n, err := db.ZRem(0, key, bin("a"), bin("b")); err != nil {
 		t.Fatal(err)
 	} else if n != 2 {
 		t.Fatal(n)
 	}
 
-	if n, err := db.ZRem(key, bin("a"), bin("b")); err != nil {
+	if n, err := db.ZRem(0, key, bin("a"), bin("b")); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
@@ -195,7 +195,7 @@ func TestZSetOrder(t *testing.T) {
 	membCnt := len(membs)
 
 	for i := 0; i < membCnt; i++ {
-		db.ZAdd(key, pair(membs[i], i))
+		db.ZAdd(0, key, pair(membs[i], i))
 	}
 
 	if n, _ := db.ZCount(key, 0, 0XFFFF); int(n) != membCnt {
@@ -229,7 +229,7 @@ func TestZSetOrder(t *testing.T) {
 	}
 
 	// {'a':0, 'b':1, 'c':2, 'd':999, 'e':4, 'f':5}
-	if n, err := db.ZAdd(key, pair("d", 999)); err != nil {
+	if n, err := db.ZAdd(0, key, pair("d", 999)); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
@@ -258,7 +258,7 @@ func TestZSetOrder(t *testing.T) {
 	}
 
 	// {'a':0, 'b':1, 'c':2, 'd':999, 'e':6, 'f':5}
-	if s, err := db.ZIncrBy(key, 2, bin("e")); err != nil {
+	if s, err := db.ZIncrBy(0, key, 2, bin("e")); err != nil {
 		t.Fatal(err)
 	} else if s != 6 {
 		t.Fatal(s)
@@ -298,7 +298,7 @@ func TestZRangeLimit(t *testing.T) {
 	key := []byte("test:myzset_range")
 	for i := 0; i < MAX_BATCH_NUM-1; i++ {
 		m := fmt.Sprintf("%8d", i)
-		_, err := db.ZAdd(key, common.ScorePair{Score: float64(i), Member: []byte(m)})
+		_, err := db.ZAdd(0, key, common.ScorePair{Score: float64(i), Member: []byte(m)})
 		assert.Nil(t, err)
 	}
 
@@ -313,7 +313,7 @@ func TestZRangeLimit(t *testing.T) {
 
 	for i := MAX_BATCH_NUM; i < MAX_BATCH_NUM+10; i++ {
 		m := fmt.Sprintf("%8d", i)
-		_, err := db.ZAdd(key, common.ScorePair{Score: float64(i), Member: []byte(m)})
+		_, err := db.ZAdd(0, key, common.ScorePair{Score: float64(i), Member: []byte(m)})
 		assert.Nil(t, err)
 	}
 	_, err = db.ZRange(key, 0, -1)
@@ -336,7 +336,7 @@ func TestZLex(t *testing.T) {
 	defer db.Close()
 
 	key := []byte("test:myzset")
-	if _, err := db.ZAdd(key, common.ScorePair{Score: 0, Member: []byte("a")},
+	if _, err := db.ZAdd(0, key, common.ScorePair{Score: 0, Member: []byte("a")},
 		common.ScorePair{Score: 0, Member: []byte("b")},
 		common.ScorePair{Score: 0, Member: []byte("c")},
 		common.ScorePair{Score: 0, Member: []byte("d")},
@@ -371,7 +371,7 @@ func TestZLex(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	if n, err := db.ZRemRangeByLex(key, []byte("aaa"), []byte("g"), common.RangeROpen); err != nil {
+	if n, err := db.ZRemRangeByLex(0, key, []byte("aaa"), []byte("g"), common.RangeROpen); err != nil {
 		t.Fatal(err)
 	} else if n != 5 {
 		t.Fatal(n)
@@ -396,7 +396,7 @@ func TestZKeyExists(t *testing.T) {
 		t.Fatal("invalid value ", n)
 	}
 
-	db.ZAdd(key, common.ScorePair{Score: 0, Member: []byte("a")}, common.ScorePair{Score: 0, Member: []byte("b")})
+	db.ZAdd(0, key, common.ScorePair{Score: 0, Member: []byte("a")}, common.ScorePair{Score: 0, Member: []byte("b")})
 
 	if n, err := db.ZKeyExists(key); err != nil {
 		t.Fatal(err.Error())

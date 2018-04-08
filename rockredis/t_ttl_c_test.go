@@ -221,7 +221,7 @@ func TestSetTTL_C(t *testing.T) {
 		t.Fatal("return value from spersist of not exist set key != 0")
 	}
 
-	if _, err := db.SAdd(setKey, []byte("this"), []byte("is"), []byte("set"),
+	if _, err := db.SAdd(0, setKey, []byte("this"), []byte("is"), []byte("set"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestZSetTTL_C(t *testing.T) {
 		{Member: []byte("member4"), Score: 40},
 	}
 
-	if _, err := db.ZAdd(zsetKey, members...); err != nil {
+	if _, err := db.ZAdd(0, zsetKey, members...); err != nil {
 		t.Fatal(err)
 	}
 

@@ -13,7 +13,7 @@ func TestRsync(t *testing.T) {
 		panic(err)
 	}
 	t.Log(tmpDir)
-	RunFileSync("127.0.0.1", "~/test_rsync", tmpDir)
+	RunFileSync("127.0.0.1", "~/test_rsync", tmpDir, nil)
 }
 
 //func TestHashPID(t *testing.T) {

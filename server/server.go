@@ -71,11 +71,21 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.ProfilePort == 0 {
 		conf.ProfilePort = 7666
 	}
+
+	if conf.SyncerWriteOnly {
+		node.SetSyncerOnly(true)
+	}
+	if conf.LearnerRole != "" && conf.SyncerNormalInit {
+		sLog.Infof("server started as normal init")
+		node.SetSyncerNormalInit()
+	}
+
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
 		Hostname:    hname,
 		RedisPort:   strconv.Itoa(conf.RedisAPIPort),
 		HttpPort:    strconv.Itoa(conf.HttpAPIPort),
+		RpcPort:     strconv.Itoa(conf.GrpcAPIPort),
 		Version:     common.VerBinary,
 		Tags:        make(map[string]interface{}),
 		DataRoot:    conf.DataDir,
@@ -125,14 +135,16 @@ func NewServer(conf ServerConfig) *Server {
 		ErrorC:      nil,
 	}
 	mconf := &node.MachineConfig{
-		BroadcastAddr: conf.BroadcastAddr,
-		HttpAPIPort:   conf.HttpAPIPort,
-		LocalRaftAddr: conf.LocalRaftAddr,
-		DataRootDir:   conf.DataDir,
-		TickMs:        conf.TickMs,
-		ElectionTick:  conf.ElectionTick,
-		LearnerRole:   conf.LearnerRole,
-		RocksDBOpts:   conf.RocksDBOpts,
+		BroadcastAddr:     conf.BroadcastAddr,
+		HttpAPIPort:       conf.HttpAPIPort,
+		LocalRaftAddr:     conf.LocalRaftAddr,
+		DataRootDir:       conf.DataDir,
+		TickMs:            conf.TickMs,
+		ElectionTick:      conf.ElectionTick,
+		LearnerRole:       conf.LearnerRole,
+		RemoteSyncCluster: conf.RemoteSyncCluster,
+		StateMachineType:  conf.StateMachineType,
+		RocksDBOpts:       conf.RocksDBOpts,
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID
@@ -144,7 +156,7 @@ func NewServer(conf ServerConfig) *Server {
 			sLog.Fatalf("failed to init register for coordinator: %v", err)
 		}
 		s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
-		s.nsMgr.SetClusterInfoInterface(s.dataCoord)
+		s.nsMgr.SetIClusterInfo(s.dataCoord)
 	} else {
 		s.raftTransport.ID = types.ID(myNode.RegID)
 	}
@@ -180,6 +192,10 @@ func (s *Server) GetNamespace(ns string, pk []byte) (*node.NamespaceNode, error)
 }
 func (s *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
 	return s.nsMgr.GetNamespaceNode(ns)
+}
+
+func (s *Server) GetLogSyncStats(leaderOnly bool, srcClusterName string) []common.LogSyncStats {
+	return s.nsMgr.GetLogSyncStats(leaderOnly, srcClusterName)
 }
 
 func (s *Server) GetStats(leaderOnly bool) common.ServerStats {
@@ -223,6 +239,12 @@ func (s *Server) Start() {
 		defer s.wg.Done()
 		s.serveRedisAPI(s.conf.RedisAPIPort, s.stopC)
 	}()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.serveGRPCAPI(s.conf.GrpcAPIPort, s.stopC)
+	}()
+
 	if s.dataCoord != nil {
 		err := s.dataCoord.Start()
 		if err != nil {
@@ -239,34 +261,34 @@ func (s *Server) Start() {
 	}()
 }
 
-func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (common.CommandFunc, redcon.Command, error) {
+func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (bool, common.CommandFunc, redcon.Command, error) {
 	if len(cmd.Args) < 2 {
-		return nil, cmd, common.ErrInvalidArgs
+		return false, nil, cmd, common.ErrInvalidArgs
 	}
 	rawKey := cmd.Args[1]
 
 	namespace, pk, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
 		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return nil, cmd, err
+		return false, nil, cmd, err
 	}
 	// we need decide the partition id from the primary key
 	// if the command need cross multi partitions, we need handle separate
 	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
 	if err != nil {
-		return nil, cmd, err
+		return false, nil, cmd, err
 	}
 	// TODO: for multi primary keys such as mset, mget, we need make sure they are all in the same partition
 	h, isWrite, ok := n.Node.GetHandler(cmdName)
 	if !ok {
-		return nil, cmd, common.ErrInvalidCommand
+		return isWrite, nil, cmd, common.ErrInvalidCommand
 	}
 	if !isWrite && !n.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 		// read only to leader to avoid stale read
 		// TODO: also read command can request the raft read index if not leader
-		return nil, cmd, node.ErrNamespaceNotLeader
+		return isWrite, nil, cmd, node.ErrNamespaceNotLeader
 	}
-	return h, cmd, nil
+	return isWrite, h, cmd, nil
 }
 
 func (s *Server) serveRaft(stopCh <-chan struct{}) {

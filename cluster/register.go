@@ -82,6 +82,17 @@ type PartitionReplicaInfo struct {
 	epoch        EpochType
 }
 
+func (self *PartitionReplicaInfo) IsLearner(nid string) bool {
+	for _, lrns := range self.LearnerNodes {
+		for _, n := range lrns {
+			if n == nid {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (self *PartitionReplicaInfo) GetISR() []string {
 	if len(self.Removings) == 0 {
 		return self.RaftNodes
@@ -157,6 +168,7 @@ func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
 	for k, v := range self.Removings {
 		newp.Removings[k] = v
 	}
+	newp.LearnerNodes = make(map[string][]string)
 	for k, v := range self.LearnerNodes {
 		ln := make([]string, len(v))
 		copy(ln, v)

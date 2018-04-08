@@ -20,6 +20,7 @@ type nodeInfo struct {
 	Hostname         string `json:"hostname"`
 	RedisPort        string `json:"redis_port"`
 	HTTPPort         string `json:"http_port"`
+	GrpcPort         string `json:"grpc_port"`
 	Version          string `json:"version"`
 	DCInfo           string `json:"dc_info"`
 }
@@ -72,6 +73,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/datanodes", common.Decorate(s.getDataNodes, common.V1))
 	router.Handle("GET", "/listpd", common.Decorate(s.listPDNodes, common.V1))
 	router.Handle("GET", "/query/:namespace", common.Decorate(s.doQueryNamespace, debugLog, common.V1))
+	router.Handle("DELETE", "/namespace/rmlearner", common.Decorate(s.doRemoveNamespaceLearner, log, common.V1))
 
 	// cluster prefix url means only handled by leader of pd
 	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
@@ -133,6 +135,7 @@ func (s *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httpr
 			Version:          n.Version,
 			RedisPort:        n.RedisPort,
 			HTTPPort:         n.HttpPort,
+			GrpcPort:         n.RpcPort,
 			DCInfo:           dcInfo,
 		}
 		nodes = append(nodes, dn)
@@ -153,7 +156,8 @@ func (s *Server) listPDNodes(w http.ResponseWriter, req *http.Request, ps httpro
 	}
 	filteredNodes := nodes[:0]
 	for _, n := range nodes {
-		if !s.IsTombstonePDNode(n.GetID()) {
+		// should ignore learner role node
+		if !s.IsTombstonePDNode(n.GetID()) && n.LearnerRole == "" {
 			filteredNodes = append(filteredNodes, n)
 		}
 	}
@@ -205,9 +209,11 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 			hostname := ""
 			version := ""
 			dcInfo := ""
+			grpcPort := ""
 			if ok {
 				hostname = n.Hostname
 				version = n.Version
+				grpcPort = n.RpcPort
 				dc, ok := n.Tags[cluster.DCInfoTag]
 				if ok {
 					dcInfo, _ = dc.(string)
@@ -219,6 +225,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 				Version:          version,
 				RedisPort:        redisPort,
 				HTTPPort:         httpPort,
+				GrpcPort:         grpcPort,
 				DCInfo:           dcInfo,
 			}
 			if nsInfo.GetRealLeader() == nid {
@@ -239,7 +246,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 func (s *Server) doClusterStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	stable := false
 	if !s.pdCoord.IsMineLeader() {
-		sLog.Infof("request from remote %v should request to leader", req.RemoteAddr)
+		sLog.Debugf("request from remote %v should request to leader", req.RemoteAddr)
 		return nil, common.HttpErr{Code: 400, Text: cluster.ErrFailedOnNotLeader}
 	}
 	stable = s.pdCoord.IsClusterStable()
@@ -596,6 +603,32 @@ func (s *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request,
 	}
 	return nil, nil
 
+}
+
+func (s *Server) doRemoveNamespaceLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+
+	ns := reqParams.Get("namespace")
+	if ns == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_NAMESPACE"}
+	}
+
+	if !common.IsValidNamespaceName(ns) {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_NAMESPACE"}
+	}
+
+	pidStr := reqParams.Get("partition")
+	nid := reqParams.Get("nid")
+
+	err = s.pdCoord.RemoveLearnerFromNs(ns, pidStr, nid)
+	if err != nil {
+		sLog.Infof("namespace %v remove learner %v failed: %v", ns, nid, err)
+		return nil, common.HttpErr{Code: 400, Text: err.Error()}
+	}
+	return nil, nil
 }
 
 func (s *Server) doSetStableNodeNum(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {

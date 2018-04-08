@@ -3,12 +3,14 @@ package node
 import (
 	"fmt"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
 )
 
-var nodeLog = common.NewLevelLogger(common.LOG_DEBUG, common.NewDefaultLogger("node"))
+var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("node"))
+var syncerOnly int32
 
 func SetLogLevel(level int) {
 	nodeLog.SetLevel(int32(level))
@@ -17,6 +19,18 @@ func SetLogLevel(level int) {
 func SetLogger(level int32, logger common.Logger) {
 	nodeLog.SetLevel(level)
 	nodeLog.Logger = logger
+}
+
+func SetSyncerOnly(enable bool) {
+	if enable {
+		atomic.StoreInt32(&syncerOnly, 1)
+	} else {
+		atomic.StoreInt32(&syncerOnly, 0)
+	}
+}
+
+func IsSyncerOnly() bool {
+	return atomic.LoadInt32(&syncerOnly) == 1
 }
 
 func buildCommand(args [][]byte) redcon.Command {

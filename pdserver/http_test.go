@@ -22,8 +22,11 @@ import (
 )
 
 const (
-	TEST_CLUSTER_NAME = "unit-test"
-	pdHttpPort        = "18007"
+	TestClusterName           = "unit-test"
+	TestRemoteSyncClusterName = "unit-test-remote-sync"
+	pdHttpPort                = "18007"
+	pdRemoteHttpPort          = "18008"
+	pdLearnerHttpPort         = "18009"
 )
 
 var testEtcdServers = "http://127.0.0.1:2379"
@@ -39,9 +42,60 @@ type dataNodeWrapper struct {
 	dataPath  string
 }
 
-func startTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
+func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
+	kvList := make([]dataNodeWrapper, 0, n)
+	clusterTmpDir, err := ioutil.TempDir("", fmt.Sprintf("learner-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	t.Logf("dir:%v\n", clusterTmpDir)
+
+	opts := NewServerConfig()
+	opts.HTTPAddress = "127.0.0.1:" + pdLearnerHttpPort
+	opts.BroadcastAddr = "127.0.0.1"
+	opts.ClusterID = "unit-test"
+	opts.ClusterLeadershipAddresses = testEtcdServers
+	opts.BalanceInterval = []string{"0", "24"}
+	opts.LearnerRole = common.LearnerRoleLogSyncer
+	pd := NewServer(opts)
+	pd.Start()
+
+	for i := 0; i < n; i++ {
+		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
+		os.MkdirAll(tmpDir, common.DIR_PERM)
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(15345+i*100)
+		redisPort := 25345 + i*100
+		httpPort := 35345 + i*100
+		kvOpts := ds.ServerConfig{
+			ClusterID:            TestClusterName,
+			EtcdClusterAddresses: testEtcdServers,
+			DataDir:              tmpDir,
+			RedisAPIPort:         redisPort,
+			LocalRaftAddr:        raftAddr,
+			BroadcastAddr:        "127.0.0.1",
+			HttpAPIPort:          httpPort,
+			TickMs:               100,
+			ElectionTick:         5,
+			LearnerRole:          common.LearnerRoleLogSyncer,
+			RemoteSyncCluster:    "http://127.0.0.1:" + pdRemoteHttpPort,
+		}
+		kv := ds.NewServer(kvOpts)
+		kv.Start()
+		time.Sleep(time.Second)
+		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})
+	}
+	return pd, kvList, clusterTmpDir
+}
+
+func startRemoteSyncTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
+	return startTestCluster(t, TestRemoteSyncClusterName, pdRemoteHttpPort, n, 16345)
+}
+
+func startDefaultTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
+	return startTestCluster(t, TestClusterName, pdHttpPort, n, 17345)
+}
+
+func startTestCluster(t *testing.T, clusterName string, pdPort string, n int, basePort int) (*Server, []dataNodeWrapper, string) {
 	serverAddrList := strings.Split(testEtcdServers, ",")
-	rootPath := serverAddrList[0] + "/v2/keys/" + cluster.ROOT_DIR + "/" + TEST_CLUSTER_NAME + "/?recursive=true"
+	rootPath := serverAddrList[0] + "/v2/keys/" + cluster.ROOT_DIR + "/" + clusterName + "/?recursive=true"
 	if !strings.HasPrefix(rootPath, "http://") {
 		rootPath = "http://" + rootPath
 	}
@@ -63,9 +117,9 @@ func startTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) 
 	t.Logf("dir:%v\n", clusterTmpDir)
 
 	opts := NewServerConfig()
-	opts.HTTPAddress = "127.0.0.1:" + pdHttpPort
+	opts.HTTPAddress = "127.0.0.1:" + pdPort
 	opts.BroadcastAddr = "127.0.0.1"
-	opts.ClusterID = "unit-test"
+	opts.ClusterID = clusterName
 	opts.ClusterLeadershipAddresses = testEtcdServers
 	opts.BalanceInterval = []string{"0", "24"}
 	pd := NewServer(opts)
@@ -74,17 +128,19 @@ func startTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) 
 	for i := 0; i < n; i++ {
 		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
 		os.MkdirAll(tmpDir, common.DIR_PERM)
-		raftAddr := "http://127.0.0.1:" + strconv.Itoa(17345+i*100)
-		redisPort := 27345 + i*100
-		httpPort := 37345 + i*100
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+i*100)
+		redisPort := basePort + 10000 + i*100
+		httpPort := basePort + 20000 + i*100
+		rpcPort := basePort + 22000 + i*100
 		kvOpts := ds.ServerConfig{
-			ClusterID:            "unit-test",
+			ClusterID:            clusterName,
 			EtcdClusterAddresses: testEtcdServers,
 			DataDir:              tmpDir,
 			RedisAPIPort:         redisPort,
 			LocalRaftAddr:        raftAddr,
 			BroadcastAddr:        "127.0.0.1",
 			HttpAPIPort:          httpPort,
+			GrpcAPIPort:          rpcPort,
 			TickMs:               100,
 			ElectionTick:         5,
 		}
@@ -112,23 +168,22 @@ func cleanAllCluster(ret int) {
 	}
 }
 
-func getTestClient(t *testing.T) *zanredisdb.ZanRedisClient {
+func getTestClient(t *testing.T, ns string) *zanredisdb.ZanRedisClient {
 	conf := &zanredisdb.Conf{
 		DialTimeout:  time.Second * 15,
 		ReadTimeout:  0,
 		WriteTimeout: 0,
 		TendInterval: 10,
-		Namespace:    "unit-test-ns",
+		Namespace:    ns,
 	}
 	conf.LookupList = append(conf.LookupList, "127.0.0.1:"+pdHttpPort)
 	c := zanredisdb.NewZanRedisClient(conf)
 	c.Start()
 	return c
-	// c.Stop()
 }
 
 func startTestClusterAndCheck(t *testing.T) (*Server, []dataNodeWrapper, string) {
-	pd, kvList, tmpDir := startTestCluster(t, 5)
+	pd, kvList, tmpDir := startDefaultTestCluster(t, 4)
 	time.Sleep(time.Second)
 	pduri := "http://127.0.0.1:" + pdHttpPort
 	uri := fmt.Sprintf("%s/datanodes", pduri)
@@ -228,8 +283,8 @@ func ensureDataNodesReady(t *testing.T, pduri string, expect int) {
 	}
 }
 
-func ensureNamespace(t *testing.T, pduri string, ns string, partNum int) {
-	uri := fmt.Sprintf("%s/cluster/namespace/create?namespace=%s&partition_num=%d&replicator=3", pduri, ns, partNum)
+func ensureNamespace(t *testing.T, pduri string, ns string, partNum int, replica int) {
+	uri := fmt.Sprintf("%s/cluster/namespace/create?namespace=%s&partition_num=%d&replicator=%d", pduri, ns, partNum, replica)
 	rsp, err := http.Post(uri, "", nil)
 	assert.Nil(t, err)
 	if rsp.StatusCode != 200 {
@@ -305,7 +360,7 @@ func ensureNamespace(t *testing.T, pduri string, ns string, partNum int) {
 			time.Sleep(time.Second)
 			continue
 		}
-		assert.Equal(t, 3, len(queryRsp.PartNodes[0].Replicas))
+		assert.Equal(t, replica, len(queryRsp.PartNodes[0].Replicas))
 		break
 	}
 }
@@ -334,7 +389,7 @@ func TestClusterSchemaAddIndex(t *testing.T) {
 	uri := fmt.Sprintf("%s/datanodes", pduri)
 
 	ensureDataNodesReady(t, pduri, len(gkvList))
-	ensureNamespace(t, pduri, ns, partNum)
+	ensureNamespace(t, pduri, ns, partNum, 3)
 
 	indexTable := "test_hash_table"
 	uri = fmt.Sprintf("%s/cluster/schema/index/add?namespace=%s&table=%s&indextype=hash_secondary", pduri, ns, indexTable)

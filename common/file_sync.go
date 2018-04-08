@@ -8,7 +8,25 @@ import (
 	"path/filepath"
 )
 
-func RunFileSync(remote string, srcPath string, dstPath string) error {
+var runningCh chan struct{}
+
+func init() {
+	runningCh = make(chan struct{}, 2)
+}
+
+func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan struct{}) error {
+	select {
+	case runningCh <- struct{}{}:
+	case <-stopCh:
+		return ErrStopped
+	}
+	defer func() {
+		select {
+		case <-runningCh:
+		default:
+		}
+	}()
+
 	var cmd *exec.Cmd
 	if filepath.Base(srcPath) == filepath.Base(dstPath) {
 		dir := filepath.Dir(dstPath)

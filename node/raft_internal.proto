@@ -9,6 +9,11 @@ option (gogoproto.unmarshaler_all) = true;
 option (gogoproto.goproto_getters_all) = false;
 option (gogoproto.goproto_enum_prefix_all) = false;
 
+enum ReqSourceType {
+    FromAPI = 0;
+    FromClusterSyncer = 1;
+}
+
 message RequestHeader {
     uint64 ID = 1; 
     int32 data_type = 2;
@@ -23,6 +28,13 @@ message InternalRaftRequest {
 message BatchInternalRaftRequest {
     int32 req_num = 1 ;
     repeated InternalRaftRequest reqs = 2;
+    int64 timestamp = 3;
+    ReqSourceType type = 4;
+    uint64 req_id = 5;
+    // used for cluster log syncer
+    uint64 orig_term = 6;
+    uint64 orig_index = 7;
+    string orig_cluster = 8;
 }
 
 enum SchemaChangeType {

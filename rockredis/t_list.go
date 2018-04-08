@@ -599,6 +599,16 @@ func (db *RockDB) LIndex(key []byte, index int64) ([]byte, error) {
 	return db.eng.GetBytes(db.defaultReadOpts, sk)
 }
 
+func (db *RockDB) LVer(key []byte) (int64, error) {
+	if err := checkKeySize(key); err != nil {
+		return 0, err
+	}
+
+	ek := lEncodeMetaKey(key)
+	_, _, _, ts, err := db.lGetMeta(ek)
+	return ts, err
+}
+
 func (db *RockDB) LLen(key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err

@@ -155,7 +155,7 @@ func TestSetTTL_L(t *testing.T) {
 		t.Fatal("return value from expire of not exist set key != 0")
 	}
 
-	if _, err := db.SAdd(setKey, []byte("this"), []byte("is"), []byte("set"),
+	if _, err := db.SAdd(0, setKey, []byte("this"), []byte("is"), []byte("set"),
 		[]byte("ttl"), []byte("test")); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestZSetTTL_L(t *testing.T) {
 		{Member: []byte("member4"), Score: 40},
 	}
 
-	if _, err := db.ZAdd(zsetKey, members...); err != nil {
+	if _, err := db.ZAdd(0, zsetKey, members...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,7 +263,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 
 		case SetType:
 			tSetKey := []byte("test_checker_local_setKey")
-			db.SAdd(tSetKey, []byte("this"), []byte("is"), []byte("set"),
+			db.SAdd(0, tSetKey, []byte("this"), []byte("is"), []byte("set"),
 				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
 
 		case ZSetType:
@@ -275,7 +275,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 				{Member: []byte("member4"), Score: 44},
 			}
 
-			db.ZAdd(tZsetKey, members...)
+			db.ZAdd(0, tZsetKey, members...)
 		}
 
 		if err := db.expire(dataType, []byte(key), 8); err != nil {

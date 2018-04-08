@@ -40,7 +40,7 @@ func TestDBSetWithEmptyMember(t *testing.T) {
 	key := []byte("test:testdb_set_empty")
 	member := []byte("")
 
-	if n, err := db.SAdd(key, member); err != nil {
+	if n, err := db.SAdd(0, key, member); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -64,7 +64,7 @@ func TestDBSetWithEmptyMember(t *testing.T) {
 		t.Fatal(string(v[0]))
 	}
 
-	if n, err := db.SRem(key, member); err != nil {
+	if n, err := db.SRem(0, key, member); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -95,7 +95,7 @@ func TestDBSet(t *testing.T) {
 	member1 := []byte("testdb_set_m1")
 	member2 := []byte("testdb_set_m2")
 
-	if n, err := db.SAdd(key, member); err != nil {
+	if n, err := db.SAdd(0, key, member); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -119,13 +119,13 @@ func TestDBSet(t *testing.T) {
 		t.Fatal(string(v[0]))
 	}
 
-	if n, err := db.SRem(key, member); err != nil {
+	if n, err := db.SRem(0, key, member); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
 
-	db.SAdd(key1, member1, member2)
+	db.SAdd(0, key1, member1, member2)
 
 	if n, err := db.SClear(key1); err != nil {
 		t.Fatal(err)
@@ -133,8 +133,8 @@ func TestDBSet(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	db.SAdd(key1, member1, member2)
-	db.SAdd(key2, member1, member2, []byte("xxx"))
+	db.SAdd(0, key1, member1, member2)
+	db.SAdd(0, key2, member1, member2, []byte("xxx"))
 
 	if n, _ := db.SCard(key2); n != 3 {
 		t.Fatal(n)
@@ -145,7 +145,7 @@ func TestDBSet(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	db.SAdd(key2, member1, member2)
+	db.SAdd(0, key2, member1, member2)
 }
 
 func TestSKeyExists(t *testing.T) {
@@ -159,7 +159,7 @@ func TestSKeyExists(t *testing.T) {
 		t.Fatal("invalid value ", n)
 	}
 
-	db.SAdd(key, []byte("hello"), []byte("world"))
+	db.SAdd(0, key, []byte("hello"), []byte("world"))
 
 	if n, err := db.SKeyExists(key); err != nil {
 		t.Fatal(err.Error())

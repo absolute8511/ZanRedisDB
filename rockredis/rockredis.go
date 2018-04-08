@@ -438,6 +438,14 @@ func (r *RockDB) GetStatistics() string {
 	return r.dbOpts.GetStatistics()
 }
 
+func (r *RockDB) GetRecordsInRange() {
+	// use
+	// GetApproximateSizes and estimate-keys-num in property
+	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
+	// range records = estimate-keys-num * GetApproximateSizes(range) / GetApproximateSizes (total)
+	// use GetPropertiesOfTablesInRange to get number of keys in sst
+}
+
 func (r *RockDB) GetInternalStatus() map[string]interface{} {
 	status := make(map[string]interface{})
 	bbt := r.dbOpts.GetBlockBasedTableFactory()
@@ -777,8 +785,9 @@ func IsBatchableWrite(cmd string) bool {
 func init() {
 	batchableCmds = make(map[string]bool)
 	// command need response value (not just error or ok) can not be batched
-	// TODO: batched command may cause the table count not-exactly.
+	// batched command may cause the table count not-exactly.
 	batchableCmds["set"] = true
 	batchableCmds["setex"] = true
 	batchableCmds["del"] = true
+	batchableCmds["hmset"] = true
 }

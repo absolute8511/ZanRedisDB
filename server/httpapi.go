@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/ZanRedisDB/node"
@@ -145,6 +147,30 @@ func (s *Server) doAddNode(w http.ResponseWriter, req *http.Request, ps httprout
 	return nil, nil
 }
 
+func (s *Server) doAddLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	sLog.Infof("got add learner node request: %v from remote: %v", string(data), req.RemoteAddr)
+
+	var m common.MemberInfo
+	err = json.Unmarshal(data, &m)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+
+	nsNode := s.GetNamespaceFromFullName(m.GroupName)
+	if nsNode == nil || !nsNode.IsReady() {
+		return nil, common.HttpErr{Code: http.StatusNotFound, Text: node.ErrNamespacePartitionNotFound.Error()}
+	}
+	err = nsNode.Node.ProposeAddLearner(m)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
+}
+
 func (s *Server) getLeader(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	v := s.GetNamespaceFromFullName(ns)
@@ -234,10 +260,27 @@ func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps http
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "BAD_LEVEL_STRING"}
 	}
-	sLog.SetLevel(int32(level))
-	rafthttp.SetLogLevel(level)
-	node.SetLogLevel(level)
-	cluster.SetLogLevel(level)
+	mode := reqParams.Get("logmode")
+	switch mode {
+	case "":
+		sLog.SetLevel(int32(level))
+		rafthttp.SetLogLevel(level)
+		node.SetLogLevel(level)
+		cluster.SetLogLevel(level)
+		rockredis.SetLogLevel(int32(level))
+	case "server":
+		sLog.SetLevel(int32(level))
+	case "node":
+		node.SetLogLevel(level)
+	case "cluster":
+		cluster.SetLogLevel(level)
+	case "db":
+		rockredis.SetLogLevel(int32(level))
+	case "rafthttp":
+		rafthttp.SetLogLevel(level)
+	default:
+		sLog.Infof("unknown log mode: %v, available(server,node,cluster,db,rafthttp)", mode)
+	}
 	return nil, nil
 }
 
@@ -274,6 +317,49 @@ func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps htt
 	}
 	return nil, nil
 }
+
+func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	param := reqParams.Get("enable")
+	if param == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG"}
+	}
+	if param == "true" {
+		node.SetSyncerOnly(true)
+	} else {
+		node.SetSyncerOnly(false)
+	}
+	return nil, nil
+}
+
+func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	fromCluster := ps.ByName("clustername")
+	if fromCluster == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "cluster name needed"}
+	}
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	var ss []common.LogSyncStats
+	err = json.Unmarshal(data, &ss)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	for _, sync := range ss {
+		v := s.GetNamespaceFromFullName(sync.Name)
+		if v == nil || !v.IsReady() {
+			continue
+		}
+		v.Node.SetRemoteClusterSyncedRaft(fromCluster, sync.Term, sync.Index)
+		sLog.Infof("set syncer index to: %v ", sync)
+	}
+	return nil, nil
+}
+
 func (s *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -342,6 +428,24 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
+func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	netStat := syncClusterNetStats.Copy()
+	totalStat := syncClusterTotalStats.Copy()
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+	logSyncedStats := s.GetLogSyncStats(leaderOnly, reqParams.Get("cluster"))
+	return struct {
+		SyncNetLatency *common.WriteStats    `json:"sync_net_latency"`
+		SyncAllLatency *common.WriteStats    `json:"sync_all_latency"`
+		LogSynced      []common.LogSyncStats `json:"log_synced,omitempty"`
+	}{netStat, totalStat, logSyncedStats}, nil
+}
+
 func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -369,6 +473,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))
+	router.Handle("POST", common.APIAddLearnerNode, common.Decorate(s.doAddLearner, log, common.V1))
 	router.Handle("POST", common.APIRemoveNode, common.Decorate(s.doRemoveNode, log, common.V1))
 	router.Handle("GET", common.APINodeAllReady, common.Decorate(s.checkNodeAllReady, common.V1))
 
@@ -376,9 +481,12 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
 	router.Handle("POST", "/costlevel/set", common.Decorate(s.doSetCostLevel, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
+	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
+	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
+	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 

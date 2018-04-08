@@ -48,6 +48,10 @@ func (nn *NamespaceNode) FullName() string {
 	return nn.conf.Name
 }
 
+func (nn *NamespaceNode) SwitchForLearnerLeader(isLearnerLeader bool) {
+	nn.Node.switchForLearnerLeader(isLearnerLeader)
+}
+
 func (nn *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 }
 
@@ -103,6 +107,10 @@ func (nn *NamespaceNode) IsNsNodeFullReady(checkCommitIndex bool) bool {
 		return false
 	}
 	return nn.Node.IsRaftSynced(checkCommitIndex)
+}
+
+func (nn *NamespaceNode) GetLearners() []*common.MemberInfo {
+	return nn.Node.GetLearners()
 }
 
 func (nn *NamespaceNode) GetMembers() []*common.MemberInfo {
@@ -170,7 +178,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	return ns
 }
 
-func (nsm *NamespaceMgr) SetClusterInfoInterface(clusterInfo common.IClusterInfo) {
+func (nsm *NamespaceMgr) SetIClusterInfo(clusterInfo common.IClusterInfo) {
 	nsm.clusterInfo = clusterInfo
 }
 
@@ -429,6 +437,34 @@ func (nsm *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
 		}
 		dbStats := n.Node.GetDBInternalStats()
 		nsStats[k] = dbStats
+	}
+	nsm.mutex.RUnlock()
+	return nsStats
+}
+
+func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string) []common.LogSyncStats {
+	if srcClusterName == "" {
+		return nil
+	}
+	nsm.mutex.RLock()
+	nsStats := make([]common.LogSyncStats, 0, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
+		term, index := n.Node.GetRemoteClusterSyncedRaft(srcClusterName)
+		if term == 0 && index == 0 {
+			continue
+		}
+		var s common.LogSyncStats
+		s.Name = k
+		s.IsLeader = n.Node.IsLead()
+		s.Term = term
+		s.Index = index
+		nsStats = append(nsStats, s)
 	}
 	nsm.mutex.RUnlock()
 	return nsStats

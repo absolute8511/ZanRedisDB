@@ -177,27 +177,75 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	return num
 }
 
-func (db *RockDB) sIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+// size key include set size and set modify timestamp
+func (db *RockDB) sIncrSize(ts int64, key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	sk := sEncodeSizeKey(key)
 
-	var err error
 	var size int64
-	if size, err = Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk)); err != nil {
+	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
+	if err != nil {
 		return 0, err
+	}
+	if len(meta) == 0 {
+		size = 0
+	} else if len(meta) < 8 {
+		return 0, errIntNumber
 	} else {
-		size += delta
-		if size <= 0 {
-			size = 0
-			wb.Delete(sk)
-		} else {
-			wb.Put(sk, PutInt64(size))
+		if size, err = Int64(meta[:8], err); err != nil {
+			return 0, err
 		}
+	}
+	size += delta
+	if size <= 0 {
+		size = 0
+		wb.Delete(sk)
+	} else {
+		buf := make([]byte, 16)
+		binary.BigEndian.PutUint64(buf[0:8], uint64(size))
+		binary.BigEndian.PutUint64(buf[8:16], uint64(ts))
+		wb.Put(sk, buf)
 	}
 
 	return size, nil
 }
 
-func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) sGetSize(key []byte) (int64, error) {
+	if err := checkKeySize(key); err != nil {
+		return 0, err
+	}
+	sk := sEncodeSizeKey(key)
+	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
+	if err != nil {
+		return 0, err
+	}
+	if len(meta) == 0 {
+		return 0, nil
+	}
+	if len(meta) < 8 {
+		return 0, errIntNumber
+	}
+	return Int64(meta[:8], err)
+}
+
+func (db *RockDB) sGetVer(key []byte) (int64, error) {
+	if err := checkKeySize(key); err != nil {
+		return 0, err
+	}
+	sk := sEncodeSizeKey(key)
+	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
+	if err != nil {
+		return 0, err
+	}
+	if len(meta) == 0 {
+		return 0, nil
+	}
+	if len(meta) < 16 {
+		return 0, errIntNumber
+	}
+	return Int64(meta[8:16], err)
+}
+
+func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.WriteBatch) (int64, error) {
 	table, _, err := extractTableFromRedisKey(key)
 	if err != nil {
 		return 0, err
@@ -212,7 +260,7 @@ func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) 
 	if v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); v != nil {
 		n = 0
 	} else {
-		if newNum, err := db.sIncrSize(key, 1, wb); err != nil {
+		if newNum, err := db.sIncrSize(ts, key, 1, wb); err != nil {
 			return 0, err
 		} else if newNum == 1 {
 			db.IncrTableKeyCount(table, 1, wb)
@@ -223,7 +271,7 @@ func (db *RockDB) sSetItem(key []byte, member []byte, wb *gorocksdb.WriteBatch) 
 	return n, nil
 }
 
-func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
+func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if len(args) >= MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
@@ -253,7 +301,7 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 		wb.Put(ek, nil)
 	}
 
-	if newNum, err := db.sIncrSize(key, num, wb); err != nil {
+	if newNum, err := db.sIncrSize(ts, key, num, wb); err != nil {
 		return 0, err
 	} else if newNum > 0 && newNum == num {
 		db.IncrTableKeyCount(table, 1, wb)
@@ -264,13 +312,12 @@ func (db *RockDB) SAdd(key []byte, args ...[]byte) (int64, error) {
 
 }
 
-func (db *RockDB) SCard(key []byte) (int64, error) {
-	if err := checkKeySize(key); err != nil {
-		return 0, err
-	}
+func (db *RockDB) SGetVer(key []byte) (int64, error) {
+	return db.sGetVer(key)
+}
 
-	sk := sEncodeSizeKey(key)
-	return Int64(db.eng.GetBytes(db.defaultReadOpts, sk))
+func (db *RockDB) SCard(key []byte) (int64, error) {
+	return db.sGetSize(key)
 }
 
 func (db *RockDB) SKeyExists(key []byte) (int64, error) {
@@ -301,12 +348,7 @@ func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
 }
 
 func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
-	if err := checkKeySize(key); err != nil {
-		return nil, err
-	}
-
-	sk := sEncodeSizeKey(key)
-	num, err := Int64(db.eng.GetBytes(db.defaultReadOpts, sk))
+	num, err := db.sGetSize(key)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +380,7 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 	return v, nil
 }
 
-func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
+func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	table, rk, _ := extractTableFromRedisKey(key)
 	if len(table) == 0 {
 		return 0, errTableName
@@ -367,7 +409,7 @@ func (db *RockDB) SRem(key []byte, args ...[]byte) (int64, error) {
 		}
 	}
 
-	if newNum, err := db.sIncrSize(key, -num, wb); err != nil {
+	if newNum, err := db.sIncrSize(ts, key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)

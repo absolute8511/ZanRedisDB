@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/redcon"
 )
 
@@ -63,7 +64,7 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			if level > 0 {
 				start = time.Now()
 			}
-			h, cmd, err := s.GetHandler(cmdName, cmd)
+			isWrite, h, cmd, err := s.GetHandler(cmdName, cmd)
 			cmdStr := string(cmd.Args[0])
 			if len(cmd.Args) > 1 {
 				cmdStr += ", " + string(cmd.Args[1])
@@ -74,11 +75,15 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 				}
 			}
 			if err == nil {
-				h(conn, cmd)
+				if isWrite && node.IsSyncerOnly() {
+					conn.WriteError("The cluster is only allowing syncer write : ERR handle command " + cmdStr)
+				} else {
+					h(conn, cmd)
+				}
 			} else {
 				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
 			}
-			if level > 0 {
+			if level > 0 && err == nil {
 				cost := time.Since(start)
 				if cost >= time.Second ||
 					(level > 1 && cost > time.Millisecond*500) ||

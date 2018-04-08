@@ -26,6 +26,18 @@ func (ws *WriteStats) UpdateSizeStats(vSize int64) {
 	atomic.AddInt64(&ws.ValueSizeStats[bucket], 1)
 }
 
+func (ws *WriteStats) BatchUpdateLatencyStats(latencyUs int64, cnt int64) {
+	bucket := 0
+	if latencyUs < 1024 {
+	} else {
+		bucket = int(math.Log2(float64(latencyUs/1000))) + 1
+	}
+	if bucket >= len(ws.WriteLatencyStats) {
+		bucket = len(ws.WriteLatencyStats) - 1
+	}
+	atomic.AddInt64(&ws.WriteLatencyStats[bucket], cnt)
+}
+
 func (ws *WriteStats) UpdateLatencyStats(latencyUs int64) {
 	bucket := 0
 	if latencyUs < 1024 {
@@ -67,6 +79,13 @@ type NamespaceStats struct {
 	InternalStats     map[string]interface{} `json:"internal_stats"`
 	EngType           string                 `json:"eng_type"`
 	IsLeader          bool                   `json:"is_leader"`
+}
+
+type LogSyncStats struct {
+	Name     string `json:"name"`
+	Term     uint64 `json:"term"`
+	Index    uint64 `json:"index"`
+	IsLeader bool   `json:"is_leader"`
 }
 
 type ScanStats struct {

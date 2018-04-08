@@ -6,89 +6,169 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/pkg/wait"
 	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/redcon"
-	"github.com/coreos/etcd/pkg/wait"
 )
 
+const (
+	maxDBBatchCmdNum = 100
+	dbWriteSlow      = time.Millisecond * 200
+)
+
+// this error is used while the raft is applying the remote raft logs and notify we should
+// not update the remote raft term-index state.
+var errIgnoredRemoteApply = errors.New("remote raft apply should be ignored")
+var errRemoteSnapTransferFailed = errors.New("remote raft snapshot transfer failed")
+
 type StateMachine interface {
-	ApplyRaftRequest(req BatchInternalRaftRequest, term uint64, index uint64) bool
+	ApplyRaftRequest(isReplaying bool, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
+	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
-	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error
+	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
 	CleanData() error
 	Optimize()
 	GetStats() common.NamespaceStats
+	Start() error
 	Close()
 	CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error
 }
 
-func NewStateMachine(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64,
-	ns string, clusterInfo common.IClusterInfo, stopChan chan struct{}) (StateMachine, error) {
+func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint64,
+	fullNS string, clusterInfo common.IClusterInfo, w wait.Wait) (StateMachine, error) {
 	if machineConfig.LearnerRole == "" {
-		return NewKVStoreSM(fullName, opts, machineConfig, localID, ns, clusterInfo, stopChan)
+		if machineConfig.StateMachineType == "empty_sm" {
+			return &emptySM{w: w}, nil
+		}
+		kvsm, err := NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo)
+		if err != nil {
+			return nil, err
+		}
+		kvsm.w = w
+		return kvsm, err
 	} else if machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
-		return NewLogSyncerSM(fullName, opts, machineConfig, localID, ns, clusterInfo, stopChan)
+		lssm, err := NewLogSyncerSM(opts, machineConfig, localID, fullNS, clusterInfo)
+		if err != nil {
+			return nil, err
+		}
+		lssm.w = w
+		return lssm, err
 	} else {
 		return nil, errors.New("unknown learner role")
 	}
+}
+
+type emptySM struct {
+	w wait.Wait
+}
+
+func (esm *emptySM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+	for _, req := range reqList.Reqs {
+		reqID := req.Header.ID
+		esm.w.Trigger(reqID, nil)
+	}
+	return false, nil
+}
+
+func (esm *emptySM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error {
+	return nil
+}
+
+func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
+	var s KVSnapInfo
+	return &s, nil
+}
+func (esm *emptySM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+	return nil
+}
+func (esm *emptySM) Destroy() {
+
+}
+func (esm *emptySM) CleanData() error {
+	return nil
+}
+func (esm *emptySM) Optimize() {
+
+}
+func (esm *emptySM) GetStats() common.NamespaceStats {
+	return common.NamespaceStats{}
+}
+func (esm *emptySM) Start() error {
+	return nil
+}
+func (esm *emptySM) Close() {
+
+}
+func (esm *emptySM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
+	return nil
 }
 
 type kvStoreSM struct {
 	fullName      string
 	store         *KVStore
 	clusterInfo   common.IClusterInfo
-	ns            string
+	fullNS        string
 	machineConfig MachineConfig
-	stopChan      chan struct{}
 	ID            uint64
 	dbWriteStats  common.WriteStats
 	w             wait.Wait
 	router        *common.SMCmdRouter
+	stopping      int32
+	cRouter       *conflictRouter
 }
 
-func NewKVStoreSM(fullName string, opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
-	clusterInfo common.IClusterInfo, stopChan chan struct{}) (StateMachine, error) {
+func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
+	clusterInfo common.IClusterInfo) (*kvStoreSM, error) {
 	store, err := NewKVStore(opts)
 	if err != nil {
 		return nil, err
 	}
 	sm := &kvStoreSM{
-		fullName:      fullName,
-		ns:            ns,
+		fullNS:        ns,
 		machineConfig: machineConfig,
 		ID:            localID,
 		clusterInfo:   clusterInfo,
 		store:         store,
-		stopChan:      stopChan,
 		router:        common.NewSMCmdRouter(),
+		cRouter:       NewConflictRouter(),
 	}
 	sm.registerHandlers()
+	sm.registerConflictHandlers()
 	return sm, nil
 }
 
 func (kvsm *kvStoreSM) Debugf(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.DebugDepth(1, fmt.Sprintf("%v: %s", kvsm.fullName, msg))
+	nodeLog.DebugDepth(1, fmt.Sprintf("%v: %s", kvsm.fullNS, msg))
 }
 
 func (kvsm *kvStoreSM) Infof(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.InfoDepth(1, fmt.Sprintf("%v: %s", kvsm.fullName, msg))
+	nodeLog.InfoDepth(1, fmt.Sprintf("%v: %s", kvsm.fullNS, msg))
 }
 
 func (kvsm *kvStoreSM) Errorf(f string, args ...interface{}) {
 	msg := fmt.Sprintf(f, args...)
-	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", kvsm.fullName, msg))
+	nodeLog.ErrorDepth(1, fmt.Sprintf("%v: %s", kvsm.fullNS, msg))
+}
+
+func (kvsm *kvStoreSM) Start() error {
+	return nil
 }
 
 func (kvsm *kvStoreSM) Close() {
+	if !atomic.CompareAndSwapInt32(&kvsm.stopping, 0, 1) {
+		return
+	}
 	kvsm.store.Close()
 }
 
@@ -152,7 +232,7 @@ func checkLocalBackup(store *KVStore, rs raftpb.Snapshot) (bool, error) {
 }
 
 func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
-	clusterInfo common.IClusterInfo, ns string,
+	clusterInfo common.IClusterInfo, fullNS string,
 	localID uint64, stopChan chan struct{},
 	raftSnapshot raftpb.Snapshot, retry int) error {
 
@@ -163,7 +243,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	if clusterInfo == nil {
 		return errors.New("cluster info is not available.")
 	}
-	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, ns, localID, stopChan, raftSnapshot, retry)
+	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, fullNS, localID, stopChan, raftSnapshot, retry, false)
 	if syncAddr == "" && syncDir == "" {
 		return errors.New("no backup available from others")
 	}
@@ -178,15 +258,15 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	err := common.RunFileSync(syncAddr,
 		path.Join(rockredis.GetBackupDir(syncDir),
 			rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)),
-		store.GetBackupDir())
+		store.GetBackupDir(), stopChan)
 
 	return err
 }
 
 func GetValidBackupInfo(machineConfig MachineConfig,
-	clusterInfo common.IClusterInfo, ns string,
+	clusterInfo common.IClusterInfo, fullNS string,
 	localID uint64, stopChan chan struct{},
-	raftSnapshot raftpb.Snapshot, retryIndex int) (string, string) {
+	raftSnapshot raftpb.Snapshot, retryIndex int, useRsyncForLocal bool) (string, string) {
 	// we need find the right backup data match with the raftsnapshot
 	// for each cluster member, it need check the term+index and the backup meta to
 	// make sure the data is valid
@@ -199,9 +279,9 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 	var err error
 	for innerRetry < 3 {
 		innerRetry++
-		snapSyncInfoList, err = clusterInfo.GetSnapshotSyncInfo(ns)
+		snapSyncInfoList, err = clusterInfo.GetSnapshotSyncInfo(fullNS)
 		if err != nil {
-			nodeLog.Infof("%v get snapshot info failed: %v", ns, err)
+			nodeLog.Infof("%v get snapshot info failed: %v", fullNS, err)
 			select {
 			case <-stopChan:
 				break
@@ -212,7 +292,7 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 		}
 	}
 
-	nodeLog.Infof("%v current cluster raft nodes info: %v", ns, snapSyncInfoList)
+	nodeLog.Infof("%v current cluster raft nodes info: %v", fullNS, snapSyncInfoList)
 	syncAddrList := make([]string, 0)
 	syncDirList := make([]string, 0)
 	for _, ssi := range snapSyncInfoList {
@@ -220,19 +300,17 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 			continue
 		}
 
-		c := http.Client{Transport: common.NewDeadlineTransport(time.Second)}
 		body, _ := raftSnapshot.Marshal()
 		uri := "http://" + ssi.RemoteAddr + ":" +
-			ssi.HttpAPIPort + common.APICheckBackup + "/" + ns
-		req, _ := http.NewRequest("GET", uri, bytes.NewBuffer(body))
-		rsp, err := c.Do(req)
+			ssi.HttpAPIPort + common.APICheckBackup + "/" + fullNS
+
+		sc, err := common.APIRequest("GET", uri, bytes.NewBuffer(body), time.Second*3, nil)
 		if err != nil {
 			nodeLog.Infof("request %v error: %v", uri, err)
 			continue
 		}
-		rsp.Body.Close()
-		if rsp.StatusCode != http.StatusOK {
-			nodeLog.Infof("request %v error: %v", uri, rsp)
+		if sc != http.StatusOK {
+			nodeLog.Infof("request %v error: %v", uri, sc)
 			continue
 		}
 		if ssi.RemoteAddr == h {
@@ -241,31 +319,36 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 				nodeLog.Infof("data dir can not be same if on local: %v, %v", ssi, machineConfig)
 				continue
 			}
-			// local node with different directory
-			syncAddrList = append(syncAddrList, "")
-			syncDirList = append(syncDirList, path.Join(ssi.DataRoot, ns))
+			if useRsyncForLocal {
+				syncAddrList = append(syncAddrList, ssi.RemoteAddr)
+				syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, fullNS))
+			} else {
+				// local node with different directory
+				syncAddrList = append(syncAddrList, "")
+				syncDirList = append(syncDirList, path.Join(ssi.DataRoot, fullNS))
+			}
 		} else {
 			// for remote snapshot, we do rsync from remote module
 			syncAddrList = append(syncAddrList, ssi.RemoteAddr)
-			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, ns))
+			syncDirList = append(syncDirList, path.Join(ssi.RsyncModule, fullNS))
 		}
 	}
 	if len(syncAddrList) > 0 {
 		syncAddr = syncAddrList[retryIndex%len(syncAddrList)]
 		syncDir = syncDirList[retryIndex%len(syncDirList)]
 	}
-	nodeLog.Infof("%v should recovery from : %v, %v", ns, syncAddr, syncDir)
+	nodeLog.Infof("%v should recovery from : %v, %v", fullNS, syncAddr, syncDir)
 	return syncAddr, syncDir
 }
 
-func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
+func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
 	retry := 0
 	for retry < 3 {
-		err := prepareSnapshotForStore(kvsm.store, kvsm.machineConfig, kvsm.clusterInfo, kvsm.ns,
-			kvsm.ID, kvsm.stopChan, raftSnapshot, retry)
+		err := prepareSnapshotForStore(kvsm.store, kvsm.machineConfig, kvsm.clusterInfo, kvsm.fullNS,
+			kvsm.ID, stop, raftSnapshot, retry)
 		if err != nil {
 			kvsm.Infof("failed to prepare snapshot: %v", err)
 		} else {
@@ -277,7 +360,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		retry++
 		kvsm.Infof("failed to restore snapshot: %v", err)
 		select {
-		case <-kvsm.stopChan:
+		case <-stop:
 			return err
 		case <-time.After(time.Second):
 		}
@@ -285,7 +368,20 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	return errors.New("failed to restore from snapshot")
 }
 
-func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term uint64, index uint64) bool {
+func (kvsm *kvStoreSM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error {
+	return nil
+}
+
+func (kvsm *kvStoreSM) preCheckConflict(cmd redcon.Command, reqTs int64) bool {
+	cmdName := strings.ToLower(string(cmd.Args[0]))
+	h, ok := kvsm.cRouter.GetHandler(cmdName)
+	if !ok {
+		return true
+	}
+	return h(cmd, reqTs)
+}
+
+func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	forceBackup := false
 	start := time.Now()
 	batching := false
@@ -294,21 +390,44 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	var batchStart time.Time
 	dupCheckMap := make(map[string]bool, len(reqList.Reqs))
 	lastBatchCmd := ""
+	ts := reqList.Timestamp
+	if reqList.Type == FromClusterSyncer {
+		if nodeLog.Level() >= common.LOG_DETAIL {
+			kvsm.Debugf("recv write from cluster syncer at (%v-%v): %v", term, index, reqList.String())
+		}
+		// TODO: here we need compare the key timestamp in this cluster and the timestamp from raft request to handle
+		// the conflict change between two cluster.
+		//
+	}
+	var retErr error
 	for reqIndex, req := range reqList.Reqs {
+		reqTs := ts
+		if reqTs == 0 {
+			reqTs = req.Header.Timestamp
+		}
 		reqID := req.Header.ID
-		if req.Header.DataType == 0 {
+		if reqID == 0 {
+			reqID = reqList.ReqId
+		}
+		if req.Header.DataType == int32(RedisReq) {
 			cmd, err := redcon.Parse(req.Data)
 			if err != nil {
 				kvsm.w.Trigger(reqID, err)
 			} else {
+				if !isReplaying && reqList.Type == FromClusterSyncer && !IsSyncerOnly() {
+					// syncer only no need check conflict since it will be no write from redis api
+					conflict := kvsm.preCheckConflict(cmd, reqTs)
+					if conflict {
+						kvsm.Infof("conflict sync: %v, %v, %v", string(cmd.Raw), req.String(), reqTs)
+					}
+				}
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
 				_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
 				_, ok := dupCheckMap[string(pk)]
 				handled := false
-				// TODO: table counter can be batched???
-				if kvsm.store.IsBatchableWrite(cmdName) &&
-					len(batchReqIDList) < maxBatchCmdNum &&
+				if rockredis.IsBatchableWrite(cmdName) &&
+					len(batchReqIDList) < maxDBBatchCmdNum &&
 					!ok {
 					if !batching {
 						err := kvsm.store.BeginBatchWrite()
@@ -330,7 +449,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 						if pk != nil {
 							dupCheckMap[string(pk)] = true
 						}
-						v, err := h(cmd, req.Header.Timestamp)
+						v, err := h(cmd, reqTs)
 						if err != nil {
 							kvsm.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
 							kvsm.w.Trigger(reqID, err)
@@ -364,10 +483,10 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 					kvsm.Infof("unsupported redis command: %v", cmd)
 					kvsm.w.Trigger(reqID, common.ErrInvalidCommand)
 				} else {
-					v, err := h(cmd, req.Header.Timestamp)
+					v, err := h(cmd, reqTs)
 					cmdCost := time.Since(cmdStart)
-					if cmdCost >= time.Second || nodeLog.Level() > common.LOG_DETAIL ||
-						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > time.Millisecond*100) {
+					if cmdCost > dbWriteSlow || nodeLog.Level() > common.LOG_DETAIL ||
+						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
 						kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 					}
 					kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
@@ -386,20 +505,8 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 				batchReqIDList, batchReqRspList, dupCheckMap = kvsm.processBatching(lastBatchCmd, reqList, batchStart,
 					batchReqIDList, batchReqRspList, dupCheckMap)
 			}
-			if req.Header.DataType == int32(HTTPReq) {
-				var p httpProposeData
-				err := json.Unmarshal(req.Data, &p)
-				if err != nil {
-					kvsm.Infof("failed to unmarshal http propose: %v", req.String())
-					kvsm.w.Trigger(reqID, err)
-				}
-				if p.ProposeOp == HttpProposeOp_Backup {
-					kvsm.Infof("got force backup request")
-					forceBackup = true
-					kvsm.w.Trigger(reqID, nil)
-				} else {
-					kvsm.w.Trigger(reqID, errUnknownData)
-				}
+			if req.Header.DataType == int32(CustomReq) {
+				forceBackup, retErr = kvsm.handleCustomRequest(req, reqID)
 			} else if req.Header.DataType == int32(SchemaChangeReq) {
 				kvsm.Infof("handle schema change: %v", string(req.Data))
 				var sc SchemaChange
@@ -432,7 +539,110 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(reqList BatchInternalRaftRequest, term u
 	if cost >= proposeTimeout/2 {
 		kvsm.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
 	}
-	return forceBackup
+	// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
+	if reqList.ReqId > 0 {
+		kvsm.w.Trigger(reqList.ReqId, nil)
+	}
+	return forceBackup, retErr
+}
+
+func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint64) (bool, error) {
+	var p customProposeData
+	var forceBackup bool
+	var retErr error
+	err := json.Unmarshal(req.Data, &p)
+	if err != nil {
+		kvsm.Infof("failed to unmarshal custom propose: %v, err: %v", req.String(), err)
+		kvsm.w.Trigger(reqID, err)
+		return forceBackup, retErr
+	}
+	if p.ProposeOp == ProposeOp_Backup {
+		kvsm.Infof("got force backup request")
+		forceBackup = true
+		kvsm.w.Trigger(reqID, nil)
+	} else if p.ProposeOp == ProposeOp_RemoteConfChange {
+		var cc raftpb.ConfChange
+		cc.Unmarshal(p.Data)
+		kvsm.Infof("remote config changed: %v, %v ", p, cc.String())
+		kvsm.w.Trigger(reqID, nil)
+	} else if p.ProposeOp == ProposeOp_TransferRemoteSnap {
+		localPath := path.Join(kvsm.store.GetBackupDir(), "remote")
+		kvsm.Infof("transfer remote snap request: %v to local: %v", p, localPath)
+		retErr = errRemoteSnapTransferFailed
+		err := os.MkdirAll(localPath, common.DIR_PERM)
+		// trigger early to allow client api return quickly
+		// the transfer status already be saved.
+		kvsm.w.Trigger(reqID, err)
+		if err == nil {
+			// how to make sure the client is not timeout while transferring
+			err = common.RunFileSync(p.SyncAddr,
+				path.Join(rockredis.GetBackupDir(p.SyncPath),
+					rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)),
+				localPath, nil,
+			)
+			if err != nil {
+				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)
+			} else {
+				// TODO: check the transferred snapshot file
+				//rockredis.IsLocalBackupOK()
+				retErr = nil
+			}
+		}
+	} else if p.ProposeOp == ProposeOp_ApplyRemoteSnap {
+		kvsm.Infof("begin apply remote snap : %v", p)
+		retErr = errIgnoredRemoteApply
+		// check if there is the same term-index backup on local
+		// if not, we can just rename remote snap to this name.
+		// if already exist, we need handle rename
+		backupDir := kvsm.store.GetBackupDir()
+		checkpointDir := rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)
+		fullPath := path.Join(backupDir, checkpointDir)
+		remotePath := path.Join(backupDir, "remote", checkpointDir)
+		tmpLocalPath := path.Join(fullPath, "tmplocal")
+		_, err := os.Stat(remotePath)
+		if err != nil {
+			kvsm.Infof("apply remote snap %v failed since backup data error: %v", p, err)
+			kvsm.w.Trigger(reqID, err)
+			return forceBackup, retErr
+		}
+		oldOK, err := kvsm.store.IsLocalBackupOK(p.RemoteTerm, p.RemoteIndex)
+		if oldOK {
+			err = os.Rename(fullPath, tmpLocalPath)
+			if err != nil {
+				kvsm.Infof("apply remote snap %v failed to rename path : %v", p, err)
+				kvsm.w.Trigger(reqID, err)
+				return forceBackup, retErr
+			}
+			defer os.Rename(tmpLocalPath, fullPath)
+		}
+		err = os.Rename(remotePath, fullPath)
+		if err != nil {
+			kvsm.Infof("apply remote snap %v failed : %v", p, err)
+			kvsm.w.Trigger(reqID, err)
+			return forceBackup, retErr
+		}
+		defer os.Rename(fullPath, remotePath)
+		newOK, err := kvsm.store.IsLocalBackupOK(p.RemoteTerm, p.RemoteIndex)
+		if err != nil || !newOK {
+			kvsm.Errorf("apply remote snap failed since remote backup is not ok: %v", err)
+			kvsm.w.Trigger(reqID, err)
+			return forceBackup, retErr
+		}
+		err = kvsm.store.Restore(p.RemoteTerm, p.RemoteIndex)
+		kvsm.w.Trigger(reqID, err)
+		if err != nil {
+			kvsm.Errorf("apply remote snap failed to restore backup: %v", err)
+		} else {
+			forceBackup = true
+			retErr = nil
+		}
+	} else if p.ProposeOp == ProposeOp_ApplySkippedRemoteSnap {
+		kvsm.Infof("apply remote skip snap %v ", p)
+		kvsm.w.Trigger(reqID, nil)
+	} else {
+		kvsm.w.Trigger(reqID, errUnknownData)
+	}
+	return forceBackup, retErr
 }
 
 // return if configure changed and whether need force backup
@@ -452,12 +662,12 @@ func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaft
 			kvsm.w.Trigger(rid, batchReqRspList[idx])
 		}
 	}
-	if batchCost >= time.Second || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > time.Millisecond*100) {
+	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
 		kvsm.Infof("slow batch write command: %v, batch: %v, cost: %v",
 			cmdName, len(batchReqIDList), batchCost)
 	}
 	if len(batchReqIDList) > 0 {
-		kvsm.dbWriteStats.UpdateLatencyStats(batchCost.Nanoseconds() / int64(len(batchReqIDList)) / 1000)
+		kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Nanoseconds()/1000, int64(len(batchReqIDList)))
 	}
 	batchReqIDList = batchReqIDList[:0]
 	batchReqRspList = batchReqRspList[:0]

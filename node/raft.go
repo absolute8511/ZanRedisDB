@@ -222,6 +222,14 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot, readOld bool) (*wal.WAL, 
 	return w, nil, hardState, nil, err
 }
 
+func (rc *raftNode) replayWALForSyncLearner(snapshot *raftpb.Snapshot) error {
+	// TODO: for sync learner, we do not need replay any logs before the remote synced term-index
+	// and also, to avoid snapshot from leader while new sync learner started, we can get the remote
+	// cluster the newest synced term-index, and add faked to wal with that term-index. In this way we can force the leader
+	// to send just logs after term-index.
+	return nil
+}
+
 // replayWAL replays WAL entries into the raft instance.
 func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) error {
 	w, meta, st, ents, err := rc.openWAL(snapshot, true)
@@ -990,6 +998,19 @@ func (rc *raftNode) GetMembersAndLeader() ([]*common.MemberInfo, *common.MemberI
 	rc.memMutex.Unlock()
 	sort.Sort(memberSorter(mems))
 	return mems, lm
+}
+
+func (rc *raftNode) IsLearnerMember(m common.MemberInfo) bool {
+	rc.memMutex.Lock()
+	mm, ok := rc.learnerMems[m.ID]
+	rc.memMutex.Unlock()
+	if !ok {
+		return false
+	}
+	if mm.ID == m.ID && mm.NodeID == m.NodeID && mm.GroupID == m.GroupID {
+		return true
+	}
+	return false
 }
 
 func (rc *raftNode) IsMember(m common.MemberInfo) bool {
