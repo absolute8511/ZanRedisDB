@@ -20,6 +20,7 @@ type ServerConfig struct {
 	LocalRaftAddr        string            `json:"local_raft_addr"`
 	Tags                 map[string]string `json:"tags"`
 	SyncerWriteOnly      bool              `json:"syncer_write_only"`
+	SyncerNormalInit     bool              `json:"syncer_normal_init"`
 	LearnerRole          string            `json:"learner_role"`
 	RemoteSyncCluster    string            `json:"remote_sync_cluster"`
 	StateMachineType     string            `json:"state_machine_type"`

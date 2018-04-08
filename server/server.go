@@ -75,6 +75,10 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.SyncerWriteOnly {
 		node.SetSyncerOnly(true)
 	}
+	if conf.LearnerRole != "" && conf.SyncerNormalInit {
+		sLog.Infof("server started as normal init")
+		node.SetSyncerNormalInit()
+	}
 
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,

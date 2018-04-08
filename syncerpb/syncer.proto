@@ -59,10 +59,16 @@ message RaftReqs {
     repeated RaftLogData raft_log = 1;
 }
 
+enum RaftApplySnapType {
+    NormalSnap = 0;
+    SkippedSnap = 1;
+}
+
 message RaftApplySnapReq {
+    RaftApplySnapType type = 1;
     // the name for source cluster, if there are multi different source clusters for syncer,
     // we can separate them.
-    string cluster_name =2;
+    string cluster_name = 2;
     // raft group for different partition has different name, so
     // we can make sure (term-index) is increased in same raft group.
     // (term-index) will be checked while replaying in remote cluster

@@ -114,7 +114,15 @@ func (s *Server) NotifyApplySnap(ctx context.Context, req *syncerpb.RaftApplySna
 		return &rpcErr, nil
 	}
 	sLog.Infof("raft need apply snapshot from remote: %v", req.String())
-	kv.Node.ApplyRemoteSnapshot(req.ClusterName, req.Term, req.Index)
+	skipSnap := false
+	if req.Type == syncerpb.SkippedSnap {
+		skipSnap = true
+	}
+	err := kv.Node.ApplyRemoteSnapshot(skipSnap, req.ClusterName, req.Term, req.Index)
+	if err != nil {
+		rpcErr.ErrMsg = err.Error()
+		rpcErr.ErrCode = http.StatusInternalServerError
+	}
 	return &rpcErr, nil
 }
 

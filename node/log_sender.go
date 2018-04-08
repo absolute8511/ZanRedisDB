@@ -228,7 +228,15 @@ func (s *RemoteLogSender) notifyTransferSnap(raftSnapshot raftpb.Snapshot, syncA
 	return nil
 }
 
+func (s *RemoteLogSender) notifyApplySkippedSnap(raftSnapshot raftpb.Snapshot) error {
+	return s.notifyApplySnapWithOption(true, raftSnapshot)
+}
+
 func (s *RemoteLogSender) notifyApplySnap(raftSnapshot raftpb.Snapshot) error {
+	return s.notifyApplySnapWithOption(false, raftSnapshot)
+}
+
+func (s *RemoteLogSender) notifyApplySnapWithOption(skip bool, raftSnapshot raftpb.Snapshot) error {
 	if s.remoteClusterAddr == "" {
 		return nil
 	}
@@ -244,6 +252,9 @@ func (s *RemoteLogSender) notifyApplySnap(raftSnapshot raftpb.Snapshot) error {
 		RaftGroupName: s.grpName,
 		Term:          raftSnapshot.Metadata.Term,
 		Index:         raftSnapshot.Metadata.Index,
+	}
+	if skip {
+		req.Type = syncerpb.SkippedSnap
 	}
 	rsp, err := c.NotifyApplySnap(ctx, req)
 	if err != nil {
@@ -374,45 +385,20 @@ func (s *RemoteLogSender) getRemoteSyncedRaftOnce() (SyncedState, error) {
 	return state, nil
 }
 
-func (s *RemoteLogSender) getRemoteSyncedRaft(stop chan struct{}) (SyncedState, error) {
-	retry := 0
-	for {
-		retry++
-		state, err := s.getRemoteSyncedRaftOnce()
-		if err != nil {
-			nodeLog.Infof("failed to get remote synced raft (retried %v): %v", retry, err.Error())
-			wait := time.Millisecond * 100 * time.Duration(retry)
-			if wait > time.Second*30 {
-				wait = time.Second * 30
-			}
-			select {
-			case <-stop:
-				return state, err
-			case <-time.After(wait):
-				continue
-			}
-		} else {
-			return state, nil
-		}
-	}
-}
+type RaftRpcFunc func() error
 
-func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
-	if len(r) == 0 {
-		return nil
-	}
-	first := r[0]
+func sendRpcAndRetry(raftRpc RaftRpcFunc, rpcMethodName string, stop chan struct{}) error {
 	retry := 0
 	for {
 		retry++
-		err := s.doSendOnce(r)
+		err := raftRpc()
 		if err != nil {
-			nodeLog.Infof("failed to send raft log (retried %v): %v, at %v-%v",
-				retry, err.Error(), first.OrigTerm, first.OrigIndex)
+			nodeLog.Infof("failed to do rpc %s (retried %v): %v", rpcMethodName,
+				retry, err.Error())
 			wait := time.Millisecond * 100 * time.Duration(retry)
 			if wait > time.Second*30 {
 				wait = time.Second * 30
-				nodeLog.Errorf("failed too much times to send raft log (retried %v): %v, %v", retry, err.Error(), r)
+				nodeLog.Errorf("failed too much times do rpc %s (retried %v): %v", rpcMethodName, retry, err.Error())
 			}
 			select {
 			case <-stop:
@@ -424,4 +410,38 @@ func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan s
 			return nil
 		}
 	}
+}
+
+func (s *RemoteLogSender) getRemoteSyncedRaft(stop chan struct{}) (SyncedState, error) {
+	var state SyncedState
+	err := sendRpcAndRetry(func() error {
+		var err error
+		state, err = s.getRemoteSyncedRaftOnce()
+		return err
+	}, "getRemoteSyncedRaft", stop)
+	return state, err
+}
+
+func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
+	if len(r) == 0 {
+		return nil
+	}
+	first := r[0]
+	err := sendRpcAndRetry(func() error {
+		err := s.doSendOnce(r)
+		if err != nil {
+			nodeLog.Infof("failed to send raft log : %v, at %v-%v",
+				err.Error(), first.OrigTerm, first.OrigIndex)
+		}
+		return err
+	}, "sendRaftLog", stop)
+	return err
+}
+
+func (s *RemoteLogSender) sendAndWaitApplySkippedSnap(raftSnap raftpb.Snapshot, stop chan struct{}) error {
+	err := sendRpcAndRetry(func() error {
+		return s.notifyApplySkippedSnap(raftSnap)
+	}, "notifyApplySkippedSnap", stop)
+
+	return err
 }

@@ -635,6 +635,9 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		} else {
 			retErr = nil
 		}
+	} else if p.ProposeOp == ProposeOp_ApplySkippedRemoteSnap {
+		kvsm.Infof("apply remote skip snap %v ", p)
+		kvsm.w.Trigger(reqID, nil)
 	} else {
 		kvsm.w.Trigger(reqID, errUnknownData)
 	}

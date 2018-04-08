@@ -42,10 +42,11 @@ const (
 )
 
 const (
-	ProposeOp_Backup             int = 1
-	ProposeOp_TransferRemoteSnap int = 2
-	ProposeOp_ApplyRemoteSnap    int = 3
-	ProposeOp_RemoteConfChange   int = 4
+	ProposeOp_Backup                 int = 1
+	ProposeOp_TransferRemoteSnap     int = 2
+	ProposeOp_ApplyRemoteSnap        int = 3
+	ProposeOp_RemoteConfChange       int = 4
+	ProposeOp_ApplySkippedRemoteSnap int = 5
 )
 
 type nodeProgress struct {

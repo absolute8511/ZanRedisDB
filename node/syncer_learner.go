@@ -23,6 +23,12 @@ const (
 	logSendBufferLen = 100
 )
 
+var syncerNormalInit = false
+
+func SetSyncerNormalInit() {
+	syncerNormalInit = true
+}
+
 type logSyncerSM struct {
 	clusterInfo    common.IClusterInfo
 	fullNS         string
@@ -335,6 +341,11 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		return nil
 	}
 
+	if syncerNormalInit {
+		// set term-index to remote cluster with skipped snap so we can
+		// avoid transfer the snapshot while the two clusters have the exactly same logs
+		return sm.lgSender.sendAndWaitApplySkippedSnap(raftSnapshot, stop)
+	}
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader

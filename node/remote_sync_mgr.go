@@ -229,24 +229,28 @@ func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64) {
 	return state.SyncedTerm, state.SyncedIndex
 }
 
-func (nd *KVNode) ApplyRemoteSnapshot(name string, term uint64, index uint64) error {
+func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index uint64) error {
 	// restore the state machine from transferred snap data when transfer success.
 	// we do not need restore other cluster member info here.
 	nd.rn.Infof("begin recovery from remote cluster %v snapshot here: %v-%v", name, term, index)
-	oldS, ok := nd.remoteSyncedStates.GetApplyingSnap(name)
-	if !ok {
-		return errors.New("no remote snapshot waiting apply")
+	if skip {
+		nd.rn.Infof("got skipped snapshot from remote cluster %v : %v-%v", name, term, index)
+	} else {
+		oldS, ok := nd.remoteSyncedStates.GetApplyingSnap(name)
+		if !ok {
+			return errors.New("no remote snapshot waiting apply")
+		}
+		if oldS.SS.SyncedTerm != term || oldS.SS.SyncedIndex != index {
+			nd.rn.Infof("remote cluster %v snapshot mismatch: %v-%v, old: %v", name, term, index, oldS)
+			return errors.New("apply remote snapshot term-index mismatch")
+		}
+		if oldS.StatusCode != ApplySnapTransferred {
+			nd.rn.Infof("remote cluster %v snapshot not ready for apply: %v", name, oldS)
+			return errors.New("apply remote snapshot status invalid")
+		}
+		// set the snap status to applying and the snap status will be updated if apply done or failed
+		nd.remoteSyncedStates.UpdateApplyingSnapStatus(name, oldS.SS, ApplySnapApplying)
 	}
-	if oldS.SS.SyncedTerm != term || oldS.SS.SyncedIndex != index {
-		nd.rn.Infof("remote cluster %v snapshot mismatch: %v-%v, old: %v", name, term, index, oldS)
-		return errors.New("apply remote snapshot term-index mismatch")
-	}
-	if oldS.StatusCode != ApplySnapTransferred {
-		nd.rn.Infof("remote cluster %v snapshot not ready for apply: %v", name, oldS)
-		return errors.New("apply remote snapshot status invalid")
-	}
-	// set the snap status to applying and the snap status will be updated if apply done or failed
-	nd.remoteSyncedStates.UpdateApplyingSnapStatus(name, oldS.SS, ApplySnapApplying)
 	var reqList BatchInternalRaftRequest
 	reqList.OrigCluster = name
 	reqList.ReqNum = 1
@@ -256,6 +260,9 @@ func (nd *KVNode) ApplyRemoteSnapshot(name string, term uint64, index uint64) er
 		NeedBackup:  true,
 		RemoteTerm:  term,
 		RemoteIndex: index,
+	}
+	if skip {
+		p.ProposeOp = ProposeOp_ApplySkippedRemoteSnap
 	}
 	d, _ := json.Marshal(p)
 	h := &RequestHeader{
