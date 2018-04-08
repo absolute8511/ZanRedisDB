@@ -11,7 +11,7 @@ import (
 var runningCh chan struct{}
 
 func init() {
-	runningCh = make(chan struct{}, 3)
+	runningCh = make(chan struct{}, 2)
 }
 
 func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan struct{}) error {

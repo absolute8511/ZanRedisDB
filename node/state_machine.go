@@ -633,6 +633,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		if err != nil {
 			kvsm.Errorf("apply remote snap failed to restore backup: %v", err)
 		} else {
+			forceBackup = true
 			retErr = nil
 		}
 	} else if p.ProposeOp == ProposeOp_ApplySkippedRemoteSnap {

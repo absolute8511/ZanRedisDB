@@ -38,7 +38,9 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 					// we ensure join group as order for partitions
 					break
 				}
-				cluster.CoordLog().Debugf("%v namespace %v already loaded", dc.GetMyID(), nsInfo.GetDesp())
+				if cluster.CoordLog().Level() >= common.LOG_DETAIL {
+					cluster.CoordLog().Debugf("%v namespace %v already loaded", dc.GetMyID(), nsInfo.GetDesp())
+				}
 				continue
 			}
 			if !dc.isInLearnerGroup(nsInfo, nil) {
