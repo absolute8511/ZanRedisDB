@@ -341,7 +341,7 @@ func (db *RockDB) zDelItem(key []byte, member []byte,
 	return 1, nil
 }
 
-func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
+func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, error) {
 	if len(args) == 0 {
 		return 0, nil
 	}
@@ -372,7 +372,7 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 		}
 	}
 
-	if newNum, err := db.zIncrSize(key, num, wb); err != nil {
+	if newNum, err := db.zIncrSize(ts, key, num, wb); err != nil {
 		return 0, err
 	} else if newNum > 0 && newNum == num {
 		db.IncrTableKeyCount(table, 1, wb)
@@ -382,7 +382,7 @@ func (db *RockDB) ZAdd(key []byte, args ...common.ScorePair) (int64, error) {
 	return num, err
 }
 
-func (db *RockDB) ZFixKey(key []byte) error {
+func (db *RockDB) ZFixKey(ts int64, key []byte) error {
 	n, err := db.ZCard(key)
 	if err != nil {
 		dbLog.Infof("get zset card failed: %v", err.Error())
@@ -396,7 +396,7 @@ func (db *RockDB) ZFixKey(key []byte) error {
 	if len(elems) != int(n) {
 		dbLog.Infof("unmatched length : %v, %v, detail: %v", n, len(elems), elems)
 		db.wb.Clear()
-		db.zSetSize(key, int64(len(elems)), db.wb)
+		db.zSetSize(ts, key, int64(len(elems)), db.wb)
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 		if err != nil {
 			return err
@@ -406,40 +406,83 @@ func (db *RockDB) ZFixKey(key []byte) error {
 }
 
 // note: we should not batch incrsize, because we read the old and put the new.
-func (db *RockDB) zIncrSize(key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) zIncrSize(ts int64, key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	sk := zEncodeSizeKey(key)
 
-	size, err := Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk))
+	var size int64
+	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
 	if err != nil {
 		return 0, err
+	}
+	if len(meta) == 0 {
+		size = 0
+	} else if len(meta) < 8 {
+		return 0, errIntNumber
 	} else {
-		size += delta
-		if size <= 0 {
-			size = 0
-			wb.Delete(sk)
-		} else {
-			wb.Put(sk, PutInt64(size))
+		if size, err = Int64(meta[:8], err); err != nil {
+			return 0, err
 		}
 	}
-	return size, nil
-}
-
-func (db *RockDB) zGetSize(key []byte, newSize int64, wb *gorocksdb.WriteBatch) (int64, error) {
-	sk := zEncodeSizeKey(key)
-	size, err := Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk))
-	if err != nil {
-		return 0, err
+	size += delta
+	if size <= 0 {
+		size = 0
+		wb.Delete(sk)
+	} else {
+		buf := make([]byte, 16)
+		binary.BigEndian.PutUint64(buf[0:8], uint64(size))
+		binary.BigEndian.PutUint64(buf[8:16], uint64(ts))
+		wb.Put(sk, buf)
 	}
 	return size, nil
 }
 
-func (db *RockDB) zSetSize(key []byte, newSize int64, wb *gorocksdb.WriteBatch) {
+func (db *RockDB) zGetSize(key []byte) (int64, error) {
+	sk := zEncodeSizeKey(key)
+	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
+	if err != nil {
+		return 0, err
+	}
+	if len(meta) == 0 {
+		return 0, nil
+	}
+	if len(meta) < 8 {
+		return 0, errIntNumber
+	}
+	return Int64(meta[:8], err)
+}
+
+func (db *RockDB) zGetVer(key []byte) (int64, error) {
+	sk := zEncodeSizeKey(key)
+	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
+	if err != nil {
+		return 0, err
+	}
+	if len(meta) == 0 {
+		return 0, nil
+	}
+	if len(meta) < 16 {
+		return 0, errIntNumber
+	}
+	return Int64(meta[8:16], err)
+}
+
+func (db *RockDB) zSetSize(ts int64, key []byte, newSize int64, wb *gorocksdb.WriteBatch) {
 	sk := zEncodeSizeKey(key)
 	if newSize <= 0 {
 		wb.Delete(sk)
 	} else {
-		wb.Put(sk, PutInt64(newSize))
+		buf := make([]byte, 16)
+		binary.BigEndian.PutUint64(buf[0:8], uint64(newSize))
+		binary.BigEndian.PutUint64(buf[8:16], uint64(ts))
+		wb.Put(sk, buf)
 	}
+}
+
+func (db *RockDB) ZGetVer(key []byte) (int64, error) {
+	if err := checkKeySize(key); err != nil {
+		return 0, err
+	}
+	return db.zGetVer(key)
 }
 
 func (db *RockDB) ZCard(key []byte) (int64, error) {
@@ -447,8 +490,7 @@ func (db *RockDB) ZCard(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	sk := zEncodeSizeKey(key)
-	return Int64(db.eng.GetBytes(db.defaultReadOpts, sk))
+	return db.zGetSize(key)
 }
 
 func (db *RockDB) ZScore(key []byte, member []byte) (float64, error) {
@@ -470,7 +512,7 @@ func (db *RockDB) ZScore(key []byte, member []byte) (float64, error) {
 	return score, nil
 }
 
-func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
+func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 	if len(members) == 0 {
 		return 0, nil
 	}
@@ -497,7 +539,7 @@ func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 		}
 	}
 
-	if newNum, err := db.zIncrSize(key, -num, wb); err != nil {
+	if newNum, err := db.zIncrSize(ts, key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
@@ -508,7 +550,7 @@ func (db *RockDB) ZRem(key []byte, members ...[]byte) (int64, error) {
 	return num, err
 }
 
-func (db *RockDB) ZIncrBy(key []byte, delta float64, member []byte) (float64, error) {
+func (db *RockDB) ZIncrBy(ts int64, key []byte, delta float64, member []byte) (float64, error) {
 	var score float64
 	if err := checkZSetKMSize(key, member); err != nil {
 		return score, err
@@ -528,7 +570,7 @@ func (db *RockDB) ZIncrBy(key []byte, delta float64, member []byte) (float64, er
 	if err != nil {
 		return score, err
 	} else if v == nil {
-		newNum, err := db.zIncrSize(key, 1, wb)
+		newNum, err := db.zIncrSize(ts, key, 1, wb)
 		if err != nil {
 			return score, err
 		} else if newNum == 1 {
@@ -661,7 +703,7 @@ func (db *RockDB) zRemAll(key []byte, wb *gorocksdb.WriteBatch) (int64, error) {
 	return num, nil
 }
 
-func (db *RockDB) zRemRangeBytes(key []byte, minKey []byte, maxKey []byte, offset int,
+func (db *RockDB) zRemRangeBytes(ts int64, key []byte, minKey []byte, maxKey []byte, offset int,
 	count int, wb *gorocksdb.WriteBatch) (int64, error) {
 	if len(key) > MaxKeySize {
 		return 0, errKeySize
@@ -701,7 +743,7 @@ func (db *RockDB) zRemRangeBytes(key []byte, minKey []byte, maxKey []byte, offse
 		}
 	}
 
-	if newNum, err := db.zIncrSize(key, -num, wb); err != nil {
+	if newNum, err := db.zIncrSize(ts, key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
@@ -711,7 +753,7 @@ func (db *RockDB) zRemRangeBytes(key []byte, minKey []byte, maxKey []byte, offse
 	return num, nil
 }
 
-func (db *RockDB) zRemRange(key []byte, min float64, max float64, offset int,
+func (db *RockDB) zRemRange(ts int64, key []byte, min float64, max float64, offset int,
 	count int, wb *gorocksdb.WriteBatch) (int64, error) {
 
 	table, rk, err := extractTableFromRedisKey(key)
@@ -721,7 +763,7 @@ func (db *RockDB) zRemRange(key []byte, min float64, max float64, offset int,
 	minKey := zEncodeStartScoreKey(table, rk, min)
 	maxKey := zEncodeStopScoreKey(table, rk, max)
 
-	return db.zRemRangeBytes(key, minKey, maxKey, offset, count, wb)
+	return db.zRemRangeBytes(ts, key, minKey, maxKey, offset, count, wb)
 }
 
 func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset int, count int, reverse bool) ([]common.ScorePair, error) {
@@ -899,7 +941,7 @@ func (db *RockDB) ZRank(key []byte, member []byte) (int64, error) {
 	return db.zrank(key, member, false)
 }
 
-func (db *RockDB) ZRemRangeByRank(key []byte, start int, stop int) (int64, error) {
+func (db *RockDB) ZRemRangeByRank(ts int64, key []byte, start int, stop int) (int64, error) {
 	offset, count, err := db.zParseLimit(key, start, stop)
 	if err != nil {
 		return 0, err
@@ -914,7 +956,7 @@ func (db *RockDB) ZRemRangeByRank(key []byte, start int, stop int) (int64, error
 	}
 	minKey := zEncodeStartKey(table, rk)
 	maxKey := zEncodeStopKey(table, rk)
-	rmCnt, err = db.zRemRangeBytes(key, minKey, maxKey, offset, count, db.wb)
+	rmCnt, err = db.zRemRangeBytes(ts, key, minKey, maxKey, offset, count, db.wb)
 	if err == nil {
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	}
@@ -922,10 +964,10 @@ func (db *RockDB) ZRemRangeByRank(key []byte, start int, stop int) (int64, error
 }
 
 //min and max must be inclusive
-func (db *RockDB) ZRemRangeByScore(key []byte, min float64, max float64) (int64, error) {
+func (db *RockDB) ZRemRangeByScore(ts int64, key []byte, min float64, max float64) (int64, error) {
 	db.wb.Clear()
 
-	rmCnt, err := db.zRemRange(key, min, max, 0, -1, db.wb)
+	rmCnt, err := db.zRemRange(ts, key, min, max, 0, -1, db.wb)
 	if err == nil {
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	}
@@ -1043,7 +1085,7 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	return ay, nil
 }
 
-func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType uint8) (int64, error) {
+func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, rangeType uint8) (int64, error) {
 	wb := db.wb
 	wb.Clear()
 	if min == nil && max == nil {
@@ -1092,7 +1134,7 @@ func (db *RockDB) ZRemRangeByLex(key []byte, min []byte, max []byte, rangeType u
 		}
 	}
 
-	if newNum, err := db.zIncrSize(key, -num, wb); err != nil {
+	if newNum, err := db.zIncrSize(ts, key, -num, wb); err != nil {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)

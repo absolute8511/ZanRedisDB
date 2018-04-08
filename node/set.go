@@ -69,11 +69,11 @@ func (nd *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v interfa
 }
 
 func (kvsm *kvStoreSM) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.SAdd(cmd.Args[1], cmd.Args[2:]...)
+	return kvsm.store.SAdd(ts, cmd.Args[1], cmd.Args[2:]...)
 }
 
 func (kvsm *kvStoreSM) localSrem(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.SRem(cmd.Args[1], cmd.Args[2:]...)
+	return kvsm.store.SRem(ts, cmd.Args[1], cmd.Args[2:]...)
 }
 
 func (kvsm *kvStoreSM) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {

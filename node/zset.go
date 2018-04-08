@@ -512,7 +512,7 @@ func (kvsm *kvStoreSM) localZaddCommand(cmd redcon.Command, ts int64) (interface
 	if err != nil {
 		return nil, err
 	}
-	v, err := kvsm.store.ZAdd(cmd.Args[1], mlist...)
+	v, err := kvsm.store.ZAdd(ts, cmd.Args[1], mlist...)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +524,7 @@ func (kvsm *kvStoreSM) localZincrbyCommand(cmd redcon.Command, ts int64) (interf
 	if err != nil {
 		return nil, err
 	}
-	return kvsm.store.ZIncrBy(cmd.Args[1], delta, cmd.Args[3])
+	return kvsm.store.ZIncrBy(ts, cmd.Args[1], delta, cmd.Args[3])
 }
 
 func (kvsm *kvStoreSM) localZremCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -532,7 +532,7 @@ func (kvsm *kvStoreSM) localZremCommand(cmd redcon.Command, ts int64) (interface
 		return nil, common.ErrInvalidArgs
 	}
 
-	return kvsm.store.ZRem(cmd.Args[1], cmd.Args[2:]...)
+	return kvsm.store.ZRem(ts, cmd.Args[1], cmd.Args[2:]...)
 }
 
 func (kvsm *kvStoreSM) localZremrangebyrankCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -545,7 +545,7 @@ func (kvsm *kvStoreSM) localZremrangebyrankCommand(cmd redcon.Command, ts int64)
 		return nil, err
 	}
 
-	return kvsm.store.ZRemRangeByRank(cmd.Args[1], int(start), int(stop))
+	return kvsm.store.ZRemRangeByRank(ts, cmd.Args[1], int(start), int(stop))
 }
 
 func (kvsm *kvStoreSM) localZremrangebyscoreCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -553,7 +553,7 @@ func (kvsm *kvStoreSM) localZremrangebyscoreCommand(cmd redcon.Command, ts int64
 	if err != nil {
 		return nil, err
 	}
-	return kvsm.store.ZRemRangeByScore(cmd.Args[1], min, max)
+	return kvsm.store.ZRemRangeByScore(ts, cmd.Args[1], min, max)
 }
 
 func (kvsm *kvStoreSM) localZremrangebylexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -561,7 +561,7 @@ func (kvsm *kvStoreSM) localZremrangebylexCommand(cmd redcon.Command, ts int64) 
 	if err != nil {
 		return nil, err
 	}
-	return kvsm.store.ZRemRangeByLex(cmd.Args[1], min, max, rt)
+	return kvsm.store.ZRemRangeByLex(ts, cmd.Args[1], min, max, rt)
 }
 
 func (kvsm *kvStoreSM) localZclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -584,6 +584,6 @@ func (kvsm *kvStoreSM) localZMClearCommand(cmd redcon.Command, ts int64) (interf
 }
 
 func (kvsm *kvStoreSM) localZFixKeyCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	kvsm.store.ZFixKey(cmd.Args[1])
+	kvsm.store.ZFixKey(ts, cmd.Args[1])
 	return nil, nil
 }

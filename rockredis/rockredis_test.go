@@ -89,7 +89,7 @@ func TestRockDB(t *testing.T) {
 	assert.Equal(t, string(value), string(v))
 
 	key = []byte("test:test_set_key")
-	_, err = db.SAdd(key, []byte("a"), []byte("b"))
+	_, err = db.SAdd(0, key, []byte("a"), []byte("b"))
 	assert.Nil(t, err)
 
 	n, err := db.SIsMember(key, []byte("a"))
@@ -97,7 +97,7 @@ func TestRockDB(t *testing.T) {
 	assert.Equal(t, int64(1), n)
 
 	key = []byte("test:test_zset_key")
-	_, err = db.ZAdd(key, common.ScorePair{Score: 1, Member: []byte("a")},
+	_, err = db.ZAdd(0, key, common.ScorePair{Score: 1, Member: []byte("a")},
 		common.ScorePair{Score: 2, Member: []byte("b")})
 	assert.Nil(t, err)
 
@@ -259,11 +259,11 @@ func TestRockDBScanTableForSet(t *testing.T) {
 		keyList2 = append(keyList2, []byte("test2:test2_set_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
 	for _, key := range keyList1 {
-		_, err := db.SAdd(key, []byte("test:a"), []byte("test:b"))
+		_, err := db.SAdd(0, key, []byte("test:a"), []byte("test:b"))
 		assert.Nil(t, err)
 	}
 	for _, key := range keyList2 {
-		_, err := db.SAdd(key, []byte("test2:a"), []byte("test2:b"))
+		_, err := db.SAdd(0, key, []byte("test2:a"), []byte("test2:b"))
 		assert.Nil(t, err)
 	}
 
@@ -328,12 +328,12 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 		keyList2 = append(keyList2, []byte("test2:test2_zset_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
 	for _, key := range keyList1 {
-		_, err := db.ZAdd(key, common.ScorePair{1, []byte("test:a")},
+		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte("test:a")},
 			common.ScorePair{2, []byte("test:b")})
 		assert.Nil(t, err)
 	}
 	for _, key := range keyList2 {
-		_, err := db.ZAdd(key, common.ScorePair{1, []byte("test2:a")},
+		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte("test2:a")},
 			common.ScorePair{2, []byte("test2:b")})
 		assert.Nil(t, err)
 	}

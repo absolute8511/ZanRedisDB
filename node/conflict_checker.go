@@ -85,14 +85,35 @@ func (kvsm *kvStoreSM) checkHashKFFConflict(cmd redcon.Command, reqTs int64) boo
 }
 
 func (kvsm *kvStoreSM) checkListConflict(cmd redcon.Command, reqTs int64) bool {
+	oldTs, err := kvsm.store.LVer(cmd.Args[1])
+	if err != nil {
+		kvsm.Infof("key %v failed to get modify version: %v", cmd.Args[1], err)
+	}
+	if oldTs < reqTs {
+		return false
+	}
 	return true
 }
 
 func (kvsm *kvStoreSM) checkSetConflict(cmd redcon.Command, reqTs int64) bool {
+	oldTs, err := kvsm.store.SGetVer(cmd.Args[1])
+	if err != nil {
+		kvsm.Infof("key %v failed to get modify version: %v", cmd.Args[1], err)
+	}
+	if oldTs < reqTs {
+		return false
+	}
 	return true
 }
 
 func (kvsm *kvStoreSM) checkZSetConflict(cmd redcon.Command, reqTs int64) bool {
+	oldTs, err := kvsm.store.ZGetVer(cmd.Args[1])
+	if err != nil {
+		kvsm.Infof("key %v failed to get modify version: %v", cmd.Args[1], err)
+	}
+	if oldTs < reqTs {
+		return false
+	}
 	return true
 }
 
