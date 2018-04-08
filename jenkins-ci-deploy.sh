@@ -21,6 +21,9 @@ mkdir -p $googleDep
 if [ ! -d "$googleDep/grpc" ]; then
   pushd $googleDep && git clone https://github.com/grpc/grpc-go.git grpc && popd
 fi
+if [ ! -d "$googleDep/genproto" ]; then
+  pushd $googleDep && git https://github.com/google/go-genproto clone genproto && popd
+fi
 
 go get -d github.com/absolute8511/ZanRedisDB/...
 arch=$(go env GOARCH)
