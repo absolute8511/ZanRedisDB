@@ -16,6 +16,11 @@ if [ ! -d "$GoDep/sys" ]; then
   pushd $GoDep && git clone https://github.com/golang/sys.git && popd
 fi
 
+googleDep=`go env GOPATH`/src/google.golang.org
+if [ ! -d "$googleDep/grpc" ]; then
+  pushd $googleDep && git clone https://github.com/grpc/grpc-go.git grpc && popd
+fi
+
 go get -d github.com/absolute8511/ZanRedisDB/...
 arch=$(go env GOARCH)
 os=$(go env GOOS)
