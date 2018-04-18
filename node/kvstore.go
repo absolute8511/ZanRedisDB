@@ -19,6 +19,7 @@ type KVOptions struct {
 	EngType          string
 	ExpirationPolicy common.ExpirationPolicy
 	RockOpts         rockredis.RockOptions
+	SharedConfig     *rockredis.SharedRockConfig
 }
 
 func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
@@ -40,6 +41,7 @@ func (s *KVStore) openDB() error {
 		cfg.DataDir = s.opts.DataDir
 		cfg.RockOptions = s.opts.RockOpts
 		cfg.ExpirationPolicy = s.opts.ExpirationPolicy
+		cfg.SharedConfig = s.opts.SharedConfig
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
 		if err != nil {
 			nodeLog.Warningf("failed to open rocksdb: %v", err)

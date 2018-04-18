@@ -242,6 +242,9 @@ func (nsm *NamespaceMgr) Stop() {
 	}
 	nsm.wg.Wait()
 	nodeLog.Infof("namespace manager stopped")
+	if nsm.machineConf.RocksDBSharedConfig != nil {
+		nsm.machineConf.RocksDBSharedConfig.Destroy()
+	}
 }
 
 func (nsm *NamespaceMgr) IsAllRecoveryDone() bool {
@@ -283,6 +286,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		EngType:          conf.EngType,
 		RockOpts:         nsm.machineConf.RocksDBOpts,
 		ExpirationPolicy: expPolicy,
+		SharedConfig:     nsm.machineConf.RocksDBSharedConfig,
 	}
 	rockredis.FillDefaultOptions(&kvOpts.RockOpts)
 

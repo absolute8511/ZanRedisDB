@@ -61,13 +61,20 @@ type RockOptions struct {
 	MinLevelToCompress             int    `json:"min_level_to_compress"`
 	MaxMainifestFileSize           uint64 `json:"max_mainifest_file_size"`
 	RateBytesPerSec                int64  `json:"rate_bytes_per_sec"`
+	BackgroundHighThread           int    `json:"background_high_thread,omitempty"`
+	BackgroundLowThread            int    `json:"background_low_thread,omitempty"`
+	AdjustThreadPool               bool   `json:"adjust_thread_pool,omitempty"`
+	UseSharedCache                 bool   `json:"use_shared_cache,omitempty"`
+	UseSharedRateLimiter           bool   `json:"use_shared_rate_limiter,omitempty"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
 	// use large block to reduce index block size for hdd
 	// if using ssd, should use the default value
 	if opts.BlockSize <= 0 {
-		opts.BlockSize = 1024 * 64
+		// for hdd use 64KB and above
+		// for ssd use 32KB and below
+		opts.BlockSize = 1024 * 32
 	}
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
@@ -77,10 +84,14 @@ func FillDefaultOptions(opts *RockOptions) {
 			opts.BlockCache = 1024 * 1024 * 128
 		} else {
 			opts.BlockCache = int64(v.Total / 100)
-			if opts.BlockCache < 1024*1024*64 {
-				opts.BlockCache = 1024 * 1024 * 64
-			} else if opts.BlockCache > 1024*1024*1024*8 {
-				opts.BlockCache = 1024 * 1024 * 1024 * 8
+			if opts.UseSharedCache {
+				opts.BlockCache *= 10
+			} else {
+				if opts.BlockCache < 1024*1024*64 {
+					opts.BlockCache = 1024 * 1024 * 64
+				} else if opts.BlockCache > 1024*1024*1024*8 {
+					opts.BlockCache = 1024 * 1024 * 1024 * 8
+				}
 			}
 		}
 	}
@@ -115,8 +126,21 @@ func FillDefaultOptions(opts *RockOptions) {
 	if opts.MaxMainifestFileSize <= 0 {
 		opts.MaxMainifestFileSize = 1024 * 1024 * 32
 	}
+	if opts.AdjustThreadPool {
+		if opts.BackgroundHighThread <= 0 {
+			opts.BackgroundHighThread = 2
+		}
+		if opts.BackgroundLowThread <= 0 {
+			opts.BackgroundLowThread = 4
+		}
+	}
 }
 
+type SharedRockConfig struct {
+	SharedCache       *gorocksdb.Cache
+	SharedEnv         *gorocksdb.Env
+	SharedRateLimiter *gorocksdb.RateLimiter
+}
 type RockConfig struct {
 	DataDir            string
 	EnableTableCounter bool
@@ -125,6 +149,7 @@ type RockConfig struct {
 	ExpirationPolicy     common.ExpirationPolicy
 	DefaultReadOpts      *gorocksdb.ReadOptions
 	DefaultWriteOpts     *gorocksdb.WriteOptions
+	SharedConfig         *SharedRockConfig
 	RockOptions
 }
 
@@ -138,6 +163,48 @@ func NewRockConfig() *RockConfig {
 	c.DefaultReadOpts.SetVerifyChecksums(false)
 	FillDefaultOptions(&c.RockOptions)
 	return c
+}
+
+func NewSharedRockConfig(opt RockOptions) *SharedRockConfig {
+	rc := &SharedRockConfig{}
+	if opt.UseSharedCache {
+		if opt.BlockCache <= 0 {
+			v, err := mem.VirtualMemory()
+			if err != nil {
+				opt.BlockCache = 1024 * 1024 * 128 * 10
+			} else {
+				opt.BlockCache = int64(v.Total / 10)
+			}
+		}
+		rc.SharedCache = gorocksdb.NewLRUCache(opt.BlockCache)
+	}
+	if opt.AdjustThreadPool {
+		rc.SharedEnv = gorocksdb.NewDefaultEnv()
+		if opt.BackgroundHighThread <= 0 {
+			opt.BackgroundHighThread = 3
+		}
+		if opt.BackgroundLowThread <= 0 {
+			opt.BackgroundLowThread = 6
+		}
+		rc.SharedEnv.SetBackgroundThreads(opt.BackgroundLowThread)
+		rc.SharedEnv.SetHighPriorityBackgroundThreads(opt.BackgroundHighThread)
+	}
+	if opt.UseSharedRateLimiter && opt.RateBytesPerSec > 0 {
+		rc.SharedRateLimiter = gorocksdb.NewGenericRateLimiter(opt.RateBytesPerSec, 100*1000, 10)
+	}
+	return rc
+}
+
+func (src *SharedRockConfig) Destroy() {
+	if src.SharedCache != nil {
+		src.SharedCache.Destroy()
+	}
+	if src.SharedEnv != nil {
+		src.SharedEnv.Destroy()
+	}
+	if src.SharedRateLimiter != nil {
+		src.SharedRateLimiter.Destroy()
+	}
 }
 
 type CheckpointSortNames []string
@@ -200,6 +267,7 @@ type RockDB struct {
 	defaultReadOpts   *gorocksdb.ReadOptions
 	wb                *gorocksdb.WriteBatch
 	lruCache          *gorocksdb.Cache
+	rl                *gorocksdb.RateLimiter
 	quit              chan struct{}
 	wg                sync.WaitGroup
 	backupC           chan *BackupInfo
@@ -226,8 +294,16 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	bbto.SetBlockSize(cfg.BlockSize)
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
-	lru := gorocksdb.NewLRUCache(cfg.BlockCache)
-	bbto.SetBlockCache(lru)
+	var lru *gorocksdb.Cache
+	if cfg.RockOptions.UseSharedCache {
+		if cfg.SharedConfig == nil || cfg.SharedConfig.SharedCache == nil {
+			return nil, errors.New("missing shared cache instance")
+		}
+		bbto.SetBlockCache(cfg.SharedConfig.SharedCache)
+	} else {
+		lru = gorocksdb.NewLRUCache(cfg.BlockCache)
+		bbto.SetBlockCache(lru)
+	}
 	// cache index and filter blocks can save some memory,
 	// if not cache, the index and filter will be pre-loaded in memory
 	bbto.SetCacheIndexAndFilterBlocks(cfg.CacheIndexAndFilterBlocks)
@@ -238,10 +314,24 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	// optimize filter for hit, use less memory since last level will has no bloom filter
 	// opts.OptimizeFilterForHits(true)
 	opts.SetBlockBasedTableFactory(bbto)
+	if cfg.RockOptions.AdjustThreadPool {
+		if cfg.SharedConfig == nil || cfg.SharedConfig.SharedEnv == nil {
+			return nil, errors.New("missing shared env instance")
+		}
+		opts.SetEnv(cfg.SharedConfig.SharedEnv)
+	}
 
+	var rl *gorocksdb.RateLimiter
 	if cfg.RateBytesPerSec > 0 {
-		rateLimiter := gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec, 100*1000, 10)
-		opts.SetRateLimiter(rateLimiter)
+		if cfg.UseSharedRateLimiter {
+			if cfg.SharedConfig == nil {
+				return nil, errors.New("missing shared instance")
+			}
+			opts.SetRateLimiter(cfg.SharedConfig.SharedRateLimiter)
+		} else {
+			rl = gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec, 100*1000, 10)
+			opts.SetRateLimiter(rl)
+		}
 	}
 
 	opts.SetCreateIfMissing(true)
@@ -271,6 +361,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		cfg:              cfg,
 		dbOpts:           opts,
 		lruCache:         lru,
+		rl:               rl,
 		defaultReadOpts:  cfg.DefaultReadOpts,
 		defaultWriteOpts: cfg.DefaultWriteOpts,
 		wb:               gorocksdb.NewWriteBatch(),
@@ -426,6 +517,10 @@ func (r *RockDB) Close() {
 	if r.lruCache != nil {
 		r.lruCache.Destroy()
 		r.lruCache = nil
+	}
+	if r.rl != nil {
+		r.rl.Destroy()
+		r.rl = nil
 	}
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }

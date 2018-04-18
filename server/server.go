@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/cluster/datanode_coord"
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -145,6 +147,10 @@ func NewServer(conf ServerConfig) *Server {
 		RemoteSyncCluster: conf.RemoteSyncCluster,
 		StateMachineType:  conf.StateMachineType,
 		RocksDBOpts:       conf.RocksDBOpts,
+	}
+	if mconf.RocksDBOpts.UseSharedCache || mconf.RocksDBOpts.AdjustThreadPool || mconf.RocksDBOpts.UseSharedRateLimiter {
+		sc := rockredis.NewSharedRockConfig(conf.RocksDBOpts)
+		mconf.RocksDBSharedConfig = sc
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID
