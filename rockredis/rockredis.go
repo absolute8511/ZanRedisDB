@@ -66,6 +66,7 @@ type RockOptions struct {
 	AdjustThreadPool               bool   `json:"adjust_thread_pool,omitempty"`
 	UseSharedCache                 bool   `json:"use_shared_cache,omitempty"`
 	UseSharedRateLimiter           bool   `json:"use_shared_rate_limiter,omitempty"`
+	DisableWAL                     bool   `json:"disable_wal,omitempty"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -285,6 +286,9 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, errors.New("config error")
 	}
 
+	if cfg.DisableWAL {
+		cfg.DefaultWriteOpts.DisableWAL(true)
+	}
 	os.MkdirAll(cfg.DataDir, common.DIR_PERM)
 	// options need be adjust due to using hdd or sdd, please reference
 	// https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide
