@@ -287,6 +287,16 @@ func (nd *KVNode) GetLocalMemberInfo() *common.MemberInfo {
 	return &m
 }
 
+// run perf for rt seconds and return perf result string
+func (nd *KVNode) RunPerf(level int, rt int) string {
+	if s, ok := nd.sm.(*kvStoreSM); ok {
+		report := s.store.RunPerf(level, rt)
+		nd.rn.Infof("perf: %v", report)
+		return report
+	}
+	return ""
+}
+
 func (nd *KVNode) GetDBInternalStats() string {
 	if s, ok := nd.sm.(*kvStoreSM); ok {
 		return s.store.GetStatistics()

@@ -637,3 +637,39 @@ func (nsm *NamespaceMgr) clearUnusedRaftPeer() {
 		}
 	}
 }
+
+type PerfReport struct {
+	Group  string
+	Report string
+}
+
+func (nsm *NamespaceMgr) RunPerf(leaderOnly bool, level int, rt int) map[string]string {
+	nsm.mutex.RLock()
+	nodes := make([]*KVNode, 0, len(nsm.kvNodes))
+	for _, n := range nsm.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
+		nodes = append(nodes, n.Node)
+	}
+	nsm.mutex.RUnlock()
+	reportCh := make(chan PerfReport, 1)
+	nsStats := make(map[string]string, len(nsm.kvNodes))
+	for _, n := range nodes {
+		go func(kv *KVNode) {
+			perfReport := kv.RunPerf(level, rt)
+			reportCh <- PerfReport{Group: kv.ns, Report: perfReport}
+		}(n)
+	}
+	for {
+		r := <-reportCh
+		nsStats[r.Group] = r.Report
+		if len(nsStats) >= len(nodes) {
+			break
+		}
+	}
+	return nsStats
+}

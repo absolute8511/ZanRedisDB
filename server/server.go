@@ -211,6 +211,10 @@ func (s *Server) GetStats(leaderOnly bool) common.ServerStats {
 	return ss
 }
 
+func (s *Server) RunPerf(leaderOnly bool, level int, secs int) map[string]string {
+	return s.nsMgr.RunPerf(leaderOnly, level, secs)
+}
+
 func (s *Server) GetDBStats(leaderOnly bool) map[string]string {
 	return s.nsMgr.GetDBStats(leaderOnly)
 }

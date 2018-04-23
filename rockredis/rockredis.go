@@ -300,6 +300,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 			return nil, errors.New("missing shared cache instance")
 		}
 		bbto.SetBlockCache(cfg.SharedConfig.SharedCache)
+		dbLog.Infof("use shared cache: %v", cfg.SharedConfig.SharedCache)
 	} else {
 		lru = gorocksdb.NewLRUCache(cfg.BlockCache)
 		bbto.SetBlockCache(lru)
@@ -319,6 +320,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 			return nil, errors.New("missing shared env instance")
 		}
 		opts.SetEnv(cfg.SharedConfig.SharedEnv)
+		dbLog.Infof("use shared env: %v", cfg.SharedConfig.SharedEnv)
 	}
 
 	var rl *gorocksdb.RateLimiter
@@ -328,6 +330,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 				return nil, errors.New("missing shared instance")
 			}
 			opts.SetRateLimiter(cfg.SharedConfig.SharedRateLimiter)
+			dbLog.Infof("use shared rate limiter: %v", cfg.SharedConfig.SharedRateLimiter)
 		} else {
 			rl = gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec, 100*1000, 10)
 			opts.SetRateLimiter(rl)
@@ -525,20 +528,49 @@ func (r *RockDB) Close() {
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
 
-func (r *RockDB) SetPerfLevel(level int) {
-	// TODO:
+func (r *RockDB) RunPerf(level int, runTime int) string {
+	defer func() {
+		dbLog.Infof("run perf done")
+	}()
+	if level <= 0 || level > 4 {
+		return ""
+	}
+	dbLog.Infof("run perf level: %v for %v seconds", level, runTime)
+	gorocksdb.SetPerfLevel(gorocksdb.PerfLevel(level))
+	perfCtx := gorocksdb.NewPerfContext()
+	perfCtx.Reset()
+	defer gorocksdb.SetPerfLevel(gorocksdb.PerfDisable)
+	defer perfCtx.Destroy()
+	t := time.NewTimer(time.Second * time.Duration(runTime))
+	defer t.Stop()
+	select {
+	case <-r.quit:
+	case <-t.C:
+	}
+	ret := perfCtx.Report(true)
+	return ret
 }
 
 func (r *RockDB) GetStatistics() string {
 	return r.dbOpts.GetStatistics()
 }
 
-func (r *RockDB) GetRecordsInRange() {
+func (r *RockDB) DeleteTableRange(dt string, table string, start []byte, end []byte) error {
+	// kv, hash, set, list, zset
+	return nil
+}
+
+func (r *RockDB) GetTableSizeInRange(dt string, table string, start []byte, end []byte) int64 {
+	return 0
+}
+
+func (r *RockDB) GetTableRecordsInRange(dt string, table string, start []byte, end []byte) int64 {
 	// use
 	// GetApproximateSizes and estimate-keys-num in property
 	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
 	// range records = estimate-keys-num * GetApproximateSizes(range) / GetApproximateSizes (total)
 	// use GetPropertiesOfTablesInRange to get number of keys in sst
+	return 0
 }
 
 func (r *RockDB) GetInternalStatus() map[string]interface{} {
