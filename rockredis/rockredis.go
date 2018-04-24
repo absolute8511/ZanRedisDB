@@ -564,7 +564,16 @@ func (r *RockDB) DeleteTableRange(dt string, table string, start []byte, end []b
 	return nil
 }
 
+func (r *RockDB) GetTablesSizes(tables []string) []int64 {
+	// try all data types for each table
+	return nil
+}
+
 func (r *RockDB) GetTableSizeInRange(dt string, table string, start []byte, end []byte) int64 {
+	//rg := getTableRange(dt, table, start, end)
+	//rgs := make([]gorocksdb.Range, 0, 1)
+	//rgs = append(rgs, rg)
+	//s := r.eng.GetApproximateSizes(rgs)
 	return 0
 }
 

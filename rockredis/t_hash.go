@@ -454,8 +454,12 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 	}
 	start := hEncodeStartKey(table, rk)
 	stop := hEncodeStopKey(table, rk)
+	hlen, err := db.HLen(hkey)
+	if err != nil {
+		return err
+	}
 
-	if tableIndexes != nil {
+	if tableIndexes != nil || hlen <= RangeDeleteNum {
 		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		if err != nil {
 			return err
@@ -464,17 +468,24 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 
 		for ; it.Valid(); it.Next() {
 			rawk := it.RefKey()
-			_, _, field, _ := hDecodeHashKey(rawk)
-			if hindex := tableIndexes.GetHIndexNoLock(string(field)); hindex != nil {
-				oldV := it.RefValue()
-				if len(oldV) >= tsLen {
-					oldV = oldV[:len(oldV)-tsLen]
+			if hlen <= RangeDeleteNum {
+				wb.Delete(rawk)
+			}
+			if tableIndexes != nil {
+				_, _, field, _ := hDecodeHashKey(rawk)
+				if hindex := tableIndexes.GetHIndexNoLock(string(field)); hindex != nil {
+					oldV := it.RefValue()
+					if len(oldV) >= tsLen {
+						oldV = oldV[:len(oldV)-tsLen]
+					}
+					hindex.RemoveRec(oldV, hkey, wb)
 				}
-				hindex.RemoveRec(oldV, hkey, wb)
 			}
 		}
 	}
-	wb.DeleteRange(start, stop)
+	if hlen > RangeDeleteNum {
+		wb.DeleteRange(start, stop)
+	}
 	wb.Delete(sk)
 	return nil
 }

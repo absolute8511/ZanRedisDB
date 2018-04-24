@@ -167,7 +167,18 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	if err != nil {
 		return 0
 	}
-	wb.DeleteRange(start, stop)
+	if num > RangeDeleteNum {
+		wb.DeleteRange(start, stop)
+	} else {
+		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+		if err != nil {
+			return 0
+		}
+		for ; it.Valid(); it.Next() {
+			wb.Delete(it.RefKey())
+		}
+		it.Close()
+	}
 	if num > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 		db.delExpire(SetType, key, wb)
