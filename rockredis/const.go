@@ -79,7 +79,7 @@ var (
 const (
 	defaultScanCount int = 100
 	MAX_BATCH_NUM        = 5000
-	RangeDeleteNum       = 100
+	RangeDeleteNum       = 500
 )
 
 var (
