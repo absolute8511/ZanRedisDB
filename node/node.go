@@ -287,6 +287,16 @@ func (nd *KVNode) GetLocalMemberInfo() *common.MemberInfo {
 	return &m
 }
 
+// run perf for rt seconds and return perf result string
+func (nd *KVNode) RunPerf(level int, rt int) string {
+	if s, ok := nd.sm.(*kvStoreSM); ok {
+		report := s.store.RunPerf(level, rt)
+		nd.rn.Infof("perf: %v", report)
+		return report
+	}
+	return ""
+}
+
 func (nd *KVNode) GetDBInternalStats() string {
 	if s, ok := nd.sm.(*kvStoreSM); ok {
 		return s.store.GetStatistics()
@@ -434,7 +444,7 @@ func (nd *KVNode) handleProposeReq() {
 				cancel()
 				cost = time.Now().UnixNano() - start
 			}
-			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
+			if cost >= int64(time.Second.Nanoseconds())/2 {
 				nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
 			}
 			for i := range reqList.Reqs {
@@ -572,11 +582,16 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		err = common.ErrStopped
 	}
 	if req.reqData.Header.DataType == int32(RedisReq) {
-		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), time.Since(start).Nanoseconds()/1000)
+		cost := time.Since(start)
+		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), cost.Nanoseconds()/1000)
 		if err == nil && !nd.IsWriteReady() {
 			nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
 				req.reqData.String())
 			return nil, errRaftNotReadyForWrite
+		}
+		if cost >= time.Second {
+			nd.rn.Infof("write request %v slow cost: %v",
+				req.reqData.String(), cost)
 		}
 	}
 	return rsp, err

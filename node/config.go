@@ -38,18 +38,19 @@ type RaftGroupConfig struct {
 
 type MachineConfig struct {
 	// server node id
-	NodeID            uint64                `json:"node_id"`
-	BroadcastAddr     string                `json:"broadcast_addr"`
-	HttpAPIPort       int                   `json:"http_api_port"`
-	LocalRaftAddr     string                `json:"local_raft_addr"`
-	DataRootDir       string                `json:"data_root_dir"`
-	ElectionTick      int                   `json:"election_tick"`
-	TickMs            int                   `json:"tick_ms"`
-	KeepWAL           int                   `json:"keep_wal"`
-	LearnerRole       string                `json:"learner_role"`
-	RemoteSyncCluster string                `json:"remote_sync_cluster"`
-	StateMachineType  string                `json:"state_machine_type"`
-	RocksDBOpts       rockredis.RockOptions `json:"rocksdb_opts"`
+	NodeID              uint64                `json:"node_id"`
+	BroadcastAddr       string                `json:"broadcast_addr"`
+	HttpAPIPort         int                   `json:"http_api_port"`
+	LocalRaftAddr       string                `json:"local_raft_addr"`
+	DataRootDir         string                `json:"data_root_dir"`
+	ElectionTick        int                   `json:"election_tick"`
+	TickMs              int                   `json:"tick_ms"`
+	KeepWAL             int                   `json:"keep_wal"`
+	LearnerRole         string                `json:"learner_role"`
+	RemoteSyncCluster   string                `json:"remote_sync_cluster"`
+	StateMachineType    string                `json:"state_machine_type"`
+	RocksDBOpts         rockredis.RockOptions `json:"rocksdb_opts"`
+	RocksDBSharedConfig *rockredis.SharedRockConfig
 }
 
 type ReplicaInfo struct {
