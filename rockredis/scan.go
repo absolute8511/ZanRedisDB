@@ -155,6 +155,7 @@ func checkScanCount(count int) int {
 	return count
 }
 
+// note: this scan will not stop while cross table, it will scan begin from key until count or no more in db.
 func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int,
 	match string, inputBuffer [][]byte) ([][]byte, error) {
 	r, err := buildMatchRegexp(match)
@@ -166,6 +167,7 @@ func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int
 	if err != nil {
 		return nil, err
 	}
+	dbLog.Debugf("scan range: %v, %v", minKey, maxKey)
 	count = checkScanCount(count)
 
 	it, err := db.buildScanIterator(minKey, maxKey)

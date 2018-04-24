@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/gorocksdb"
@@ -222,6 +223,7 @@ func (db *RockDB) hIncrSize(hkey []byte, delta int64, wb *gorocksdb.WriteBatch) 
 }
 
 func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value []byte) (int64, error) {
+	s := time.Now()
 	if err := checkValueSize(value); err != nil {
 		return 0, err
 	}
@@ -244,12 +246,18 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value [
 	if err != nil {
 		return 0, err
 	}
+	c1 := time.Since(s)
 
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	c2 := time.Since(s)
+	if c2 > time.Second/3 {
+		dbLog.Infof("key %v slow write cost: %v, %v", string(key), c1, c2)
+	}
 	return created, err
 }
 
 func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
+	s := time.Now()
 	if len(args) >= MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
@@ -267,6 +275,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	}
 	db.wb.Clear()
 
+	c1 := time.Since(s)
 	var num int64
 	var value []byte
 	tsBuf := PutInt64(ts)
@@ -301,13 +310,19 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 			}
 		}
 	}
+	c2 := time.Since(s)
 	if newNum, err := db.hIncrSize(key, num, db.wb); err != nil {
 		return err
 	} else if newNum > 0 && newNum == num {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
+	c3 := time.Since(s)
 
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	c4 := time.Since(s)
+	if c4 > time.Second/3 {
+		dbLog.Infof("key %v slow write cost: %v, %v, %v, %v", string(key), c1, c2, c3, c4)
+	}
 	return err
 }
 
@@ -439,8 +454,12 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 	}
 	start := hEncodeStartKey(table, rk)
 	stop := hEncodeStopKey(table, rk)
+	hlen, err := db.HLen(hkey)
+	if err != nil {
+		return err
+	}
 
-	if tableIndexes != nil {
+	if tableIndexes != nil || hlen <= RangeDeleteNum {
 		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		if err != nil {
 			return err
@@ -449,17 +468,24 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 
 		for ; it.Valid(); it.Next() {
 			rawk := it.RefKey()
-			_, _, field, _ := hDecodeHashKey(rawk)
-			if hindex := tableIndexes.GetHIndexNoLock(string(field)); hindex != nil {
-				oldV := it.RefValue()
-				if len(oldV) >= tsLen {
-					oldV = oldV[:len(oldV)-tsLen]
+			if hlen <= RangeDeleteNum {
+				wb.Delete(rawk)
+			}
+			if tableIndexes != nil {
+				_, _, field, _ := hDecodeHashKey(rawk)
+				if hindex := tableIndexes.GetHIndexNoLock(string(field)); hindex != nil {
+					oldV := it.RefValue()
+					if len(oldV) >= tsLen {
+						oldV = oldV[:len(oldV)-tsLen]
+					}
+					hindex.RemoveRec(oldV, hkey, wb)
 				}
-				hindex.RemoveRec(oldV, hkey, wb)
 			}
 		}
 	}
-	wb.DeleteRange(start, stop)
+	if hlen > RangeDeleteNum {
+		wb.DeleteRange(start, stop)
+	}
 	wb.Delete(sk)
 	return nil
 }

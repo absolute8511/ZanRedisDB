@@ -826,12 +826,16 @@ func (rc *raftNode) serveChannels() {
 				return
 			}
 			if rd.SoftState != nil {
-				isMeNewLeader = rd.RaftState == raft.StateLeader
+				isMeNewLeader = (rd.RaftState == raft.StateLeader)
 				oldLead := atomic.LoadUint64(&rc.lead)
 				isMeLosingLeader := (oldLead == uint64(rc.config.ID)) && !isMeNewLeader
 				if rd.SoftState.Lead != raft.None && oldLead != rd.SoftState.Lead {
 					rc.Infof("leader changed from %v to %v", oldLead, rd.SoftState)
 					atomic.StoreInt64(&rc.lastLeaderChangedTs, time.Now().UnixNano())
+				}
+				if rd.SoftState.Lead == raft.None && oldLead != raft.None {
+					// TODO: handle proposal drop if leader is lost
+					//rc.triggerLeaderLost()
 				}
 				if isMeNewLeader || isMeLosingLeader {
 					rc.triggerLeaderChanged()

@@ -410,11 +410,23 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 	}
 
 	if start > 0 {
-		wb.DeleteRange(lEncodeListKey(table, rk, headSeq), lEncodeListKey(table, rk, headSeq+start))
+		if start > RangeDeleteNum {
+			wb.DeleteRange(lEncodeListKey(table, rk, headSeq), lEncodeListKey(table, rk, headSeq+start))
+		} else {
+			for i := int64(0); i < start; i++ {
+				wb.Delete(lEncodeListKey(table, rk, headSeq+i))
+			}
+		}
 	}
 	if stop < int64(llen-1) {
-		wb.DeleteRange(lEncodeListKey(table, rk, headSeq+int64(stop+1)),
-			lEncodeListKey(table, rk, headSeq+llen))
+		if llen-stop > RangeDeleteNum {
+			wb.DeleteRange(lEncodeListKey(table, rk, headSeq+int64(stop+1)),
+				lEncodeListKey(table, rk, headSeq+llen))
+		} else {
+			for i := int64(stop + 1); i < llen; i++ {
+				wb.Delete(lEncodeListKey(table, rk, headSeq+i))
+			}
+		}
 	}
 
 	newLen, err := db.lSetMeta(ek, headSeq+start, headSeq+stop, ts, wb)
@@ -475,10 +487,17 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 		tailSeq = trimStartSeq - 1
 	}
 
-	itemStartKey := lEncodeListKey(table, rk, trimStartSeq)
-	itemEndKey := lEncodeListKey(table, rk, trimEndSeq)
-	wb.DeleteRange(itemStartKey, itemEndKey)
-	wb.Delete(itemEndKey)
+	if trimEndSeq-trimStartSeq > RangeDeleteNum {
+		itemStartKey := lEncodeListKey(table, rk, trimStartSeq)
+		itemEndKey := lEncodeListKey(table, rk, trimEndSeq)
+		wb.DeleteRange(itemStartKey, itemEndKey)
+		wb.Delete(itemEndKey)
+	} else {
+		for trimSeq := trimStartSeq; trimSeq <= trimEndSeq; trimSeq++ {
+			itemKey := lEncodeListKey(table, rk, trimSeq)
+			wb.Delete(itemKey)
+		}
+	}
 
 	size, err = db.lSetMeta(metaKey, headSeq, tailSeq, ts, wb)
 	if err != nil {
@@ -519,8 +538,20 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	startKey := lEncodeListKey(table, rk, headSeq)
 	stopKey := lEncodeListKey(table, rk, tailSeq)
 
-	wb.DeleteRange(startKey, stopKey)
+	if size > RangeDeleteNum {
+		wb.DeleteRange(startKey, stopKey)
+	} else {
+		rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
+		if err != nil {
+			return 0
+		}
+		for ; rit.Valid(); rit.Next() {
+			wb.Delete(rit.RefKey())
+		}
+		rit.Close()
+	}
 	// delete range is [left, right), so we need delete end
+
 	wb.Delete(stopKey)
 	if size > 0 {
 		db.IncrTableKeyCount(table, -1, wb)

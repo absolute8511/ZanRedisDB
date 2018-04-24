@@ -678,7 +678,7 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 	return -1, nil
 }
 
-func (db *RockDB) zRemAll(key []byte, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) zRemAll(ts int64, key []byte, wb *gorocksdb.WriteBatch) (int64, error) {
 	num, err := db.ZCard(key)
 	if err != nil {
 		return 0, err
@@ -687,19 +687,25 @@ func (db *RockDB) zRemAll(key []byte, wb *gorocksdb.WriteBatch) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	sk := zEncodeSizeKey(key)
+
 	minKey := zEncodeStartKey(table, rk)
 	maxKey := zEncodeStopKey(table, rk)
-	wb.DeleteRange(minKey, maxKey)
+	if num > RangeDeleteNum {
+		sk := zEncodeSizeKey(key)
+		wb.DeleteRange(minKey, maxKey)
 
-	minSetKey := zEncodeStartSetKey(table, rk)
-	maxSetKey := zEncodeStopSetKey(table, rk)
-	wb.DeleteRange(minSetKey, maxSetKey)
-	if num > 0 {
-		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(ZSetType, key, wb)
+		minSetKey := zEncodeStartSetKey(table, rk)
+		maxSetKey := zEncodeStopSetKey(table, rk)
+		wb.DeleteRange(minSetKey, maxSetKey)
+		if num > 0 {
+			db.IncrTableKeyCount(table, -1, wb)
+			db.delExpire(ZSetType, key, wb)
+		}
+		wb.Delete(sk)
+	} else {
+		rmCnt, err := db.zRemRangeBytes(ts, key, minKey, maxKey, 0, -1, wb)
+		return rmCnt, err
 	}
-	wb.Delete(sk)
 	return num, nil
 }
 
@@ -712,7 +718,7 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, minKey []byte, maxKey []b
 	if offset == 0 {
 		total, err := db.ZCard(key)
 		if err == nil && int64(count) >= total {
-			return db.zRemAll(key, wb)
+			return db.zRemAll(ts, key, wb)
 		}
 	}
 	if count >= MAX_BATCH_NUM {
@@ -884,7 +890,7 @@ func (db *RockDB) zParseLimit(key []byte, start int, stop int) (offset int, coun
 func (db *RockDB) ZClear(key []byte) (int64, error) {
 	db.wb.Clear()
 
-	rmCnt, err := db.zRemAll(key, db.wb)
+	rmCnt, err := db.zRemAll(0, key, db.wb)
 	if err == nil {
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	}
@@ -900,7 +906,7 @@ func (db *RockDB) ZMclear(keys ...[]byte) (int64, error) {
 		// note: the zRemAll can not be batched, so we need clear and commit
 		// after each key.
 		db.wb.Clear()
-		if _, err := db.zRemAll(key, db.wb); err != nil {
+		if _, err := db.zRemAll(0, key, db.wb); err != nil {
 			return deleted, err
 		}
 		err := db.eng.Write(db.defaultWriteOpts, db.wb)
@@ -918,7 +924,7 @@ func (db *RockDB) zMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) err
 		return errTooMuchBatchSize
 	}
 	for _, key := range keys {
-		if _, err := db.zRemAll(key, wb); err != nil {
+		if _, err := db.zRemAll(0, key, wb); err != nil {
 			return err
 		}
 	}
@@ -1089,7 +1095,7 @@ func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, r
 	wb := db.wb
 	wb.Clear()
 	if min == nil && max == nil {
-		cnt, err := db.zRemAll(key, wb)
+		cnt, err := db.zRemAll(ts, key, wb)
 		if err != nil {
 			return 0, err
 		}

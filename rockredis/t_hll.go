@@ -298,7 +298,6 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 
 	item, ok := db.hllCache.Get(rawKey)
 
-	db.wb.Clear()
 	changed := false
 	var hllp *hll.HyperLogLogPlus
 	if !ok {

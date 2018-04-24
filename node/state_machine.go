@@ -536,7 +536,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 	}
 
 	cost := time.Since(start)
-	if cost >= proposeTimeout/2 {
+	if cost >= time.Second {
 		kvsm.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
 	}
 	// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
@@ -651,7 +651,7 @@ func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaft
 	err := kvsm.store.CommitBatchWrite()
 	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 	batchCost := time.Since(batchStart)
-	if nodeLog.Level() >= common.LOG_DETAIL {
+	if nodeLog.Level() > common.LOG_DETAIL {
 		kvsm.Infof("batching command number: %v", len(batchReqIDList))
 	}
 	// write the future response or error
@@ -663,7 +663,7 @@ func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaft
 		}
 	}
 	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
-		kvsm.Infof("slow batch write command: %v, batch: %v, cost: %v",
+		kvsm.Infof("slow batch write db, command: %v, batch: %v, cost: %v",
 			cmdName, len(batchReqIDList), batchCost)
 	}
 	if len(batchReqIDList) > 0 {

@@ -105,6 +105,7 @@ func (nd *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 // here cursor is the scan key for start, (table:key)
 // and the response will return the next start key for next scan,
 // (note: it is not the "0" as the redis scan to indicate the end of scan)
+// advscan will stop if crossing table
 func (nd *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 3 {
 		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: common.ErrInvalidArgs}, common.ErrInvalidArgs

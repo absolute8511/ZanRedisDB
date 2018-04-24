@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/ZanRedisDB/rockredis"
+
 	"github.com/absolute8511/ZanRedisDB/cluster"
 	"github.com/absolute8511/ZanRedisDB/cluster/datanode_coord"
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -146,6 +148,10 @@ func NewServer(conf ServerConfig) *Server {
 		StateMachineType:  conf.StateMachineType,
 		RocksDBOpts:       conf.RocksDBOpts,
 	}
+	if mconf.RocksDBOpts.UseSharedCache || mconf.RocksDBOpts.AdjustThreadPool || mconf.RocksDBOpts.UseSharedRateLimiter {
+		sc := rockredis.NewSharedRockConfig(conf.RocksDBOpts)
+		mconf.RocksDBSharedConfig = sc
+	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID
 
@@ -203,6 +209,10 @@ func (s *Server) GetStats(leaderOnly bool) common.ServerStats {
 	ss.NSStats = s.nsMgr.GetStats(leaderOnly)
 	ss.ScanStats = s.scanStats.Copy()
 	return ss
+}
+
+func (s *Server) RunPerf(leaderOnly bool, level int, secs int) map[string]string {
+	return s.nsMgr.RunPerf(leaderOnly, level, secs)
 }
 
 func (s *Server) GetDBStats(leaderOnly bool) map[string]string {

@@ -416,6 +416,9 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
 	ss := s.GetStats(leaderOnly)
 
 	startTime := s.startTime
@@ -438,6 +441,10 @@ func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps htt
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
 	logSyncedStats := s.GetLogSyncStats(leaderOnly, reqParams.Get("cluster"))
 	return struct {
 		SyncNetLatency *common.WriteStats    `json:"sync_net_latency"`
@@ -454,7 +461,32 @@ func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprout
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
 	ss := s.GetDBStats(leaderOnly)
+	return ss, nil
+}
+
+func (s *Server) doDBPerf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
+	levelStr := reqParams.Get("level")
+	level, _ := strconv.ParseInt(levelStr, 10, 64)
+	secsStr := reqParams.Get("seconds")
+	secs, _ := strconv.ParseInt(secsStr, 10, 64)
+
+	ss := s.RunPerf(leaderOnly, int(level), int(secs))
 	return ss, nil
 }
 
@@ -488,6 +520,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
 	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
+	router.Handle("GET", "/db/perf", common.Decorate(s.doDBPerf, log, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 
 	s.router = router
