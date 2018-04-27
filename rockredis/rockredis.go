@@ -488,6 +488,13 @@ func (r *RockDB) CompactRange() {
 	r.eng.CompactRange(rg)
 }
 
+func (r *RockDB) CompactTableRange(table string) {
+	// get table count to determin whether the table data type is valid
+	//var rg gorocksdb.Range
+	// TODO: get table range for kv, list, hash, set, zset, others to compact
+	//r.eng.CompactRange(rg)
+}
+
 func (r *RockDB) closeEng() {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
@@ -532,34 +539,11 @@ func (r *RockDB) Close() {
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
 
-func (r *RockDB) RunPerf(level int, runTime int) string {
-	defer func() {
-		dbLog.Infof("run perf done")
-	}()
-	if level <= 0 || level > 4 {
-		return ""
-	}
-	dbLog.Infof("run perf level: %v for %v seconds", level, runTime)
-	gorocksdb.SetPerfLevel(gorocksdb.PerfLevel(level))
-	perfCtx := gorocksdb.NewPerfContext()
-	perfCtx.Reset()
-	defer gorocksdb.SetPerfLevel(gorocksdb.PerfDisable)
-	defer perfCtx.Destroy()
-	t := time.NewTimer(time.Second * time.Duration(runTime))
-	defer t.Stop()
-	select {
-	case <-r.quit:
-	case <-t.C:
-	}
-	ret := perfCtx.Report(true)
-	return ret
-}
-
 func (r *RockDB) GetStatistics() string {
 	return r.dbOpts.GetStatistics()
 }
 
-func (r *RockDB) DeleteTableRange(dt string, table string, start []byte, end []byte) error {
+func (r *RockDB) DeleteTableRange(table string, start []byte, end []byte) error {
 	// kv, hash, set, list, zset
 	return nil
 }
@@ -569,7 +553,7 @@ func (r *RockDB) GetTablesSizes(tables []string) []int64 {
 	return nil
 }
 
-func (r *RockDB) GetTableSizeInRange(dt string, table string, start []byte, end []byte) int64 {
+func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int64 {
 	//rg := getTableRange(dt, table, start, end)
 	//rgs := make([]gorocksdb.Range, 0, 1)
 	//rgs = append(rgs, rg)
@@ -577,7 +561,7 @@ func (r *RockDB) GetTableSizeInRange(dt string, table string, start []byte, end 
 	return 0
 }
 
-func (r *RockDB) GetTableRecordsInRange(dt string, table string, start []byte, end []byte) int64 {
+func (r *RockDB) GetTableRecordsInRange(table string, start []byte, end []byte) int64 {
 	// use
 	// GetApproximateSizes and estimate-keys-num in property
 	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
@@ -920,6 +904,43 @@ func (r *RockDB) CommitBatchWrite() error {
 func IsBatchableWrite(cmd string) bool {
 	_, ok := batchableCmds[cmd]
 	return ok
+}
+
+func SetPerfLevel(level int) {
+	if level <= 0 || level > 4 {
+		DisablePerfLevel()
+		return
+	}
+	gorocksdb.SetPerfLevel(gorocksdb.PerfLevel(level))
+}
+
+func IsPerfEnabledLevel(lv int) bool {
+	if lv <= 0 || lv > 4 {
+		return false
+	}
+	return lv != gorocksdb.PerfDisable
+}
+
+func DisablePerfLevel() {
+	gorocksdb.SetPerfLevel(gorocksdb.PerfDisable)
+}
+
+type PerfContext struct {
+	ctx *gorocksdb.PerfContext
+}
+
+func NewPerfCtx() *PerfContext {
+	perfCtx := gorocksdb.NewPerfContext()
+	perfCtx.Reset()
+	return &PerfContext{ctx: perfCtx}
+}
+
+func (pc *PerfContext) Destroy() {
+	pc.ctx.Destroy()
+}
+
+func (pc *PerfContext) Report() string {
+	return pc.ctx.Report(true)
 }
 
 func init() {

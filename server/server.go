@@ -211,16 +211,16 @@ func (s *Server) GetStats(leaderOnly bool) common.ServerStats {
 	return ss
 }
 
-func (s *Server) RunPerf(leaderOnly bool, level int, secs int) map[string]string {
-	return s.nsMgr.RunPerf(leaderOnly, level, secs)
-}
-
 func (s *Server) GetDBStats(leaderOnly bool) map[string]string {
 	return s.nsMgr.GetDBStats(leaderOnly)
 }
 
-func (s *Server) OptimizeDB() {
-	s.nsMgr.OptimizeDB()
+func (s *Server) OptimizeDB(ns string, table string) {
+	s.nsMgr.OptimizeDB(ns, table)
+}
+
+func (s *Server) DeleteRange(ns string, dtr node.DeleteTableRange) {
+	s.nsMgr.DeleteRange(ns, dtr)
 }
 
 func (s *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig, join bool) (*node.NamespaceNode, error) {

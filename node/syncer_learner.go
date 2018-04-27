@@ -89,7 +89,7 @@ func (sm *logSyncerSM) Errorf(f string, args ...interface{}) {
 	nodeLog.ErrorDepth(1, fmt.Sprintf("%v-%v: %s", sm.fullNS, sm.ID, msg))
 }
 
-func (sm *logSyncerSM) Optimize() {
+func (sm *logSyncerSM) Optimize(t string) {
 }
 
 func (sm *logSyncerSM) GetDBInternalStats() string {

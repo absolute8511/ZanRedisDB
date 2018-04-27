@@ -36,7 +36,7 @@ type StateMachine interface {
 	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
 	CleanData() error
-	Optimize()
+	Optimize(string)
 	GetStats() common.NamespaceStats
 	Start() error
 	Close()
@@ -96,7 +96,7 @@ func (esm *emptySM) Destroy() {
 func (esm *emptySM) CleanData() error {
 	return nil
 }
-func (esm *emptySM) Optimize() {
+func (esm *emptySM) Optimize(t string) {
 
 }
 func (esm *emptySM) GetStats() common.NamespaceStats {
@@ -172,8 +172,12 @@ func (kvsm *kvStoreSM) Close() {
 	kvsm.store.Close()
 }
 
-func (kvsm *kvStoreSM) Optimize() {
-	kvsm.store.CompactRange()
+func (kvsm *kvStoreSM) Optimize(table string) {
+	if table == "" {
+		kvsm.store.CompactRange()
+	} else {
+		kvsm.store.CompactTableRange(table)
+	}
 }
 
 func (kvsm *kvStoreSM) GetDBInternalStats() string {
@@ -483,12 +487,23 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 					kvsm.Infof("unsupported redis command: %v", cmd)
 					kvsm.w.Trigger(reqID, common.ErrInvalidCommand)
 				} else {
+					var perfCtx *rockredis.PerfContext
+					if IsPerfEnabled() {
+						perfCtx = rockredis.NewPerfCtx()
+					}
 					v, err := h(cmd, reqTs)
 					cmdCost := time.Since(cmdStart)
 					if cmdCost > dbWriteSlow || nodeLog.Level() > common.LOG_DETAIL ||
 						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
 						kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
+						if perfCtx != nil {
+							kvsm.Infof("slow write perf: %v", perfCtx.Report())
+						}
 					}
+					if perfCtx != nil {
+						perfCtx.Destroy()
+					}
+
 					kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 					// write the future response or error
 					if err != nil {
@@ -560,6 +575,15 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		kvsm.Infof("got force backup request")
 		forceBackup = true
 		kvsm.w.Trigger(reqID, nil)
+	} else if p.ProposeOp == ProposeOp_DeleteTable {
+		var dr DeleteTableRange
+		err = json.Unmarshal(p.Data, &dr)
+		if err != nil {
+			kvsm.Infof("invalid delete table range data: %v", string(p.Data))
+		} else {
+			err = kvsm.store.DeleteTableRange(dr.Table, dr.StartFrom, dr.EndTo)
+		}
+		kvsm.w.Trigger(reqID, err)
 	} else if p.ProposeOp == ProposeOp_RemoteConfChange {
 		var cc raftpb.ConfChange
 		cc.Unmarshal(p.Data)
@@ -648,6 +672,12 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 // return if configure changed and whether need force backup
 func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{},
 	dupCheckMap map[string]bool) ([]uint64, []interface{}, map[string]bool) {
+
+	var perfCtx *rockredis.PerfContext
+	if IsPerfEnabled() {
+		perfCtx = rockredis.NewPerfCtx()
+		defer perfCtx.Destroy()
+	}
 	err := kvsm.store.CommitBatchWrite()
 	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 	batchCost := time.Since(batchStart)
@@ -665,6 +695,10 @@ func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaft
 	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
 		kvsm.Infof("slow batch write db, command: %v, batch: %v, cost: %v",
 			cmdName, len(batchReqIDList), batchCost)
+
+		if perfCtx != nil {
+			kvsm.Infof("slow write perf: %v", perfCtx.Report())
+		}
 	}
 	if len(batchReqIDList) > 0 {
 		kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Nanoseconds()/1000, int64(len(batchReqIDList)))
