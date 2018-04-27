@@ -778,7 +778,7 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	if !checkCommitIndex {
 		return true
 	}
-	to := time.Second * 2
+	to := time.Second * 5
 	req := make([]byte, 8)
 	binary.BigEndian.PutUint64(req, nd.rn.reqIDGen.Next())
 	ctx, cancel := context.WithTimeout(context.Background(), to)
