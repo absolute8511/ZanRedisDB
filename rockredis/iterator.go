@@ -135,7 +135,10 @@ func NewDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uin
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
+	lowerBound = nil
+	upperBound = nil
 
+	//dbLog.Infof("iterator %v : %v", lowerBound, upperBound)
 	dbit, err := NewDBIterator(db, false, true, lowerBound, upperBound, false)
 	if err != nil {
 		return nil, err
@@ -158,6 +161,8 @@ func NewSnapshotDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, r
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
+	lowerBound = nil
+	upperBound = nil
 	dbit, err := NewDBIterator(db, true, true, lowerBound, upperBound, false)
 	if err != nil {
 		return nil, err
@@ -180,6 +185,8 @@ func NewDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
+	lowerBound = nil
+	upperBound = nil
 	dbit, err := NewDBIterator(db, false, true, lowerBound, upperBound, false)
 	if err != nil {
 		return nil, err
@@ -200,6 +207,8 @@ func NewSnapshotDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype 
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
+	lowerBound = nil
+	upperBound = nil
 	dbit, err := NewDBIterator(db, true, true, lowerBound, upperBound, false)
 	if err != nil {
 		return nil, err

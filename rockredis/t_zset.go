@@ -1077,6 +1077,9 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 		rawk := it.Key()
 		if _, _, m, err := zDecodeSetKey(rawk); err == nil {
 			ay = append(ay, m)
+			//dbLog.Infof("key %v : %v", rawk)
+		} else {
+			dbLog.Infof("key %v : error %v", rawk, err)
 		}
 		// TODO: err for iterator step would match the final count?
 		if count >= 0 && len(ay) >= count {
