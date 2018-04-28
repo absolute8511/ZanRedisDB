@@ -185,12 +185,29 @@ func (kvsm *kvStoreSM) GetDBInternalStats() string {
 }
 
 func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
+	var perfCtx *rockredis.PerfContext
+	var start time.Time
+	if IsPerfEnabled() {
+		start = time.Now()
+		perfCtx = rockredis.NewPerfCtx()
+	}
 	tbs := kvsm.store.GetTables()
 	var ns common.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
+	if perfCtx != nil {
+		cost := time.Since(start)
+		if cost > time.Second {
+			kvsm.Infof("slow get tables cost %v, perf: %v", cost, perfCtx.Report())
+		}
+		perfCtx.Destroy()
+		perfCtx = nil
+	}
 
-	for t := range tbs {
+	if IsPerfEnabled() {
+		perfCtx = rockredis.NewPerfCtx()
+	}
+	for _, t := range tbs {
 		cnt, err := kvsm.store.GetTableKeyCount(t)
 		if err != nil {
 			continue
@@ -199,6 +216,14 @@ func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
 		ts.Name = string(t)
 		ts.KeyNum = cnt
 		ns.TStats = append(ns.TStats, ts)
+	}
+	if perfCtx != nil {
+		cost := time.Since(start)
+		if cost > time.Second {
+			kvsm.Infof("slow get table count cost %v perf: %v", cost, perfCtx.Report())
+		}
+		perfCtx.Destroy()
+		perfCtx = nil
 	}
 	return ns
 }
