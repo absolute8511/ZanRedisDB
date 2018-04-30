@@ -185,28 +185,10 @@ func (kvsm *kvStoreSM) GetDBInternalStats() string {
 }
 
 func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
-	var perfCtx *rockredis.PerfContext
-	var start time.Time
-	if IsPerfEnabled() {
-		start = time.Now()
-		perfCtx = rockredis.NewPerfCtx()
-	}
 	tbs := kvsm.store.GetTables()
 	var ns common.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
-	if perfCtx != nil {
-		cost := time.Since(start)
-		if cost > time.Second {
-			kvsm.Infof("slow get tables cost %v, perf: %v", cost, perfCtx.Report())
-		}
-		perfCtx.Destroy()
-		perfCtx = nil
-	}
-
-	if IsPerfEnabled() {
-		perfCtx = rockredis.NewPerfCtx()
-	}
 	for _, t := range tbs {
 		cnt, err := kvsm.store.GetTableKeyCount(t)
 		if err != nil {
@@ -217,14 +199,7 @@ func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
 		ts.KeyNum = cnt
 		ns.TStats = append(ns.TStats, ts)
 	}
-	if perfCtx != nil {
-		cost := time.Since(start)
-		if cost > time.Second {
-			kvsm.Infof("slow get table count cost %v perf: %v", cost, perfCtx.Report())
-		}
-		perfCtx.Destroy()
-		perfCtx = nil
-	}
+
 	return ns
 }
 
@@ -512,21 +487,11 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 					kvsm.Infof("unsupported redis command: %v", cmd)
 					kvsm.w.Trigger(reqID, common.ErrInvalidCommand)
 				} else {
-					var perfCtx *rockredis.PerfContext
-					if IsPerfEnabled() {
-						perfCtx = rockredis.NewPerfCtx()
-					}
 					v, err := h(cmd, reqTs)
 					cmdCost := time.Since(cmdStart)
 					if cmdCost > dbWriteSlow || nodeLog.Level() > common.LOG_DETAIL ||
 						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
 						kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
-						if perfCtx != nil {
-							kvsm.Infof("slow write perf: %v", perfCtx.Report())
-						}
-					}
-					if perfCtx != nil {
-						perfCtx.Destroy()
 					}
 
 					kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
@@ -698,11 +663,6 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{},
 	dupCheckMap map[string]bool) ([]uint64, []interface{}, map[string]bool) {
 
-	var perfCtx *rockredis.PerfContext
-	if IsPerfEnabled() {
-		perfCtx = rockredis.NewPerfCtx()
-		defer perfCtx.Destroy()
-	}
 	err := kvsm.store.CommitBatchWrite()
 	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 	batchCost := time.Since(batchStart)
@@ -720,10 +680,6 @@ func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaft
 	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
 		kvsm.Infof("slow batch write db, command: %v, batch: %v, cost: %v",
 			cmdName, len(batchReqIDList), batchCost)
-
-		if perfCtx != nil {
-			kvsm.Infof("slow write perf: %v", perfCtx.Report())
-		}
 	}
 	if len(batchReqIDList) > 0 {
 		kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Nanoseconds()/1000, int64(len(batchReqIDList)))

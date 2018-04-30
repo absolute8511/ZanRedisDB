@@ -925,24 +925,6 @@ func DisablePerfLevel() {
 	gorocksdb.SetPerfLevel(gorocksdb.PerfDisable)
 }
 
-type PerfContext struct {
-	ctx *gorocksdb.PerfContext
-}
-
-func NewPerfCtx() *PerfContext {
-	perfCtx := gorocksdb.NewPerfContext()
-	perfCtx.Reset()
-	return &PerfContext{ctx: perfCtx}
-}
-
-func (pc *PerfContext) Destroy() {
-	pc.ctx.Destroy()
-}
-
-func (pc *PerfContext) Report() string {
-	return pc.ctx.Report(true)
-}
-
 func init() {
 	batchableCmds = make(map[string]bool)
 	// command need response value (not just error or ok) can not be batched
