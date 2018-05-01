@@ -39,6 +39,8 @@ type DBIterator struct {
 	snap         *gorocksdb.Snapshot
 	ro           *gorocksdb.ReadOptions
 	db           *gorocksdb.DB
+	upperBound   *gorocksdb.IterBound
+	lowerBound   *gorocksdb.IterBound
 	removeTsType byte
 }
 
@@ -56,10 +58,12 @@ func NewDBIterator(db *gorocksdb.DB, withSnap bool, prefixSame bool, lowbound []
 		readOpts.SetPrefixSameAsStart(true)
 	}
 	if lowbound != nil {
-		readOpts.SetIterLowerBound(lowbound)
+		dbit.lowerBound = gorocksdb.NewIterBound(lowbound)
+		readOpts.SetIterLowerBound(dbit.lowerBound)
 	}
 	if upbound != nil {
-		readOpts.SetIterUpperBound(upbound)
+		dbit.upperBound = gorocksdb.NewIterBound(upbound)
+		readOpts.SetIterUpperBound(dbit.upperBound)
 	}
 	if ignoreDel {
 		// may iterator some deleted keys still not compacted.
@@ -121,6 +125,12 @@ func (it *DBIterator) Close() {
 	if it.snap != nil {
 		it.snap.Release()
 	}
+	if it.upperBound != nil {
+		it.upperBound.Destroy()
+	}
+	if it.lowerBound != nil {
+		it.lowerBound.Destroy()
+	}
 	it.db.RUnlock()
 }
 
@@ -135,8 +145,6 @@ func NewDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uin
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
-	lowerBound = nil
-	upperBound = nil
 
 	//dbLog.Infof("iterator %v : %v", lowerBound, upperBound)
 	dbit, err := NewDBIterator(db, false, true, lowerBound, upperBound, false)
@@ -161,8 +169,6 @@ func NewSnapshotDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, r
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
-	lowerBound = nil
-	upperBound = nil
 	dbit, err := NewDBIterator(db, true, true, lowerBound, upperBound, false)
 	if err != nil {
 		return nil, err
@@ -185,8 +191,6 @@ func NewDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
-	lowerBound = nil
-	upperBound = nil
 	dbit, err := NewDBIterator(db, false, true, lowerBound, upperBound, false)
 	if err != nil {
 		return nil, err
@@ -207,8 +211,6 @@ func NewSnapshotDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype 
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
-	lowerBound = nil
-	upperBound = nil
 	dbit, err := NewDBIterator(db, true, true, lowerBound, upperBound, false)
 	if err != nil {
 		return nil, err
