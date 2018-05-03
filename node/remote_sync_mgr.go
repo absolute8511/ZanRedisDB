@@ -236,6 +236,11 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 	if skip {
 		nd.rn.Infof("got skipped snapshot from remote cluster %v : %v-%v", name, term, index)
 	} else {
+		// we should disallow applying remote snap while we are running as master cluster
+		if !IsSyncerOnly() {
+			nd.rn.Infof("cluster %v snapshot is not allowed: %v-%v", name, term, index)
+			return errors.New("apply remote snapshot is not allowed while not in syncer only mode")
+		}
 		oldS, ok := nd.remoteSyncedStates.GetApplyingSnap(name)
 		if !ok {
 			return errors.New("no remote snapshot waiting apply")

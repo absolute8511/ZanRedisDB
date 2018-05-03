@@ -320,17 +320,20 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	_, ok := raftStats.Progress[m.ID]
 	assert.Equal(t, false, ok)
 
+	node.SetSyncerOnly(true)
 	err := leaderNode.Node.ProposeAddLearner(*m)
 	assert.Nil(t, err)
 	time.Sleep(time.Second * 3)
 	assert.Equal(t, true, learnerNode.IsReady())
 
+	node.SetSyncerOnly(false)
 	key := "default:test-cluster:a"
 	keySnapTest := "default:test-cluster:a-snaptest"
 	rsp, err := goredis.String(c.Do("set", key, "1234"))
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
 
+	node.SetSyncerOnly(true)
 	// wait raft log synced
 	time.Sleep(time.Second)
 	leaderci := leaderNode.Node.GetCommittedIndex()
@@ -346,6 +349,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, "1234", v)
 
+	node.SetSyncerOnly(false)
 	_, err = goredis.Int(c.Do("del", key))
 	assert.Nil(t, err)
 
@@ -403,6 +407,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	nsConf.ExpirationPolicy = "consistency_deletion"
 	learnerNode, err = learnerServers[0].InitKVNamespace(m.ID, nsConf, true)
 	assert.Nil(t, err)
+	node.SetSyncerOnly(true)
 	err = learnerNode.Start(false)
 	assert.Nil(t, err)
 
@@ -412,6 +417,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
 	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
+	node.SetSyncerOnly(false)
 
 	v, err = goredis.String(c.Do("get", key))
 	assert.Nil(t, err)
