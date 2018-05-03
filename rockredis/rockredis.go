@@ -590,7 +590,7 @@ func getTableDataRange(dt byte, table []byte, start, end []byte) ([]gorocksdb.Ra
 		}
 		rgs = append(rgs, gorocksdb.Range{Start: zminKey, Limit: zmaxKey})
 	}
-	dbLog.Infof("table dt %v data range: %v", dt, rgs)
+	dbLog.Debugf("table dt %v data range: %v", dt, rgs)
 	return rgs, nil
 }
 
@@ -612,7 +612,7 @@ func getTableMetaRange(dt byte, table []byte, start, end []byte) ([]byte, []byte
 	if err != nil {
 		return nil, nil, err
 	}
-	dbLog.Infof("table dt %v meta range: %v, %v", dt, minMetaKey, maxMetaKey)
+	dbLog.Debugf("table dt %v meta range: %v, %v", dt, minMetaKey, maxMetaKey)
 	return minMetaKey, maxMetaKey, nil
 }
 
@@ -715,7 +715,7 @@ func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int
 		rgs = append(rgs, rgMeta)
 	}
 	sList := r.eng.GetApproximateSizes(rgs, true)
-	dbLog.Infof("range %v sizes: %v", rgs, sList)
+	dbLog.Debugf("range %v sizes: %v", rgs, sList)
 	total := uint64(0)
 	for _, ss := range sList {
 		total += ss
@@ -732,13 +732,13 @@ func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end [
 		return 0
 	}
 	if num <= 0 {
-		dbLog.Infof("total keys num zero: %v", numStr)
+		dbLog.Debugf("total keys num zero: %v", numStr)
 		return 0
 	}
 
 	ss := r.GetTableSizeInRange(table, start, end)
 	if ss <= 0 {
-		dbLog.Infof("table range size zero: %v", ss)
+		dbLog.Debugf("table range size zero: %v", ss)
 		return 0
 	}
 	rgs := make([]gorocksdb.Range, 0, 1)
@@ -748,7 +748,7 @@ func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end [
 		dbLog.Infof("total db size: %v", sList)
 		return 0
 	}
-	dbLog.Infof("total db size: %v, table %v", sList, ss)
+	dbLog.Debugf("total db size: %v, table %v", sList, ss)
 	// use GetApproximateSizes and estimate-keys-num in property
 	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
 	// range records = estimate-keys-num * GetApproximateSizes(range) / GetApproximateSizes (total)
