@@ -438,6 +438,7 @@ func (im *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 						return true, err
 					}
 					wb := gorocksdb.NewWriteBatch()
+					defer wb.Destroy()
 					for _, pk := range pkList {
 						if !bytes.HasPrefix(pk, origPrefix) {
 							dbLog.Infof("rebuild index for table %v end at: %v, next is: %v",
@@ -464,7 +465,6 @@ func (im *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 						cursor = nil
 					}
 					db.eng.Write(db.defaultWriteOpts, wb)
-					wb.Destroy()
 					if len(cursor) == 0 {
 						return true, nil
 					} else {
