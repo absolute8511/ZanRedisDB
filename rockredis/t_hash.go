@@ -68,20 +68,9 @@ func hDecodeSizeKey(ek []byte) ([]byte, error) {
 }
 
 func hEncodeHashKey(table []byte, key []byte, field []byte) []byte {
-	buf := make([]byte, len(table)+2+1+len(key)+len(field)+1+1+2)
+	buf := make([]byte, getDataTablePrefixBufLen(HashType, table)+len(key)+len(field)+1+2)
 
-	pos := 0
-	buf[pos] = HashType
-	pos++
-
-	// in order to make sure all the table data are in the same range
-	// we need make sure we has the same table prefix
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
-	pos += 2
-	copy(buf[pos:], table)
-	pos += len(table)
-	buf[pos] = tableStartSep
-	pos++
+	pos := encodeDataTablePrefixToBuf(buf, HashType, table)
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
 	pos += 2
@@ -96,27 +85,11 @@ func hEncodeHashKey(table []byte, key []byte, field []byte) []byte {
 }
 
 func hDecodeHashKey(ek []byte) ([]byte, []byte, []byte, error) {
-	pos := 0
-	if pos+1 > len(ek) || ek[pos] != HashType {
-		return nil, nil, nil, errHashKey
-	}
-	pos++
-
-	if pos+2 > len(ek) {
-		return nil, nil, nil, errHashKey
+	table, pos, err := decodeDataTablePrefixFromBuf(ek, HashType)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
-	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-	if tableLen+pos > len(ek) {
-		return nil, nil, nil, errHashKey
-	}
-	table := ek[pos : pos+tableLen]
-	pos += tableLen
-	if ek[pos] != tableStartSep {
-		return nil, nil, nil, errHashKey
-	}
-	pos++
 	if pos+2 > len(ek) {
 		return nil, nil, nil, errHashKey
 	}

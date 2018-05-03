@@ -88,19 +88,9 @@ func convertRedisKeyToDBZScoreKey(key []byte, member []byte, score float64) ([]b
 }
 
 func zEncodeSetKey(table []byte, key []byte, member []byte) []byte {
-	buf := make([]byte, len(table)+2+1+len(key)+len(member)+4)
+	buf := make([]byte, getDataTablePrefixBufLen(ZSetType, table)+len(key)+len(member)+3)
 	pos := 0
-	buf[pos] = ZSetType
-	pos++
-
-	// in order to make sure all the table data are in the same range
-	// we need make sure we has the same table prefix
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
-	pos += 2
-	copy(buf[pos:], table)
-	pos += len(table)
-	buf[pos] = tableStartSep
-	pos++
+	pos = encodeDataTablePrefixToBuf(buf, ZSetType, table)
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
 	pos += 2
@@ -116,27 +106,10 @@ func zEncodeSetKey(table []byte, key []byte, member []byte) []byte {
 }
 
 func zDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
-	pos := 0
-	if pos+1 > len(ek) || ek[pos] != ZSetType {
-		return nil, nil, nil, errZSetKey
+	table, pos, err := decodeDataTablePrefixFromBuf(ek, ZSetType)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-
-	pos++
-	if pos+2 > len(ek) {
-		return nil, nil, nil, errZSetKey
-	}
-
-	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-	if tableLen+pos > len(ek) {
-		return nil, nil, nil, errZSetKey
-	}
-	table := ek[pos : pos+tableLen]
-	pos += tableLen
-	if ek[pos] != tableStartSep {
-		return nil, nil, nil, errZSetKey
-	}
-	pos++
 
 	if pos+2 > len(ek) {
 		return table, nil, nil, errZSetKey
@@ -172,20 +145,11 @@ func zEncodeStopSetKey(table []byte, key []byte) []byte {
 
 func zEncodeScoreKeyInternal(minScore bool,
 	stopKey bool, stopMember bool, table []byte, key []byte, member []byte, score float64) []byte {
-	buf := make([]byte, 1+len(table)+2+1)
+	buf := make([]byte, getDataTablePrefixBufLen(ZScoreType, table))
 	pos := 0
-
-	buf[pos] = ZScoreType
-	pos++
-
 	// in order to make sure all the table data are in the same range
 	// we need make sure we has the same table prefix
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
-	pos += 2
-	copy(buf[pos:], table)
-	pos += len(table)
-	buf[pos] = tableStartSep
-	pos++
+	pos = encodeDataTablePrefixToBuf(buf, ZScoreType, table)
 
 	sep := int32(zsetKeySep)
 	if stopKey {
@@ -223,31 +187,11 @@ func zEncodeStopKey(table []byte, key []byte) []byte {
 }
 
 func zDecodeScoreKey(ek []byte) (table []byte, key []byte, member []byte, score float64, err error) {
-	pos := 0
-	if pos+1 > len(ek) || ek[pos] != ZScoreType {
-		err = errZScoreKey
+	table, pos, derr := decodeDataTablePrefixFromBuf(ek, ZScoreType)
+	if derr != nil {
+		err = derr
 		return
 	}
-	pos++
-
-	if pos+2 > len(ek) {
-		err = errZScoreKey
-		return
-	}
-
-	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-	if tableLen+pos > len(ek) {
-		err = errZScoreKey
-		return
-	}
-	table = ek[pos : pos+tableLen]
-	pos += tableLen
-	if ek[pos] != tableStartSep {
-		err = errZScoreKey
-		return
-	}
-	pos++
 
 	// key, sep, score, sep, member
 	var rets []interface{}

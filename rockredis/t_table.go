@@ -14,10 +14,11 @@ import (
 // we need scan all data types to get all the data in the same table
 
 var (
-	errTableNameLen      = errors.New("invalid table name length")
-	errTableName         = errors.New("invalid table name")
-	errTableMetaKey      = errors.New("invalid table meta key")
-	errTableIndexMetaKey = errors.New("invalid table index meta key")
+	errTableNameLen       = errors.New("invalid table name length")
+	errTableName          = errors.New("invalid table name")
+	errTableMetaKey       = errors.New("invalid table meta key")
+	errTableIndexMetaKey  = errors.New("invalid table index meta key")
+	errTableDataKeyPrefix = errors.New("invalid table data key prefix")
 )
 
 const (
@@ -92,25 +93,68 @@ func encodeTableMetaStopKey() []byte {
 	return t
 }
 
-func encodeDataTableStart(dataType byte, table []byte) []byte {
+func getDataTablePrefixBufLen(dataType byte, table []byte) int {
 	bufLen := len(table) + 2 + 1 + 1
 	if dataType == KVType {
 		// kv has no table length prefix
 		bufLen = len(table) + 1 + 1
 	}
-	buf := make([]byte, bufLen)
+	return bufLen
+}
 
+func encodeDataTablePrefixToBuf(buf []byte, dataType byte, table []byte) int {
 	pos := 0
 	buf[pos] = dataType
 	pos++
 
+	// in order to make sure all the table data are in the same range
+	// we need make sure we has the same table prefix
 	if dataType != KVType {
+		// for compatible, kv has no table length prefix
 		binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
 		pos += 2
 	}
 	copy(buf[pos:], table)
 	pos += len(table)
 	buf[pos] = tableStartSep
+	pos++
+	return pos
+}
+
+func decodeDataTablePrefixFromBuf(buf []byte, dataType byte) ([]byte, int, error) {
+	pos := 0
+	if pos+1 > len(buf) || buf[pos] != dataType {
+		return nil, 0, errTableDataKeyPrefix
+	}
+	pos++
+	if pos+2 > len(buf) {
+		return nil, 0, errTableDataKeyPrefix
+	}
+
+	tableLen := int(binary.BigEndian.Uint16(buf[pos:]))
+	pos += 2
+	if tableLen+pos > len(buf) {
+		return nil, 0, errTableDataKeyPrefix
+	}
+	table := buf[pos : pos+tableLen]
+	pos += tableLen
+	if buf[pos] != tableStartSep {
+		return nil, 0, errTableDataKeyPrefix
+	}
+	pos++
+	return table, pos, nil
+}
+
+func encodeDataTableStart(dataType byte, table []byte) []byte {
+	bufLen := len(table) + 2 + 1 + 1
+	if dataType == KVType {
+		// kv has no table length prefix
+		bufLen = len(table) + 1 + 1
+	}
+	bufLen = getDataTablePrefixBufLen(dataType, table)
+	buf := make([]byte, bufLen)
+
+	encodeDataTablePrefixToBuf(buf, dataType, table)
 	return buf
 }
 
@@ -138,6 +182,15 @@ func (db *RockDB) GetTables() [][]byte {
 		ch = append(ch, table)
 	}
 	return ch
+}
+
+func (db *RockDB) DelTableKeyCount(table []byte, wb *gorocksdb.WriteBatch) error {
+	if !db.cfg.EnableTableCounter {
+		return nil
+	}
+	tm := encodeTableMetaKey(table)
+	wb.Delete(tm)
+	return nil
 }
 
 func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) error {

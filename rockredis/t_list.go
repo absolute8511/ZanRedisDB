@@ -73,19 +73,9 @@ func convertRedisKeyToDBListKey(key []byte, seq int64) ([]byte, error) {
 }
 
 func lEncodeListKey(table []byte, key []byte, seq int64) []byte {
-	buf := make([]byte, len(table)+2+1+len(key)+1+2+8)
+	buf := make([]byte, getDataTablePrefixBufLen(ListType, table)+len(key)+2+8)
 
-	pos := 0
-	buf[pos] = ListType
-	pos++
-	// in order to make sure all the table data are in the same range
-	// we need make sure we has the same table prefix
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
-	pos += 2
-	copy(buf[pos:], table)
-	pos += len(table)
-	buf[pos] = tableStartSep
-	pos++
+	pos := encodeDataTablePrefixToBuf(buf, ListType, table)
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
 	pos += 2
@@ -99,32 +89,12 @@ func lEncodeListKey(table []byte, key []byte, seq int64) []byte {
 }
 
 func lDecodeListKey(ek []byte) (table []byte, key []byte, seq int64, err error) {
-	pos := 0
-	if pos+1 > len(ek) || ek[pos] != ListType {
-		err = errListKey
+	table, pos, derr := decodeDataTablePrefixFromBuf(ek, ListType)
+	if derr != nil {
+		err = derr
 		return
 	}
 
-	pos++
-
-	if pos+2 > len(ek) {
-		err = errListKey
-		return
-	}
-
-	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-	if tableLen+pos > len(ek) {
-		err = errListKey
-		return
-	}
-	table = ek[pos : pos+tableLen]
-	pos += tableLen
-	if ek[pos] != tableStartSep {
-		err = errListKey
-		return
-	}
-	pos++
 	if pos+2 > len(ek) {
 		err = errListKey
 		return
