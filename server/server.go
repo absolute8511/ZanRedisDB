@@ -219,8 +219,8 @@ func (s *Server) OptimizeDB(ns string, table string) {
 	s.nsMgr.OptimizeDB(ns, table)
 }
 
-func (s *Server) DeleteRange(ns string, dtr node.DeleteTableRange) {
-	s.nsMgr.DeleteRange(ns, dtr)
+func (s *Server) DeleteRange(ns string, dtr node.DeleteTableRange) error {
+	return s.nsMgr.DeleteRange(ns, dtr)
 }
 
 func (s *Server) InitKVNamespace(id uint64, conf *node.NamespaceConfig, join bool) (*node.NamespaceNode, error) {

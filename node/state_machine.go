@@ -189,14 +189,16 @@ func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
 	var ns common.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
-	for _, t := range tbs {
-		cnt, err := kvsm.store.GetTableKeyCount(t)
-		if err != nil {
-			continue
+	diskUsages := kvsm.store.GetBTablesSizes(tbs)
+	for i, t := range tbs {
+		cnt, _ := kvsm.store.GetTableKeyCount(t)
+		if cnt <= 0 {
+			cnt = kvsm.store.GetTableApproximateNumInRange(string(t), nil, nil)
 		}
 		var ts common.TableStats
 		ts.Name = string(t)
 		ts.KeyNum = cnt
+		ts.DiskBytesUsage = diskUsages[i]
 		ns.TStats = append(ns.TStats, ts)
 	}
 
@@ -571,7 +573,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		if err != nil {
 			kvsm.Infof("invalid delete table range data: %v", string(p.Data))
 		} else {
-			err = kvsm.store.DeleteTableRange(dr.Table, dr.StartFrom, dr.EndTo)
+			err = kvsm.store.DeleteTableRange(dr.Dryrun, dr.Table, dr.StartFrom, dr.EndTo)
 		}
 		kvsm.w.Trigger(reqID, err)
 	} else if p.ProposeOp == ProposeOp_RemoteConfChange {

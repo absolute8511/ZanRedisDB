@@ -517,7 +517,7 @@ func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 	}
 }
 
-func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) {
+func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) error {
 	nsm.mutex.RLock()
 	nodeList := make([]*NamespaceNode, 0, len(nsm.kvNodes))
 	for k, n := range nsm.kvNodes {
@@ -530,12 +530,16 @@ func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) {
 	nsm.mutex.RUnlock()
 	for _, n := range nodeList {
 		if atomic.LoadInt32(&nsm.stopping) == 1 {
-			return
+			return common.ErrStopped
 		}
 		if n.IsReady() {
-			n.Node.DeleteRange(dtr)
+			err := n.Node.DeleteRange(dtr)
+			if err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {

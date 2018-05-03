@@ -54,6 +54,21 @@ type DeleteTableRange struct {
 	Table     string `json:"table,omitempty"`
 	StartFrom []byte `json:"start_from,omitempty"`
 	EndTo     []byte `json:"end_to,omitempty"`
+	// to avoid drop all table data, this is needed to delete all data in table
+	DeleteAll bool `json:"delete_all,omitempty"`
+	Dryrun    bool `json:"dryrun,omitempty"`
+}
+
+func (dtr DeleteTableRange) CheckValid() error {
+	if dtr.Table == "" {
+		return errors.New("delete range must have table name")
+	}
+	if len(dtr.StartFrom) == 0 && len(dtr.EndTo) == 0 {
+		if !dtr.DeleteAll {
+			return errors.New("delete all must be true if deleting whole table")
+		}
+	}
+	return nil
 }
 
 type nodeProgress struct {
@@ -225,17 +240,24 @@ func (nd *KVNode) OptimizeDB(table string) {
 	nd.rn.Infof("node %v begin optimize db, table %v", nd.ns, table)
 	defer nd.rn.Infof("node %v end optimize db", nd.ns)
 	nd.sm.Optimize(table)
-	// since we can not know whether leader or follower is done on optimize
-	// we backup anyway after optimize
-	p := &customProposeData{
-		ProposeOp:  ProposeOp_Backup,
-		NeedBackup: true,
+	// empty table means optimize for all data, so we backup to keep optimized data
+	// after restart
+	if table == "" {
+		// since we can not know whether leader or follower is done on optimize
+		// we backup anyway after optimize
+		p := &customProposeData{
+			ProposeOp:  ProposeOp_Backup,
+			NeedBackup: true,
+		}
+		d, _ := json.Marshal(p)
+		nd.CustomPropose(d)
 	}
-	d, _ := json.Marshal(p)
-	nd.CustomPropose(d)
 }
 
 func (nd *KVNode) DeleteRange(drange DeleteTableRange) error {
+	if err := drange.CheckValid(); err != nil {
+		return err
+	}
 	d, _ := json.Marshal(drange)
 	p := &customProposeData{
 		ProposeOp:  ProposeOp_DeleteTable,

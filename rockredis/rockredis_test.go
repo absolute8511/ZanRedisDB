@@ -111,13 +111,14 @@ func TestRockDBScanTableForHash(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	keyList1 := make([][]byte, 0)
-	keyList2 := make([][]byte, 0)
-	for i := 0; i < 5; i++ {
+	total := 500
+	keyList1 := make([][]byte, 0, total*2)
+	keyList2 := make([][]byte, 0, total*2)
+	for i := 0; i < total; i++ {
 		keyList1 = append(keyList1, []byte("test:test_hash_scan_key"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_hash_scan_key"+strconv.Itoa(i)))
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < total; i++ {
 		keyList1 = append(keyList1, []byte("test:test_hash_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_hash_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
@@ -175,6 +176,65 @@ func TestRockDBScanTableForHash(t *testing.T) {
 		}
 		assert.Equal(t, len(keyList2)*2, cnt)
 	}()
+
+	keyNum := db.GetTableApproximateNumInRange("test", nil, nil)
+	diskUsage := db.GetTableSizeInRange("test", nil, nil)
+	t.Logf("test key number: %v, usage: %v", keyNum, diskUsage)
+	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
+	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
+
+	err = db.DeleteTableRange(false, "test", nil, nil)
+	assert.Nil(t, err)
+
+	minKey = encodeDataTableStart(HashType, []byte("test"))
+	maxKey = encodeDataTableEnd(HashType, []byte("test"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	it.NoTimestamp(HashType)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			table, k, f, err := hDecodeHashKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test", string(table))
+			if string(f) != "a" && string(f) != "b" {
+				t.Fatal("scan field mismatch: " + string(f))
+			}
+			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
+			cnt++
+		}
+		assert.Equal(t, 0, cnt)
+	}()
+
+	minKey = encodeDataTableStart(HashType, []byte("test2"))
+	maxKey = encodeDataTableEnd(HashType, []byte("test2"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	it.NoTimestamp(HashType)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			table, k, f, err := hDecodeHashKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test2", string(table))
+			if string(f) != "a" && string(f) != "b" {
+				t.Fatal("scan field mismatch: " + string(f))
+			}
+			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
+			cnt++
+		}
+		assert.Equal(t, len(keyList2)*2, cnt)
+	}()
+
+	keyNum = db.GetTableApproximateNumInRange("test", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test", nil, nil)
+	t.Logf("test key number: %v, usage: %v", keyNum, diskUsage)
+	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
+	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
 }
 
 func TestRockDBScanTableForList(t *testing.T) {
@@ -184,11 +244,12 @@ func TestRockDBScanTableForList(t *testing.T) {
 
 	keyList1 := make([][]byte, 0)
 	keyList2 := make([][]byte, 0)
-	for i := 0; i < 5; i++ {
+	totalCnt := 50
+	for i := 0; i < totalCnt; i++ {
 		keyList1 = append(keyList1, []byte("test:test_list_scan_key"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_list_scan_key"+strconv.Itoa(i)))
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < totalCnt; i++ {
 		keyList1 = append(keyList1, []byte("test:test_list_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_list_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
@@ -241,6 +302,57 @@ func TestRockDBScanTableForList(t *testing.T) {
 		}
 		assert.Equal(t, len(keyList2)*2, cnt)
 	}()
+
+	keyNum := db.GetTableApproximateNumInRange("test", nil, nil)
+	diskUsage := db.GetTableSizeInRange("test", nil, nil)
+	t.Logf("test key number: %v, usage: %v", keyNum, diskUsage)
+	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
+	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
+
+	err = db.DeleteTableRange(false, "test", nil, nil)
+	assert.Nil(t, err)
+
+	minKey = encodeDataTableStart(ListType, []byte("test"))
+	maxKey = encodeDataTableEnd(ListType, []byte("test"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			tb, k, _, err := lDecodeListKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test", string(tb))
+			if !strings.HasPrefix(string(k), "test") {
+				t.Fatal("should has table prefix for key")
+			}
+			assert.Equal(t, "test:"+string(k), string(it.Value()))
+			cnt++
+		}
+		assert.Equal(t, 0, cnt)
+	}()
+
+	minKey = encodeDataTableStart(ListType, []byte("test2"))
+	maxKey = encodeDataTableEnd(ListType, []byte("test2"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			tb, k, _, err := lDecodeListKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test2", string(tb))
+
+			if !strings.HasPrefix(string(k), "test2") {
+				t.Fatal("should has table prefix for key")
+			}
+			assert.Equal(t, "test2:"+string(k), string(it.Value()))
+			cnt++
+		}
+		assert.Equal(t, len(keyList2)*2, cnt)
+	}()
 }
 
 func TestRockDBScanTableForSet(t *testing.T) {
@@ -250,11 +362,12 @@ func TestRockDBScanTableForSet(t *testing.T) {
 
 	keyList1 := make([][]byte, 0)
 	keyList2 := make([][]byte, 0)
-	for i := 0; i < 5; i++ {
+	totalCnt := 50
+	for i := 0; i < totalCnt; i++ {
 		keyList1 = append(keyList1, []byte("test:test_set_scan_key"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_set_scan_key"+strconv.Itoa(i)))
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < totalCnt; i++ {
 		keyList1 = append(keyList1, []byte("test:test_set_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_set_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
@@ -310,6 +423,67 @@ func TestRockDBScanTableForSet(t *testing.T) {
 		}
 		assert.Equal(t, len(keyList2)*2, cnt)
 	}()
+
+	keyNum := db.GetTableApproximateNumInRange("test", nil, nil)
+	diskUsage := db.GetTableSizeInRange("test", nil, nil)
+	t.Logf("test key number: %v, usage: %v", keyNum, diskUsage)
+	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
+	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
+
+	err = db.DeleteTableRange(false, "test", nil, nil)
+	assert.Nil(t, err)
+
+	minKey = encodeDataTableStart(SetType, []byte("test"))
+	maxKey = encodeDataTableEnd(SetType, []byte("test"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			tb, k, m, err := sDecodeSetKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test", string(tb))
+			if !strings.HasPrefix(string(k), "test") {
+				t.Fatal("should has table prefix for key")
+			}
+			if string(m) != "test:a" && string(m) != "test:b" {
+				t.Fatal("scan set member mismatch: " + string(m))
+			}
+			cnt++
+		}
+		assert.Equal(t, 0, cnt)
+	}()
+
+	minKey = encodeDataTableStart(SetType, []byte("test2"))
+	maxKey = encodeDataTableEnd(SetType, []byte("test2"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			tb, k, m, err := sDecodeSetKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test2", string(tb))
+			if !strings.HasPrefix(string(k), "test2") {
+				t.Fatal("should has table prefix for key")
+			}
+			if string(m) != "test2:a" && string(m) != "test2:b" {
+				t.Fatal("scan member mismatch: " + string(m))
+			}
+			cnt++
+		}
+		assert.Equal(t, len(keyList2)*2, cnt)
+	}()
+
+	keyNum = db.GetTableApproximateNumInRange("test", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test", nil, nil)
+	t.Logf("test key number: %v, usage: %v", keyNum, diskUsage)
+	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
+	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
 }
 
 func TestRockDBScanTableForZSet(t *testing.T) {
@@ -319,11 +493,12 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	keyList1 := make([][]byte, 0)
 	keyList2 := make([][]byte, 0)
-	for i := 0; i < 5; i++ {
+	totalCnt := 50
+	for i := 0; i < totalCnt; i++ {
 		keyList1 = append(keyList1, []byte("test:test_zset_scan_key"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_zset_scan_key"+strconv.Itoa(i)))
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < totalCnt; i++ {
 		keyList1 = append(keyList1, []byte("test:test_zset_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 		keyList2 = append(keyList2, []byte("test2:test2_zset_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
 	}
@@ -340,6 +515,7 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	minKey := encodeDataTableStart(ZScoreType, []byte("test"))
 	maxKey := encodeDataTableEnd(ZScoreType, []byte("test"))
+	t.Logf("scan test : %v, %v", minKey, maxKey)
 	it, err := db.buildScanIterator(minKey, maxKey)
 	assert.Nil(t, err)
 	func() {
@@ -389,4 +565,72 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 		}
 		assert.Equal(t, len(keyList2)*2, cnt)
 	}()
+
+	keyNum := db.GetTableApproximateNumInRange("test", nil, nil)
+	diskUsage := db.GetTableSizeInRange("test", nil, nil)
+	t.Logf("test key number: %v, usage: %v", keyNum, diskUsage)
+	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
+	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
+
+	err = db.DeleteTableRange(false, "test", nil, nil)
+	assert.Nil(t, err)
+
+	minKey = encodeDataTableStart(ZScoreType, []byte("test"))
+	maxKey = encodeDataTableEnd(ZScoreType, []byte("test"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			tb, k, m, s, err := zDecodeScoreKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test", string(tb))
+			if !strings.HasPrefix(string(k), "test") {
+				t.Fatal("key should has table prefix " + string(k))
+			}
+			if string(m) == "test:a" {
+				assert.Equal(t, float64(1), s)
+			} else if string(m) == "test:b" {
+				assert.Equal(t, float64(2), s)
+			} else {
+				t.Fatal("scan field mismatch: " + string(m))
+			}
+			cnt++
+		}
+		assert.Equal(t, 0, cnt)
+	}()
+
+	minKey = encodeDataTableStart(ZScoreType, []byte("test2"))
+	maxKey = encodeDataTableEnd(ZScoreType, []byte("test2"))
+	it, err = db.buildScanIterator(minKey, maxKey)
+	assert.Nil(t, err)
+	func() {
+		defer it.Close()
+		cnt := 0
+		for ; it.Valid(); it.Next() {
+			tb, k, m, s, err := zDecodeScoreKey(it.Key())
+			assert.Nil(t, err)
+			assert.Equal(t, "test2", string(tb))
+			if !strings.HasPrefix(string(k), "test2") {
+				t.Fatal("key should has table prefix " + string(k))
+			}
+			if string(m) == "test2:a" {
+				assert.Equal(t, float64(1), s)
+			} else if string(m) == "test2:b" {
+				assert.Equal(t, float64(2), s)
+			} else {
+				t.Fatal("scan field mismatch: " + string(m))
+			}
+			cnt++
+		}
+		assert.Equal(t, len(keyList2)*2, cnt)
+	}()
+	keyNum = db.GetTableApproximateNumInRange("test", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test", nil, nil)
+	t.Logf("test key number: %v, usage: %v", keyNum, diskUsage)
+	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
+	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
+	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
 }

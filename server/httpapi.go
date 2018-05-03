@@ -65,8 +65,8 @@ func (s *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprou
 func (s *Server) doDeleteRange(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	table := ps.ByName("table")
-	if ns == "" || table == "" {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "namespace and table should not be empty"}
+	if ns == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "namespace should not be empty"}
 	}
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
@@ -78,8 +78,16 @@ func (s *Server) doDeleteRange(w http.ResponseWriter, req *http.Request, ps http
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	dtr.Table = table
-	s.DeleteRange(ns, dtr)
+	if table != "" {
+		dtr.Table = table
+	}
+	if err := dtr.CheckValid(); err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	err = s.DeleteRange(ns, dtr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
 	return nil, nil
 }
 

@@ -488,11 +488,29 @@ func (r *RockDB) CompactRange() {
 	r.eng.CompactRange(rg)
 }
 
+// [start, end)
 func (r *RockDB) CompactTableRange(table string) {
-	// get table count to determin whether the table data type is valid
-	//var rg gorocksdb.Range
-	// TODO: get table range for kv, list, hash, set, zset, others to compact
-	//r.eng.CompactRange(rg)
+	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
+	dtsMeta := []byte{KVType, HSizeType, LMetaType, SSizeType, ZSizeType}
+	for i, dt := range dts {
+		rgs, err := getTableDataRange(dt, []byte(table), nil, nil)
+		if err != nil {
+			dbLog.Infof("failed to build dt %v data range: %v", dt, err)
+			continue
+		}
+		// compact data range
+		dbLog.Infof("compacting dt %v data range: %v, %v", dt, rgs)
+		for _, rg := range rgs {
+			r.eng.CompactRange(rg)
+		}
+		// compact meta range
+		minKey, maxKey, err := getTableMetaRange(dtsMeta[i], []byte(table), nil, nil)
+		var rg gorocksdb.Range
+		rg.Start = minKey
+		rg.Limit = maxKey
+		dbLog.Infof("compacting dt %v meta range: %v, %v", dt, minKey, maxKey)
+		r.eng.CompactRange(rg)
+	}
 }
 
 func (r *RockDB) closeEng() {
@@ -543,31 +561,199 @@ func (r *RockDB) GetStatistics() string {
 	return r.dbOpts.GetStatistics()
 }
 
-func (r *RockDB) DeleteTableRange(table string, start []byte, end []byte) error {
+func getTableDataRange(dt byte, table []byte, start, end []byte) ([]gorocksdb.Range, error) {
+	minKey, err := encodeFullScanMinKey(dt, table, start, nil)
+	if err != nil {
+		dbLog.Infof("failed to build dt %v range: %v", dt, err)
+		return nil, err
+	}
+	var maxKey []byte
+	if end == nil {
+		maxKey = encodeDataTableEnd(dt, table)
+	} else {
+		maxKey, err = encodeFullScanMinKey(dt, table, end, nil)
+	}
+	if err != nil {
+		dbLog.Infof("failed to build dt %v range: %v", dt, err)
+		return nil, err
+	}
+	rgs := make([]gorocksdb.Range, 0, 2)
+	rgs = append(rgs, gorocksdb.Range{Start: minKey, Limit: maxKey})
+	if dt == ZSetType {
+		// zset has key-score-member data except the key-member data
+		zminKey := zEncodeStartKey(table, start)
+		var zmaxKey []byte
+		if end == nil {
+			zmaxKey = encodeDataTableEnd(ZScoreType, []byte(table))
+		} else {
+			zmaxKey = zEncodeStopKey(table, end)
+		}
+		rgs = append(rgs, gorocksdb.Range{Start: zminKey, Limit: zmaxKey})
+	}
+	dbLog.Infof("table dt %v data range: %v", dt, rgs)
+	return rgs, nil
+}
+
+func getTableMetaRange(dt byte, table []byte, start, end []byte) ([]byte, []byte, error) {
+	tableStart := append(table, tableStartSep)
+	tableStart = append(tableStart, start...)
+	minMetaKey, err := encodeScanKey(dt, tableStart)
+	if err != nil {
+		return nil, nil, err
+	}
+	tableStart = tableStart[:0]
+	if end == nil {
+		tableStart = append(table, tableStartSep+1)
+	} else {
+		tableStart = append(table, tableStartSep)
+		tableStart = append(tableStart, end...)
+	}
+	maxMetaKey, err := encodeScanKey(dt, tableStart)
+	if err != nil {
+		return nil, nil, err
+	}
+	dbLog.Infof("table dt %v meta range: %v, %v", dt, minMetaKey, maxMetaKey)
+	return minMetaKey, maxMetaKey, nil
+}
+
+// [start, end)
+func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end []byte) error {
+	// TODO: need handle index and meta data, since index need scan if we delete part
+	// range of table, we can only allow delete whole table if it has index.
+	// fixme: how to handle the table key number counter, scan to count the deleted number is too slow
+
+	tidx := r.indexMgr.GetTableIndexes(table)
+	if tidx != nil {
+		return errors.New("drop table with any index is not supported currently")
+	}
+	wb := gorocksdb.NewWriteBatch()
+	defer wb.Destroy()
 	// kv, hash, set, list, zset
+	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
+	dtsMeta := []byte{KVType, HSizeType, LMetaType, SSizeType, ZSizeType}
+	for i, dt := range dts {
+		// delete meta and data
+		rgs, err := getTableDataRange(dt, []byte(table), start, end)
+		if err != nil {
+			dbLog.Infof("failed to build dt %v range: %v", dt, err)
+			continue
+		}
+		dbLog.Infof("delete dt %v data range: %v", dt, rgs)
+		// delete meta
+		minMetaKey, maxMetaKey, err := getTableMetaRange(dtsMeta[i], []byte(table), start, end)
+		if err != nil {
+			continue
+		}
+		dbLog.Infof("deleting dt %v meta range: %v, %v", dt, minMetaKey, maxMetaKey)
+
+		if dryrun {
+			continue
+		}
+		for _, rg := range rgs {
+			wb.DeleteRange(rg.Start, rg.Limit)
+		}
+		wb.DeleteRange(minMetaKey, maxMetaKey)
+		if start == nil && end == nil {
+			// delete table counter
+			r.DelTableKeyCount([]byte(table), wb)
+		}
+	}
+	if dryrun {
+		return nil
+	}
+	err := r.eng.Write(r.defaultWriteOpts, wb)
+	if err != nil {
+		dbLog.Infof("failed to delete table %v range: %v", table, err)
+	}
 	return nil
 }
 
+func (r *RockDB) GetBTablesSizes(tables [][]byte) []int64 {
+	// try all data types for each table
+	tableTotals := make([]int64, 0, len(tables))
+	for _, table := range tables {
+		ss := r.GetTableSizeInRange(string(table), nil, nil)
+		tableTotals = append(tableTotals, ss)
+	}
+	return tableTotals
+}
+
+// [start, end)
 func (r *RockDB) GetTablesSizes(tables []string) []int64 {
 	// try all data types for each table
-	return nil
+	tableTotals := make([]int64, 0, len(tables))
+	for _, table := range tables {
+		ss := r.GetTableSizeInRange(table, nil, nil)
+		tableTotals = append(tableTotals, ss)
+	}
+
+	return tableTotals
 }
 
+// [start, end)
 func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int64 {
-	//rg := getTableRange(dt, table, start, end)
-	//rgs := make([]gorocksdb.Range, 0, 1)
-	//rgs = append(rgs, rg)
-	//s := r.eng.GetApproximateSizes(rgs)
-	return 0
+	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
+	dtsMeta := []byte{KVType, HSizeType, LMetaType, SSizeType, ZSizeType}
+	rgs := make([]gorocksdb.Range, 0, len(dts))
+	for i, dt := range dts {
+		// data range
+		drgs, err := getTableDataRange(dt, []byte(table), start, end)
+		if err != nil {
+			dbLog.Infof("failed to build dt %v range: %v", dt, err)
+			continue
+		}
+		rgs = append(rgs, drgs...)
+		// meta range
+		minMetaKey, maxMetaKey, err := getTableMetaRange(dtsMeta[i], []byte(table), start, end)
+		if err != nil {
+			dbLog.Infof("failed to build dt %v meta range: %v", dt, err)
+			continue
+		}
+		var rgMeta gorocksdb.Range
+		rgMeta.Start = minMetaKey
+		rgMeta.Limit = maxMetaKey
+		rgs = append(rgs, rgMeta)
+	}
+	sList := r.eng.GetApproximateSizes(rgs, true)
+	dbLog.Infof("range %v sizes: %v", rgs, sList)
+	total := uint64(0)
+	for _, ss := range sList {
+		total += ss
+	}
+	return int64(total)
 }
 
-func (r *RockDB) GetTableRecordsInRange(table string, start []byte, end []byte) int64 {
-	// use
-	// GetApproximateSizes and estimate-keys-num in property
+// [start, end)
+func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end []byte) int64 {
+	numStr := r.eng.GetProperty("rocksdb.estimate-num-keys")
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		dbLog.Infof("total keys num error: %v, %v", numStr, err)
+		return 0
+	}
+	if num <= 0 {
+		dbLog.Infof("total keys num zero: %v", numStr)
+		return 0
+	}
+
+	ss := r.GetTableSizeInRange(table, start, end)
+	if ss <= 0 {
+		dbLog.Infof("table range size zero: %v", ss)
+		return 0
+	}
+	rgs := make([]gorocksdb.Range, 0, 1)
+	rgs = append(rgs, gorocksdb.Range{Start: nil, Limit: []byte{255, 255, 255, 255}})
+	sList := r.eng.GetApproximateSizes(rgs, true)
+	if len(sList) == 0 || sList[0] <= 0 {
+		dbLog.Infof("total db size: %v", sList)
+		return 0
+	}
+	dbLog.Infof("total db size: %v, table %v", sList, ss)
+	// use GetApproximateSizes and estimate-keys-num in property
 	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
 	// range records = estimate-keys-num * GetApproximateSizes(range) / GetApproximateSizes (total)
 	// use GetPropertiesOfTablesInRange to get number of keys in sst
-	return 0
+	return int64(float64(ss) / float64(sList[0]) * float64(num))
 }
 
 func (r *RockDB) GetInternalStatus() map[string]interface{} {
