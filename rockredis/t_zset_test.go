@@ -305,6 +305,9 @@ func TestZRangeLimit(t *testing.T) {
 	maxMem := fmt.Sprintf("%8d", MAX_BATCH_NUM+1)
 	ay, err := db.ZRangeByLex(key, nil, []byte(maxMem), common.RangeClose, 0, -1)
 	assert.Nil(t, err)
+	for _, v := range ay {
+		t.Logf("zrange key: %v", v)
+	}
 	assert.Equal(t, MAX_BATCH_NUM-1, len(ay))
 
 	elems, err := db.ZRange(key, 0, -1)

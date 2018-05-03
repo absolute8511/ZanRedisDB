@@ -65,21 +65,9 @@ func convertRedisKeyToDBSKey(key []byte, member []byte) ([]byte, error) {
 }
 
 func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
-	buf := make([]byte, len(table)+2+1+len(key)+len(member)+1+1+2)
+	buf := make([]byte, getDataTablePrefixBufLen(SetType, table)+len(key)+len(member)+1+2)
 
-	pos := 0
-
-	buf[pos] = SetType
-	pos++
-
-	// in order to make sure all the table data are in the same range
-	// we need make sure we has the same table prefix
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
-	pos += 2
-	copy(buf[pos:], table)
-	pos += len(table)
-	buf[pos] = tableStartSep
-	pos++
+	pos := encodeDataTablePrefixToBuf(buf, SetType, table)
 
 	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
 	pos += 2
@@ -95,29 +83,12 @@ func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
 }
 
 func sDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
-	pos := 0
+	table, pos, err := decodeDataTablePrefixFromBuf(ek, SetType)
 
-	if pos+1 > len(ek) || ek[pos] != SetType {
-		return nil, nil, nil, errSetKey
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
-	pos++
-
-	if pos+2 > len(ek) {
-		return nil, nil, nil, errSetKey
-	}
-
-	tableLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-	if tableLen+pos > len(ek) {
-		return nil, nil, nil, errSetKey
-	}
-	table := ek[pos : pos+tableLen]
-	pos += tableLen
-	if ek[pos] != tableStartSep {
-		return nil, nil, nil, errSetKey
-	}
-	pos++
 	if pos+2 > len(ek) {
 		return nil, nil, nil, errSetKey
 	}
@@ -436,7 +407,8 @@ func (db *RockDB) SClear(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	wb := gorocksdb.NewWriteBatch()
+	wb := db.wb
+	wb.Clear()
 	num := db.sDelete(key, wb)
 	err := db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
@@ -447,6 +419,7 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 		return 0, errTooMuchBatchSize
 	}
 	wb := gorocksdb.NewWriteBatch()
+	defer wb.Destroy()
 	for _, key := range keys {
 		if err := checkKeySize(key); err != nil {
 			return 0, err

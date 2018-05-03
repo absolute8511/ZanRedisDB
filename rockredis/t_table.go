@@ -14,10 +14,11 @@ import (
 // we need scan all data types to get all the data in the same table
 
 var (
-	errTableNameLen      = errors.New("invalid table name length")
-	errTableName         = errors.New("invalid table name")
-	errTableMetaKey      = errors.New("invalid table meta key")
-	errTableIndexMetaKey = errors.New("invalid table index meta key")
+	errTableNameLen       = errors.New("invalid table name length")
+	errTableName          = errors.New("invalid table name")
+	errTableMetaKey       = errors.New("invalid table meta key")
+	errTableIndexMetaKey  = errors.New("invalid table index meta key")
+	errTableDataKeyPrefix = errors.New("invalid table data key prefix")
 )
 
 const (
@@ -92,25 +93,68 @@ func encodeTableMetaStopKey() []byte {
 	return t
 }
 
-func encodeDataTableStart(dataType byte, table []byte) []byte {
+func getDataTablePrefixBufLen(dataType byte, table []byte) int {
 	bufLen := len(table) + 2 + 1 + 1
 	if dataType == KVType {
 		// kv has no table length prefix
 		bufLen = len(table) + 1 + 1
 	}
-	buf := make([]byte, bufLen)
+	return bufLen
+}
 
+func encodeDataTablePrefixToBuf(buf []byte, dataType byte, table []byte) int {
 	pos := 0
 	buf[pos] = dataType
 	pos++
 
+	// in order to make sure all the table data are in the same range
+	// we need make sure we has the same table prefix
 	if dataType != KVType {
+		// for compatible, kv has no table length prefix
 		binary.BigEndian.PutUint16(buf[pos:], uint16(len(table)))
 		pos += 2
 	}
 	copy(buf[pos:], table)
 	pos += len(table)
 	buf[pos] = tableStartSep
+	pos++
+	return pos
+}
+
+func decodeDataTablePrefixFromBuf(buf []byte, dataType byte) ([]byte, int, error) {
+	pos := 0
+	if pos+1 > len(buf) || buf[pos] != dataType {
+		return nil, 0, errTableDataKeyPrefix
+	}
+	pos++
+	if pos+2 > len(buf) {
+		return nil, 0, errTableDataKeyPrefix
+	}
+
+	tableLen := int(binary.BigEndian.Uint16(buf[pos:]))
+	pos += 2
+	if tableLen+pos > len(buf) {
+		return nil, 0, errTableDataKeyPrefix
+	}
+	table := buf[pos : pos+tableLen]
+	pos += tableLen
+	if buf[pos] != tableStartSep {
+		return nil, 0, errTableDataKeyPrefix
+	}
+	pos++
+	return table, pos, nil
+}
+
+func encodeDataTableStart(dataType byte, table []byte) []byte {
+	bufLen := len(table) + 2 + 1 + 1
+	if dataType == KVType {
+		// kv has no table length prefix
+		bufLen = len(table) + 1 + 1
+	}
+	bufLen = getDataTablePrefixBufLen(dataType, table)
+	buf := make([]byte, bufLen)
+
+	encodeDataTablePrefixToBuf(buf, dataType, table)
 	return buf
 }
 
@@ -120,30 +164,33 @@ func encodeDataTableEnd(dataType byte, table []byte) []byte {
 	return k
 }
 
-func (db *RockDB) GetTables() chan []byte {
-	ch := make(chan []byte, 10)
-	db.wg.Add(1)
-	go func() {
-		defer db.wg.Done()
-		s := encodeTableMetaStartKey()
-		e := encodeTableMetaStopKey()
-		it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+func (db *RockDB) GetTables() [][]byte {
+	ch := make([][]byte, 0, 100)
+	s := encodeTableMetaStartKey()
+	e := encodeTableMetaStopKey()
+	it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+	if err != nil {
+		return nil
+	}
+	defer it.Close()
+	for ; it.Valid(); it.Next() {
+		rk := it.Key()
+		table, err := decodeTableMetaKey(rk)
 		if err != nil {
-			close(ch)
-			return
+			continue
 		}
-		defer it.Close()
-		for ; it.Valid(); it.Next() {
-			rk := it.Key()
-			table, err := decodeTableMetaKey(rk)
-			if err != nil {
-				continue
-			}
-			ch <- table
-		}
-		close(ch)
-	}()
+		ch = append(ch, table)
+	}
 	return ch
+}
+
+func (db *RockDB) DelTableKeyCount(table []byte, wb *gorocksdb.WriteBatch) error {
+	if !db.cfg.EnableTableCounter {
+		return nil
+	}
+	tm := encodeTableMetaKey(table)
+	wb.Delete(tm)
+	return nil
 }
 
 func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) error {
@@ -199,32 +246,25 @@ func encodeTableIndexMetaStopKey(itype byte) []byte {
 	return t
 }
 
-func (db *RockDB) GetHsetIndexTables() chan []byte {
-	// TODO: use total_order_seek options for rocksdb to seek with prefix less than prefix extractor
-	ch := make(chan []byte, 10)
-	db.wg.Add(1)
-	go func() {
-		defer db.wg.Done()
-		s := encodeTableIndexMetaStartKey(hsetIndexMeta)
-		e := encodeTableIndexMetaStopKey(hsetIndexMeta)
-		it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
-		if err != nil {
-			close(ch)
-			return
-		}
-		defer it.Close()
-		defer close(ch)
+func (db *RockDB) GetHsetIndexTables() [][]byte {
+	ch := make([][]byte, 0, 100)
+	s := encodeTableIndexMetaStartKey(hsetIndexMeta)
+	e := encodeTableIndexMetaStopKey(hsetIndexMeta)
+	it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+	if err != nil {
+		return nil
+	}
+	defer it.Close()
 
-		for ; it.Valid(); it.Next() {
-			rk := it.Key()
-			_, table, err := decodeTableIndexMetaKey(rk)
-			if err != nil {
-				dbLog.Infof("decode index table name %v failed: %v", rk, err)
-				continue
-			}
-			ch <- table
+	for ; it.Valid(); it.Next() {
+		rk := it.Key()
+		_, table, err := decodeTableIndexMetaKey(rk)
+		if err != nil {
+			dbLog.Infof("decode index table name %v failed: %v", rk, err)
+			continue
 		}
-	}()
+		ch = append(ch, table)
+	}
 	return ch
 }
 

@@ -36,7 +36,7 @@ type StateMachine interface {
 	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
 	CleanData() error
-	Optimize()
+	Optimize(string)
 	GetStats() common.NamespaceStats
 	Start() error
 	Close()
@@ -96,7 +96,7 @@ func (esm *emptySM) Destroy() {
 func (esm *emptySM) CleanData() error {
 	return nil
 }
-func (esm *emptySM) Optimize() {
+func (esm *emptySM) Optimize(t string) {
 
 }
 func (esm *emptySM) GetStats() common.NamespaceStats {
@@ -172,8 +172,12 @@ func (kvsm *kvStoreSM) Close() {
 	kvsm.store.Close()
 }
 
-func (kvsm *kvStoreSM) Optimize() {
-	kvsm.store.CompactRange()
+func (kvsm *kvStoreSM) Optimize(table string) {
+	if table == "" {
+		kvsm.store.CompactRange()
+	} else {
+		kvsm.store.CompactTableRange(table)
+	}
 }
 
 func (kvsm *kvStoreSM) GetDBInternalStats() string {
@@ -185,17 +189,19 @@ func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
 	var ns common.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
-
-	for t := range tbs {
-		cnt, err := kvsm.store.GetTableKeyCount(t)
-		if err != nil {
-			continue
+	diskUsages := kvsm.store.GetBTablesSizes(tbs)
+	for i, t := range tbs {
+		cnt, _ := kvsm.store.GetTableKeyCount(t)
+		if cnt <= 0 {
+			cnt = kvsm.store.GetTableApproximateNumInRange(string(t), nil, nil)
 		}
 		var ts common.TableStats
 		ts.Name = string(t)
 		ts.KeyNum = cnt
+		ts.DiskBytesUsage = diskUsages[i]
 		ns.TStats = append(ns.TStats, ts)
 	}
+
 	return ns
 }
 
@@ -489,6 +495,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
 						kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 					}
+
 					kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
 					// write the future response or error
 					if err != nil {
@@ -560,6 +567,15 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		kvsm.Infof("got force backup request")
 		forceBackup = true
 		kvsm.w.Trigger(reqID, nil)
+	} else if p.ProposeOp == ProposeOp_DeleteTable {
+		var dr DeleteTableRange
+		err = json.Unmarshal(p.Data, &dr)
+		if err != nil {
+			kvsm.Infof("invalid delete table range data: %v", string(p.Data))
+		} else {
+			err = kvsm.store.DeleteTableRange(dr.Dryrun, dr.Table, dr.StartFrom, dr.EndTo)
+		}
+		kvsm.w.Trigger(reqID, err)
 	} else if p.ProposeOp == ProposeOp_RemoteConfChange {
 		var cc raftpb.ConfChange
 		cc.Unmarshal(p.Data)
@@ -648,6 +664,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 // return if configure changed and whether need force backup
 func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{},
 	dupCheckMap map[string]bool) ([]uint64, []interface{}, map[string]bool) {
+
 	err := kvsm.store.CommitBatchWrite()
 	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
 	batchCost := time.Since(batchStart)

@@ -30,8 +30,6 @@ func buildErrFullScanResult(err error, dataType common.DataType) *common.FullSca
 
 func getFullScanDataStoreType(dataType common.DataType) (byte, error) {
 	var storeDataType byte
-	// for list, hash, set, zset, we can scan all keys from meta ,
-	// because meta key is the key of these structure
 	switch dataType {
 	case common.KV:
 		storeDataType = KVType
@@ -297,27 +295,21 @@ func (db *RockDB) buildFullScanIterator(storeDataType byte, table,
 	return it, nil
 }
 
+// the range is start from table:key:cursor to the end of the table. (data only, no meta included)
 func buildFullScanKeyRange(storeDataType byte, table, key, cursor []byte) (minKey, maxKey []byte, err error) {
 	if minKey, err = encodeFullScanMinKey(storeDataType, table, key, cursor); err != nil {
 		return
 	}
-	if maxKey, err = encodeFullScanMaxKey(storeDataType, table, nil, nil); err != nil {
-		return
-	}
+	maxKey = encodeDataTableEnd(storeDataType, table)
 	return
 }
 
 func encodeFullScanMinKey(storeDataType byte, table, key, cursor []byte) ([]byte, error) {
-
 	if len(cursor) > 0 {
 		return encodeFullScanKey(storeDataType, table, key, cursor)
 	} else {
 		return encodeFullScanKey(storeDataType, table, key, nil)
 	}
-}
-
-func encodeFullScanMaxKey(storeDataType byte, table, key, cursor []byte) ([]byte, error) {
-	return encodeDataTableEnd(storeDataType, table), nil
 }
 
 func encodeFullScanKey(storeDataType byte, table, key, cursor []byte) ([]byte, error) {

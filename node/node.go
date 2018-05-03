@@ -47,7 +47,29 @@ const (
 	ProposeOp_ApplyRemoteSnap        int = 3
 	ProposeOp_RemoteConfChange       int = 4
 	ProposeOp_ApplySkippedRemoteSnap int = 5
+	ProposeOp_DeleteTable            int = 6
 )
+
+type DeleteTableRange struct {
+	Table     string `json:"table,omitempty"`
+	StartFrom []byte `json:"start_from,omitempty"`
+	EndTo     []byte `json:"end_to,omitempty"`
+	// to avoid drop all table data, this is needed to delete all data in table
+	DeleteAll bool `json:"delete_all,omitempty"`
+	Dryrun    bool `json:"dryrun,omitempty"`
+}
+
+func (dtr DeleteTableRange) CheckValid() error {
+	if dtr.Table == "" {
+		return errors.New("delete range must have table name")
+	}
+	if len(dtr.StartFrom) == 0 && len(dtr.EndTo) == 0 {
+		if !dtr.DeleteAll {
+			return errors.New("delete all must be true if deleting whole table")
+		}
+	}
+	return nil
+}
 
 type nodeProgress struct {
 	confState raftpb.ConfState
@@ -214,18 +236,40 @@ func (nd *KVNode) Stop() {
 	nd.rn.Infof("node %v stopped", nd.ns)
 }
 
-func (nd *KVNode) OptimizeDB() {
-	nd.rn.Infof("node %v begin optimize db", nd.ns)
-	nd.sm.Optimize()
-	nd.rn.Infof("node %v end optimize db", nd.ns)
-	// since we can not know whether leader or follower is done on optimize
-	// we backup anyway after optimize
-	p := &customProposeData{
-		ProposeOp:  ProposeOp_Backup,
-		NeedBackup: true,
+func (nd *KVNode) OptimizeDB(table string) {
+	nd.rn.Infof("node %v begin optimize db, table %v", nd.ns, table)
+	defer nd.rn.Infof("node %v end optimize db", nd.ns)
+	nd.sm.Optimize(table)
+	// empty table means optimize for all data, so we backup to keep optimized data
+	// after restart
+	if table == "" {
+		// since we can not know whether leader or follower is done on optimize
+		// we backup anyway after optimize
+		p := &customProposeData{
+			ProposeOp:  ProposeOp_Backup,
+			NeedBackup: true,
+		}
+		d, _ := json.Marshal(p)
+		nd.CustomPropose(d)
 	}
-	d, _ := json.Marshal(p)
-	nd.CustomPropose(d)
+}
+
+func (nd *KVNode) DeleteRange(drange DeleteTableRange) error {
+	if err := drange.CheckValid(); err != nil {
+		return err
+	}
+	d, _ := json.Marshal(drange)
+	p := &customProposeData{
+		ProposeOp:  ProposeOp_DeleteTable,
+		NeedBackup: false,
+		Data:       d,
+	}
+	dd, _ := json.Marshal(p)
+	_, err := nd.CustomPropose(dd)
+	if err != nil {
+		nd.rn.Infof("node %v delete table range %v failed: %v", nd.ns, drange, err)
+	}
+	return err
 }
 
 func (nd *KVNode) switchForLearnerLeader(isLearnerLeader bool) {
@@ -285,16 +329,6 @@ func (nd *KVNode) GetLocalMemberInfo() *common.MemberInfo {
 	m.GroupName = nd.rn.config.GroupName
 	m.RaftURLs = append(m.RaftURLs, nd.rn.config.RaftAddr)
 	return &m
-}
-
-// run perf for rt seconds and return perf result string
-func (nd *KVNode) RunPerf(level int, rt int) string {
-	if s, ok := nd.sm.(*kvStoreSM); ok {
-		report := s.store.RunPerf(level, rt)
-		nd.rn.Infof("perf: %v", report)
-		return report
-	}
-	return ""
 }
 
 func (nd *KVNode) GetDBInternalStats() string {
@@ -766,7 +800,7 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	if !checkCommitIndex {
 		return true
 	}
-	to := time.Second * 2
+	to := time.Second * 5
 	req := make([]byte, 8)
 	binary.BigEndian.PutUint64(req, nd.rn.reqIDGen.Next())
 	ctx, cancel := context.WithTimeout(context.Background(), to)

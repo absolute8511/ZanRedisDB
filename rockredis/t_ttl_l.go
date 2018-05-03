@@ -147,6 +147,17 @@ func newLocalBatchedBuffer(db *RockDB, cap int) *localBatchedBuffer {
 	return batchedBuff
 }
 
+func (lbb *localBatchedBuffer) Destroy() {
+	if lbb.wb != nil {
+		lbb.wb.Destroy()
+	}
+	for _, b := range lbb.batched {
+		if b != nil {
+			b.destroy()
+		}
+	}
+}
+
 func (self *localBatchedBuffer) Write(meta *expiredMeta) error {
 	if len(self.buff) >= self.cap {
 		return ErrLocalBatchedBuffFull
@@ -195,6 +206,12 @@ func (self *localBatchedBuffer) commit() {
 func (exp *localExpiration) Stop() {
 	close(exp.stopCh)
 	exp.wg.Wait()
+	if exp.wb != nil {
+		exp.wb.Destroy()
+	}
+	if exp.localBuffer != nil {
+		exp.localBuffer.Destroy()
+	}
 }
 
 func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch) func(keys [][]byte) error {
@@ -268,6 +285,12 @@ func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 	}
 	batch.localDelFn = createLocalDelFunc(dt, db, batch.wb)
 	return batch
+}
+
+func (batch *localBatch) destroy() {
+	if batch.wb != nil {
+		batch.wb.Destroy()
+	}
 }
 
 func (batch *localBatch) commit() error {

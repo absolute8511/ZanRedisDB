@@ -56,7 +56,38 @@ func (s *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprouter.
 }
 
 func (s *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	s.OptimizeDB()
+	ns := ps.ByName("namespace")
+	table := ps.ByName("table")
+	s.OptimizeDB(ns, table)
+	return nil, nil
+}
+
+func (s *Server) doDeleteRange(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	table := ps.ByName("table")
+	if ns == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "namespace should not be empty"}
+	}
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	sLog.Infof("got delete range: %v from remote: %v", string(data), req.RemoteAddr)
+	var dtr node.DeleteTableRange
+	err = json.Unmarshal(data, &dtr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	if table != "" {
+		dtr.Table = table
+	}
+	if err := dtr.CheckValid(); err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	err = s.DeleteRange(ns, dtr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
 	return nil, nil
 }
 
@@ -250,15 +281,15 @@ func (s *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httpro
 func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	levelStr := reqParams.Get("loglevel")
 	if levelStr == "" {
-		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_LEVEL"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG_LEVEL"}
 	}
 	level, err := strconv.Atoi(levelStr)
 	if err != nil {
-		return nil, common.HttpErr{Code: 400, Text: "BAD_LEVEL_STRING"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_LEVEL_STRING"}
 	}
 	mode := reqParams.Get("logmode")
 	switch mode {
@@ -287,15 +318,15 @@ func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps http
 func (s *Server) doSetCostLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	levelStr := reqParams.Get("level")
 	if levelStr == "" {
-		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_LEVEL"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG_LEVEL"}
 	}
 	level, err := strconv.Atoi(levelStr)
 	if err != nil {
-		return nil, common.HttpErr{Code: 400, Text: "BAD_LEVEL_STRING"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_LEVEL_STRING"}
 	}
 	atomic.StoreInt32(&costStatsLevel, int32(level))
 	return nil, nil
@@ -304,11 +335,11 @@ func (s *Server) doSetCostLevel(w http.ResponseWriter, req *http.Request, ps htt
 func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	allowStr := reqParams.Get("allow")
 	if allowStr == "" {
-		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
 	}
 	if allowStr == "true" {
 		atomic.StoreInt32(&allowStaleRead, int32(1))
@@ -321,11 +352,11 @@ func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps htt
 func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	param := reqParams.Get("enable")
 	if param == "" {
-		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
 	}
 	if param == "true" {
 		node.SetSyncerOnly(true)
@@ -363,7 +394,7 @@ func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps h
 func (s *Server) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, common.HttpErr{Code: 500, Text: err.Error()}
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
 	}
 	return struct {
 		Version          string `json:"version"`
@@ -386,7 +417,7 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	ns := reqParams.Get("namespace")
 	nsList := s.nsMgr.GetNamespaces()
@@ -412,7 +443,7 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
@@ -437,7 +468,7 @@ func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps htt
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
@@ -457,7 +488,7 @@ func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprout
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		sLog.Infof("failed to parse request params - %s", err)
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	leaderOnlyStr := reqParams.Get("leader_only")
 	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
@@ -472,22 +503,17 @@ func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprout
 func (s *Server) doDBPerf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		sLog.Infof("failed to parse request params - %s", err)
-		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
-	}
-	leaderOnlyStr := reqParams.Get("leader_only")
-	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
-
-	if leaderOnlyStr == "" {
-		leaderOnly = true
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	levelStr := reqParams.Get("level")
-	level, _ := strconv.ParseInt(levelStr, 10, 64)
-	secsStr := reqParams.Get("seconds")
-	secs, _ := strconv.ParseInt(secsStr, 10, 64)
+	level, err := strconv.Atoi(levelStr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
 
-	ss := s.RunPerf(leaderOnly, int(level), int(secs))
-	return ss, nil
+	node.SetPerfLevel(level)
+	sLog.Infof("perf level set to: %v", level)
+	return nil, nil
 }
 
 func (s *Server) initHttpHandler() {
@@ -501,13 +527,14 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, log, common.V1))
 	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isNsNodeFullReady, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
-	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimize, log, common.V1))
+	router.Handle("POST", "/kv/optimize/:namespace/:table", common.Decorate(s.doOptimize, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))
 	router.Handle("POST", common.APIAddLearnerNode, common.Decorate(s.doAddLearner, log, common.V1))
 	router.Handle("POST", common.APIRemoveNode, common.Decorate(s.doRemoveNode, log, common.V1))
 	router.Handle("GET", common.APINodeAllReady, common.Decorate(s.checkNodeAllReady, common.V1))
+	router.Handle("POST", "/kv/delrange/:namespace/:table", common.Decorate(s.doDeleteRange, log, common.V1))
 
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))

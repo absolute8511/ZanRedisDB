@@ -110,6 +110,15 @@ func encodeScanMaxKey(storeDataType byte, key []byte) ([]byte, error) {
 	return k, nil
 }
 
+func encodeScanKeyTableEnd(storeDataType byte, key []byte) ([]byte, error) {
+	table, _, err := common.ExtractTable(key)
+	if err != nil {
+		return nil, err
+	}
+	table = append(table, tableStartSep+1)
+	return encodeScanKey(storeDataType, table)
+}
+
 func encodeScanKey(storeDataType byte, key []byte) ([]byte, error) {
 	switch storeDataType {
 	case KVType:

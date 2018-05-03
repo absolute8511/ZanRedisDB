@@ -38,28 +38,24 @@ func convertJSONPath(path []byte) string {
 }
 
 func encodeJSONKey(table []byte, key []byte) ([]byte, error) {
-	ek := make([]byte, 1)
-	pos := 0
-	ek[pos] = JSONType
-	pos++
+	buf := make([]byte, getDataTablePrefixBufLen(JSONType, table))
+	pos := encodeDataTablePrefixToBuf(buf, JSONType, table)
 	var err error
-	ek, err = EncodeMemCmpKey(ek[:pos], table, jSep, key)
-	return ek, err
+	buf, err = EncodeMemCmpKey(buf[:pos], jSep, key)
+	return buf, err
 }
 
 func decodeJSONKey(ek []byte) ([]byte, []byte, error) {
-	pos := 0
-	if pos+1 > len(ek) || ek[pos] != JSONType {
-		return nil, nil, errKVKey
-	}
-
-	pos++
-	rets, err := Decode(ek[pos:], 3)
+	table, pos, err := decodeDataTablePrefixFromBuf(ek, JSONType)
 	if err != nil {
 		return nil, nil, err
 	}
-	table, _ := rets[0].([]byte)
-	rk, _ := rets[2].([]byte)
+
+	rets, err := Decode(ek[pos:], 2)
+	if err != nil {
+		return nil, nil, err
+	}
+	rk, _ := rets[1].([]byte)
 	return table, rk, nil
 }
 
@@ -68,12 +64,10 @@ func encodeJSONStartKey(table []byte) ([]byte, error) {
 }
 
 func encodeJSONStopKey(table []byte, key []byte) []byte {
-	ek := make([]byte, 1)
-	pos := 0
-	ek[pos] = JSONType
-	pos++
-	ek, _ = EncodeMemCmpKey(ek[:pos], table, jSep+1, nil)
-	return ek
+	buf := make([]byte, getDataTablePrefixBufLen(JSONType, table))
+	pos := encodeDataTablePrefixToBuf(buf, JSONType, table)
+	buf, _ = EncodeMemCmpKey(buf[:pos], jSep+1, nil)
+	return buf
 }
 
 func (db *RockDB) jSetPath(jdata []byte, path string, value []byte) ([]byte, error) {

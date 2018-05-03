@@ -662,9 +662,10 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 	currentNodes, currentNodesEpoch := pdCoord.getCurrentNodesWithRemoving()
 	cluster.CoordLog().Infof("do check namespaces (%v), current nodes: %v, ...", len(namespaces), len(currentNodes))
 	checkOK := true
+	fullReady := true
 	defer func() {
 		if checkOK {
-			if fullCheck {
+			if fullCheck && fullReady {
 				atomic.StoreInt32(&pdCoord.isClusterUnstable, 0)
 				pdCoord.doSchemaCheck()
 			}
@@ -776,8 +777,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 		} else {
 			delete(partitions, nsInfo.Partition)
 			if ok, err := IsAllISRFullReady(&nsInfo); err != nil || !ok {
-				checkOK = false
-				atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+				fullReady = false
 				cluster.CoordLog().Infof("namespace %v isr is not full ready", nsInfo.GetDesp())
 				continue
 			}

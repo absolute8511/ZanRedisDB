@@ -67,8 +67,9 @@ func (ws *WriteStats) Copy() *WriteStats {
 }
 
 type TableStats struct {
-	Name   string `json:"name"`
-	KeyNum int64  `json:"key_num"`
+	Name           string `json:"name"`
+	KeyNum         int64  `json:"key_num"`
+	DiskBytesUsage int64  `json:"disk_bytes_usage"`
 }
 
 type NamespaceStats struct {

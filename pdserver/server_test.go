@@ -267,7 +267,7 @@ func TestLeaderLost(t *testing.T) {
 	oldRaftReplicaID := nsNode.Node.GetLocalMemberInfo().ID
 	// call this to propose some request to write raft logs
 	for i := 0; i < 50; i++ {
-		nsNode.Node.OptimizeDB()
+		nsNode.Node.OptimizeDB("")
 	}
 	leader.Stop()
 
@@ -321,7 +321,7 @@ func TestFollowerLost(t *testing.T) {
 	assert.NotNil(t, leader)
 	// call this to propose some request to write raft logs
 	for i := 0; i < 50; i++ {
-		nsNode.Node.OptimizeDB()
+		nsNode.Node.OptimizeDB("")
 	}
 	follower, followerNode := getFollowerNode(t, ns, 0)
 	oldFollowerReplicaID := followerNode.GetRaftID()

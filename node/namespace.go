@@ -34,6 +34,8 @@ var (
 	errNamespaceConfInvalid       = errors.New("namespace config is invalid")
 )
 
+var perfLevel int32
+
 type NamespaceNode struct {
 	Node  *KVNode
 	conf  *NamespaceConfig
@@ -494,10 +496,14 @@ func (nsm *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
 	return nsStats
 }
 
-func (nsm *NamespaceMgr) OptimizeDB() {
+func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 	nsm.mutex.RLock()
 	nodeList := make([]*NamespaceNode, 0, len(nsm.kvNodes))
-	for _, n := range nsm.kvNodes {
+	for k, n := range nsm.kvNodes {
+		baseName, _ := common.GetNamespaceAndPartition(k)
+		if ns != "" && ns != baseName {
+			continue
+		}
 		nodeList = append(nodeList, n)
 	}
 	nsm.mutex.RUnlock()
@@ -506,9 +512,34 @@ func (nsm *NamespaceMgr) OptimizeDB() {
 			return
 		}
 		if n.IsReady() {
-			n.Node.OptimizeDB()
+			n.Node.OptimizeDB(table)
 		}
 	}
+}
+
+func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) error {
+	nsm.mutex.RLock()
+	nodeList := make([]*NamespaceNode, 0, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
+		baseName, _ := common.GetNamespaceAndPartition(k)
+		if ns != baseName {
+			continue
+		}
+		nodeList = append(nodeList, n)
+	}
+	nsm.mutex.RUnlock()
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return common.ErrStopped
+		}
+		if n.IsReady() {
+			err := n.Node.DeleteRange(dtr)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
@@ -638,38 +669,16 @@ func (nsm *NamespaceMgr) clearUnusedRaftPeer() {
 	}
 }
 
-type PerfReport struct {
-	Group  string
-	Report string
+func SetPerfLevel(level int) {
+	atomic.StoreInt32(&perfLevel, int32(level))
+	rockredis.SetPerfLevel(level)
 }
 
-func (nsm *NamespaceMgr) RunPerf(leaderOnly bool, level int, rt int) map[string]string {
-	nsm.mutex.RLock()
-	nodes := make([]*KVNode, 0, len(nsm.kvNodes))
-	for _, n := range nsm.kvNodes {
-		if !n.IsReady() {
-			continue
-		}
-		if leaderOnly && !n.Node.IsLead() {
-			continue
-		}
-		nodes = append(nodes, n.Node)
-	}
-	nsm.mutex.RUnlock()
-	reportCh := make(chan PerfReport, 1)
-	nsStats := make(map[string]string, len(nsm.kvNodes))
-	for _, n := range nodes {
-		go func(kv *KVNode) {
-			perfReport := kv.RunPerf(level, rt)
-			reportCh <- PerfReport{Group: kv.ns, Report: perfReport}
-		}(n)
-	}
-	for {
-		r := <-reportCh
-		nsStats[r.Group] = r.Report
-		if len(nsStats) >= len(nodes) {
-			break
-		}
-	}
-	return nsStats
+func IsPerfEnabled() bool {
+	lv := GetPerfLevel()
+	return rockredis.IsPerfEnabledLevel(lv)
+}
+
+func GetPerfLevel() int {
+	return int(atomic.LoadInt32(&perfLevel))
 }

@@ -147,7 +147,7 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 		}
 		_, err = common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIIsRaftSynced+"/"+nsInfo.GetDesp(),
-			nil, time.Second*3, nil)
+			nil, time.Second*5, nil)
 		if err != nil {
 			cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			return false, err
