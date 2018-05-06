@@ -499,7 +499,7 @@ func (r *RockDB) CompactTableRange(table string) {
 			continue
 		}
 		// compact data range
-		dbLog.Infof("compacting dt %v data range: %v, %v", dt, rgs)
+		dbLog.Infof("compacting dt %v data range: %v", dt, rgs)
 		for _, rg := range rgs {
 			r.eng.CompactRange(rg)
 		}
@@ -735,25 +735,35 @@ func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end [
 		dbLog.Debugf("total keys num zero: %v", numStr)
 		return 0
 	}
-
-	ss := r.GetTableSizeInRange(table, start, end)
-	if ss <= 0 {
-		dbLog.Debugf("table range size zero: %v", ss)
-		return 0
+	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
+	dtsMeta := []byte{KVType, HSizeType, LMetaType, SSizeType, ZSizeType}
+	rgs := make([]gorocksdb.Range, 0, len(dts))
+	for i, dt := range dts {
+		// meta range
+		minMetaKey, maxMetaKey, err := getTableMetaRange(dtsMeta[i], []byte(table), start, end)
+		if err != nil {
+			dbLog.Infof("failed to build dt %v meta range: %v", dt, err)
+			continue
+		}
+		var rgMeta gorocksdb.Range
+		rgMeta.Start = minMetaKey
+		rgMeta.Limit = maxMetaKey
+		rgs = append(rgs, rgMeta)
 	}
-	rgs := make([]gorocksdb.Range, 0, 1)
-	rgs = append(rgs, gorocksdb.Range{Start: nil, Limit: []byte{255, 255, 255, 255}})
+	filteredRgs := make([]gorocksdb.Range, 0, len(dts))
 	sList := r.eng.GetApproximateSizes(rgs, true)
-	if len(sList) == 0 || sList[0] <= 0 {
-		dbLog.Infof("total db size: %v", sList)
-		return 0
+	for i, s := range sList {
+		if s > 0 {
+			filteredRgs = append(filteredRgs, rgs[i])
+		}
 	}
-	dbLog.Debugf("total db size: %v, table %v", sList, ss)
+	keyNum := int64(r.eng.GetApproximateKeyNum(filteredRgs))
+	dbLog.Debugf("total db key num: %v, table key num %v, %v", num, keyNum, sList)
 	// use GetApproximateSizes and estimate-keys-num in property
 	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
 	// range records = estimate-keys-num * GetApproximateSizes(range) / GetApproximateSizes (total)
 	// use GetPropertiesOfTablesInRange to get number of keys in sst
-	return int64(float64(ss) / float64(sList[0]) * float64(num))
+	return int64(keyNum)
 }
 
 func (r *RockDB) GetInternalStatus() map[string]interface{} {

@@ -192,10 +192,11 @@ func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
 	diskUsages := kvsm.store.GetBTablesSizes(tbs)
 	for i, t := range tbs {
 		cnt, _ := kvsm.store.GetTableKeyCount(t)
-		if cnt <= 0 {
-			cnt = kvsm.store.GetTableApproximateNumInRange(string(t), nil, nil)
-		}
 		var ts common.TableStats
+		ts.ApproximateKeyNum = kvsm.store.GetTableApproximateNumInRange(string(t), nil, nil)
+		if cnt <= 0 {
+			cnt = ts.ApproximateKeyNum
+		}
 		ts.Name = string(t)
 		ts.KeyNum = cnt
 		ts.DiskBytesUsage = diskUsages[i]

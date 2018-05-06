@@ -45,7 +45,7 @@ func getTestDB(t *testing.T) *RockDB {
 	testDB, err := OpenRockDB(cfg)
 	assert.Nil(t, err)
 	if testing.Verbose() {
-		SetLogLevel(int32(4))
+		SetLogLevel(int32(3))
 	}
 	return testDB
 }
