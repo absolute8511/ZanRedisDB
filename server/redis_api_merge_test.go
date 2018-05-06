@@ -43,6 +43,7 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 		ClusterID:     "test",
 		DataDir:       tmpDir,
 		RedisAPIPort:  redisportMerge,
+		HttpAPIPort:   redisportMerge + 1,
 		LocalRaftAddr: raftAddr,
 		BroadcastAddr: "127.0.0.1",
 		TickMs:        100,

@@ -1,0 +1,167 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"testing"
+
+	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/siddontang/goredis"
+)
+
+func insertData(t *testing.T, c *goredis.PoolConn, cnt int, cmd, prefixkey string, args ...interface{}) {
+	for i := 0; i < cnt; i++ {
+		nargs := make([]interface{}, 0, len(args)+1)
+		nargs = append(nargs, prefixkey+fmt.Sprintf("%04d", i))
+		nargs = append(nargs, args...)
+		if _, err := c.Do(cmd, nargs...); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func checkScanKeys(t *testing.T, c *goredis.PoolConn, prefix string, dt string, expectCnt int) {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", prefix, dt, "COUNT", 1000)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		a, err := goredis.Strings(ay[1], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(a) != expectCnt {
+			t.Errorf("data %v want %v get %v", dt, expectCnt, len(a))
+		}
+	}
+}
+
+func checkFullScan(t *testing.T, c *goredis.PoolConn, prefix string, dt string, expectCnt int) {
+	if ay, err := goredis.Values(c.Do("FULLSCAN", prefix, dt, "COUNT", 1000)); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		a, err := goredis.MultiBulk(ay[1], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(a) != expectCnt {
+			t.Errorf("data %v want %v get %v", dt, expectCnt, len(a))
+		}
+	}
+}
+
+func deleteTableRange(t *testing.T, table string, start []byte, end []byte) {
+	var dr node.DeleteTableRange
+	dr.Table = table
+	dr.StartFrom = start
+	dr.EndTo = end
+	dr.DeleteAll = true
+	buf, _ := json.Marshal(dr)
+	url := fmt.Sprintf("http://127.0.0.1:%v/kv/delrange/default/%s", redisportMerge+1, table)
+	rsp, err := http.Post(url, "json", bytes.NewBuffer(buf))
+	if err != nil {
+		t.Error(err)
+	}
+	if rsp.StatusCode != http.StatusOK {
+		t.Error(rsp.Status)
+	}
+}
+
+func TestDeleteRangeCrossTable(t *testing.T) {
+	c := getMergeTestConn(t)
+	defer c.Close()
+
+	prefixkv1 := "default:testdeleterange_kv:"
+	prefixkv2 := "default:testdeleterange_kv1:"
+	prefixhash1 := "default:testdeleterange_hash:"
+	prefixhash2 := "default:testdeleterange_hash1:"
+	prefixlist1 := "default:testdeleterange_list:"
+	prefixlist2 := "default:testdeleterange_list1:"
+	prefixset1 := "default:testdeleterange_set:"
+	prefixset2 := "default:testdeleterange_set1:"
+	prefixzset1 := "default:testdeleterange_zset:"
+	prefixzset2 := "default:testdeleterange_zset1:"
+	tableCnt := 20
+	// insert kv
+	insertData(t, c, tableCnt, "set", prefixkv1, []byte("value"))
+	insertData(t, c, tableCnt, "set", prefixkv2, []byte("value"))
+
+	insertData(t, c, tableCnt, "hset", prefixhash1, "0", []byte("value"))
+	insertData(t, c, tableCnt, "hset", prefixhash2, "0", []byte("value"))
+
+	insertData(t, c, tableCnt, "sadd", prefixset1, []byte("value"))
+	insertData(t, c, tableCnt, "sadd", prefixset2, []byte("value"))
+
+	insertData(t, c, tableCnt, "lpush", prefixlist1, []byte("value"))
+	insertData(t, c, tableCnt, "lpush", prefixlist2, []byte("value"))
+
+	insertData(t, c, tableCnt, "zadd", prefixzset1, "0", []byte("value"))
+	insertData(t, c, tableCnt, "zadd", prefixzset2, "0", []byte("value"))
+
+	// scan deleted range should be zero
+	// scan non-deleted range (other types, other range in same type) should be the same before delete
+	midKey := fmt.Sprintf("%04d", tableCnt/2)
+	checkScanKeys(t, c, prefixkv1, "KV", tableCnt)
+	checkFullScan(t, c, prefixkv1, "KV", tableCnt)
+	deleteTableRange(t, "testdeleterange_kv", nil, nil)
+	checkScanKeys(t, c, prefixkv1, "KV", 0)
+	checkFullScan(t, c, prefixkv1, "KV", 0)
+
+	checkScanKeys(t, c, prefixkv2, "KV", tableCnt)
+	checkFullScan(t, c, prefixkv2, "KV", tableCnt)
+	deleteTableRange(t, "testdeleterange_kv1", nil, []byte(midKey))
+	checkScanKeys(t, c, prefixkv2, "KV", tableCnt/2)
+	checkFullScan(t, c, prefixkv2, "KV", tableCnt/2)
+
+	checkScanKeys(t, c, prefixhash1, "HASH", tableCnt)
+	checkFullScan(t, c, prefixhash1, "HASH", tableCnt)
+	deleteTableRange(t, "testdeleterange_hash", nil, nil)
+	checkScanKeys(t, c, prefixhash1, "hash", 0)
+	checkFullScan(t, c, prefixhash1, "hash", 0)
+
+	checkScanKeys(t, c, prefixhash2, "HASH", tableCnt)
+	checkFullScan(t, c, prefixhash2, "HASH", tableCnt)
+	deleteTableRange(t, "testdeleterange_hash1", nil, []byte(midKey))
+	checkScanKeys(t, c, prefixhash2, "HASH", tableCnt/2)
+	checkFullScan(t, c, prefixhash2, "HASH", tableCnt/2)
+
+	checkScanKeys(t, c, prefixlist1, "list", tableCnt)
+	checkFullScan(t, c, prefixlist1, "list", tableCnt)
+	deleteTableRange(t, "testdeleterange_list", nil, nil)
+	checkScanKeys(t, c, prefixlist1, "list", 0)
+	checkFullScan(t, c, prefixlist1, "list", 0)
+
+	checkScanKeys(t, c, prefixlist2, "list", tableCnt)
+	checkFullScan(t, c, prefixlist2, "list", tableCnt)
+	deleteTableRange(t, "testdeleterange_list1", nil, []byte(midKey))
+	checkScanKeys(t, c, prefixlist2, "list", tableCnt/2)
+	checkFullScan(t, c, prefixlist2, "list", tableCnt/2)
+
+	checkScanKeys(t, c, prefixset1, "set", tableCnt)
+	checkFullScan(t, c, prefixset1, "set", tableCnt)
+	deleteTableRange(t, "testdeleterange_set", nil, nil)
+	checkScanKeys(t, c, prefixset1, "set", 0)
+	checkFullScan(t, c, prefixset1, "set", 0)
+
+	checkScanKeys(t, c, prefixset2, "set", tableCnt)
+	checkFullScan(t, c, prefixset2, "set", tableCnt)
+	deleteTableRange(t, "testdeleterange_set1", nil, []byte(midKey))
+	checkScanKeys(t, c, prefixset2, "set", tableCnt/2)
+	checkFullScan(t, c, prefixset2, "set", tableCnt/2)
+
+	checkScanKeys(t, c, prefixzset1, "zset", tableCnt)
+	checkFullScan(t, c, prefixzset1, "zset", tableCnt)
+	deleteTableRange(t, "testdeleterange_zset", nil, nil)
+	checkScanKeys(t, c, prefixzset1, "zset", 0)
+	checkFullScan(t, c, prefixzset1, "zset", 0)
+
+	checkScanKeys(t, c, prefixzset2, "zset", tableCnt)
+	checkFullScan(t, c, prefixzset2, "zset", tableCnt)
+	deleteTableRange(t, "testdeleterange_zset1", nil, []byte(midKey))
+	checkScanKeys(t, c, prefixzset2, "zset", tableCnt/2)
+	checkFullScan(t, c, prefixzset2, "zset", tableCnt/2)
+}

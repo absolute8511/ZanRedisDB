@@ -644,7 +644,8 @@ func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end [
 		if err != nil {
 			continue
 		}
-		dbLog.Infof("deleting dt %v meta range: %v, %v", dt, minMetaKey, maxMetaKey)
+		dbLog.Infof("deleting dt %v meta range: %v, %v, %v, %v", dt,
+			minMetaKey, maxMetaKey, string(minMetaKey), string(maxMetaKey))
 
 		if dryrun {
 			continue
