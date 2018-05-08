@@ -437,9 +437,9 @@ func backup(t string) {
 
 	conf := &sdk.Conf{
 		LookupList:   lookupList,
-		DialTimeout:  1 * time.Second,
-		ReadTimeout:  1 * time.Second,
-		WriteTimeout: 1 * time.Second,
+		DialTimeout:  10 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		TendInterval: 100,
 		Namespace:    *ns,
 		Password:     *pass,
