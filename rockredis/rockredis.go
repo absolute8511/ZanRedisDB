@@ -377,28 +377,6 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		hasher64:         murmur3.New64(),
 	}
 
-	hcache, err := newHLLCache(HLLCacheSize, db)
-	if err != nil {
-		return nil, err
-	}
-	db.hllCache = hcache
-
-	eng, err := gorocksdb.OpenDb(opts, db.GetDataDir())
-	if err != nil {
-		return nil, err
-	}
-	db.eng = eng
-	db.indexMgr = NewIndexMgr()
-	err = db.indexMgr.LoadIndexes(db)
-	if err != nil {
-		dbLog.Infof("rocksdb %v load index failed: %v", db.GetDataDir(), err)
-		eng.Close()
-		return nil, err
-	}
-	atomic.StoreInt32(&db.engOpened, 1)
-	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
-	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
-
 	switch cfg.ExpirationPolicy {
 	case common.ConsistencyDeletion:
 		db.expiration = newConsistencyExpiration(db)
@@ -412,7 +390,13 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, errors.New("unsupported ExpirationPolicy")
 	}
 
-	db.expiration.Start()
+	err := db.reOpenEng()
+	if err != nil {
+		return nil, err
+	}
+
+	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
+	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
 	db.wg.Add(1)
 	go func() {
@@ -460,17 +444,20 @@ func (r *RockDB) reOpenEng() error {
 
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	r.indexMgr = NewIndexMgr()
-	if err == nil {
-		err = r.indexMgr.LoadIndexes(r)
-		if err != nil {
-			dbLog.Infof("rocksdb %v load index failed: %v", r.GetDataDir(), err)
-			return err
-		}
-
-		atomic.StoreInt32(&r.engOpened, 1)
-		dbLog.Infof("rocksdb reopened: %v", r.GetDataDir())
+	if err != nil {
+		return err
 	}
-	return err
+	err = r.indexMgr.LoadIndexes(r)
+	if err != nil {
+		dbLog.Infof("rocksdb %v load index failed: %v", r.GetDataDir(), err)
+		r.eng.Close()
+		return err
+	}
+
+	atomic.StoreInt32(&r.engOpened, 1)
+	dbLog.Infof("rocksdb reopened: %v", r.GetDataDir())
+	r.expiration.Start()
+	return nil
 }
 
 func (r *RockDB) getDBEng() *gorocksdb.DB {
