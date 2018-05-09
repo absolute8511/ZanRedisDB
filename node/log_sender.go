@@ -19,6 +19,7 @@ var (
 	errInvalidRemoteCluster = errors.New("remote cluster is not valid")
 	errInvalidNamespace     = errors.New("namespace is not valid")
 	rpcTimeout              = time.Second * 5
+	sendLogTimeout          = time.Second * 30
 )
 
 type ccAPIClient struct {
@@ -182,7 +183,7 @@ func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nodeLog.Debugf("sending log : %v", addr, in.String())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), sendLogTimeout)
 	defer cancel()
 	rpcErr, err := c.ApplyRaftReqs(ctx, in)
 	if err != nil {

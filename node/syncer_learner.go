@@ -172,8 +172,12 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 	for {
 		handled := false
 		var err error
+		sendCh := sm.sendCh
+		if len(raftLogs) > logSendBufferLen*2 {
+			sendCh = nil
+		}
 		select {
-		case req := <-sm.sendCh:
+		case req := <-sendCh:
 			last = req
 			raftLogs = append(raftLogs, req)
 			if nodeLog.Level() > common.LOG_DETAIL {
