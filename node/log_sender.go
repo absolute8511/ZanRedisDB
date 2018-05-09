@@ -177,6 +177,7 @@ func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 		raftLogs[i].Index = e.OrigIndex
 		raftLogs[i].RaftTimestamp = e.Timestamp
 		raftLogs[i].RaftGroupName = s.grpName
+		raftLogs[i].ClusterName = s.localCluster
 	}
 
 	in := &syncerpb.RaftReqs{RaftLog: raftLogs}

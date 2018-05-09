@@ -910,6 +910,15 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 			// check if retrying duplicate req, we can just ignore old retry
 			if isApplied {
 				nd.rn.Infof("request %v-%v ignored since older than synced", reqList.OrigTerm, reqList.OrigIndex)
+				for _, req := range reqList.Reqs {
+					if req.Header.ID > 0 && nd.w.IsRegistered(req.Header.ID) {
+						nd.w.Trigger(req.Header.ID, nil)
+					}
+				}
+				// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
+				if reqList.ReqId > 0 {
+					nd.w.Trigger(reqList.ReqId, nil)
+				}
 				return false
 			}
 			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
