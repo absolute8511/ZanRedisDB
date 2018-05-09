@@ -516,9 +516,10 @@ func (r *RockDB) CompactTableRange(table string) {
 func (r *RockDB) closeEng() {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
+			r.hllCache.Flush()
 			r.indexMgr.Close()
 			r.eng.Close()
-			dbLog.Infof("rocksdb closed: %v", r.GetDataDir())
+			dbLog.Infof("rocksdb engine closed: %v", r.GetDataDir())
 		}
 	}
 }
@@ -530,7 +531,6 @@ func (r *RockDB) Close() {
 	close(r.quit)
 	r.expiration.Stop()
 	r.wg.Wait()
-	r.hllCache.Flush()
 	r.closeEng()
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
@@ -830,6 +830,10 @@ func (r *RockDB) backupLoop() {
 			}
 
 			func() {
+				// before close rsp.done or rsp.started, the raft loop will block,
+				// after the chan closed, the raft loop continue, so we need make sure
+				// the db engine will not be closed while doing checkpoint, we need hold read lock
+				// before closing the chan.
 				defer close(rsp.done)
 				dbLog.Infof("begin backup to:%v \n", rsp.backupDir)
 				start := time.Now()
@@ -847,10 +851,16 @@ func (r *RockDB) backupLoop() {
 					os.RemoveAll(rsp.backupDir)
 				}
 				rsp.rsp = []byte(rsp.backupDir)
-				time.AfterFunc(time.Millisecond*10, func() {
-					close(rsp.started)
-				})
-				err = ck.Save(rsp.backupDir, math.MaxUint64)
+				r.eng.RLock()
+				if r.eng.IsOpened() {
+					time.AfterFunc(time.Millisecond*10, func() {
+						close(rsp.started)
+					})
+					err = ck.Save(rsp.backupDir, math.MaxUint64)
+				} else {
+					err = errors.New("db engine closed")
+				}
+				r.eng.RUnlock()
 				r.checkpointDirLock.Unlock()
 				if err != nil {
 					dbLog.Infof("save checkpoint failed: %v", err)
