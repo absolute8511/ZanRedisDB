@@ -377,28 +377,6 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		hasher64:         murmur3.New64(),
 	}
 
-	hcache, err := newHLLCache(HLLCacheSize, db)
-	if err != nil {
-		return nil, err
-	}
-	db.hllCache = hcache
-
-	eng, err := gorocksdb.OpenDb(opts, db.GetDataDir())
-	if err != nil {
-		return nil, err
-	}
-	db.eng = eng
-	db.indexMgr = NewIndexMgr()
-	err = db.indexMgr.LoadIndexes(db)
-	if err != nil {
-		dbLog.Infof("rocksdb %v load index failed: %v", db.GetDataDir(), err)
-		eng.Close()
-		return nil, err
-	}
-	atomic.StoreInt32(&db.engOpened, 1)
-	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
-	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
-
 	switch cfg.ExpirationPolicy {
 	case common.ConsistencyDeletion:
 		db.expiration = newConsistencyExpiration(db)
@@ -412,7 +390,13 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 		return nil, errors.New("unsupported ExpirationPolicy")
 	}
 
-	db.expiration.Start()
+	err := db.reOpenEng()
+	if err != nil {
+		return nil, err
+	}
+
+	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
+	dbLog.Infof("rocksdb opened: %v", db.GetDataDir())
 
 	db.wg.Add(1)
 	go func() {
@@ -460,17 +444,20 @@ func (r *RockDB) reOpenEng() error {
 
 	r.eng, err = gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
 	r.indexMgr = NewIndexMgr()
-	if err == nil {
-		err = r.indexMgr.LoadIndexes(r)
-		if err != nil {
-			dbLog.Infof("rocksdb %v load index failed: %v", r.GetDataDir(), err)
-			return err
-		}
-		r.expiration.Start()
-		atomic.StoreInt32(&r.engOpened, 1)
-		dbLog.Infof("rocksdb reopened: %v", r.GetDataDir())
+	if err != nil {
+		return err
 	}
-	return err
+	err = r.indexMgr.LoadIndexes(r)
+	if err != nil {
+		dbLog.Infof("rocksdb %v load index failed: %v", r.GetDataDir(), err)
+		r.eng.Close()
+		return err
+	}
+
+	r.expiration.Start()
+	atomic.StoreInt32(&r.engOpened, 1)
+	dbLog.Infof("rocksdb reopened: %v", r.GetDataDir())
+	return nil
 }
 
 func (r *RockDB) getDBEng() *gorocksdb.DB {
@@ -516,10 +503,11 @@ func (r *RockDB) CompactTableRange(table string) {
 func (r *RockDB) closeEng() {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
+			r.hllCache.Flush()
 			r.indexMgr.Close()
 			r.expiration.Stop()
 			r.eng.Close()
-			dbLog.Infof("rocksdb closed: %v", r.GetDataDir())
+			dbLog.Infof("rocksdb engine closed: %v", r.GetDataDir())
 		}
 	}
 }
@@ -530,7 +518,6 @@ func (r *RockDB) Close() {
 	}
 	close(r.quit)
 	r.wg.Wait()
-	r.hllCache.Flush()
 	r.closeEng()
 	if r.expiration != nil {
 		r.expiration.Destroy()
@@ -834,6 +821,10 @@ func (r *RockDB) backupLoop() {
 			}
 
 			func() {
+				// before close rsp.done or rsp.started, the raft loop will block,
+				// after the chan closed, the raft loop continue, so we need make sure
+				// the db engine will not be closed while doing checkpoint, we need hold read lock
+				// before closing the chan.
 				defer close(rsp.done)
 				dbLog.Infof("begin backup to:%v \n", rsp.backupDir)
 				start := time.Now()
@@ -851,10 +842,16 @@ func (r *RockDB) backupLoop() {
 					os.RemoveAll(rsp.backupDir)
 				}
 				rsp.rsp = []byte(rsp.backupDir)
-				time.AfterFunc(time.Millisecond*10, func() {
-					close(rsp.started)
-				})
-				err = ck.Save(rsp.backupDir, math.MaxUint64)
+				r.eng.RLock()
+				if r.eng.IsOpened() {
+					time.AfterFunc(time.Millisecond*10, func() {
+						close(rsp.started)
+					})
+					err = ck.Save(rsp.backupDir, math.MaxUint64)
+				} else {
+					err = errors.New("db engine closed")
+				}
+				r.eng.RUnlock()
 				r.checkpointDirLock.Unlock()
 				if err != nil {
 					dbLog.Infof("save checkpoint failed: %v", err)

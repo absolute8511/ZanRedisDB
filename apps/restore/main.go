@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	sdk "github.com/absolute8511/go-zanredisdb"
+	"github.com/absolute8511/redigo/redis"
 )
 
 var (
@@ -51,71 +53,65 @@ func checkParameter() {
 	}
 }
 
+func readLen(file *os.File, lenBuf [4]byte) (int, error) {
+	n, err := file.Read(lenBuf[:])
+	if err != nil {
+		if err == io.EOF {
+			return 0, err
+		} else {
+			log.Printf("read key length error. [err=%v]\n", err)
+			return 0, err
+		}
+	}
+	if n != len(lenBuf) {
+		log.Printf("read key length, length not equal.[n=%d]\n", n)
+		return 0, errors.New("read length not match")
+	}
+	length := int(binary.BigEndian.Uint32(lenBuf[:]))
+	return length, nil
+}
+
+func readLenAndBody(file *os.File, lenBuf [4]byte, key []byte) ([]byte, error) {
+	length, err := readLen(file, lenBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	if length <= len(key) {
+		key = key[:length]
+	} else {
+		key = make([]byte, length)
+	}
+	n, err := file.Read(key)
+	if err != nil {
+		log.Printf("read key error.[err=%v]\n", err)
+		return key, err
+	}
+
+	if n != length {
+		log.Printf("read key length not equal.[key=%s, n=%d, length=%d]\n", string(key), n, length)
+		return key, err
+	}
+	return key, nil
+}
+
 func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
-	lenBuf := make([]byte, 4)
+	var lenBuf [4]byte
 	var key []byte
 	var value []byte
-	var length int
-	var n int
 	var err error
 	var total uint64
 	var existed uint64
 	for {
-		n, err = file.Read(lenBuf)
+		key, err = readLenAndBody(file, lenBuf, key)
 		if err != nil {
-			if err == io.EOF {
-				break
-			} else {
-				log.Printf("read key length error. [err=%v]\n", err)
-				break
-			}
-		}
-		if n != 4 {
-			log.Printf("read key length, length not equal.[n=%d]\n", n)
+			log.Printf("read key error. [err=%v]\n", err)
 			break
 		}
 
-		length = int(binary.BigEndian.Uint32(lenBuf))
-
-		if length <= len(key) {
-			key = key[:length]
-		} else {
-			key = make([]byte, length)
-		}
-		n, err = file.Read(key)
+		value, err = readLenAndBody(file, lenBuf, value)
 		if err != nil {
-			log.Printf("read key error.[err=%v]\n", err)
-			break
-		}
-
-		if n != length {
-			log.Printf("read key length not equal.[key=%s, n=%d, length=%d]\n", string(key), n, length)
-			break
-		}
-
-		n, err = file.Read(lenBuf)
-		if err != nil {
-			log.Printf("read key length error. [err=%v]\n", err)
-			break
-		}
-		if n != 4 {
-			log.Printf("read key length, length not equal.[n=%d]\n", n)
-			break
-		}
-
-		length = int(binary.BigEndian.Uint32(lenBuf))
-		if length <= len(value) {
-			value = value[:length]
-		} else {
-			value = make([]byte, length)
-		}
-		n, err = file.Read(value)
-		if err != nil {
-			log.Printf("read value error.[key=%s, err=%v]\n", string(key), err)
-			break
-		}
-		if n != length {
-			log.Printf("read value length not equal.[key=%s, value=%v, n=%d, length=%d]\n", string(key), value, n, length)
+			log.Printf("read key error. [err=%v]\n", err)
 			break
 		}
 
@@ -143,7 +139,61 @@ func kvrestore(file *os.File, client *sdk.ZanRedisClient) {
 }
 
 func hrestore(file *os.File, client *sdk.ZanRedisClient) {
+	var lenBuf [4]byte
+	var key []byte
+	var field []byte
+	var value []byte
+	var fieldNum int
+	var err error
+	var total uint64
+	var existed uint64
+	for {
+		key, err = readLenAndBody(file, lenBuf, key)
+		if err != nil {
+			log.Printf("read key error. [err=%v]\n", err)
+			break
+		}
 
+		fieldNum, err = readLen(file, lenBuf)
+		if err != nil {
+			log.Printf("read error. [err=%v]\n", err)
+			break
+		}
+
+		for i := 0; i < fieldNum; i++ {
+			field, err = readLenAndBody(file, lenBuf, field)
+			if err != nil {
+				log.Printf("read error. [err=%v]\n", err)
+				break
+			}
+			value, err = readLenAndBody(file, lenBuf, value)
+			if err != nil {
+				log.Printf("read error. [err=%v]\n", err)
+				break
+			}
+			pk := sdk.NewPKey(oriNS, oriTable, key)
+			val, err := redis.Int(client.DoRedis("hsetnx", pk.ShardingKey(), true, pk.RawKey, field, value))
+			if err != nil {
+				log.Printf("restore error. [key=%s, val=%v, err=%v]\n", key, val, err)
+				break
+			}
+			if val == 0 {
+				existed++
+			}
+		}
+
+		total++
+		if total%1000 == 0 {
+			if tm > 0 {
+				time.Sleep(tm * 100)
+			}
+			fmt.Print(".")
+		}
+		if total%10000 == 0 {
+			fmt.Printf("%d(%d)", total, existed)
+		}
+	}
+	log.Printf("restore finished. [total=%d, existed=%d]\n", total, existed)
 }
 
 func srestore(file *os.File, client *sdk.ZanRedisClient) {
