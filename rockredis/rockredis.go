@@ -532,6 +532,10 @@ func (r *RockDB) Close() {
 	r.wg.Wait()
 	r.hllCache.Flush()
 	r.closeEng()
+	if r.expiration != nil {
+		r.expiration.Destroy()
+		r.expiration = nil
+	}
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
 		r.defaultReadOpts = nil
