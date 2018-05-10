@@ -454,9 +454,9 @@ func (r *RockDB) reOpenEng() error {
 		return err
 	}
 
+	r.expiration.Start()
 	atomic.StoreInt32(&r.engOpened, 1)
 	dbLog.Infof("rocksdb reopened: %v", r.GetDataDir())
-	r.expiration.Start()
 	return nil
 }
 
@@ -505,6 +505,7 @@ func (r *RockDB) closeEng() {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
 			r.hllCache.Flush()
 			r.indexMgr.Close()
+			r.expiration.Stop()
 			r.eng.Close()
 			dbLog.Infof("rocksdb engine closed: %v", r.GetDataDir())
 		}
@@ -516,9 +517,12 @@ func (r *RockDB) Close() {
 		return
 	}
 	close(r.quit)
-	r.expiration.Stop()
 	r.wg.Wait()
 	r.closeEng()
+	if r.expiration != nil {
+		r.expiration.Destroy()
+		r.expiration = nil
+	}
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
 		r.defaultReadOpts = nil

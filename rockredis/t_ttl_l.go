@@ -3,6 +3,7 @@ package rockredis
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/ZanRedisDB/common"
@@ -25,18 +26,16 @@ var (
 type localExpiration struct {
 	*TTLChecker
 	db          *RockDB
-	wb          *gorocksdb.WriteBatch
 	stopCh      chan struct{}
 	wg          sync.WaitGroup
 	localBuffer *localBatchedBuffer
+	running     int32
 }
 
 func newLocalExpiration(db *RockDB) *localExpiration {
 	exp := &localExpiration{
 		db:          db,
-		wb:          gorocksdb.NewWriteBatch(),
 		TTLChecker:  newTTLChecker(db),
-		stopCh:      make(chan struct{}),
 		localBuffer: newLocalBatchedBuffer(db, localBatchedBufSize),
 	}
 
@@ -80,11 +79,14 @@ func (exp *localExpiration) check(buffer common.ExpiredDataBuffer, stop chan str
 }
 
 func (exp *localExpiration) Start() {
-	exp.wg.Add(1)
-	go func() {
-		defer exp.wg.Done()
-		exp.applyExpiration(exp.stopCh)
-	}()
+	if atomic.CompareAndSwapInt32(&exp.running, 0, 1) {
+		exp.stopCh = make(chan struct{})
+		exp.wg.Add(1)
+		go func() {
+			defer exp.wg.Done()
+			exp.applyExpiration(exp.stopCh)
+		}()
+	}
 }
 
 func (exp *localExpiration) applyExpiration(stop chan struct{}) {
@@ -103,6 +105,7 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 				err := checker.check(exp.localBuffer, stop)
 				select {
 				case <-stop:
+					exp.localBuffer.Clear()
 					return
 				default:
 					exp.localBuffer.commit()
@@ -123,7 +126,6 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 
 type localBatchedBuffer struct {
 	db      *RockDB
-	wb      *gorocksdb.WriteBatch
 	buff    []*expiredMeta
 	batched [common.ALL - common.NONE]*localBatch
 	cap     int
@@ -132,7 +134,6 @@ type localBatchedBuffer struct {
 func newLocalBatchedBuffer(db *RockDB, cap int) *localBatchedBuffer {
 	batchedBuff := &localBatchedBuffer{
 		buff: make([]*expiredMeta, 0, cap),
-		wb:   gorocksdb.NewWriteBatch(),
 		db:   db,
 		cap:  cap,
 	}
@@ -147,10 +148,16 @@ func newLocalBatchedBuffer(db *RockDB, cap int) *localBatchedBuffer {
 	return batchedBuff
 }
 
-func (lbb *localBatchedBuffer) Destroy() {
-	if lbb.wb != nil {
-		lbb.wb.Destroy()
+func (lbb *localBatchedBuffer) Clear() {
+	lbb.buff = lbb.buff[:0]
+	for _, b := range lbb.batched {
+		if b != nil {
+			b.clear()
+		}
 	}
+}
+
+func (lbb *localBatchedBuffer) Destroy() {
 	for _, b := range lbb.batched {
 		if b != nil {
 			b.destroy()
@@ -204,11 +211,15 @@ func (self *localBatchedBuffer) commit() {
 }
 
 func (exp *localExpiration) Stop() {
-	close(exp.stopCh)
-	exp.wg.Wait()
-	if exp.wb != nil {
-		exp.wb.Destroy()
+	if atomic.CompareAndSwapInt32(&exp.running, 1, 0) {
+		close(exp.stopCh)
+		exp.wg.Wait()
+		exp.localBuffer.Clear()
 	}
+}
+
+func (exp *localExpiration) Destroy() {
+	exp.Stop()
 	if exp.localBuffer != nil {
 		exp.localBuffer.Destroy()
 	}
@@ -285,6 +296,13 @@ func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 	}
 	batch.localDelFn = createLocalDelFunc(dt, db, batch.wb)
 	return batch
+}
+
+func (batch *localBatch) clear() {
+	if batch.wb != nil {
+		batch.wb.Clear()
+	}
+	batch.keys = batch.keys[:0]
 }
 
 func (batch *localBatch) destroy() {

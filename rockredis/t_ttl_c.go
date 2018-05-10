@@ -83,8 +83,10 @@ func (exp *consistencyExpiration) ttl(dataType byte, key []byte) (int64, error) 
 func (exp *consistencyExpiration) Start() {
 }
 
-func (exp *consistencyExpiration) Stop() {
+func (exp *consistencyExpiration) Destroy() {
+}
 
+func (exp *consistencyExpiration) Stop() {
 }
 
 func (exp *consistencyExpiration) delExpire(dataType byte, key []byte, wb *gorocksdb.WriteBatch) error {
