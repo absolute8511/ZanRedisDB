@@ -104,6 +104,7 @@ type expiration interface {
 	check(common.ExpiredDataBuffer, chan struct{}) error
 	Start()
 	Stop()
+	Destroy()
 }
 
 func (db *RockDB) expire(dataType byte, key []byte, duration int64) error {
