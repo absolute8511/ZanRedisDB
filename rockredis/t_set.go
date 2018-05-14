@@ -334,6 +334,11 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return db.sMembersN(key, int(num))
+}
+
+func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 	if num > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
@@ -344,7 +349,7 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 	start := sEncodeStartKey(table, rk)
 	stop := sEncodeStopKey(table, rk)
 
-	v := make([][]byte, 0, 16)
+	v := make([][]byte, 0, num)
 
 	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
@@ -357,9 +362,21 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 			return nil, err
 		}
 		v = append(v, m)
+		if len(v) >= num {
+			break
+		}
+	}
+	return v, nil
+}
+
+func (db *RockDB) SPop(ts int64, key []byte, count int) ([][]byte, error) {
+	vals, err := db.sMembersN(key, count)
+	if err != nil {
+		return nil, err
 	}
 
-	return v, nil
+	_, err = db.SRem(ts, key, vals...)
+	return vals, err
 }
 
 func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {

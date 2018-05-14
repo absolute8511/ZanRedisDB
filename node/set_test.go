@@ -24,7 +24,7 @@ func TestKVNode_setCommand(t *testing.T) {
 		{"sismember", buildCommand([][]byte{[]byte("sismember"), testKey, testMember})},
 		{"smembers", buildCommand([][]byte{[]byte("smembers"), testKey})},
 		{"scard", buildCommand([][]byte{[]byte("scard"), testKey})},
-		{"srem", buildCommand([][]byte{[]byte("srem"), testKey, testMember})},
+		{"spop", buildCommand([][]byte{[]byte("spop"), testKey})},
 		{"srem", buildCommand([][]byte{[]byte("srem"), testKey, testMember})},
 		{"sclear", buildCommand([][]byte{[]byte("sclear"), testKey})},
 	}
