@@ -67,6 +67,7 @@ type RockOptions struct {
 	UseSharedCache                 bool   `json:"use_shared_cache,omitempty"`
 	UseSharedRateLimiter           bool   `json:"use_shared_rate_limiter,omitempty"`
 	DisableWAL                     bool   `json:"disable_wal,omitempty"`
+	DisableMergeCounter            bool   `json:"disable_merge_counter,omitempty"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -362,7 +363,13 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetMaxManifestFileSize(cfg.MaxMainifestFileSize)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
-	opts.SetUint64AddMergeOperator()
+	if !cfg.DisableMergeCounter {
+		if cfg.EnableTableCounter {
+			opts.SetUint64AddMergeOperator()
+		}
+	} else {
+		cfg.EnableTableCounter = false
+	}
 
 	db := &RockDB{
 		cfg:              cfg,
