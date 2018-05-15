@@ -1472,6 +1472,44 @@ func TestSet(t *testing.T) {
 	} else if len(n) != 4 {
 		t.Fatal(n)
 	}
+	if val, err := goredis.String(c.Do("spop", key2)); err != nil {
+		t.Fatal(err)
+	} else if val != "0" {
+		t.Fatal(val)
+	}
+	if val, err := goredis.String(c.Do("spop", key2)); err != nil {
+		t.Fatal(err)
+	} else if val != "1" {
+		t.Fatal(val)
+	}
+	if val, err := goredis.Values(c.Do("spop", key2, 4)); err != nil {
+		t.Fatal(err)
+	} else if len(val) != 2 {
+		t.Fatal(val)
+	}
+	if n, err := goredis.Values(c.Do("smembers", key2)); err != nil {
+		t.Fatal(err)
+	} else if len(n) != 0 {
+		t.Fatal(n)
+	}
+	// empty spop single will return nil, but spop multi will return empty array
+	if val, err := c.Do("spop", key2); err != nil {
+		t.Fatal(err)
+	} else if val != nil {
+		t.Fatal(val)
+	}
+	if val, err := goredis.Values(c.Do("spop", key2, 2)); err != nil {
+		t.Fatal(err)
+	} else if val == nil {
+		t.Fatal(val)
+	} else if len(val) != 0 {
+		t.Fatal(val)
+	}
+	if n, err := goredis.Int(c.Do("sadd", key2, 0, 1, 2, 3)); err != nil {
+		t.Fatal(err)
+	} else if n != 4 {
+		t.Fatal(n)
+	}
 
 	if n, err := goredis.Int(c.Do("sclear", key2)); err != nil {
 		t.Fatal(err)
@@ -1510,6 +1548,13 @@ func TestSetErrorParams(t *testing.T) {
 	}
 
 	if _, err := c.Do("smembers", key, key); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("spop"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+	if _, err := c.Do("spop", key, "0"); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
 

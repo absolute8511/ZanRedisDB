@@ -168,3 +168,38 @@ func TestSKeyExists(t *testing.T) {
 	}
 
 }
+
+func TestDBSPop(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test:spop_test")
+	if vals, err := db.SPop(0, key, 1); err != nil {
+		t.Fatal(err.Error())
+	} else if len(vals) != 0 {
+		t.Fatal("invalid value ", vals)
+	}
+
+	db.SAdd(0, key, []byte("hello"), []byte("world"), []byte("hello2"))
+
+	if vals, err := db.SPop(0, key, 1); err != nil {
+		t.Fatal(err.Error())
+	} else if len(vals) != 1 {
+		t.Fatal("invalid value ", vals)
+	}
+
+	if vals, err := db.SPop(0, key, 3); err != nil {
+		t.Fatal(err.Error())
+	} else if len(vals) != 2 {
+		t.Fatal("invalid value ", vals)
+	}
+
+	if vals, err := db.SPop(0, key, 1); err != nil {
+		t.Fatal(err.Error())
+	} else if len(vals) != 0 {
+		t.Fatal("invalid value ", vals)
+	}
+	if vals, _ := db.SMembers(key); len(vals) != 0 {
+		t.Errorf("should empty set")
+	}
+}

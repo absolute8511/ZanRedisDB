@@ -50,6 +50,7 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	kvsm.router.RegisterInternal("srem", kvsm.localSrem)
 	kvsm.router.RegisterInternal("sclear", kvsm.localSclear)
 	kvsm.router.RegisterInternal("smclear", kvsm.localSmclear)
+	kvsm.router.RegisterInternal("spop", kvsm.localSpop)
 	// expire
 	kvsm.router.RegisterInternal("setex", kvsm.localSetexCommand)
 	kvsm.router.RegisterInternal("expire", kvsm.localExpireCommand)
@@ -141,6 +142,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "scard", wrapReadCommandK(nd.scardCommand))
 	nd.router.Register(false, "sismember", wrapReadCommandKSubkey(nd.sismemberCommand))
 	nd.router.Register(false, "smembers", wrapReadCommandK(nd.smembersCommand))
+	nd.router.Register(true, "spop", nd.spopCommand)
 	nd.router.Register(true, "sadd", wrapWriteCommandKSubkeySubkey(nd, nd.saddCommand))
 	nd.router.Register(true, "srem", wrapWriteCommandKSubkeySubkey(nd, nd.sremCommand))
 	nd.router.Register(true, "sclear", wrapWriteCommandK(nd, nd.sclearCommand))
@@ -224,6 +226,7 @@ func (kvsm *kvStoreSM) registerConflictHandlers() {
 	// set
 	kvsm.cRouter.Register("sadd", kvsm.checkSetConflict)
 	kvsm.cRouter.Register("srem", kvsm.checkSetConflict)
+	kvsm.cRouter.Register("spop", kvsm.checkSetConflict)
 	// expire
 	kvsm.cRouter.Register("setex", kvsm.checkKVConflict)
 	kvsm.cRouter.Register("expire", kvsm.checkKVConflict)

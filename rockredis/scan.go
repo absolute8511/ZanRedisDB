@@ -293,6 +293,7 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
+	it.NoTimestamp(HashType)
 	defer it.Close()
 
 	for i := 0; it.Valid() && i < count; it.Next() {
