@@ -1477,15 +1477,33 @@ func TestSet(t *testing.T) {
 	} else if val != "0" {
 		t.Fatal(val)
 	}
-	if val, err := goredis.MultiBulk(c.Do("spop", key2, 4)); err != nil {
+	if val, err := goredis.String(c.Do("spop", key2)); err != nil {
 		t.Fatal(err)
-	} else if len(val) != 3 {
+	} else if val != "1" {
 		t.Fatal(val)
 	}
-	if n, err := goredis.MultiBulk(c.Do("smembers", key2)); err != nil {
+	if val, err := goredis.Values(c.Do("spop", key2, 4)); err != nil {
+		t.Fatal(err)
+	} else if len(val) != 2 {
+		t.Fatal(val)
+	}
+	if n, err := goredis.Values(c.Do("smembers", key2)); err != nil {
 		t.Fatal(err)
 	} else if len(n) != 0 {
 		t.Fatal(n)
+	}
+	// empty spop single will return nil, but spop multi will return empty array
+	if val, err := c.Do("spop", key2); err != nil {
+		t.Fatal(err)
+	} else if val != nil {
+		t.Fatal(val)
+	}
+	if val, err := goredis.Values(c.Do("spop", key2, 2)); err != nil {
+		t.Fatal(err)
+	} else if val == nil {
+		t.Fatal(val)
+	} else if len(val) != 0 {
+		t.Fatal(val)
 	}
 	if n, err := goredis.Int(c.Do("sadd", key2, 0, 1, 2, 3)); err != nil {
 		t.Fatal(err)
