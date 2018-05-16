@@ -10,6 +10,7 @@ import (
 type SyncedState struct {
 	SyncedTerm  uint64 `json:"synced_term,omitempty"`
 	SyncedIndex uint64 `json:"synced_index,omitempty"`
+	Timestamp   int64  `json:"timestamp,omitempty"`
 }
 
 func (ss *SyncedState) IsNewer(other *SyncedState) bool {
@@ -199,7 +200,7 @@ func (nd *KVNode) preprocessRemoteSnapApply(reqList BatchInternalRaftRequest) (b
 
 func (nd *KVNode) postprocessRemoteSnapApply(reqList BatchInternalRaftRequest,
 	isRemoteSnapTransfer bool, isRemoteSnapApply bool, retErr error) {
-	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex}
+	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex, Timestamp: reqList.Timestamp}
 	// for remote snapshot transfer, we need wait apply success before update sync state
 	if !isRemoteSnapTransfer {
 		if retErr != errIgnoredRemoteApply {
@@ -221,12 +222,12 @@ func (nd *KVNode) postprocessRemoteSnapApply(reqList BatchInternalRaftRequest,
 	}
 }
 
-func (nd *KVNode) SetRemoteClusterSyncedRaft(name string, term uint64, index uint64) {
-	nd.remoteSyncedStates.UpdateState(name, SyncedState{SyncedTerm: term, SyncedIndex: index})
+func (nd *KVNode) SetRemoteClusterSyncedRaft(name string, term uint64, index uint64, ts int64) {
+	nd.remoteSyncedStates.UpdateState(name, SyncedState{SyncedTerm: term, SyncedIndex: index, Timestamp: ts})
 }
-func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64) {
+func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64, int64) {
 	state, _ := nd.remoteSyncedStates.GetState(name)
-	return state.SyncedTerm, state.SyncedIndex
+	return state.SyncedTerm, state.SyncedIndex, state.Timestamp
 }
 
 func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index uint64) error {

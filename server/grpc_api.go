@@ -37,9 +37,10 @@ func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq)
 	if kv == nil || !kv.IsReady() {
 		return &rsp, errRaftGroupNotReady
 	}
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, ts := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	rsp.Term = term
 	rsp.Index = index
+	rsp.Timestamp = ts
 	return &rsp, nil
 }
 
@@ -59,7 +60,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		if r.Type != syncerpb.EntryNormalRaw {
 			// unsupported other type
 		}
-		term, index := kv.Node.GetRemoteClusterSyncedRaft(r.ClusterName)
+		term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(r.ClusterName)
 		if r.Term < term || r.Index <= index {
 			sLog.Infof("raft log already applied : %v, synced: %v-%v", r.String(), term, index)
 			continue
@@ -90,7 +91,7 @@ func (s *Server) NotifyTransferSnap(ctx context.Context, req *syncerpb.RaftApply
 		rpcErr.ErrMsg = errRaftGroupNotReady.Error()
 		return &rpcErr, errRaftGroupNotReady
 	}
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	if req.Term < term || req.Index <= index {
 		sLog.Infof("raft already applied : %v, synced: %v-%v", req.String(), term, index)
 		return &rpcErr, nil
@@ -108,7 +109,7 @@ func (s *Server) NotifyApplySnap(ctx context.Context, req *syncerpb.RaftApplySna
 		rpcErr.ErrMsg = errRaftGroupNotReady.Error()
 		return &rpcErr, errRaftGroupNotReady
 	}
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	if req.Term < term || req.Index <= index {
 		sLog.Infof("raft already applied : %v, synced: %v-%v", req.String(), term, index)
 		return &rpcErr, nil
@@ -133,7 +134,7 @@ func (s *Server) GetApplySnapStatus(ctx context.Context, req *syncerpb.RaftApply
 		return &status, errRaftGroupNotReady
 	}
 	// if another is transferring, just return status for waiting
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	if term >= req.Term && index >= req.Index {
 		status.Status = syncerpb.ApplySuccess
 	} else {

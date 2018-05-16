@@ -390,7 +390,7 @@ func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps h
 		if v == nil || !v.IsReady() {
 			continue
 		}
-		v.Node.SetRemoteClusterSyncedRaft(fromCluster, sync.Term, sync.Index)
+		v.Node.SetRemoteClusterSyncedRaft(fromCluster, sync.Term, sync.Index, sync.Timestamp)
 		sLog.Infof("set syncer index to: %v ", sync)
 	}
 	return nil, nil

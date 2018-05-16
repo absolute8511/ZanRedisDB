@@ -461,7 +461,7 @@ func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string)
 		if leaderOnly && !n.Node.IsLead() {
 			continue
 		}
-		term, index := n.Node.GetRemoteClusterSyncedRaft(srcClusterName)
+		term, index, ts := n.Node.GetRemoteClusterSyncedRaft(srcClusterName)
 		if term == 0 && index == 0 {
 			continue
 		}
@@ -470,6 +470,7 @@ func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string)
 		s.IsLeader = n.Node.IsLead()
 		s.Term = term
 		s.Index = index
+		s.Timestamp = ts
 		nsStats = append(nsStats, s)
 	}
 	nsm.mutex.RUnlock()
