@@ -383,6 +383,7 @@ func (s *RemoteLogSender) getRemoteSyncedRaftOnce() (SyncedState, error) {
 	}
 	state.SyncedTerm = rsp.Term
 	state.SyncedIndex = rsp.Index
+	state.Timestamp = rsp.Timestamp
 	nodeLog.Debugf("remote(%v) raft group %v synced : %v", addr, s.grpName, state)
 	return state, nil
 }

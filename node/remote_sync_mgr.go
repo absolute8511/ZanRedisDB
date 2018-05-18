@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 type SyncedState struct {
@@ -235,6 +237,16 @@ func (nd *KVNode) SetRemoteClusterSyncedRaft(name string, term uint64, index uin
 func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64, int64) {
 	state, _ := nd.remoteSyncedStates.GetState(name)
 	return state.SyncedTerm, state.SyncedIndex, state.Timestamp
+}
+
+func (nd *KVNode) GetLogSyncStatsInSyncLearner() (*common.LogSyncStats, *common.LogSyncStats) {
+	logSyncer, ok := nd.sm.(*logSyncerSM)
+	if !ok {
+		return nil, nil
+	}
+
+	recv, sync := logSyncer.GetLogSyncStats()
+	return &recv, &sync
 }
 
 func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index uint64) error {

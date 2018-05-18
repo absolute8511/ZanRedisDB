@@ -69,7 +69,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		// raft timestamp should be the same with the real raft request in data
 		logStart := r.RaftTimestamp
 		syncNetLatency := receivedTs.UnixNano() - logStart
-		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / 1000)
+		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / time.Microsecond.Nanoseconds())
 		err := kv.Node.ProposeRawAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
 		if err != nil {
 			sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
@@ -78,7 +78,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 			return &rpcErr, nil
 		}
 		syncLatency := time.Now().UnixNano() - logStart
-		syncClusterTotalStats.UpdateLatencyStats(syncLatency / 1000)
+		syncClusterTotalStats.UpdateLatencyStats(syncLatency / time.Microsecond.Nanoseconds())
 	}
 	return &rpcErr, nil
 }
