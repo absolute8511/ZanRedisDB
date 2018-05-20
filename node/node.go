@@ -887,46 +887,63 @@ func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.Conf
 	return removeSelf, changed, err
 }
 
+func (nd *KVNode) applyRaftRequest(reqList BatchInternalRaftRequest, term, index uint64, isReplaying bool) bool {
+	forceBackup := false
+	if len(reqList.Reqs) != int(reqList.ReqNum) {
+		nd.rn.Errorf("request check failed %v, real len:%v",
+			reqList, len(reqList.Reqs))
+	}
+
+	isRemoteSnapTransfer := false
+	isRemoteSnapApply := false
+	if reqList.Type == FromClusterSyncer {
+		isApplied := nd.isAlreadyApplied(reqList)
+		// check if retrying duplicate req, we can just ignore old retry
+		if isApplied {
+			nd.rn.Infof("request %v-%v ignored since older than synced", reqList.OrigTerm, reqList.OrigIndex)
+			for _, req := range reqList.Reqs {
+				if req.Header.ID > 0 && nd.w.IsRegistered(req.Header.ID) {
+					nd.w.Trigger(req.Header.ID, nil)
+				}
+			}
+			// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
+			if reqList.ReqId > 0 {
+				nd.w.Trigger(reqList.ReqId, nil)
+			}
+			return false
+		}
+		isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
+	}
+	var retErr error
+	forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, reqList, term, index, nd.stopChan)
+	if reqList.Type == FromClusterSyncer {
+		nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
+	}
+	return forceBackup
+}
+
 func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 	forceBackup := false
 	if evnt.Data != nil {
 		// try redis command
-		var reqList BatchInternalRaftRequest
-		parseErr := reqList.Unmarshal(evnt.Data)
+		var breqList BatchInternalRaftRequest
+		parseErr := breqList.Unmarshal(evnt.Data)
 		if parseErr != nil {
-			nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
+			nd.rn.Errorf("parse request failed: %v, data len %v, entry: %v, raw:%v",
 				parseErr, len(evnt.Data), evnt,
 				evnt.String())
 		}
-		if len(reqList.Reqs) != int(reqList.ReqNum) {
-			nd.rn.Infof("request check failed %v, real len:%v",
-				reqList, len(reqList.Reqs))
+		if len(breqList.BatchedReqs) > 0 && len(breqList.Reqs) > 0 {
+			nd.rn.Errorf("batching in batch request should not have reqs: %v",
+				breqList.String())
+			return false
 		}
-
-		isRemoteSnapTransfer := false
-		isRemoteSnapApply := false
-		if reqList.Type == FromClusterSyncer {
-			isApplied := nd.isAlreadyApplied(reqList)
-			// check if retrying duplicate req, we can just ignore old retry
-			if isApplied {
-				nd.rn.Infof("request %v-%v ignored since older than synced", reqList.OrigTerm, reqList.OrigIndex)
-				for _, req := range reqList.Reqs {
-					if req.Header.ID > 0 && nd.w.IsRegistered(req.Header.ID) {
-						nd.w.Trigger(req.Header.ID, nil)
-					}
-				}
-				// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
-				if reqList.ReqId > 0 {
-					nd.w.Trigger(reqList.ReqId, nil)
-				}
-				return false
+		if len(breqList.BatchedReqs) > 0 {
+			for _, reqList := range breqList.BatchedReqs {
+				forceBackup = nd.applyRaftRequest(*reqList, evnt.Term, evnt.Index, isReplaying)
 			}
-			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
-		}
-		var retErr error
-		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, reqList, evnt.Term, evnt.Index, nd.stopChan)
-		if reqList.Type == FromClusterSyncer {
-			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
+		} else {
+			forceBackup = nd.applyRaftRequest(breqList, evnt.Term, evnt.Index, isReplaying)
 		}
 	}
 	return forceBackup
