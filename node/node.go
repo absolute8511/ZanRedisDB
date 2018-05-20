@@ -494,7 +494,7 @@ func (nd *KVNode) IsWriteReady() bool {
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(nd.rn.config.Replicator/2)
 }
 
-func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
+func (nd *KVNode) ProposeRawSyncerReqAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
 	var reqList BatchInternalRaftRequest
 	err := reqList.Unmarshal(buffer)
 	if err != nil {
@@ -504,14 +504,18 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nd.rn.Infof("propose raw (%v): %v at (%v-%v)", len(buffer), buffer, term, index)
 	}
-	reqList.Type = FromClusterSyncer
-	reqList.ReqId = nd.rn.reqIDGen.Next()
 	reqList.OrigTerm = term
 	reqList.OrigIndex = index
 	if reqList.Timestamp != raftTs {
 		return fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
 	}
+	return nd.ProposeSyncerReqAndWait(buffer, reqList)
+}
 
+func (nd *KVNode) ProposeSyncerReqAndWait(buffer []byte, reqList BatchInternalRaftRequest) error {
+	var err error
+	reqList.Type = FromClusterSyncer
+	reqList.ReqId = nd.rn.reqIDGen.Next()
 	for _, req := range reqList.Reqs {
 		// re-generate the req id to override the id from log
 		req.Header.ID = nd.rn.reqIDGen.Next()
@@ -534,9 +538,6 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	start := time.Now()
 	ch := nd.w.Register(reqList.ReqId)
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
-	if nodeLog.Level() >= common.LOG_DETAIL {
-		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
-	}
 	defer cancel()
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
 	if err != nil {

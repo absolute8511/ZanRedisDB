@@ -280,6 +280,8 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 	reqList.OrigCluster = name
 	reqList.ReqNum = 1
 	reqList.Timestamp = time.Now().UnixNano()
+	reqList.OrigTerm = term
+	reqList.OrigIndex = index
 	p := &customProposeData{
 		ProposeOp:   ProposeOp_ApplyRemoteSnap,
 		NeedBackup:  true,
@@ -299,8 +301,7 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		Data:   d,
 	}
 	reqList.Reqs = append(reqList.Reqs, &raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
+	err := nd.ProposeSyncerReqAndWait(nil, reqList)
 	if err != nil {
 		nd.rn.Infof("cluster %v applying snap %v-%v failed", name, term, index)
 		// just wait next retry
@@ -333,6 +334,8 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 	reqList.OrigCluster = name
 	reqList.ReqNum = 1
 	reqList.Timestamp = time.Now().UnixNano()
+	reqList.OrigTerm = term
+	reqList.OrigIndex = index
 
 	h := &RequestHeader{
 		ID:       0,
@@ -343,8 +346,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 		Data:   d,
 	}
 	reqList.Reqs = append(reqList.Reqs, &raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
+	err := nd.ProposeSyncerReqAndWait(nil, reqList)
 	if err != nil {
 		nd.rn.Infof("cluster %v applying transfer snap %v failed", name, ss)
 	} else {

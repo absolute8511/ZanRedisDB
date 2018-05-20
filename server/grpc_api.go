@@ -10,6 +10,7 @@ import (
 	context "golang.org/x/net/context"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/syncerpb"
 	"google.golang.org/grpc"
 )
@@ -47,6 +48,10 @@ func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq)
 func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*syncerpb.RpcErr, error) {
 	var rpcErr syncerpb.RpcErr
 	receivedTs := time.Now()
+	// using batch in batch only when all the nodes are upgraded to support applying batch in batch
+	//
+	babs := make(map[string]*node.BatchInternalRaftRequest)
+	useBatchInBatch := len(reqs.RaftLog) > 1
 	for _, r := range reqs.RaftLog {
 		if sLog.Level() >= common.LOG_DETAIL {
 			sLog.Debugf("applying raft log from remote cluster syncer: %v", r.String())
@@ -70,15 +75,62 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		logStart := r.RaftTimestamp
 		syncNetLatency := receivedTs.UnixNano() - logStart
 		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / time.Microsecond.Nanoseconds())
-		err := kv.Node.ProposeRawAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
+		if !useBatchInBatch {
+			err := kv.Node.ProposeRawSyncerReqAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
+			if err != nil {
+				sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
+				rpcErr.ErrCode = http.StatusInternalServerError
+				rpcErr.ErrMsg = err.Error()
+				return &rpcErr, nil
+			}
+			n := time.Now().UnixNano()
+			syncLatency := n - r.RaftTimestamp
+			syncClusterTotalStats.UpdateLatencyStats(syncLatency / time.Microsecond.Nanoseconds())
+			break
+		}
+		var breq node.BatchInternalRaftRequest
+		err := breq.Unmarshal(r.Data)
 		if err != nil {
-			sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
 			rpcErr.ErrCode = http.StatusInternalServerError
 			rpcErr.ErrMsg = err.Error()
 			return &rpcErr, nil
 		}
-		syncLatency := time.Now().UnixNano() - logStart
-		syncClusterTotalStats.UpdateLatencyStats(syncLatency / time.Microsecond.Nanoseconds())
+		bab, ok := babs[r.RaftGroupName]
+		if !ok {
+			var newReq node.BatchInternalRaftRequest
+			newReq.BatchedReqs = append(newReq.BatchedReqs, &breq)
+			newReq.OrigCluster = breq.OrigCluster
+			newReq.OrigTerm = r.Term
+			newReq.OrigIndex = r.Index
+			newReq.Timestamp = r.RaftTimestamp
+			babs[r.RaftGroupName] = &newReq
+		} else {
+			bab.BatchedReqs = append(bab.BatchedReqs, &breq)
+			bab.OrigCluster = breq.OrigCluster
+			bab.OrigTerm = r.Term
+			bab.OrigIndex = r.Index
+			bab.Timestamp = r.RaftTimestamp
+		}
+	}
+	for name, reqs := range babs {
+		kv := s.GetNamespaceFromFullName(name)
+		if kv == nil || !kv.IsReady() {
+			rpcErr.ErrCode = http.StatusNotFound
+			rpcErr.ErrMsg = errRaftGroupNotReady.Error()
+			return &rpcErr, nil
+		}
+		err := kv.Node.ProposeSyncerReqAndWait(nil, *reqs)
+		if err != nil {
+			sLog.Infof("propose failed: %v, err: %v", reqs.String(), err.Error())
+			rpcErr.ErrCode = http.StatusInternalServerError
+			rpcErr.ErrMsg = err.Error()
+			return &rpcErr, nil
+		}
+		n := time.Now().UnixNano()
+		for _, r := range reqs.BatchedReqs {
+			syncLatency := n - r.Timestamp
+			syncClusterTotalStats.UpdateLatencyStats(syncLatency / time.Microsecond.Nanoseconds())
+		}
 	}
 	return &rpcErr, nil
 }
