@@ -10,6 +10,7 @@ import (
 	context "golang.org/x/net/context"
 
 	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/ZanRedisDB/syncerpb"
 	"google.golang.org/grpc"
 )
@@ -47,8 +48,14 @@ func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq)
 func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*syncerpb.RpcErr, error) {
 	var rpcErr syncerpb.RpcErr
 	receivedTs := time.Now()
+	// can we batch here?
+	// It may cause term-index duplicate since we only check the last request term-index.
+	// If some retry happening, we may redo the batched for 10~15, while we already did the batched for 10~12.
+	newReqList := make(map[string]node.BatchInternalRaftRequest)
+	batchedTs := make([]int64, 0, len(reqs.RaftLog))
+	canBatched := len(reqs.RaftLog) > 1
 	for _, r := range reqs.RaftLog {
-		if sLog.Level() >= common.LOG_DETAIL {
+		if sLog.Level() > common.LOG_DETAIL {
 			sLog.Debugf("applying raft log from remote cluster syncer: %v", r.String())
 		}
 		kv := s.GetNamespaceFromFullName(r.RaftGroupName)
@@ -70,14 +77,62 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		logStart := r.RaftTimestamp
 		syncNetLatency := receivedTs.UnixNano() - logStart
 		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / time.Microsecond.Nanoseconds())
-		err := kv.Node.ProposeRawAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
+
+		batchedTs = append(batchedTs, r.RaftTimestamp)
+		if !canBatched {
+			err := kv.Node.ProposeRawAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
+			if err != nil {
+				sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
+				rpcErr.ErrCode = http.StatusInternalServerError
+				rpcErr.ErrMsg = err.Error()
+				return &rpcErr, nil
+			}
+			break
+		}
+		var reqList node.BatchInternalRaftRequest
+		err := reqList.Unmarshal(r.Data)
 		if err != nil {
-			sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
+			sLog.Infof("unmarshal request failed: %v, err: %v", r.String(), err.Error())
 			rpcErr.ErrCode = http.StatusInternalServerError
 			rpcErr.ErrMsg = err.Error()
 			return &rpcErr, nil
 		}
-		syncLatency := time.Now().UnixNano() - logStart
+		reqList.OrigTerm = r.Term
+		reqList.OrigIndex = r.Index
+		reqList.Timestamp = r.RaftTimestamp
+
+		oldReq, ok := newReqList[r.RaftGroupName]
+		if !ok {
+			newReqList[r.RaftGroupName] = reqList
+		} else {
+			oldReq.Reqs = append(oldReq.Reqs, reqList.Reqs...)
+			oldReq.ReqNum = int32(len(oldReq.Reqs))
+			oldReq.OrigCluster = reqList.OrigCluster
+			oldReq.OrigTerm = reqList.OrigTerm
+			oldReq.OrigIndex = reqList.OrigIndex
+			oldReq.Timestamp = reqList.Timestamp
+			newReqList[r.RaftGroupName] = oldReq
+		}
+	}
+
+	for name, v := range newReqList {
+		kv := s.GetNamespaceFromFullName(name)
+		if kv == nil || !kv.IsReady() {
+			rpcErr.ErrCode = http.StatusNotFound
+			rpcErr.ErrMsg = errRaftGroupNotReady.Error()
+			return &rpcErr, nil
+		}
+		err := kv.Node.ProposeRawReqAndWait(v)
+		if err != nil {
+			sLog.Infof("propose failed: %v, err: %v", v.String(), err.Error())
+			rpcErr.ErrCode = http.StatusInternalServerError
+			rpcErr.ErrMsg = err.Error()
+			return &rpcErr, nil
+		}
+	}
+	doneTs := time.Now().UnixNano()
+	for _, ts := range batchedTs {
+		syncLatency := doneTs - ts
 		syncClusterTotalStats.UpdateLatencyStats(syncLatency / time.Microsecond.Nanoseconds())
 	}
 	return &rpcErr, nil

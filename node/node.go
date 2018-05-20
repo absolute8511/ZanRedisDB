@@ -504,41 +504,31 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nd.rn.Infof("propose raw (%v): %v at (%v-%v)", len(buffer), buffer, term, index)
 	}
-	reqList.Type = FromClusterSyncer
-	reqList.ReqId = nd.rn.reqIDGen.Next()
-	reqList.OrigTerm = term
-	reqList.OrigIndex = index
 	if reqList.Timestamp != raftTs {
 		return fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
 	}
+	reqList.OrigTerm = term
+	reqList.OrigIndex = index
+	return nd.ProposeRawReqAndWait(reqList)
+}
+
+func (nd *KVNode) ProposeRawReqAndWait(reqList BatchInternalRaftRequest) error {
+	reqList.Type = FromClusterSyncer
+	reqList.ReqId = nd.rn.reqIDGen.Next()
 
 	for _, req := range reqList.Reqs {
 		// re-generate the req id to override the id from log
 		req.Header.ID = nd.rn.reqIDGen.Next()
 	}
-	dataLen := reqList.Size()
-	if dataLen <= len(buffer) {
-		n, err := reqList.MarshalTo(buffer[:dataLen])
-		if err != nil {
-			return err
-		}
-		if n != dataLen {
-			return errors.New("marshal length mismatch")
-		}
-	} else {
-		buffer, err = reqList.Marshal()
-		if err != nil {
-			return err
-		}
+	buffer, err := reqList.Marshal()
+	if err != nil {
+		return err
 	}
 	start := time.Now()
 	ch := nd.w.Register(reqList.ReqId)
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
-	if nodeLog.Level() >= common.LOG_DETAIL {
-		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
-	}
 	defer cancel()
-	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
+	err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
 	if err != nil {
 		return err
 	}
