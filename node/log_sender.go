@@ -181,19 +181,19 @@ func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 	}
 
 	in := &syncerpb.RaftReqs{RaftLog: raftLogs}
-	if nodeLog.Level() >= common.LOG_DETAIL {
-		nodeLog.Debugf("sending log : %v", addr, in.String())
+	if nodeLog.Level() > common.LOG_DETAIL {
+		nodeLog.Debugf("sending(%v) log : %v", addr, in.String())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sendLogTimeout)
 	defer cancel()
-	rpcErr, err := c.ApplyRaftReqs(ctx, in)
+	rpcErr, err := c.ApplyRaftReqs(ctx, in, grpc.MaxCallSendMsgSize(256<<20))
 	if err != nil {
-		nodeLog.Infof("sending(%v) log failed: %v,  %v", addr, err.Error(), in.String())
+		nodeLog.Infof("sending(%v) log failed: %v", addr, err.Error())
 		return err
 	}
 	if rpcErr != nil && rpcErr.ErrCode != http.StatusOK &&
 		rpcErr.ErrCode != 0 {
-		nodeLog.Infof("sending(%v) log failed: %v,  %v", addr, rpcErr, in.String())
+		nodeLog.Infof("sending(%v) log failed: %v", addr, rpcErr)
 		return errors.New(rpcErr.String())
 	}
 	return nil

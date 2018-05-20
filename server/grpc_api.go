@@ -62,7 +62,8 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		}
 		term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(r.ClusterName)
 		if r.Term < term || r.Index <= index {
-			sLog.Infof("raft log already applied : %v, synced: %v-%v", r.String(), term, index)
+			sLog.Infof("%v raft log already applied : %v-%v, synced: %v-%v",
+				r.RaftGroupName, r.Term, r.Index, term, index)
 			continue
 		}
 
@@ -157,7 +158,10 @@ func (s *Server) serveGRPCAPI(port int, stopC <-chan struct{}) error {
 		return err
 	}
 	sLog.Infof("begin grpc server at port: %v", port)
-	rpcServer := grpc.NewServer()
+	rpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(256<<20),
+		grpc.MaxSendMsgSize(256<<20),
+	)
 	syncerpb.RegisterCrossClusterAPIServer(rpcServer, s)
 	go func() {
 		<-stopC
