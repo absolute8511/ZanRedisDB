@@ -20,7 +20,7 @@ func EnableForTest() {
 }
 
 const (
-	logSendBufferLen = 100
+	logSendBufferLen = 200
 )
 
 var syncerNormalInit = false

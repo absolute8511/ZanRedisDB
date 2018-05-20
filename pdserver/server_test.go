@@ -428,7 +428,7 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 						}
 					}
 					assert.True(t, found, "should found myself in learners")
-					_, remoteIndex := remoteNode.Node.GetRemoteClusterSyncedRaft(TestClusterName)
+					_, remoteIndex, _ := remoteNode.Node.GetRemoteClusterSyncedRaft(TestClusterName)
 					learnerCI := nsNode.Node.GetCommittedIndex()
 					t.Logf("commit %v , current remote :%v, learner: %v", commitID, remoteIndex, learnerCI)
 					if remoteIndex >= commitID && learnerCI == remoteIndex {
