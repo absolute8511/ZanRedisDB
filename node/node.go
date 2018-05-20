@@ -537,7 +537,7 @@ func (nd *KVNode) ProposeSyncerReqAndWait(buffer []byte, reqList BatchInternalRa
 	}
 	start := time.Now()
 	ch := nd.w.Register(reqList.ReqId)
-	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout*time.Duration(2+len(reqList.BatchedReqs)))
 	defer cancel()
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
 	if err != nil {
