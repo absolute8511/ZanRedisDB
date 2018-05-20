@@ -20,7 +20,7 @@ func EnableForTest() {
 }
 
 const (
-	logSendBufferLen = 200
+	logSendBufferLen = 64
 )
 
 var syncerNormalInit = false
@@ -264,7 +264,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			default:
 				syncedTerm, syncedIndex, syncedTs := sm.getSyncedState()
 				sm.Errorf("failed to send raft log to remote: %v, %v, current: %v-%v-%v",
-					err, raftLogs, syncedTerm, syncedIndex, syncedTs)
+					err, len(raftLogs), syncedTerm, syncedIndex, syncedTs)
 			}
 			continue
 		}

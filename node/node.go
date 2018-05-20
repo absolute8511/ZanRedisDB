@@ -397,7 +397,7 @@ func (nd *KVNode) handleProposeReq() {
 	}()
 	for {
 		pc := nd.reqProposeC
-		if len(reqList.Reqs) >= proposeQueueLen*4 {
+		if len(reqList.Reqs) >= proposeQueueLen*2 {
 			pc = nil
 		}
 		select {
