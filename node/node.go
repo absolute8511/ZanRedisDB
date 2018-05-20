@@ -943,6 +943,9 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 			for _, reqList := range breqList.BatchedReqs {
 				forceBackup = nd.applyRaftRequest(*reqList, evnt.Term, evnt.Index, isReplaying)
 			}
+			if breqList.ReqId > 0 {
+				nd.w.Trigger(breqList.ReqId, nil)
+			}
 		} else {
 			forceBackup = nd.applyRaftRequest(breqList, evnt.Term, evnt.Index, isReplaying)
 		}
