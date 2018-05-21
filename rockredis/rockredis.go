@@ -361,6 +361,7 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	opts.SetMaxLogFileSize(1024 * 1024 * 32)
 	opts.SetLogFileTimeToRoll(3600 * 24 * 3)
 	opts.SetMaxManifestFileSize(cfg.MaxMainifestFileSize)
+	opts.SetMaxSuccessiveMerges(1000)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
 	// rate limiter need to reduce the compaction io
 	if !cfg.DisableMergeCounter {

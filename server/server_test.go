@@ -328,18 +328,24 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 
 	node.SetSyncerOnly(false)
 	key := "default:test-cluster:a"
+	key2 := "default:test-cluster:a2"
 	keySnapTest := "default:test-cluster:a-snaptest"
 	rsp, err := goredis.String(c.Do("set", key, "1234"))
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
+	rsp, err = goredis.String(c.Do("set", key2, "a2-1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, rsp)
+	writeTs := time.Now().UnixNano()
 
 	node.SetSyncerOnly(true)
 	// wait raft log synced
 	time.Sleep(time.Second)
 	leaderci := leaderNode.Node.GetCommittedIndex()
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
-	_, remoteIndex := remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
+	_, remoteIndex, ts := remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
+	assert.True(t, ts <= writeTs)
 
 	v, err := goredis.String(c.Do("get", key))
 	assert.Nil(t, err)
@@ -348,10 +354,14 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	v, err = goredis.String(remoteConn.Do("get", key))
 	assert.Nil(t, err)
 	assert.Equal(t, "1234", v)
+	v, err = goredis.String(remoteConn.Do("get", key2))
+	assert.Nil(t, err)
+	assert.Equal(t, "a2-1234", v)
 
 	node.SetSyncerOnly(false)
 	_, err = goredis.Int(c.Do("del", key))
 	assert.Nil(t, err)
+	writeTs2 := time.Now().UnixNano()
 
 	time.Sleep(time.Second * 3)
 	newci := leaderNode.Node.GetCommittedIndex()
@@ -359,8 +369,10 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	leaderci = newci
 	t.Logf("current leader commit: %v", leaderci)
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
-	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
+	_, remoteIndex, ts = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
+	assert.True(t, ts <= writeTs2)
+	assert.True(t, ts > writeTs)
 
 	n, err := goredis.Int(c.Do("exists", key))
 	assert.Nil(t, err)
@@ -392,6 +404,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 			assert.Equal(t, OK, rsp)
 		}
 	}
+	writeTs3 := time.Now().UnixNano()
 
 	time.Sleep(time.Second)
 	// restart will replay all logs
@@ -415,8 +428,10 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	t.Logf("current leader commit: %v", leaderci)
 
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
-	_, remoteIndex = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
+	_, remoteIndex, ts = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
+	assert.True(t, ts <= writeTs3)
+	assert.True(t, ts > writeTs2)
 	node.SetSyncerOnly(false)
 
 	v, err = goredis.String(c.Do("get", key))

@@ -37,9 +37,10 @@ func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq)
 	if kv == nil || !kv.IsReady() {
 		return &rsp, errRaftGroupNotReady
 	}
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, ts := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	rsp.Term = term
 	rsp.Index = index
+	rsp.Timestamp = ts
 	return &rsp, nil
 }
 
@@ -59,16 +60,17 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		if r.Type != syncerpb.EntryNormalRaw {
 			// unsupported other type
 		}
-		term, index := kv.Node.GetRemoteClusterSyncedRaft(r.ClusterName)
+		term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(r.ClusterName)
 		if r.Term < term || r.Index <= index {
-			sLog.Infof("raft log already applied : %v, synced: %v-%v", r.String(), term, index)
+			sLog.Infof("%v raft log already applied : %v-%v, synced: %v-%v",
+				r.RaftGroupName, r.Term, r.Index, term, index)
 			continue
 		}
 
 		// raft timestamp should be the same with the real raft request in data
 		logStart := r.RaftTimestamp
 		syncNetLatency := receivedTs.UnixNano() - logStart
-		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / 1000)
+		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / time.Microsecond.Nanoseconds())
 		err := kv.Node.ProposeRawAndWait(r.Data, r.Term, r.Index, r.RaftTimestamp)
 		if err != nil {
 			sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
@@ -77,7 +79,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 			return &rpcErr, nil
 		}
 		syncLatency := time.Now().UnixNano() - logStart
-		syncClusterTotalStats.UpdateLatencyStats(syncLatency / 1000)
+		syncClusterTotalStats.UpdateLatencyStats(syncLatency / time.Microsecond.Nanoseconds())
 	}
 	return &rpcErr, nil
 }
@@ -90,7 +92,7 @@ func (s *Server) NotifyTransferSnap(ctx context.Context, req *syncerpb.RaftApply
 		rpcErr.ErrMsg = errRaftGroupNotReady.Error()
 		return &rpcErr, errRaftGroupNotReady
 	}
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	if req.Term < term || req.Index <= index {
 		sLog.Infof("raft already applied : %v, synced: %v-%v", req.String(), term, index)
 		return &rpcErr, nil
@@ -108,7 +110,7 @@ func (s *Server) NotifyApplySnap(ctx context.Context, req *syncerpb.RaftApplySna
 		rpcErr.ErrMsg = errRaftGroupNotReady.Error()
 		return &rpcErr, errRaftGroupNotReady
 	}
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	if req.Term < term || req.Index <= index {
 		sLog.Infof("raft already applied : %v, synced: %v-%v", req.String(), term, index)
 		return &rpcErr, nil
@@ -133,7 +135,7 @@ func (s *Server) GetApplySnapStatus(ctx context.Context, req *syncerpb.RaftApply
 		return &status, errRaftGroupNotReady
 	}
 	// if another is transferring, just return status for waiting
-	term, index := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
+	term, index, _ := kv.Node.GetRemoteClusterSyncedRaft(req.ClusterName)
 	if term >= req.Term && index >= req.Index {
 		status.Status = syncerpb.ApplySuccess
 	} else {
@@ -156,7 +158,10 @@ func (s *Server) serveGRPCAPI(port int, stopC <-chan struct{}) error {
 		return err
 	}
 	sLog.Infof("begin grpc server at port: %v", port)
-	rpcServer := grpc.NewServer()
+	rpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(256<<20),
+		grpc.MaxSendMsgSize(256<<20),
+	)
 	syncerpb.RegisterCrossClusterAPIServer(rpcServer, s)
 	go func() {
 		<-stopC

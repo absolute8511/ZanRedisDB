@@ -107,4 +107,5 @@ message SyncedRaftReq {
 message SyncedRaftRsp {
     uint64 term = 1;
     uint64 index = 2;
+    int64 timestamp = 3;
 }

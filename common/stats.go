@@ -84,10 +84,11 @@ type NamespaceStats struct {
 }
 
 type LogSyncStats struct {
-	Name     string `json:"name"`
-	Term     uint64 `json:"term"`
-	Index    uint64 `json:"index"`
-	IsLeader bool   `json:"is_leader"`
+	Name      string `json:"name"`
+	Term      uint64 `json:"term"`
+	Index     uint64 `json:"index"`
+	Timestamp int64  `json:"timestamp"`
+	IsLeader  bool   `json:"is_leader"`
 }
 
 type ScanStats struct {

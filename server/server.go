@@ -200,6 +200,10 @@ func (s *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
 	return s.nsMgr.GetNamespaceNode(ns)
 }
 
+func (s *Server) GetLogSyncStatsInSyncLearner() ([]common.LogSyncStats, []common.LogSyncStats) {
+	return s.nsMgr.GetLogSyncStatsInSyncer()
+}
+
 func (s *Server) GetLogSyncStats(leaderOnly bool, srcClusterName string) []common.LogSyncStats {
 	return s.nsMgr.GetLogSyncStats(leaderOnly, srcClusterName)
 }

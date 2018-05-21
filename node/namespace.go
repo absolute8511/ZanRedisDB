@@ -448,6 +448,27 @@ func (nsm *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
 	return nsStats
 }
 
+func (nsm *NamespaceMgr) GetLogSyncStatsInSyncer() ([]common.LogSyncStats, []common.LogSyncStats) {
+	nsm.mutex.RLock()
+	nsRecvStats := make([]common.LogSyncStats, 0, len(nsm.kvNodes))
+	nsSyncStats := make([]common.LogSyncStats, 0, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		recvStats, syncStats := n.Node.GetLogSyncStatsInSyncLearner()
+		if recvStats == nil || syncStats == nil {
+			continue
+		}
+		recvStats.Name = k
+		syncStats.Name = k
+		nsRecvStats = append(nsRecvStats, *recvStats)
+		nsSyncStats = append(nsSyncStats, *syncStats)
+	}
+	nsm.mutex.RUnlock()
+	return nsRecvStats, nsSyncStats
+}
+
 func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string) []common.LogSyncStats {
 	if srcClusterName == "" {
 		return nil
@@ -461,7 +482,7 @@ func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string)
 		if leaderOnly && !n.Node.IsLead() {
 			continue
 		}
-		term, index := n.Node.GetRemoteClusterSyncedRaft(srcClusterName)
+		term, index, ts := n.Node.GetRemoteClusterSyncedRaft(srcClusterName)
 		if term == 0 && index == 0 {
 			continue
 		}
@@ -470,6 +491,7 @@ func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string)
 		s.IsLeader = n.Node.IsLead()
 		s.Term = term
 		s.Index = index
+		s.Timestamp = ts
 		nsStats = append(nsStats, s)
 	}
 	nsm.mutex.RUnlock()

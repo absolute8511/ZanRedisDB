@@ -86,14 +86,14 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 }
 
 func startRemoteSyncTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
-	return startTestCluster(t, TestRemoteSyncClusterName, pdRemoteHttpPort, n, 16345)
+	return startTestCluster(t, true, TestRemoteSyncClusterName, pdRemoteHttpPort, n, 16345)
 }
 
 func startDefaultTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
-	return startTestCluster(t, TestClusterName, pdHttpPort, n, 17345)
+	return startTestCluster(t, false, TestClusterName, pdHttpPort, n, 17345)
 }
 
-func startTestCluster(t *testing.T, clusterName string, pdPort string, n int, basePort int) (*Server, []dataNodeWrapper, string) {
+func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort string, n int, basePort int) (*Server, []dataNodeWrapper, string) {
 	serverAddrList := strings.Split(testEtcdServers, ",")
 	rootPath := serverAddrList[0] + "/v2/keys/" + cluster.ROOT_DIR + "/" + clusterName + "/?recursive=true"
 	if !strings.HasPrefix(rootPath, "http://") {
@@ -143,6 +143,7 @@ func startTestCluster(t *testing.T, clusterName string, pdPort string, n int, ba
 			GrpcAPIPort:          rpcPort,
 			TickMs:               100,
 			ElectionTick:         5,
+			SyncerWriteOnly:      syncOnly,
 		}
 		kv := ds.NewServer(kvOpts)
 		kv.Start()

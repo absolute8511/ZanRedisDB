@@ -20,7 +20,7 @@ func EnableForTest() {
 }
 
 const (
-	logSendBufferLen = 100
+	logSendBufferLen = 64
 )
 
 var syncerNormalInit = false
@@ -29,14 +29,17 @@ func SetSyncerNormalInit() {
 	syncerNormalInit = true
 }
 
+var syncLearnerRecvStats common.WriteStats
+var syncLearnerDoneStats common.WriteStats
+
 type logSyncerSM struct {
 	clusterInfo    common.IClusterInfo
 	fullNS         string
 	machineConfig  MachineConfig
 	ID             uint64
 	syncedCnt      int64
-	syncedIndex    uint64
-	syncedTerm     uint64
+	receivedState  SyncedState
+	syncedState    SyncedState
 	lgSender       *RemoteLogSender
 	stopping       int32
 	sendCh         chan *BatchInternalRaftRequest
@@ -96,13 +99,30 @@ func (sm *logSyncerSM) GetDBInternalStats() string {
 	return ""
 }
 
+func GetLogLatencyStats() (*common.WriteStats, *common.WriteStats) {
+	return syncLearnerRecvStats.Copy(), syncLearnerDoneStats.Copy()
+}
+
+func (sm *logSyncerSM) GetLogSyncStats() (common.LogSyncStats, common.LogSyncStats) {
+	var recvStats common.LogSyncStats
+	var syncStats common.LogSyncStats
+	syncStats.Name = sm.fullNS
+	syncStats.Term, syncStats.Index, syncStats.Timestamp = sm.getSyncedState()
+	recvStats.Term = atomic.LoadUint64(&sm.receivedState.SyncedTerm)
+	recvStats.Index = atomic.LoadUint64(&sm.receivedState.SyncedIndex)
+	recvStats.Timestamp = atomic.LoadInt64(&sm.receivedState.Timestamp)
+	recvStats.Name = sm.fullNS
+	return recvStats, syncStats
+}
+
 func (sm *logSyncerSM) GetStats() common.NamespaceStats {
 	var ns common.NamespaceStats
 	stat := make(map[string]interface{})
 	stat["role"] = common.LearnerRoleLogSyncer
 	stat["synced"] = atomic.LoadInt64(&sm.syncedCnt)
-	stat["synced_index"] = atomic.LoadUint64(&sm.syncedIndex)
-	stat["synced_term"] = atomic.LoadUint64(&sm.syncedTerm)
+	stat["synced_index"] = atomic.LoadUint64(&sm.syncedState.SyncedIndex)
+	stat["synced_term"] = atomic.LoadUint64(&sm.syncedState.SyncedTerm)
+	stat["synced_timestamp"] = atomic.LoadInt64(&sm.syncedState.Timestamp)
 	ns.InternalStats = stat
 	return ns
 }
@@ -136,22 +156,40 @@ func (sm *logSyncerSM) Close() {
 	sm.wg.Wait()
 }
 
+func (sm *logSyncerSM) setReceivedState(term uint64, index uint64, ts int64) {
+	atomic.StoreUint64(&sm.receivedState.SyncedTerm, term)
+	atomic.StoreUint64(&sm.receivedState.SyncedIndex, index)
+	atomic.StoreInt64(&sm.receivedState.Timestamp, ts)
+}
+
+func (sm *logSyncerSM) setSyncedState(term uint64, index uint64, ts int64) {
+	atomic.StoreUint64(&sm.syncedState.SyncedTerm, term)
+	atomic.StoreUint64(&sm.syncedState.SyncedIndex, index)
+	atomic.StoreInt64(&sm.syncedState.Timestamp, ts)
+}
+
+func (sm *logSyncerSM) getSyncedState() (uint64, uint64, int64) {
+	syncedTerm := atomic.LoadUint64(&sm.syncedState.SyncedTerm)
+	syncedIndex := atomic.LoadUint64(&sm.syncedState.SyncedIndex)
+	syncedTs := atomic.LoadInt64(&sm.syncedState.Timestamp)
+	return syncedTerm, syncedIndex, syncedTs
+}
+
 func (sm *logSyncerSM) switchIgnoreSend(send bool) {
 	old := atomic.LoadInt32(&sm.ignoreSend)
 
-	syncedTerm := atomic.LoadUint64(&sm.syncedTerm)
-	syncedIndex := atomic.LoadUint64(&sm.syncedIndex)
+	syncedTerm, syncedIndex, syncedTs := sm.getSyncedState()
 	if send {
 		if old == 0 {
 			return
 		}
-		sm.Infof("switch to send log really at: %v-%v", syncedTerm, syncedIndex)
+		sm.Infof("switch to send log really at: %v-%v-%v", syncedTerm, syncedIndex, syncedTs)
 		atomic.StoreInt32(&sm.ignoreSend, 0)
 	} else {
 		if old == 1 {
 			return
 		}
-		sm.Infof("switch to ignore send log at: %v-%v", syncedTerm, syncedIndex)
+		sm.Infof("switch to ignore send log at: %v-%v-%v", syncedTerm, syncedIndex, syncedTs)
 		atomic.StoreInt32(&sm.ignoreSend, 1)
 	}
 }
@@ -159,9 +197,8 @@ func (sm *logSyncerSM) switchIgnoreSend(send bool) {
 func (sm *logSyncerSM) handlerRaftLogs() {
 	defer func() {
 		sm.lgSender.Stop()
-		syncedTerm := atomic.LoadUint64(&sm.syncedTerm)
-		syncedIndex := atomic.LoadUint64(&sm.syncedIndex)
-		sm.Infof("raft log syncer send loop exit at synced: %v-%v", syncedTerm, syncedIndex)
+		syncedTerm, syncedIndex, syncedTs := sm.getSyncedState()
+		sm.Infof("raft log syncer send loop exit at synced: %v-%v-%v", syncedTerm, syncedIndex, syncedTs)
 	}()
 	raftLogs := make([]*BatchInternalRaftRequest, 0, logSendBufferLen)
 	var last *BatchInternalRaftRequest
@@ -225,17 +262,19 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			case <-sm.sendStop:
 				return
 			default:
-				syncedTerm := atomic.LoadUint64(&sm.syncedTerm)
-				syncedIndex := atomic.LoadUint64(&sm.syncedIndex)
-				sm.Errorf("failed to send raft log to remote: %v, %v, current: %v-%v",
-					err, raftLogs, syncedTerm, syncedIndex)
+				syncedTerm, syncedIndex, syncedTs := sm.getSyncedState()
+				sm.Errorf("failed to send raft log to remote: %v, %v, current: %v-%v-%v",
+					err, len(raftLogs), syncedTerm, syncedIndex, syncedTs)
 			}
 			continue
 		}
 		if handled {
 			atomic.AddInt64(&sm.syncedCnt, int64(len(raftLogs)))
-			atomic.StoreUint64(&sm.syncedIndex, last.OrigIndex)
-			atomic.StoreUint64(&sm.syncedTerm, last.OrigTerm)
+			sm.setSyncedState(last.OrigTerm, last.OrigIndex, last.Timestamp)
+			t := time.Now().UnixNano()
+			for _, rl := range raftLogs {
+				syncLearnerDoneStats.UpdateLatencyStats((t - rl.Timestamp) / time.Microsecond.Nanoseconds())
+			}
 			raftLogs = raftLogs[:0]
 		}
 	}
@@ -278,8 +317,7 @@ func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop ch
 	for {
 		if atomic.LoadInt32(&sm.ignoreSend) == 1 {
 			// check local to avoid call rpc too much
-			syncTerm := atomic.LoadUint64(&sm.syncedTerm)
-			syncIndex := atomic.LoadUint64(&sm.syncedIndex)
+			syncTerm, syncIndex, _ := sm.getSyncedState()
 			if syncTerm >= term && syncIndex >= index {
 				return true, nil
 			}
@@ -288,8 +326,7 @@ func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop ch
 				sm.Infof("failed to get the synced state from remote: %v, at %v-%v", err, term, index)
 			} else {
 				if state.IsNewer2(term, index) {
-					atomic.StoreUint64(&sm.syncedIndex, state.SyncedIndex)
-					atomic.StoreUint64(&sm.syncedTerm, state.SyncedTerm)
+					sm.setSyncedState(state.SyncedTerm, state.SyncedIndex, state.Timestamp)
 					return true, nil
 				}
 			}
@@ -319,8 +356,7 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	}
 	if state.IsNewer2(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index) {
 		sm.Infof("ignored restore snapshot since remote has newer raft: %v than %v", state, raftSnapshot.Metadata.String())
-		atomic.StoreUint64(&sm.syncedIndex, raftSnapshot.Metadata.Index)
-		atomic.StoreUint64(&sm.syncedTerm, raftSnapshot.Metadata.Term)
+		sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
 		return nil
 	}
 
@@ -389,8 +425,7 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	}
 
 	sm.Infof("apply snap done %v", raftSnapshot.Metadata)
-	atomic.StoreUint64(&sm.syncedIndex, raftSnapshot.Metadata.Index)
-	atomic.StoreUint64(&sm.syncedTerm, raftSnapshot.Metadata.Term)
+	sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
 	return nil
 }
 
@@ -425,6 +460,10 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 		sm.Infof("ignore sync from cluster syncer, %v-%v:%v", term, index, reqList.String())
 		return false, nil
 	}
+	sm.setReceivedState(term, index, reqList.Timestamp)
+	latency := time.Now().UnixNano() - reqList.Timestamp
+	syncLearnerRecvStats.UpdateLatencyStats(latency / time.Microsecond.Nanoseconds())
+
 	forceBackup := false
 	reqList.OrigTerm = term
 	reqList.OrigIndex = index

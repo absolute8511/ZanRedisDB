@@ -390,7 +390,7 @@ func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps h
 		if v == nil || !v.IsReady() {
 			continue
 		}
-		v.Node.SetRemoteClusterSyncedRaft(fromCluster, sync.Term, sync.Index)
+		v.Node.SetRemoteClusterSyncedRaft(fromCluster, sync.Term, sync.Index, sync.Timestamp)
 		sLog.Infof("set syncer index to: %v ", sync)
 	}
 	return nil, nil
@@ -468,6 +468,16 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 }
 
 func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	if s.conf.LearnerRole == common.LearnerRoleLogSyncer {
+		recvLatency, syncLatency := node.GetLogLatencyStats()
+		recvStats, syncStats := s.GetLogSyncStatsInSyncLearner()
+		return struct {
+			SyncRecvLatency *common.WriteStats    `json:"sync_net_latency"`
+			SyncAllLatency  *common.WriteStats    `json:"sync_all_latency"`
+			LogReceived     []common.LogSyncStats `json:"log_received,omitempty"`
+			LogSynced       []common.LogSyncStats `json:"log_synced,omitempty"`
+		}{recvLatency, syncLatency, recvStats, syncStats}, nil
+	}
 	netStat := syncClusterNetStats.Copy()
 	totalStat := syncClusterTotalStats.Copy()
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)

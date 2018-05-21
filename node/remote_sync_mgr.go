@@ -5,11 +5,16 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/absolute8511/ZanRedisDB/common"
 )
 
 type SyncedState struct {
 	SyncedTerm  uint64 `json:"synced_term,omitempty"`
 	SyncedIndex uint64 `json:"synced_index,omitempty"`
+	Timestamp   int64  `json:"timestamp,omitempty"`
+	// this is used to disallow compare using the ==
+	disableEqual []byte
 }
 
 func (ss *SyncedState) IsNewer(other *SyncedState) bool {
@@ -17,6 +22,10 @@ func (ss *SyncedState) IsNewer(other *SyncedState) bool {
 		return true
 	}
 	return false
+}
+
+func (ss *SyncedState) IsSame(other *SyncedState) bool {
+	return ss.SyncedTerm == other.SyncedTerm && ss.SyncedIndex == other.SyncedIndex
 }
 
 func (ss *SyncedState) IsNewer2(term uint64, index uint64) bool {
@@ -68,7 +77,7 @@ func newRemoteSyncedStateMgr() *remoteSyncedStateMgr {
 func (rss *remoteSyncedStateMgr) RemoveApplyingSnap(name string, state SyncedState) {
 	rss.Lock()
 	sas, ok := rss.remoteSnapshotsApplying[name]
-	if ok && sas.SS == state {
+	if ok && sas.SS.IsSame(&state) {
 		delete(rss.remoteSnapshotsApplying, name)
 	}
 	rss.Unlock()
@@ -109,7 +118,7 @@ func (rss *remoteSyncedStateMgr) AddApplyingSnap(name string, state SyncedState)
 func (rss *remoteSyncedStateMgr) UpdateApplyingSnapStatus(name string, ss SyncedState, status int) {
 	rss.Lock()
 	sas, ok := rss.remoteSnapshotsApplying[name]
-	if ok && status < len(applyStatusMsgs) && ss == sas.SS {
+	if ok && status < len(applyStatusMsgs) && ss.IsSame(&sas.SS) {
 		if sas.StatusCode != status {
 			sas.StatusCode = status
 			sas.Status = applyStatusMsgs[status]
@@ -175,7 +184,8 @@ func (nd *KVNode) isAlreadyApplied(reqList BatchInternalRaftRequest) bool {
 
 // return as (cluster name, is transferring remote snapshot, is applying remote snapshot)
 func (nd *KVNode) preprocessRemoteSnapApply(reqList BatchInternalRaftRequest) (bool, bool) {
-	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex}
+	ss := SyncedState{SyncedTerm: reqList.OrigTerm,
+		SyncedIndex: reqList.OrigIndex, Timestamp: reqList.Timestamp}
 	for _, req := range reqList.Reqs {
 		if req.Header.DataType == int32(CustomReq) {
 			var cr customProposeData
@@ -199,7 +209,7 @@ func (nd *KVNode) preprocessRemoteSnapApply(reqList BatchInternalRaftRequest) (b
 
 func (nd *KVNode) postprocessRemoteSnapApply(reqList BatchInternalRaftRequest,
 	isRemoteSnapTransfer bool, isRemoteSnapApply bool, retErr error) {
-	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex}
+	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex, Timestamp: reqList.Timestamp}
 	// for remote snapshot transfer, we need wait apply success before update sync state
 	if !isRemoteSnapTransfer {
 		if retErr != errIgnoredRemoteApply {
@@ -221,12 +231,22 @@ func (nd *KVNode) postprocessRemoteSnapApply(reqList BatchInternalRaftRequest,
 	}
 }
 
-func (nd *KVNode) SetRemoteClusterSyncedRaft(name string, term uint64, index uint64) {
-	nd.remoteSyncedStates.UpdateState(name, SyncedState{SyncedTerm: term, SyncedIndex: index})
+func (nd *KVNode) SetRemoteClusterSyncedRaft(name string, term uint64, index uint64, ts int64) {
+	nd.remoteSyncedStates.UpdateState(name, SyncedState{SyncedTerm: term, SyncedIndex: index, Timestamp: ts})
 }
-func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64) {
+func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64, int64) {
 	state, _ := nd.remoteSyncedStates.GetState(name)
-	return state.SyncedTerm, state.SyncedIndex
+	return state.SyncedTerm, state.SyncedIndex, state.Timestamp
+}
+
+func (nd *KVNode) GetLogSyncStatsInSyncLearner() (*common.LogSyncStats, *common.LogSyncStats) {
+	logSyncer, ok := nd.sm.(*logSyncerSM)
+	if !ok {
+		return nil, nil
+	}
+
+	recv, sync := logSyncer.GetLogSyncStats()
+	return &recv, &sync
 }
 
 func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index uint64) error {
