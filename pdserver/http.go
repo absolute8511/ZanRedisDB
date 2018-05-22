@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/julienschmidt/httprouter"
 )
 

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
-	"github.com/absolute8511/ZanRedisDB/stats"
-	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/stats"
+	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"github.com/absolute8511/redcon"
 	"github.com/stretchr/testify/assert"
 )

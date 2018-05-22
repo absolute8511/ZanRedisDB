@@ -22,11 +22,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/httputil"
-	pioutil "github.com/absolute8511/ZanRedisDB/pkg/ioutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/snap"
+	"github.com/youzan/ZanRedisDB/pkg/httputil"
+	pioutil "github.com/youzan/ZanRedisDB/pkg/ioutil"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/snap"
 )
 
 var (

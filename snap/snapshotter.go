@@ -26,12 +26,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	pioutil "github.com/absolute8511/ZanRedisDB/pkg/ioutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/snap/snappb"
+	"github.com/youzan/ZanRedisDB/common"
+	pioutil "github.com/youzan/ZanRedisDB/pkg/ioutil"
+	"github.com/youzan/ZanRedisDB/pkg/pbutil"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/snap/snappb"
 )
 
 const (

@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
-	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/net/context"
 )

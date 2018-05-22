@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/cluster"
 )
 
 func (pdCoord *PDCoordinator) checkNamespacesForLearner(monitorChan chan struct{}) {

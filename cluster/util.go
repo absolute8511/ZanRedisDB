@@ -1,7 +1,7 @@
 package cluster
 
 import (
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var coordLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("cluster"))

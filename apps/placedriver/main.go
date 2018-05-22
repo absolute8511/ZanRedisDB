@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/pdserver"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/pdserver"
 
 	"github.com/BurntSushi/toml"
 	"github.com/absolute8511/glog"

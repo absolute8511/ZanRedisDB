@@ -21,8 +21,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 type corruptFunc func(string, int64) error

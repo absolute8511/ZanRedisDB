@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"log"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 type raftLog struct {

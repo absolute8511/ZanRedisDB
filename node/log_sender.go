@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/syncerpb"
-	"github.com/absolute8511/go-zanredisdb"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/syncerpb"
+	"github.com/youzan/go-zanredisdb"
 	"google.golang.org/grpc"
 )
 

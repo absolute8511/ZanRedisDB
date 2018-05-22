@@ -19,8 +19,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/pkg/fileutil"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 // Repair tries to repair ErrUnexpectedEOF in the

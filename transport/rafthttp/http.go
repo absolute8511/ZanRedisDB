@@ -23,9 +23,9 @@ import (
 	"path"
 	"strings"
 
-	pioutil "github.com/absolute8511/ZanRedisDB/pkg/ioutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pioutil "github.com/youzan/ZanRedisDB/pkg/ioutil"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/coreos/etcd/version"
 	"golang.org/x/net/context"
 )

@@ -3,9 +3,9 @@ package datanode_coord
 import (
 	"encoding/json"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	node "github.com/absolute8511/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
+	node "github.com/youzan/ZanRedisDB/node"
 )
 
 // this will only be handled on leader of raft group

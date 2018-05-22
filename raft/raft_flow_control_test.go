@@ -17,7 +17,7 @@ package raft
 import (
 	"testing"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // TestMsgAppFlowControlFull ensures:

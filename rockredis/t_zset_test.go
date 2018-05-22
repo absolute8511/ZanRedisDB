@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/stretchr/testify/assert"
 )
 

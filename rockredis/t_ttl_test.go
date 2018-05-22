@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func getTestDBWithExpirationPolicy(t *testing.T, ePolicy common.ExpirationPolicy) *RockDB {

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 type ServerConfig struct {

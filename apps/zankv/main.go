@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/server"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/server"
 	"github.com/judwhite/go-svc/svc"
 )
 

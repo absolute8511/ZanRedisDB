@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster/datanode_coord"
+	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
 
-	"github.com/absolute8511/ZanRedisDB/cluster/pdnode_coord"
-	"github.com/absolute8511/ZanRedisDB/node"
-	ds "github.com/absolute8511/ZanRedisDB/server"
+	"github.com/youzan/ZanRedisDB/cluster/pdnode_coord"
+	"github.com/youzan/ZanRedisDB/node"
+	ds "github.com/youzan/ZanRedisDB/server"
 	"github.com/stretchr/testify/assert"
 )
 

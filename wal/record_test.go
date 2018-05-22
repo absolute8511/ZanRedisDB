@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 var (

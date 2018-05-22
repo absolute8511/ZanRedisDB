@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func TestKVCodec(t *testing.T) {

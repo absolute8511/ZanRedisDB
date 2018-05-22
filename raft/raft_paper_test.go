@@ -33,7 +33,7 @@ import (
 	"reflect"
 	"sort"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 func TestFollowerUpdateTermFromMessage(t *testing.T) {

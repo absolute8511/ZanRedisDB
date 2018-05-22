@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"testing"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // nextEnts returns the appliable entries and updates the applied index

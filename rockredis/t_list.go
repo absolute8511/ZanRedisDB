@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/gorocksdb"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/gorocksdb"
 )
 
 // TODO: we can use ring buffer to allow the list pop and push many times

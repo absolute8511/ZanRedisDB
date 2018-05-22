@@ -3,8 +3,8 @@ package rockredis
 import (
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/gorocksdb"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/gorocksdb"
 )
 
 type consistencyExpiration struct {

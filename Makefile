@@ -1,7 +1,7 @@
 PREFIX=/usr/local
 DESTDIR=
 BINDIR=${PREFIX}/bin
-PROJECT?=github.com/absolute8511/ZanRedisDB
+PROJECT?=github.com/youzan/ZanRedisDB
 VERBINARY?= 0.3.2
 COMMIT?=$(shell git rev-parse --short HEAD)
 BUILD_TIME?=$(shell date '+%Y-%m-%d_%H:%M:%S-%Z')

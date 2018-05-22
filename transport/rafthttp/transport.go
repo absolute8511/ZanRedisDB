@@ -19,20 +19,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/absolute8511/ZanRedisDB/stats"
-	//"github.com/absolute8511/ZanRedisDB/pkg/logutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/transport"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/snap"
+	"github.com/youzan/ZanRedisDB/stats"
+	//"github.com/youzan/ZanRedisDB/pkg/logutil"
+	"github.com/youzan/ZanRedisDB/pkg/transport"
+	"github.com/youzan/ZanRedisDB/pkg/types"
 	//"github.com/coreos/pkg/capnslog"
 	"github.com/xiang90/probing"
 	"golang.org/x/net/context"
 )
 
-//var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "transport/rafthttp"))
+//var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/youzan/ZanRedisDB", "transport/rafthttp"))
 var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("transport/rafthttp")))
 
 func SetLogLevel(level int) {

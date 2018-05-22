@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 	etcdlock "github.com/absolute8511/xlock2"
 	"github.com/coreos/etcd/client"
 	"golang.org/x/net/context"

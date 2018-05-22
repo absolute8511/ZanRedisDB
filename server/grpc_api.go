@@ -9,8 +9,8 @@ import (
 
 	context "golang.org/x/net/context"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/syncerpb"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/syncerpb"
 	"google.golang.org/grpc"
 )
 

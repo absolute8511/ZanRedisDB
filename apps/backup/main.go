@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/absolute8511/go-zanredisdb"
+	sdk "github.com/youzan/go-zanredisdb"
 )
 
 var (

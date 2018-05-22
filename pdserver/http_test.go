@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	ds "github.com/absolute8511/ZanRedisDB/server"
-	"github.com/absolute8511/go-zanredisdb"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
+	ds "github.com/youzan/ZanRedisDB/server"
+	"github.com/youzan/go-zanredisdb"
 )
 
 const (

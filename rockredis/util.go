@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var errIntNumber = errors.New("invalid integer")

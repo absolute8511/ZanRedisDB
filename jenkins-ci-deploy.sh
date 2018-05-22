@@ -25,7 +25,7 @@ if [ ! -d "$googleDep/genproto" ]; then
   pushd $googleDep && git https://github.com/google/go-genproto clone genproto && popd
 fi
 
-go get -d github.com/absolute8511/ZanRedisDB/...
+go get -d github.com/youzan/ZanRedisDB/...
 arch=$(go env GOARCH)
 os=$(go env GOOS)
 goversion=$(go version | awk '{print $3}')
@@ -46,13 +46,13 @@ git checkout v5.8.8-share-rate-limiter
 CC=/opt/rh/devtoolset-3/root/usr/bin/gcc CXX=/opt/rh/devtoolset-3/root/usr/bin/g++ LD=/opt/rh/devtoolset-3/root/usr/bin/ld USE_SSE=1 make static_lib
 popd
 
-LD=/opt/rh/devtoolset-3/root/usr/bin/ld CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/absolute8511/gorocksdb
+LD=/opt/rh/devtoolset-3/root/usr/bin/ld CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/youzan/gorocksdb
 
 wget -c https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm
 export PATH=`pwd`:$PATH
 
 echo `pwd`
-pushd `go env GOPATH`/src/github.com/absolute8511/ZanRedisDB/
+pushd `go env GOPATH`/src/github.com/youzan/ZanRedisDB/
 git pull
 ./pre-dist.sh || true
 ./dist.sh
@@ -71,7 +71,7 @@ fi
 echo $etcdurl
 echo $ETCD_URL
 
-cp -fp `go env GOPATH`/src/github.com/absolute8511/ZanRedisDB/dist/$LATEST.tar.gz .
+cp -fp `go env GOPATH`/src/github.com/youzan/ZanRedisDB/dist/$LATEST.tar.gz .
 killall zankv || true
 killall placedriver || true
 killall etcd || true

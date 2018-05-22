@@ -17,7 +17,7 @@ package raft
 import (
 	"errors"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // ErrStepLocalMsg is returned when try to step a local raft message

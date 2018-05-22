@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/node"
 	"github.com/siddontang/goredis"
 )
 

@@ -19,7 +19,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // TestRawNodeStep ensures that RawNode.Step ignore local message.

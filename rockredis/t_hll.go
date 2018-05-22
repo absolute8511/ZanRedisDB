@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/gorocksdb"
+	"github.com/youzan/gorocksdb"
 	hll "github.com/absolute8511/hyperloglog"
 	//hll "github.com/axiomhq/hyperloglog"
 	"github.com/hashicorp/golang-lru"

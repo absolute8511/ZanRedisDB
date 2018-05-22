@@ -3,7 +3,7 @@ package pdnode_coord
 import (
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/stretchr/testify/assert"
 )
 

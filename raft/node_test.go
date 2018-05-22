@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/pkg/testutil"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
 )
 

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // None is a placeholder node ID used when there is no leader.

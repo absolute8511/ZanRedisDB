@@ -21,10 +21,10 @@ import (
 	"io"
 	"sync"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/crc"
-	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/pkg/crc"
+	"github.com/youzan/ZanRedisDB/pkg/pbutil"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 const minSectorSize = 512

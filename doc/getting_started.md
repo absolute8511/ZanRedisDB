@@ -19,9 +19,9 @@ make static_lib
 
 Install the dependency:
 <pre>
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/absolute8511/gorocksdb
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/youzan/gorocksdb
 
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy" go get github.com/absolute8511/gorocksdb (for MacOS)
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy" go get github.com/youzan/gorocksdb (for MacOS)
 </pre>
 
 use the `gpm` to install other dependencies
@@ -156,4 +156,4 @@ Golang client SDK : [client-sdk] , a redis proxy can be deployed
 based on this golang sdk if you want use the redis client in other language.
 
 
-[client-sdk]: https://github.com/absolute8511/go-zanredisdb
+[client-sdk]: https://github.com/youzan/go-zanredisdb

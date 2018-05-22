@@ -1,8 +1,8 @@
 package node
 
 import (
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 type NamespaceConfig struct {

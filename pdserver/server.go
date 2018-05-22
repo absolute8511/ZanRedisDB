@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/cluster/pdnode_coord"
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/cluster/pdnode_coord"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("pdserver"))
