@@ -1,7 +1,7 @@
 # ZanRedisDB
 
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/3288ed77f27c4f8a998e35ef936edc6f)](https://www.codacy.com/app/cool8511/ZanRedisDB?utm_source=github.com&utm_medium=referral&utm_content=youzan/ZanRedisDB&utm_campaign=badger)
-[![Build Status](https://travis-ci.org/youzan/ZanRedisDB.svg?branch=master)](https://travis-ci.org/youzan/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/youzan/ZanRedisDB.svg)](https://github.com/youzan/ZanRedisDB/releases/latest) [![codecov](https://codecov.io/gh/youzan/ZanRedisDB/branch/master/graph/badge.svg)](https://codecov.io/gh/youzan/ZanRedisDB) [![Go Report Card](https://goreportcard.com/badge/github.com/youzan/ZanRedisDB)](https://goreportcard.com/report/github.com/youzan/ZanRedisDB) [![Documentation Status](https://readthedocs.org/projects/zanredisdb/badge/?version=latest)](http://zanredisdb.readthedocs.io/en/latest/?badge=latest)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/5bb2847636f343e79edf048a0394de04)](https://www.codacy.com/app/cool8511/youzan_ZanRedisDB?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=youzan/ZanRedisDB&amp;utm_campaign=Badge_Grade)
+[![Build Status](https://travis-ci.org/youzan/ZanRedisDB.svg?branch=master)](https://travis-ci.org/youzan/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/youzan/ZanRedisDB.svg)](https://github.com/youzan/ZanRedisDB/releases/latest) [![codecov](https://codecov.io/gh/youzan/ZanRedisDB/branch/master/graph/badge.svg)](https://codecov.io/gh/youzan/ZanRedisDB) [![Go Report Card](https://goreportcard.com/badge/github.com/youzan/ZanRedisDB)](https://goreportcard.com/report/github.com/youzan/ZanRedisDB) [![Documentation Status](https://readthedocs.org/projects/youzan-zanredisdb/badge/?version=latest)](http://youzan-zanredisdb.readthedocs.io/en/latest/?badge=latest)
  
 
 ## What is ZanRedisDB
