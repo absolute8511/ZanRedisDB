@@ -25,7 +25,8 @@ Build the rocksdb
 <pre>
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
-USE_SSE=1 make static_lib
+git checkout v5.8.8-share-rate-limiter
+make static_lib
 </pre>
 
 Install the dependency:
@@ -35,12 +36,7 @@ CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksd
 CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy" go get github.com/youzan/gorocksdb (for MacOS)
 </pre>
 
-use the `gpm` to install other dependencies
-<pre>
-wget https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm && sudo mv gpm /usr/local/bin
-gpm get
-</pre>
-
+use the `dep ensure` to install other dependencies
 
 Build zankv and placedriver from the source (only support go version 1.8+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
