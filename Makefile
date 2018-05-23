@@ -23,7 +23,7 @@ $(BLDDIR)/restore:  $(wildcard apps/restore/*.go)
 
 $(BLDDIR)/%:
 	@mkdir -p $(dir $@)
-	go build -i ${GOFLAGS} -o $@ ./apps/$*
+	go build ${GOFLAGS} -o $@ ./apps/$*
 
 $(APPS): %: $(BLDDIR)/%
 

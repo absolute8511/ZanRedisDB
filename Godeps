@@ -2,6 +2,7 @@ github.com/absolute8511/glog
 github.com/youzan/go-zanredisdb
 github.com/absolute8511/xlock2
 github.com/gogo/protobuf 1adfc126b41513cc696b209667c8656ea7aac67c
+github.com/golang/protobuf b4deda0973fb4c70b50d226b1af49f3da59f5265
 google.golang.org/grpc 6b51017f791ae1cfbec89c52efdf444b13b550ef
 github.com/ugorji/go ded73eae5db7e7a0ef6f55aace87a2873c5d2b74
 github.com/coreos/etcd         380b833c180f1bd2f90a0938573d6e174bf7ebe0
