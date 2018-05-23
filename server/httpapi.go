@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
@@ -14,12 +15,12 @@ import (
 
 	"github.com/youzan/ZanRedisDB/rockredis"
 
+	"github.com/julienschmidt/httprouter"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
-	"github.com/julienschmidt/httprouter"
 )
 
 var allowStaleRead int32
@@ -425,6 +426,8 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	ns := reqParams.Get("namespace")
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
 	nsList := s.nsMgr.GetNamespaces()
 	rstat := make([]*RaftStatus, 0)
 	for name, nsNode := range nsList {
@@ -432,6 +435,9 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 			continue
 		}
 		if !nsNode.IsReady() {
+			continue
+		}
+		if leaderOnly && !nsNode.Node.IsLead() {
 			continue
 		}
 		var s RaftStatus
@@ -471,12 +477,43 @@ func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps htt
 	if s.conf.LearnerRole == common.LearnerRoleLogSyncer {
 		recvLatency, syncLatency := node.GetLogLatencyStats()
 		recvStats, syncStats := s.GetLogSyncStatsInSyncLearner()
+		allRaftStats := make(map[string]raft.Status)
+		for _, stat := range recvStats {
+			ninfos, err := s.dataCoord.GetSnapshotSyncInfo(stat.Name)
+			if err != nil {
+				sLog.Infof("failed to get %v nodes info - %s", stat.Name, err)
+				continue
+			}
+			baseNs, _ := common.GetNamespaceAndPartition(stat.Name)
+			for _, n := range ninfos {
+				uri := fmt.Sprintf("http://%s:%s/raft/stats?namespace=%s&leader_only=true",
+					n.RemoteAddr, n.HttpAPIPort, baseNs)
+				rstat := make([]*RaftStatus, 0)
+				sc, err := common.APIRequest("GET", uri, nil, time.Second*3, &rstat)
+				if err != nil {
+					sLog.Infof("request %v error: %v", uri, err)
+					continue
+				}
+				if sc != http.StatusOK {
+					sLog.Infof("request %v error: %v", uri, sc)
+					continue
+				}
+
+				for _, rs := range rstat {
+					if rs.LeaderInfo != nil && rs.RaftStat.RaftState == raft.StateLeader {
+						allRaftStats[rs.LeaderInfo.GroupName] = rs.RaftStat
+					}
+				}
+			}
+		}
+		// get leader raft log stats
 		return struct {
-			SyncRecvLatency *common.WriteStats    `json:"sync_net_latency"`
-			SyncAllLatency  *common.WriteStats    `json:"sync_all_latency"`
-			LogReceived     []common.LogSyncStats `json:"log_received,omitempty"`
-			LogSynced       []common.LogSyncStats `json:"log_synced,omitempty"`
-		}{recvLatency, syncLatency, recvStats, syncStats}, nil
+			SyncRecvLatency *common.WriteStats     `json:"sync_net_latency"`
+			SyncAllLatency  *common.WriteStats     `json:"sync_all_latency"`
+			LogReceived     []common.LogSyncStats  `json:"log_received,omitempty"`
+			LogSynced       []common.LogSyncStats  `json:"log_synced,omitempty"`
+			LeaderRaftStats map[string]raft.Status `json:"leader_raft_stats,omitempty"`
+		}{recvLatency, syncLatency, recvStats, syncStats, allRaftStats}, nil
 	}
 	netStat := syncClusterNetStats.Copy()
 	totalStat := syncClusterTotalStats.Copy()
