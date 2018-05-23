@@ -11,7 +11,8 @@
 set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-#export GOPATH=$DIR/.godeps:$(go env GOPATH)
+# this is used by CI which can not use dep ensure
+export GOPATH=$DIR/.godeps:$(go env GOPATH)
 echo $GOPATH
 
 arch=$(go env GOARCH)

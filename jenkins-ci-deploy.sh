@@ -54,7 +54,13 @@ export PATH=`pwd`:$PATH
 echo `pwd`
 pushd `go env GOPATH`/src/github.com/youzan/ZanRedisDB/
 git pull
+
 ./pre-dist.sh || true
+
+## we also use gpm in ci because some dep can not be pulled since gfw.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GOPATH=$DIR/.godeps gpm get || true
+
 ./dist.sh
 popd
 
