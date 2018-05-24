@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
-	"github.com/youzan/ZanRedisDB/node"
 	"github.com/siddontang/goredis"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/node"
 )
 
 func insertData(t *testing.T, c *goredis.PoolConn, cnt int, cmd, prefixkey string, args ...interface{}) {
@@ -164,4 +166,27 @@ func TestDeleteRangeCrossTable(t *testing.T) {
 	deleteTableRange(t, "testdeleterange_zset1", nil, []byte(midKey))
 	checkScanKeys(t, c, prefixzset2, "zset", tableCnt/2)
 	checkFullScan(t, c, prefixzset2, "zset", tableCnt/2)
+}
+
+func TestMarshalRaftStats(t *testing.T) {
+	c := getMergeTestConn(t)
+	defer c.Close()
+	uri := fmt.Sprintf("http://127.0.0.1:%v/raft/stats?leader_only=true",
+		redisportMerge+1)
+	rstat := make([]*RaftStatus, 0)
+	sc, err := common.APIRequest("GET", uri, nil, time.Second*3, &rstat)
+	if err != nil {
+		t.Errorf("request %v error: %v", uri, err)
+		return
+	}
+	if sc != http.StatusOK {
+		t.Errorf("request %v error: %v", uri, sc)
+		return
+	}
+	if len(rstat) == 0 {
+		t.Errorf("get raft stats %v empty !!!", rstat)
+		return
+	}
+	d, _ := json.Marshal(rstat)
+	t.Logf("%v =======", string(d))
 }
