@@ -18,14 +18,14 @@ import (
 
 	"github.com/spaolacci/murmur3"
 
+	"github.com/shirou/gopsutil/mem"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/gorocksdb"
-	"github.com/shirou/gopsutil/mem"
 )
 
 const (
-	MAX_CHECKPOINT_NUM = 10
-	HLLCacheSize       = 512
+	MaxCheckpointNum = 10
+	HLLCacheSize     = 512
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
@@ -276,7 +276,7 @@ type RockDB struct {
 	engOpened         int32
 	indexMgr          *IndexMgr
 	isBatching        int32
-	checkpointDirLock sync.Mutex
+	checkpointDirLock sync.RWMutex
 	hasher64          hash.Hash64
 	hllCache          *hllCache
 	stopping          int32
@@ -419,6 +419,10 @@ func GetBackupDir(base string) string {
 	return path.Join(base, "rocksdb_backup")
 }
 
+func GetBackupDirForRemote(base string) string {
+	return path.Join(base, "rocksdb_backup", "remote")
+}
+
 func (r *RockDB) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
 	if r.cfg.ExpirationPolicy != common.ConsistencyDeletion {
 		return fmt.Errorf("can not check expired data at the expiration-policy:%d", r.cfg.ExpirationPolicy)
@@ -428,6 +432,10 @@ func (r *RockDB) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan str
 
 func (r *RockDB) GetBackupBase() string {
 	return r.cfg.DataDir
+}
+
+func (r *RockDB) GetBackupDirForRemote() string {
+	return GetBackupDirForRemote(r.cfg.DataDir)
 }
 
 func (r *RockDB) GetBackupDir() string {
@@ -870,7 +878,8 @@ func (r *RockDB) backupLoop() {
 				dbLog.Infof("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
 				// purge some old checkpoint
 				r.checkpointDirLock.Lock()
-				purgeOldCheckpoint(MAX_CHECKPOINT_NUM, r.GetBackupDir())
+				purgeOldCheckpoint(MaxCheckpointNum, r.GetBackupDir())
+				purgeOldCheckpoint(MaxCheckpointNum, r.GetBackupDirForRemote())
 				r.checkpointDirLock.Unlock()
 			}()
 		case <-r.quit:
@@ -893,7 +902,12 @@ func (r *RockDB) Backup(term uint64, index uint64) *BackupInfo {
 }
 
 func (r *RockDB) IsLocalBackupOK(term uint64, index uint64) (bool, error) {
-	backupDir := r.GetBackupDir()
+	r.checkpointDirLock.RLock()
+	defer r.checkpointDirLock.RUnlock()
+	return r.isBackupOKInPath(r.GetBackupDir(), term, index)
+}
+
+func (r *RockDB) isBackupOKInPath(backupDir string, term uint64, index uint64) (bool, error) {
 	checkpointDir := GetCheckpointDir(term, index)
 	fullPath := path.Join(backupDir, checkpointDir)
 	_, err := os.Stat(fullPath)
@@ -903,8 +917,6 @@ func (r *RockDB) IsLocalBackupOK(term uint64, index uint64) (bool, error) {
 	}
 	dbLog.Infof("begin check local checkpoint : %v", fullPath)
 	defer dbLog.Infof("check local checkpoint : %v done", fullPath)
-	r.checkpointDirLock.Lock()
-	defer r.checkpointDirLock.Unlock()
 	ro := *r.dbOpts
 	ro.SetCreateIfMissing(false)
 	db, err := gorocksdb.OpenDbForReadOnly(&ro, fullPath, false)
@@ -956,17 +968,38 @@ func copyFile(src, dst string, override bool) error {
 	return out.Close()
 }
 
+func (r *RockDB) RestoreFromRemoteBackup(term uint64, index uint64) error {
+	// check if there is the same term-index backup on local
+	// if not, we can just rename remote snap to this name.
+	// if already exist, we need handle rename
+	checkpointDir := GetCheckpointDir(term, index)
+	remotePath := path.Join(r.GetBackupDirForRemote(), checkpointDir)
+	_, err := os.Stat(remotePath)
+	if err != nil {
+		dbLog.Infof("apply remote snap failed since backup data error: %v", err)
+		return err
+	}
+	err = r.restoreFromPath(r.GetBackupDirForRemote(), term, index)
+	return err
+}
+
 func (r *RockDB) Restore(term uint64, index uint64) error {
-	// write meta (snap term and index) and check the meta data in the backup
 	backupDir := r.GetBackupDir()
-	hasBackup, _ := r.IsLocalBackupOK(term, index)
+	return r.restoreFromPath(backupDir, term, index)
+}
+
+func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) error {
+	// write meta (snap term and index) and check the meta data in the backup
+	r.checkpointDirLock.RLock()
+	defer r.checkpointDirLock.RUnlock()
+	hasBackup, _ := r.isBackupOKInPath(backupDir, term, index)
 	if !hasBackup {
 		return errors.New("no backup for restore")
 	}
 
 	checkpointDir := GetCheckpointDir(term, index)
 	start := time.Now()
-	dbLog.Infof("begin restore from checkpoint: %v\n", checkpointDir)
+	dbLog.Infof("begin restore from checkpoint: %v-%v\n", backupDir, checkpointDir)
 	r.closeEng()
 	select {
 	case <-r.quit:
@@ -1040,12 +1073,6 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 		dbLog.Infof("reopen the restored db failed:  %v\n", err)
 	}
 	return err
-}
-
-func (r *RockDB) ClearBackup(term uint64, index uint64) error {
-	backupDir := r.GetBackupDir()
-	checkpointDir := GetCheckpointDir(term, index)
-	return os.RemoveAll(path.Join(backupDir, checkpointDir))
 }
 
 func (r *RockDB) GetIndexSchema(table string) (*common.IndexSchema, error) {

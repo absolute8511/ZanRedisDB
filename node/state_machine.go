@@ -12,11 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/pkg/wait"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/rockredis"
-	"github.com/absolute8511/redcon"
 )
 
 const (
@@ -583,7 +583,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		kvsm.Infof("remote config changed: %v, %v ", p, cc.String())
 		kvsm.w.Trigger(reqID, nil)
 	} else if p.ProposeOp == ProposeOp_TransferRemoteSnap {
-		localPath := path.Join(kvsm.store.GetBackupDir(), "remote")
+		localPath := kvsm.store.GetBackupDirForRemote()
 		kvsm.Infof("transfer remote snap request: %v to local: %v", p, localPath)
 		retErr = errRemoteSnapTransferFailed
 		err := os.MkdirAll(localPath, common.DIR_PERM)
@@ -608,50 +608,13 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 	} else if p.ProposeOp == ProposeOp_ApplyRemoteSnap {
 		kvsm.Infof("begin apply remote snap : %v", p)
 		retErr = errIgnoredRemoteApply
-		// check if there is the same term-index backup on local
-		// if not, we can just rename remote snap to this name.
-		// if already exist, we need handle rename
-		backupDir := kvsm.store.GetBackupDir()
-		checkpointDir := rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)
-		fullPath := path.Join(backupDir, checkpointDir)
-		remotePath := path.Join(backupDir, "remote", checkpointDir)
-		tmpLocalPath := path.Join(fullPath, "tmplocal")
-		_, err := os.Stat(remotePath)
-		if err != nil {
-			kvsm.Infof("apply remote snap %v failed since backup data error: %v", p, err)
-			kvsm.w.Trigger(reqID, err)
-			return forceBackup, retErr
-		}
-		oldOK, err := kvsm.store.IsLocalBackupOK(p.RemoteTerm, p.RemoteIndex)
-		if oldOK {
-			err = os.Rename(fullPath, tmpLocalPath)
-			if err != nil {
-				kvsm.Infof("apply remote snap %v failed to rename path : %v", p, err)
-				kvsm.w.Trigger(reqID, err)
-				return forceBackup, retErr
-			}
-			defer os.Rename(tmpLocalPath, fullPath)
-		}
-		err = os.Rename(remotePath, fullPath)
-		if err != nil {
-			kvsm.Infof("apply remote snap %v failed : %v", p, err)
-			kvsm.w.Trigger(reqID, err)
-			return forceBackup, retErr
-		}
-		defer os.Rename(fullPath, remotePath)
-		newOK, err := kvsm.store.IsLocalBackupOK(p.RemoteTerm, p.RemoteIndex)
-		if err != nil || !newOK {
-			kvsm.Errorf("apply remote snap failed since remote backup is not ok: %v", err)
-			kvsm.w.Trigger(reqID, err)
-			return forceBackup, retErr
-		}
-		err = kvsm.store.Restore(p.RemoteTerm, p.RemoteIndex)
+		err := kvsm.store.RestoreFromRemoteBackup(p.RemoteTerm, p.RemoteIndex)
 		kvsm.w.Trigger(reqID, err)
 		if err != nil {
-			kvsm.Errorf("apply remote snap failed to restore backup: %v", err)
+			kvsm.Infof("apply remote snap %v failed : %v", p, err)
 		} else {
-			forceBackup = true
 			retErr = nil
+			forceBackup = true
 		}
 	} else if p.ProposeOp == ProposeOp_ApplySkippedRemoteSnap {
 		kvsm.Infof("apply remote skip snap %v ", p)
