@@ -343,7 +343,7 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 			select {
 			case <-stop:
 				return common.ErrStopped
-			case <-time.After(time.Second):
+			case <-time.After(time.Second * 10):
 				continue
 			}
 		}

@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	MaxCheckpointNum = 10
-	HLLCacheSize     = 512
+	MaxCheckpointNum       = 10
+	MaxRemoteCheckpointNum = 3
+	HLLCacheSize           = 512
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
@@ -879,7 +880,7 @@ func (r *RockDB) backupLoop() {
 				// purge some old checkpoint
 				r.checkpointDirLock.Lock()
 				purgeOldCheckpoint(MaxCheckpointNum, r.GetBackupDir())
-				purgeOldCheckpoint(MaxCheckpointNum, r.GetBackupDirForRemote())
+				purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote())
 				r.checkpointDirLock.Unlock()
 			}()
 		case <-r.quit:
