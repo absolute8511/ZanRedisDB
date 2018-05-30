@@ -14,6 +14,7 @@ import (
 
 	"github.com/youzan/ZanRedisDB/rockredis"
 
+	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
 	"github.com/youzan/ZanRedisDB/common"
@@ -23,7 +24,6 @@ import (
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/stats"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
-	"github.com/absolute8511/redcon"
 	"golang.org/x/net/context"
 )
 
@@ -296,6 +296,9 @@ func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (bool, common.Co
 	h, isWrite, ok := n.Node.GetHandler(cmdName)
 	if !ok {
 		return isWrite, nil, cmd, common.ErrInvalidCommand
+	}
+	if sLog.Level() >= common.LOG_DETAIL {
+		sLog.Debugf("hash to namespace :%v, %v, %v, for pk:%v", isWrite, n.FullName(), n.Node.IsLead(), string(pk))
 	}
 	if !isWrite && !n.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 		// read only to leader to avoid stale read
