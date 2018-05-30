@@ -56,6 +56,14 @@ If you want package the binary release run the scripts
  * Deploy the placedriver which is used for data placement: `placedriver -config=/path/to/config`
  * Deploy the zankv for data storage server `zankv -config=/path/to/config`
 
+## OS-Level Tuning
+
+ * Setting `vm.swappiness=0`
+ * Setting `vm.min_free_kbytes` to at least 1GB (8GB on larger memory system)
+ * Disable NUMA zone reclaim with `vm.zone_reclaim_mode=0`
+ * Disable THP(transparent huge pages)
+
+
 ## API
 placedriver has several HTTP APIs to manager the namespace
  * list the namespace: `GET /namespaces`

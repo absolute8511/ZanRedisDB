@@ -39,15 +39,15 @@ func MustMarshal(m Marshaler) []byte {
 
 func MustUnmarshal(um Unmarshaler, data []byte) {
 	if err := um.Unmarshal(data); err != nil {
-		plog.Panicf("unmarshal should never fail (%v)", err)
+		plog.Panicf("unmarshal should never fail (%v). %v", err, data)
 	}
 }
 
-func MaybeUnmarshal(um Unmarshaler, data []byte) bool {
+func MaybeUnmarshal(um Unmarshaler, data []byte) error {
 	if err := um.Unmarshal(data); err != nil {
-		return false
+		return err
 	}
-	return true
+	return nil
 }
 
 func GetBool(v *bool) (vv bool, set bool) {

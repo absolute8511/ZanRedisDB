@@ -2,6 +2,7 @@ package common
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -73,5 +74,9 @@ func APIRequest(method string, endpoint string, body io.Reader, timeout time.Dur
 	if len(respBody) == 0 {
 		respBody = []byte("{}")
 	}
-	return resp.StatusCode, json.Unmarshal(respBody, ret)
+	err = json.Unmarshal(respBody, ret)
+	if err != nil {
+		err = errors.New(err.Error() + string(respBody))
+	}
+	return resp.StatusCode, err
 }

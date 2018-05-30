@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
@@ -14,21 +15,59 @@ import (
 
 	"github.com/youzan/ZanRedisDB/rockredis"
 
+	"github.com/julienschmidt/httprouter"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
-	"github.com/julienschmidt/httprouter"
 )
 
 var allowStaleRead int32
 
+type RaftProgress struct {
+	Match uint64 `json:"match"`
+	Next  uint64 `json:"next"`
+	State string `json:"state"`
+}
+
+// raft status in raft can not marshal/unmarshal correctly, we redefine it
+type CustomRaftStatus struct {
+	ID             uint64                  `json:"id,omitempty"`
+	Term           uint64                  `json:"term,omitempty"`
+	Vote           uint64                  `json:"vote"`
+	Commit         uint64                  `json:"commit"`
+	Lead           uint64                  `json:"lead"`
+	RaftState      string                  `json:"raft_state"`
+	Applied        uint64                  `json:"applied"`
+	Progress       map[uint64]RaftProgress `json:"progress,omitempty"`
+	LeadTransferee uint64                  `json:"lead_transferee"`
+}
+
+func (crs *CustomRaftStatus) Init(s raft.Status) {
+	crs.ID = s.ID
+	crs.Term = s.Term
+	crs.Vote = s.Vote
+	crs.Commit = s.Commit
+	crs.Lead = s.Lead
+	crs.RaftState = s.RaftState.String()
+	crs.Applied = s.Applied
+	crs.Progress = make(map[uint64]RaftProgress, len(s.Progress))
+	for i, pr := range s.Progress {
+		var cpr RaftProgress
+		cpr.Match = pr.Match
+		cpr.Next = pr.Next
+		cpr.State = pr.State.String()
+		crs.Progress[i] = cpr
+	}
+	crs.LeadTransferee = s.LeadTransferee
+}
+
 type RaftStatus struct {
-	LeaderInfo *common.MemberInfo
-	Members    []*common.MemberInfo
-	Learners   []*common.MemberInfo
-	RaftStat   raft.Status
+	LeaderInfo *common.MemberInfo   `json:"leader_info,omitempty"`
+	Members    []*common.MemberInfo `json:"members,omitempty"`
+	Learners   []*common.MemberInfo `json:"learners,omitempty"`
+	RaftStat   CustomRaftStatus     `json:"raft_stat,omitempty"`
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -425,6 +464,8 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	ns := reqParams.Get("namespace")
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
 	nsList := s.nsMgr.GetNamespaces()
 	rstat := make([]*RaftStatus, 0)
 	for name, nsNode := range nsList {
@@ -434,11 +475,15 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 		if !nsNode.IsReady() {
 			continue
 		}
+		if leaderOnly && !nsNode.Node.IsLead() {
+			continue
+		}
 		var s RaftStatus
 		s.LeaderInfo = nsNode.Node.GetLeadMember()
 		s.Members = nsNode.Node.GetMembers()
 		s.Learners = nsNode.Node.GetLearners()
-		s.RaftStat = nsNode.Node.GetRaftStatus()
+		rs := nsNode.Node.GetRaftStatus()
+		s.RaftStat.Init(rs)
 		rstat = append(rstat, &s)
 	}
 	return rstat, nil
@@ -469,14 +514,48 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 
 func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	if s.conf.LearnerRole == common.LearnerRoleLogSyncer {
+		allUrls := make(map[string]bool)
 		recvLatency, syncLatency := node.GetLogLatencyStats()
 		recvStats, syncStats := s.GetLogSyncStatsInSyncLearner()
+		for _, stat := range recvStats {
+			ninfos, err := s.dataCoord.GetSnapshotSyncInfo(stat.Name)
+			if err != nil {
+				sLog.Infof("failed to get %v nodes info - %s", stat.Name, err)
+				continue
+			}
+			for _, n := range ninfos {
+				uri := fmt.Sprintf("http://%s:%s/raft/stats?leader_only=true",
+					n.RemoteAddr, n.HttpAPIPort)
+				allUrls[uri] = true
+			}
+		}
+		allRaftStats := make(map[string]CustomRaftStatus)
+		for uri, _ := range allUrls {
+			rstat := make([]*RaftStatus, 0)
+			sc, err := common.APIRequest("GET", uri, nil, time.Second*3, &rstat)
+			if err != nil {
+				sLog.Infof("request %v error: %v", uri, err)
+				continue
+			}
+			if sc != http.StatusOK {
+				sLog.Infof("request %v error: %v", uri, sc)
+				continue
+			}
+
+			for _, rs := range rstat {
+				if rs.LeaderInfo != nil && rs.RaftStat.RaftState == raft.StateLeader.String() {
+					allRaftStats[rs.LeaderInfo.GroupName] = rs.RaftStat
+				}
+			}
+		}
+		// get leader raft log stats
 		return struct {
-			SyncRecvLatency *common.WriteStats    `json:"sync_net_latency"`
-			SyncAllLatency  *common.WriteStats    `json:"sync_all_latency"`
-			LogReceived     []common.LogSyncStats `json:"log_received,omitempty"`
-			LogSynced       []common.LogSyncStats `json:"log_synced,omitempty"`
-		}{recvLatency, syncLatency, recvStats, syncStats}, nil
+			SyncRecvLatency *common.WriteStats          `json:"sync_net_latency"`
+			SyncAllLatency  *common.WriteStats          `json:"sync_all_latency"`
+			LogReceived     []common.LogSyncStats       `json:"log_received,omitempty"`
+			LogSynced       []common.LogSyncStats       `json:"log_synced,omitempty"`
+			LeaderRaftStats map[string]CustomRaftStatus `json:"leader_raft_stats,omitempty"`
+		}{recvLatency, syncLatency, recvStats, syncStats, allRaftStats}, nil
 	}
 	netStat := syncClusterNetStats.Copy()
 	totalStat := syncClusterTotalStats.Copy()
