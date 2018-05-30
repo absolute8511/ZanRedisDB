@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/rockredis"
-	"github.com/siddontang/goredis"
-	"github.com/stretchr/testify/assert"
 )
 
 var testOnce sync.Once
@@ -1467,7 +1467,7 @@ func TestSet(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	if n, err := goredis.MultiBulk(c.Do("smembers", key2)); err != nil {
+	if n, err := goredis.Values(c.Do("smembers", key2)); err != nil {
 		t.Fatal(err)
 	} else if len(n) != 4 {
 		t.Fatal(n)
@@ -1505,12 +1505,29 @@ func TestSet(t *testing.T) {
 	} else if len(val) != 0 {
 		t.Fatal(val)
 	}
+	if n, err := goredis.Int(c.Do("sadd", key2, "member0", "member1", "member2")); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+	if val, err := goredis.String(c.Do("spop", key2)); err != nil {
+		t.Fatal(err)
+	} else if val != "member0" {
+		t.Fatal(val)
+	}
+	if val, err := goredis.Values(c.Do("spop", key2, 2)); err != nil {
+		t.Fatal(err)
+	} else if len(val) != 2 {
+		t.Fatal(val)
+	} else if string(val[0].([]byte)) != "member1" || string(val[1].([]byte)) != "member2" {
+		t.Fatal(val)
+	}
+
 	if n, err := goredis.Int(c.Do("sadd", key2, 0, 1, 2, 3)); err != nil {
 		t.Fatal(err)
 	} else if n != 4 {
 		t.Fatal(n)
 	}
-
 	if n, err := goredis.Int(c.Do("sclear", key2)); err != nil {
 		t.Fatal(err)
 	} else if n != 4 {

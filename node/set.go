@@ -75,7 +75,7 @@ func (nd *KVNode) spopCommand(conn redcon.Conn, cmd redcon.Command) {
 			return
 		}
 		if rsp, ok := v.(string); ok {
-			conn.WriteBulkString(string(rsp[0]))
+			conn.WriteBulkString(rsp)
 			return
 		}
 		if !ok {
