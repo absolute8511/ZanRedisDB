@@ -9,12 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/siddontang/goredis"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
+	zanredisdb "github.com/youzan/go-zanredisdb"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/cluster/pdnode_coord"
 	"github.com/youzan/ZanRedisDB/node"
 	ds "github.com/youzan/ZanRedisDB/server"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
@@ -42,7 +44,7 @@ func enableAutoBalance(t *testing.T, pduri string, enable bool) {
 	//gpdServer.pdCoord.SetBalanceInterval(0, 24)
 }
 
-func waitForLeader(t *testing.T, ns string, part int) (*ds.Server, *node.NamespaceNode) {
+func waitForLeader(t *testing.T, ns string, part int) (dataNodeWrapper, *node.NamespaceNode) {
 	start := time.Now()
 	for {
 		if time.Since(start) > time.Minute {
@@ -56,12 +58,12 @@ func waitForLeader(t *testing.T, ns string, part int) (*ds.Server, *node.Namespa
 			}
 			assert.NotNil(t, nsNode)
 			if nsNode.Node.IsLead() {
-				return kv.s, nsNode
+				return kv, nsNode
 			}
 		}
 		time.Sleep(time.Millisecond * 100)
 	}
-	return nil, nil
+	return dataNodeWrapper{}, nil
 }
 
 func waitForAllFullReady(t *testing.T, ns string, part int) {
@@ -245,6 +247,87 @@ func TestClusterRemoveNode(t *testing.T) {
 	// TODO: remove a node from api
 }
 
+func getTestRedisConn(t *testing.T, port int) *goredis.PoolConn {
+	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(port), "")
+	c.SetMaxIdleConns(4)
+	conn, err := c.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+func TestRWMultiPartOnDifferentNodes(t *testing.T) {
+	ensureClusterReady(t)
+
+	time.Sleep(time.Second)
+	ns := "test_multi_part_rw"
+	partNum := 4
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 2)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	for i := 0; i < partNum; i++ {
+		leader, _ := waitForLeader(t, ns, i)
+		assert.NotNil(t, leader.s)
+	}
+	time.Sleep(time.Second)
+	// test should write to different parts
+	table := "test_set_kv_multi"
+	zanClient := getTestClient(t, ns)
+	for i := 0; i < 20; i++ {
+		k := []byte(fmt.Sprintf("kv%d", i))
+		err := zanClient.KVSet(table, k, k)
+		assert.Nil(t, err)
+		v, err := zanClient.KVGet(table, k)
+		assert.Nil(t, err)
+		assert.Equal(t, k, v)
+	}
+	for i := 0; i < partNum; i++ {
+		leader, nsNode := waitForLeader(t, ns, i)
+		assert.NotNil(t, leader)
+		stats := nsNode.Node.GetStats()
+		for _, st := range stats.TStats {
+			assert.Equal(t, table, st.Name)
+			t.Log(st)
+			assert.True(t, st.KeyNum > 3)
+		}
+	}
+	// test write to server with no part and not leader part should return error
+	for i := 0; i < 20; i++ {
+		k := []byte(fmt.Sprintf("%v:kv%d", table, i))
+		pid := zanredisdb.GetHashedPartitionID(k, partNum)
+		leader, _ := waitForLeader(t, ns, pid)
+		t.Logf("pk %v hash to pid: %v, leader is %v", string(k), pid, leader.redisPort)
+		for _, srv := range gkvList {
+			if srv.redisPort == leader.redisPort {
+				continue
+			}
+			conn := getTestRedisConn(t, srv.redisPort)
+			assert.NotNil(t, conn)
+			_, err := goredis.String(conn.Do("get", ns+":"+string(k)))
+			// get should not send to non-leader
+			t.Log(err)
+			t.Logf("pk %v send to node: %v", string(k), srv.redisPort)
+			assert.NotNil(t, err)
+			nsNode := srv.s.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(pid))
+			if nsNode == nil {
+				_, err := conn.Do("set", ns+":"+string(k), []byte(k))
+				t.Log(err)
+				assert.NotNil(t, err)
+			} else {
+				// set can be handled by non-leader
+				_, err := conn.Do("set", ns+":"+string(k), []byte(k))
+				assert.Nil(t, err)
+			}
+		}
+	}
+}
+
 func TestLeaderLost(t *testing.T) {
 	// leader is lost and mark leader as removing
 	ensureClusterReady(t)
@@ -260,7 +343,8 @@ func TestLeaderLost(t *testing.T) {
 	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
-	leader, nsNode := waitForLeader(t, ns, 0)
+	nodeWrapper, nsNode := waitForLeader(t, ns, 0)
+	leader := nodeWrapper.s
 	assert.NotNil(t, leader)
 	dcoord := leader.GetCoord()
 	leaderID := dcoord.GetMyID()
@@ -278,7 +362,8 @@ func TestLeaderLost(t *testing.T) {
 	waitForAllFullReady(t, ns, 0)
 	// wait balance
 	waitBalancedLeader(t, ns, 0)
-	newLeader, _ := waitForLeader(t, ns, 0)
+	nodeWrapper, _ = waitForLeader(t, ns, 0)
+	newLeader := nodeWrapper.s
 	assert.NotNil(t, newLeader)
 	newLeaderID := newLeader.GetCoord().GetMyID()
 	assert.NotEqual(t, leaderID, newLeaderID)
@@ -316,8 +401,8 @@ func TestFollowerLost(t *testing.T) {
 	enableAutoBalance(t, pduri, true)
 	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
-
-	leader, nsNode := waitForLeader(t, ns, 0)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
 	assert.NotNil(t, leader)
 	// call this to propose some request to write raft logs
 	for i := 0; i < 50; i++ {
@@ -366,7 +451,8 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
-	leader, leaderNode := waitForLeader(t, ns, 0)
+	dnw, leaderNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
 	assert.NotNil(t, leader)
 
 	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 2)
