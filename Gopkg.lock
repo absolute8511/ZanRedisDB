@@ -407,8 +407,8 @@
 [[projects]]
   name = "github.com/youzan/go-zanredisdb"
   packages = ["."]
-  revision = "b2c355d2ac552c397ebe426363b6640bcede93bd"
-  version = "v0.1"
+  revision = "c2b0599b720df74f20f7a352728c8db03d941dc5"
+  version = "v0.2"
 
 [[projects]]
   branch = "master"
@@ -514,6 +514,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "b272db360ba449763a35c7dfc527d4b87e64ad1727524ddfa0133eb307d13b13"
+  inputs-digest = "66020b52bae64d78f00b008035de4015490636ff3aca3d8b831c26b41401db92"
   solver-name = "gps-cdcl"
   solver-version = 1
