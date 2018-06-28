@@ -68,6 +68,15 @@ func (self *NamespaceMetaInfo) MetaEpoch() EpochType {
 	return self.metaEpoch
 }
 
+func (self *NamespaceMetaInfo) DeepClone() NamespaceMetaInfo {
+	nm := *self
+	nm.Tags = make(map[string]interface{})
+	for k, v := range self.Tags {
+		nm.Tags[k] = v
+	}
+	return nm
+}
+
 type RemovingInfo struct {
 	RemoveTime      int64
 	RemoveReplicaID uint64
@@ -158,22 +167,10 @@ func (self *PartitionMetaInfo) GetRealLeader() string {
 
 func (self *PartitionMetaInfo) GetCopy() *PartitionMetaInfo {
 	newp := *self
-	newp.RaftNodes = make([]string, len(self.RaftNodes))
-	copy(newp.RaftNodes, self.RaftNodes)
-	newp.RaftIDs = make(map[string]uint64, len(self.RaftIDs))
-	for k, v := range self.RaftIDs {
-		newp.RaftIDs[k] = v
-	}
-	newp.Removings = make(map[string]RemovingInfo, len(self.Removings))
-	for k, v := range self.Removings {
-		newp.Removings[k] = v
-	}
-	newp.LearnerNodes = make(map[string][]string)
-	for k, v := range self.LearnerNodes {
-		ln := make([]string, len(v))
-		copy(ln, v)
-		newp.LearnerNodes[k] = ln
-	}
+
+	newp.PartitionReplicaInfo = self.PartitionReplicaInfo.DeepClone()
+	newp.NamespaceMetaInfo = self.NamespaceMetaInfo.DeepClone()
+
 	return &newp
 }
 

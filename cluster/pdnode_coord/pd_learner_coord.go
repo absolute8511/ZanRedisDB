@@ -184,6 +184,9 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 	cluster.CoordLog().Infof("namespace %v: mark learner role %v node %v removing , current : %v", nsInfo.GetDesp(), role, nid,
 		nsInfo.LearnerNodes)
 
+	if nsInfo.LearnerNodes == nil {
+		nsInfo.LearnerNodes = make(map[string][]string)
+	}
 	old := nsInfo.LearnerNodes[role]
 	newLrns := make([]string, 0, len(old))
 	for _, oid := range old {
@@ -194,9 +197,6 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 	}
 	if len(old) == len(newLrns) {
 		return errors.New("remove node id is not in learners")
-	}
-	if nsInfo.LearnerNodes == nil {
-		nsInfo.LearnerNodes = make(map[string][]string)
 	}
 	nsInfo.LearnerNodes[role] = newLrns
 	delete(nsInfo.RaftIDs, nid)
@@ -217,7 +217,9 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 func (pdCoord *PDCoordinator) removeNsAllLearners(origNSInfo *cluster.PartitionMetaInfo) error {
 	nsInfo := origNSInfo.GetCopy()
 	role := pdCoord.learnerRole
-
+	if nsInfo.LearnerNodes == nil {
+		nsInfo.LearnerNodes = make(map[string][]string)
+	}
 	old := nsInfo.LearnerNodes[role]
 	if len(old) == 0 {
 		return nil
@@ -226,9 +228,6 @@ func (pdCoord *PDCoordinator) removeNsAllLearners(origNSInfo *cluster.PartitionM
 		nsInfo.GetDesp(), role, old)
 	for _, nid := range old {
 		delete(nsInfo.RaftIDs, nid)
-	}
-	if nsInfo.LearnerNodes == nil {
-		nsInfo.LearnerNodes = make(map[string][]string)
 	}
 	nsInfo.LearnerNodes[role] = make([]string, 0)
 
