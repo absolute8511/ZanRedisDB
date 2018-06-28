@@ -34,11 +34,12 @@ var (
 	clusterID                  = flagSet.String("cluster-id", "test-cluster", "the cluster id used for separating different cluster.")
 	autoBalance                = flagSet.Bool("auto-balance-and-migrate", false, "auto balance and migrate the data while unstable")
 
-	logLevel        = flagSet.Int("log-level", 1, "log verbose level")
-	logDir          = flagSet.String("log-dir", "", "directory for log file")
-	dataDir         = flagSet.String("data-dir", "", "directory for data")
-	learnerRole     = flagSet.String("learner-role", "", "learner role for pd")
-	balanceInterval = common.StringArray{}
+	logLevel         = flagSet.Int("log-level", 1, "log verbose level")
+	logDir           = flagSet.String("log-dir", "", "directory for log file")
+	dataDir          = flagSet.String("data-dir", "", "directory for data")
+	learnerRole      = flagSet.String("learner-role", "", "learner role for pd")
+	filterNamespaces = flagSet.String("filter-namespaces", "", "filter namespaces while in learner role for pd")
+	balanceInterval  = common.StringArray{}
 )
 
 func init() {
