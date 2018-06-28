@@ -68,6 +68,13 @@ func (pdCoord *PDCoordinator) doCheckNamespacesForLearner(monitorChan chan struc
 			// wait enough isr for leader election before we add learner
 			continue
 		}
+		// filter some namespace
+		if _, ok := pdCoord.filterNamespaces[nsInfo.Name]; ok {
+			// need clean learner for old configure (new configure add new filter namespace after
+			// old learner already added)
+			pdCoord.removeNsAllLearners(&nsInfo)
+			continue
+		}
 		// check current learner node alive
 		newMaster := ""
 		learnerIDs := nsInfo.LearnerNodes[pdCoord.learnerRole]
@@ -202,6 +209,37 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 	} else {
 		cluster.CoordLog().Infof("namespace %v: mark learner role %v removing from node:%v done", nsInfo.GetDesp(),
 			role, nid)
+		*origNSInfo = *nsInfo
+	}
+	return nil
+}
+
+func (pdCoord *PDCoordinator) removeNsAllLearners(origNSInfo *cluster.PartitionMetaInfo) error {
+	nsInfo := origNSInfo.GetCopy()
+	role := pdCoord.learnerRole
+
+	old := nsInfo.LearnerNodes[role]
+	if len(old) == 0 {
+		return nil
+	}
+	cluster.CoordLog().Infof("namespace %v: removing all learner role %v nodes %v",
+		nsInfo.GetDesp(), role, old)
+	for _, nid := range old {
+		delete(nsInfo.RaftIDs, nid)
+	}
+	if nsInfo.LearnerNodes == nil {
+		nsInfo.LearnerNodes = make(map[string][]string)
+	}
+	nsInfo.LearnerNodes[role] = make([]string, 0)
+
+	err := pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
+	if err != nil {
+		cluster.CoordLog().Infof("update namespace %v replica info failed: %v", nsInfo.GetDesp(), err.Error())
+		return err
+	} else {
+		cluster.CoordLog().Infof("namespace %v: removed all learner role %v node:%v", nsInfo.GetDesp(),
+			role, old)
 		*origNSInfo = *nsInfo
 	}
 	return nil

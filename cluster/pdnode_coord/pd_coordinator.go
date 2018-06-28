@@ -7,6 +7,7 @@ import (
 	"path"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,6 +72,7 @@ type PDCoordinator struct {
 	stableNodeNum          int32
 	dataDir                string
 	learnerRole            string
+	filterNamespaces       map[string]bool
 }
 
 func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Options) *PDCoordinator {
@@ -90,6 +92,7 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 		stopChan:               make(chan struct{}),
 		monitorChan:            make(chan struct{}),
 		learnerRole:            n.LearnerRole,
+		filterNamespaces:       make(map[string]bool),
 	}
 	coord.dpm = NewDataPlacement(coord)
 	if opts != nil {
@@ -98,6 +101,12 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 			coord.autoBalance = 1
 		}
 		coord.dataDir = opts.DataDir
+		nss := strings.Split(opts.FilterNamespaces, ",")
+		for _, ns := range nss {
+			if len(ns) > 0 {
+				coord.filterNamespaces[ns] = true
+			}
+		}
 	}
 	return coord
 }

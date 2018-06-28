@@ -252,4 +252,5 @@ type Options struct {
 	BalanceStart          int
 	BalanceEnd            int
 	DataDir               string
+	FilterNamespaces      string
 }

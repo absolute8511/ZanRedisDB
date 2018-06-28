@@ -71,6 +71,7 @@ func NewServer(conf *ServerConfig) *Server {
 	clusterOpts := &cluster.Options{}
 	clusterOpts.DataDir = conf.DataDir
 	clusterOpts.AutoBalanceAndMigrate = conf.AutoBalanceAndMigrate
+	clusterOpts.FilterNamespaces = conf.FilterNamespaces
 	if len(conf.BalanceInterval) == 2 {
 		clusterOpts.BalanceStart, err = strconv.Atoi(conf.BalanceInterval[0])
 		if err != nil {

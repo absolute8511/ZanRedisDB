@@ -18,10 +18,11 @@ type ServerConfig struct {
 	AutoBalanceAndMigrate      bool     `flag:"auto-balance-and-migrate"`
 	BalanceInterval            []string `flag:"balance-interval"`
 
-	LogLevel    int32  `flag:"log-level" cfg:"log_level"`
-	LogDir      string `flag:"log-dir" cfg:"log_dir"`
-	DataDir     string `flag:"data-dir" cfg:"data_dir"`
-	LearnerRole string `flag:"learner-role" cfg:"learner_role"`
+	LogLevel         int32  `flag:"log-level" cfg:"log_level"`
+	LogDir           string `flag:"log-dir" cfg:"log_dir"`
+	DataDir          string `flag:"data-dir" cfg:"data_dir"`
+	LearnerRole      string `flag:"learner-role" cfg:"learner_role"`
+	FilterNamespaces string `flag:"filter-namespaces" cfg:"filter_namespaces"`
 }
 
 func NewServerConfig() *ServerConfig {
