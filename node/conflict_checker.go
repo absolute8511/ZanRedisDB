@@ -84,10 +84,18 @@ func (kvsm *kvStoreSM) checkHashKFFConflict(cmd redcon.Command, reqTs int64) boo
 	return false
 }
 
+// for list, set, zset, ts may be not enough.
+// If clusterA modified and clusterB modified later and then clusterA
+// modified again, the second modification in clusterA will be allowed since its timestamp is newer
+// but this will cause inconsistence. So we need forbiden write sync if both timestamps are newer
+// than the time we switched the cluster.
 func (kvsm *kvStoreSM) checkListConflict(cmd redcon.Command, reqTs int64) bool {
 	oldTs, err := kvsm.store.LVer(cmd.Args[1])
 	if err != nil {
 		kvsm.Infof("key %v failed to get modify version: %v", cmd.Args[1], err)
+	}
+	if oldTs >= GetSyncedOnlyChangedTs() && reqTs >= GetSyncedOnlyChangedTs() {
+		return true
 	}
 	if oldTs < reqTs {
 		return false
@@ -100,6 +108,9 @@ func (kvsm *kvStoreSM) checkSetConflict(cmd redcon.Command, reqTs int64) bool {
 	if err != nil {
 		kvsm.Infof("key %v failed to get modify version: %v", cmd.Args[1], err)
 	}
+	if oldTs >= GetSyncedOnlyChangedTs() && reqTs >= GetSyncedOnlyChangedTs() {
+		return true
+	}
 	if oldTs < reqTs {
 		return false
 	}
@@ -110,6 +121,9 @@ func (kvsm *kvStoreSM) checkZSetConflict(cmd redcon.Command, reqTs int64) bool {
 	oldTs, err := kvsm.store.ZGetVer(cmd.Args[1])
 	if err != nil {
 		kvsm.Infof("key %v failed to get modify version: %v", cmd.Args[1], err)
+	}
+	if oldTs >= GetSyncedOnlyChangedTs() && reqTs >= GetSyncedOnlyChangedTs() {
+		return true
 	}
 	if oldTs < reqTs {
 		return false

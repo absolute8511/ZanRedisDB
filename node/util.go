@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"strconv"
 	"sync/atomic"
+	"time"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("node"))
 var syncerOnly int32
+var syncerOnlyChangedTs int64
 
 func SetLogLevel(level int) {
 	nodeLog.SetLevel(int32(level))
@@ -26,7 +28,12 @@ func SetSyncerOnly(enable bool) {
 		atomic.StoreInt32(&syncerOnly, 1)
 	} else {
 		atomic.StoreInt32(&syncerOnly, 0)
+		atomic.StoreInt64(&syncerOnlyChangedTs, time.Now().UnixNano())
 	}
+}
+
+func GetSyncedOnlyChangedTs() int64 {
+	return atomic.LoadInt64(&syncerOnlyChangedTs)
 }
 
 func IsSyncerOnly() bool {
