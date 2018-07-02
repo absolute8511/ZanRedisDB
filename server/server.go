@@ -227,7 +227,9 @@ func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]common.
 			tbs.DiskBytesUsage += ts.DiskBytesUsage
 			tbs.ApproximateKeyNum += ts.ApproximateKeyNum
 		}
-		allTbs[ns] = tbs
+		if tbs.KeyNum > 0 || tbs.DiskBytesUsage > 0 || tbs.ApproximateKeyNum > 0 {
+			allTbs[ns] = tbs
+		}
 	}
 	return allTbs
 }
