@@ -37,7 +37,7 @@ type StateMachine interface {
 	Destroy()
 	CleanData() error
 	Optimize(string)
-	GetStats() common.NamespaceStats
+	GetStats(table string) common.NamespaceStats
 	Start() error
 	Close()
 	CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error
@@ -99,7 +99,7 @@ func (esm *emptySM) CleanData() error {
 func (esm *emptySM) Optimize(t string) {
 
 }
-func (esm *emptySM) GetStats() common.NamespaceStats {
+func (esm *emptySM) GetStats(table string) common.NamespaceStats {
 	return common.NamespaceStats{}
 }
 func (esm *emptySM) Start() error {
@@ -184,8 +184,13 @@ func (kvsm *kvStoreSM) GetDBInternalStats() string {
 	return kvsm.store.GetStatistics()
 }
 
-func (kvsm *kvStoreSM) GetStats() common.NamespaceStats {
-	tbs := kvsm.store.GetTables()
+func (kvsm *kvStoreSM) GetStats(table string) common.NamespaceStats {
+	var tbs [][]byte
+	if len(table) > 0 {
+		tbs = [][]byte{[]byte(table)}
+	} else {
+		tbs = kvsm.store.GetTables()
+	}
 	var ns common.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()

@@ -208,9 +208,32 @@ func (s *Server) GetLogSyncStats(leaderOnly bool, srcClusterName string) []commo
 	return s.nsMgr.GetLogSyncStats(leaderOnly, srcClusterName)
 }
 
+func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]common.TableStats {
+	var ss common.ServerStats
+	ss.NSStats = s.nsMgr.GetStats(leaderOnly, table)
+	allTbs := make(map[string]common.TableStats)
+	for _, s := range ss.NSStats {
+		var tbs common.TableStats
+		tbs.Name = table
+		if t, ok := allTbs[s.Name]; ok {
+			tbs = t
+		}
+		for _, ts := range s.TStats {
+			if ts.Name != table {
+				continue
+			}
+			tbs.KeyNum += ts.KeyNum
+			tbs.DiskBytesUsage += ts.DiskBytesUsage
+			tbs.ApproximateKeyNum += ts.ApproximateKeyNum
+		}
+		allTbs[s.Name] = tbs
+	}
+	return allTbs
+}
+
 func (s *Server) GetStats(leaderOnly bool) common.ServerStats {
 	var ss common.ServerStats
-	ss.NSStats = s.nsMgr.GetStats(leaderOnly)
+	ss.NSStats = s.nsMgr.GetStats(leaderOnly, "")
 	ss.ScanStats = s.scanStats.Copy()
 	return ss
 }

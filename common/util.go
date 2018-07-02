@@ -22,6 +22,7 @@ const (
 	APINodeAllReady   = "/node/allready"
 	// check if the namespace raft node is synced and can be elected as leader immediately
 	APIIsRaftSynced = "/cluster/israftsynced"
+	APITableStats   = "/tablestats"
 
 	// below api for pd
 	APIGetSnapshotSyncInfo = "/pd/snapshot_sync_info"

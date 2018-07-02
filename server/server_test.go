@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/rockredis"
-	"github.com/siddontang/goredis"
-	"github.com/stretchr/testify/assert"
 )
 
 var clusterName = "cluster-unittest-server"
@@ -259,7 +259,7 @@ func waitForLeader(t *testing.T, w time.Duration) *node.NamespaceNode {
 func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *node.NamespaceNode, logSyncer bool) {
 	start := time.Now()
 	for {
-		nsStats := node.Node.GetStats()
+		nsStats := node.Node.GetStats("")
 		ci := node.Node.GetCommittedIndex()
 		if ci >= leaderci {
 			assert.Equal(t, leaderci, ci)
@@ -313,7 +313,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	learnerNode := learnerServers[0].GetNamespaceFromFullName("default-0")
 	assert.NotNil(t, learnerNode)
 	m := learnerNode.Node.GetLocalMemberInfo()
-	nsStats := learnerNode.Node.GetStats()
+	nsStats := learnerNode.Node.GetStats("")
 	assert.Equal(t, common.LearnerRoleLogSyncer, nsStats.InternalStats["role"])
 
 	raftStats := leaderNode.Node.GetRaftStatus()

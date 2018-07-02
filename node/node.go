@@ -338,8 +338,8 @@ func (nd *KVNode) GetDBInternalStats() string {
 	return ""
 }
 
-func (nd *KVNode) GetStats() common.NamespaceStats {
-	ns := nd.sm.GetStats()
+func (nd *KVNode) GetStats(table string) common.NamespaceStats {
+	ns := nd.sm.GetStats(table)
 	ns.ClusterWriteStats = nd.clusterWriteStats.Copy()
 	return ns
 }

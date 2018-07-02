@@ -3,16 +3,18 @@ package pdserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/julienschmidt/httprouter"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/julienschmidt/httprouter"
 )
 
 type nodeInfo struct {
@@ -73,6 +75,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/datanodes", common.Decorate(s.getDataNodes, common.V1))
 	router.Handle("GET", "/listpd", common.Decorate(s.listPDNodes, common.V1))
 	router.Handle("GET", "/query/:namespace", common.Decorate(s.doQueryNamespace, debugLog, common.V1))
+	router.Handle("GET", "/querytable/stats/:table", common.Decorate(s.doQueryTableStats, debugLog, common.V1))
 	router.Handle("DELETE", "/namespace/rmlearner", common.Decorate(s.doRemoveNamespaceLearner, log, common.V1))
 
 	// cluster prefix url means only handled by leader of pd
@@ -165,6 +168,54 @@ func (s *Server) listPDNodes(w http.ResponseWriter, req *http.Request, ps httpro
 	return map[string]interface{}{
 		"pdnodes":  filteredNodes,
 		"pdleader": leader,
+	}, nil
+}
+
+func (s *Server) doQueryTableStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	table := ps.ByName("table")
+	if table == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_TABLE"}
+	}
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	leaderOnly := reqParams.Get("leader_only")
+
+	dns, _ := s.pdCoord.GetAllDataNodes()
+	nodeTableStats := make(map[string]map[string]common.TableStats)
+	totalTableStats := make(map[string]common.TableStats)
+	for _, n := range dns {
+		uri := fmt.Sprintf("http://%s:%v%v?leader_only=%v&table=%v", n.Hostname, n.HttpPort, common.APITableStats, leaderOnly, table)
+		tableStats := make(map[string]common.TableStats)
+		rspCode, err := common.APIRequest("GET", uri, nil, time.Second*10, tableStats)
+		if err != nil {
+			sLog.Infof("get table stats error %v, %v", err, uri)
+			continue
+		}
+		if rspCode != http.StatusOK {
+			sLog.Infof("get table stats not ok %v, %v", rspCode, uri)
+			continue
+		}
+		nodeTableStats[n.GetID()] = tableStats
+		for ns, tbs := range tableStats {
+			if tbs.Name != table {
+				continue
+			}
+			var tmp common.TableStats
+			tmp.Name = table
+			if t, ok := totalTableStats[ns]; ok {
+				tmp = t
+			}
+			tmp.KeyNum += tbs.KeyNum
+			tmp.DiskBytesUsage += tbs.DiskBytesUsage
+			tmp.ApproximateKeyNum += tbs.ApproximateKeyNum
+			totalTableStats[ns] = tmp
+		}
+	}
+	return map[string]interface{}{
+		"total": totalTableStats,
+		"nodes": nodeTableStats,
 	}, nil
 }
 

@@ -512,6 +512,28 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
+func (s *Server) doTableStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
+	table := reqParams.Get("table")
+	if len(table) == 0 {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST: table is needed"}
+	}
+	ss := s.GetTableStats(leaderOnly, table)
+
+	return struct {
+		TableStats map[string]common.TableStats `json:"table_stats"`
+	}{ss}, nil
+}
+
 func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	if s.conf.LearnerRole == common.LearnerRoleLogSyncer {
 		allUrls := make(map[string]bool)
@@ -640,6 +662,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
+	router.Handle("GET", common.APITableStats, common.Decorate(s.doTableStats, common.V1))
 	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
 	router.Handle("GET", "/db/perf", common.Decorate(s.doDBPerf, log, common.V1))

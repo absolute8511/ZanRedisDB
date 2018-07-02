@@ -115,7 +115,7 @@ func (sm *logSyncerSM) GetLogSyncStats() (common.LogSyncStats, common.LogSyncSta
 	return recvStats, syncStats
 }
 
-func (sm *logSyncerSM) GetStats() common.NamespaceStats {
+func (sm *logSyncerSM) GetStats(table string) common.NamespaceStats {
 	var ns common.NamespaceStats
 	stat := make(map[string]interface{})
 	stat["role"] = common.LearnerRoleLogSyncer

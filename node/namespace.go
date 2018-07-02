@@ -498,7 +498,7 @@ func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string)
 	return nsStats
 }
 
-func (nsm *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
+func (nsm *NamespaceMgr) GetStats(leaderOnly bool, table string) []common.NamespaceStats {
 	nsm.mutex.RLock()
 	nsStats := make([]common.NamespaceStats, 0, len(nsm.kvNodes))
 	for k, n := range nsm.kvNodes {
@@ -508,7 +508,7 @@ func (nsm *NamespaceMgr) GetStats(leaderOnly bool) []common.NamespaceStats {
 		if leaderOnly && !n.Node.IsLead() {
 			continue
 		}
-		ns := n.Node.GetStats()
+		ns := n.Node.GetStats(table)
 		ns.Name = k
 		ns.EngType = n.conf.EngType
 		ns.IsLeader = n.Node.IsLead()
