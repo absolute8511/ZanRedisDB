@@ -104,6 +104,9 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.BroadcastInterface != "" {
 		myNode.NodeIP = common.GetIPv4ForInterfaceName(conf.BroadcastInterface)
 	}
+	if conf.RsyncLimit > 0 {
+		common.SetRsyncLimit(conf.RsyncLimit)
+	}
 	if myNode.NodeIP == "" {
 		myNode.NodeIP = conf.BroadcastAddr
 	} else {

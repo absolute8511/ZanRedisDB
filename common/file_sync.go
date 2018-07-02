@@ -2,16 +2,24 @@ package common
 
 import (
 	//"github.com/Redundancy/go-sync"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 )
 
 var runningCh chan struct{}
 
 func init() {
 	runningCh = make(chan struct{}, 2)
+}
+
+var rsyncLimit = int64(51200)
+
+func SetRsyncLimit(limit int64) {
+	atomic.StoreInt64(&rsyncLimit, limit)
 }
 
 func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan struct{}) error {
@@ -40,7 +48,8 @@ func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan stru
 	} else {
 		log.Printf("copy from remote :%v/%v to local: %v\n", remote, srcPath, dstPath)
 		// limit rate in kilobytes
-		cmd = exec.Command("rsync", "-avP", "--bwlimit=25600",
+		limitStr := fmt.Sprintf("--bwlimit=%v", atomic.LoadInt64(&rsyncLimit))
+		cmd = exec.Command("rsync", "-avP", limitStr,
 			"rsync://"+remote+"/"+srcPath, dstPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

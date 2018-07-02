@@ -1072,6 +1072,9 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 	dbLog.Infof("restore done, cost: %v\n", time.Now().Sub(start))
 	if err != nil {
 		dbLog.Infof("reopen the restored db failed:  %v\n", err)
+	} else {
+		purgeOldCheckpoint(MaxCheckpointNum, r.GetBackupDir())
+		purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote())
 	}
 	return err
 }

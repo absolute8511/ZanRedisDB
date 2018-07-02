@@ -24,6 +24,7 @@ type ServerConfig struct {
 	LearnerRole          string            `json:"learner_role"`
 	RemoteSyncCluster    string            `json:"remote_sync_cluster"`
 	StateMachineType     string            `json:"state_machine_type"`
+	RsyncLimit           int64             `json:"rsync_limit"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`
