@@ -188,7 +188,7 @@ func (s *Server) doQueryTableStats(w http.ResponseWriter, req *http.Request, ps 
 	for _, n := range dns {
 		uri := fmt.Sprintf("http://%s:%v%v?leader_only=%v&table=%v", n.Hostname, n.HttpPort, common.APITableStats, leaderOnly, table)
 		tableStats := make(map[string]common.TableStats)
-		rspCode, err := common.APIRequest("GET", uri, nil, time.Second*10, tableStats)
+		rspCode, err := common.APIRequest("GET", uri, nil, time.Second*10, &tableStats)
 		if err != nil {
 			sLog.Infof("get table stats error %v, %v", err, uri)
 			continue

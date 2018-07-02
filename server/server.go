@@ -213,9 +213,10 @@ func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]common.
 	ss.NSStats = s.nsMgr.GetStats(leaderOnly, table)
 	allTbs := make(map[string]common.TableStats)
 	for _, s := range ss.NSStats {
+		ns, _ := common.GetNamespaceAndPartition(s.Name)
 		var tbs common.TableStats
 		tbs.Name = table
-		if t, ok := allTbs[s.Name]; ok {
+		if t, ok := allTbs[ns]; ok {
 			tbs = t
 		}
 		for _, ts := range s.TStats {
@@ -226,7 +227,7 @@ func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]common.
 			tbs.DiskBytesUsage += ts.DiskBytesUsage
 			tbs.ApproximateKeyNum += ts.ApproximateKeyNum
 		}
-		allTbs[s.Name] = tbs
+		allTbs[ns] = tbs
 	}
 	return allTbs
 }
