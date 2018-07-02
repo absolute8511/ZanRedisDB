@@ -185,9 +185,12 @@ func (s *Server) doQueryTableStats(w http.ResponseWriter, req *http.Request, ps 
 	dns, _ := s.pdCoord.GetAllDataNodes()
 	nodeTableStats := make(map[string]map[string]common.TableStats)
 	totalTableStats := make(map[string]common.TableStats)
+	type TableStatsType struct {
+		TableStats map[string]common.TableStats `json:"table_stats"`
+	}
 	for _, n := range dns {
 		uri := fmt.Sprintf("http://%s:%v%v?leader_only=%v&table=%v", n.Hostname, n.HttpPort, common.APITableStats, leaderOnly, table)
-		tableStats := make(map[string]common.TableStats)
+		var tableStats TableStatsType
 		rspCode, err := common.APIRequest("GET", uri, nil, time.Second*10, &tableStats)
 		if err != nil {
 			sLog.Infof("get table stats error %v, %v", err, uri)
@@ -197,8 +200,8 @@ func (s *Server) doQueryTableStats(w http.ResponseWriter, req *http.Request, ps 
 			sLog.Infof("get table stats not ok %v, %v", rspCode, uri)
 			continue
 		}
-		nodeTableStats[n.GetID()] = tableStats
-		for ns, tbs := range tableStats {
+		nodeTableStats[n.GetID()] = tableStats.TableStats
+		for ns, tbs := range tableStats.TableStats {
 			if tbs.Name != table {
 				continue
 			}
