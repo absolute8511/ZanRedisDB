@@ -159,7 +159,10 @@ func NewServer(conf ServerConfig) *Server {
 	myNode.RegID = mconf.NodeID
 
 	if conf.EtcdClusterAddresses != "" {
-		r := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
+		r, err := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
+		if err != nil {
+			sLog.Fatalf("failed to init register for coordinator: %v", err)
+		}
 		s.dataCoord = datanode_coord.NewDataCoordinator(conf.ClusterID, myNode, s.nsMgr)
 		if err := s.dataCoord.SetRegister(r); err != nil {
 			sLog.Fatalf("failed to init register for coordinator: %v", err)

@@ -42,12 +42,6 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/absolute8511/xlock2"
-  packages = ["."]
-  revision = "7b7239df53d44f2494c35306962488e31e0754e0"
-
-[[projects]]
-  branch = "master"
   name = "github.com/beorn7/perks"
   packages = ["quantile"]
   revision = "3a771d992973f24aa725d07868b467d1ddfceafb"
@@ -514,6 +508,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "66020b52bae64d78f00b008035de4015490636ff3aca3d8b831c26b41401db92"
+  inputs-digest = "913e7556b4c10aaca4212e95f217d18b28438f9330be5428b9f4da886aacbbac"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -55,10 +55,6 @@ required = [
   name = "github.com/absolute8511/redigo"
 
 [[constraint]]
-  branch = "master"
-  name = "github.com/absolute8511/xlock2"
-
-[[constraint]]
   name = "github.com/coreos/etcd"
   version = "=3.1.15"
 

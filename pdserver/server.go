@@ -91,7 +91,11 @@ func NewServer(conf *ServerConfig) *Server {
 		tombstonePDNodes: make(map[string]bool),
 	}
 
-	r := cluster.NewPDEtcdRegister(conf.ClusterLeadershipAddresses)
+	r, err := cluster.NewPDEtcdRegister(conf.ClusterLeadershipAddresses)
+	if err != nil {
+		sLog.Errorf("failed to init register: %v", err)
+		os.Exit(1)
+	}
 	s.pdCoord.SetRegister(r)
 
 	return s
