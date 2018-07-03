@@ -133,7 +133,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		rconfig.SnapCount = DefaultSnapCount
 	}
 	if rconfig.SnapCatchup <= 0 {
-		rconfig.SnapCatchup = rconfig.SnapCount / 4
+		rconfig.SnapCatchup = rconfig.SnapCount / 2
 	}
 
 	rc := &raftNode{

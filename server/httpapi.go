@@ -376,6 +376,26 @@ func (s *Server) doSetCostLevel(w http.ResponseWriter, req *http.Request, ps htt
 	return nil, nil
 }
 
+func (s *Server) doSetRsyncLimit(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	limitStr := reqParams.Get("limit")
+	if limitStr == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_ARG_STRING"}
+	}
+	if limit <= 0 {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_ARG_STRING"}
+	}
+	common.SetRsyncLimit(int64(limit))
+	return nil, nil
+}
+
 func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -656,6 +676,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
 	router.Handle("POST", "/costlevel/set", common.Decorate(s.doSetCostLevel, log, common.V1))
+	router.Handle("POST", "/rsynclimit", common.Decorate(s.doSetRsyncLimit, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
 	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
