@@ -32,4 +32,5 @@ pages:
       - 'Overview' : 'design.md'
       - 'full scan' : 'design/fullscan.md'
       - 'source analyse' : 'design/source_analyse.md'
-  - 'Examples' : 'examples.md'
+  - 'User Guide' : 'user-guide.md'
+  - 'Operation Guide' : 'operation-guide.md'
