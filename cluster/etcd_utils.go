@@ -11,13 +11,6 @@ const (
 	ErrCodeUnhandledHTTPStatus = 502
 )
 
-var (
-	lockID   int64
-	pid      int
-	hostname string
-	ip       string
-)
-
 func initEtcdPeers(machines []string) error {
 	for i, ep := range machines {
 		u, err := url.Parse(ep)
