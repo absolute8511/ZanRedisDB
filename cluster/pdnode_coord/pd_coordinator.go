@@ -267,7 +267,10 @@ func (pdCoord *PDCoordinator) notifyLeaderChanged(monitorChan chan struct{}) {
 	if pdCoord.register != nil {
 		newNamespaces, _, err := pdCoord.register.GetAllNamespaces()
 		if err != nil {
-			cluster.CoordLog().Errorf("load namespace info failed: %v", err)
+			// may not init any yet.
+			if err != cluster.ErrKeyNotFound {
+				cluster.CoordLog().Infof("load namespace info failed: %v", err)
+			}
 		} else {
 			cluster.CoordLog().Infof("namespace loaded : %v", len(newNamespaces))
 			// save to file in case of etcd data disaster
@@ -639,8 +642,10 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 	if failedInfo == nil || failedInfo.NamespaceName == "" || failedInfo.NamespacePartition < 0 {
 		allNamespaces, _, commonErr := pdCoord.register.GetAllNamespaces()
 		if commonErr != nil {
-			cluster.CoordLog().Infof("scan namespaces failed. %v", commonErr)
-			atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+			if commonErr != cluster.ErrKeyNotFound {
+				cluster.CoordLog().Infof("scan namespaces failed. %v", commonErr)
+				atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
+			}
 			return
 		}
 		for n, parts := range allNamespaces {
