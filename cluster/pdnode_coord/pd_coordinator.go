@@ -760,9 +760,7 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 				continue
 			}
 			failedTime := partitions[nsInfo.Partition]
-			emergency := (aliveCount <= nsInfo.Replica/2) && failedTime.Before(time.Now().Add(-1*waitEmergencyMigrateInterval))
-			if emergency ||
-				failedTime.Before(time.Now().Add(-1*waitMigrateInterval)) {
+			if failedTime.Before(time.Now().Add(-1 * waitMigrateInterval)) {
 				aliveNodes, aliveEpoch := pdCoord.getCurrentNodesWithEpoch(nsInfo.Tags)
 				if aliveEpoch != currentNodesEpoch {
 					go pdCoord.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second)
@@ -771,9 +769,6 @@ func (pdCoord *PDCoordinator) doCheckNamespaces(monitorChan chan struct{}, faile
 				cluster.CoordLog().Infof("begin migrate the namespace :%v", nsInfo.GetDesp())
 				if coordErr := pdCoord.handleNamespaceMigrate(&nsInfo, aliveNodes, aliveEpoch); coordErr != nil {
 					atomic.StoreInt32(&pdCoord.isClusterUnstable, 1)
-					if emergency {
-						go pdCoord.triggerCheckNamespaces(nsInfo.Name, nsInfo.Partition, time.Second*3)
-					}
 					continue
 				} else {
 					delete(partitions, nsInfo.Partition)
