@@ -1,5 +1,75 @@
 # 运维指南
 
+## 部署配置说明
+
+### 默认配置说明
+
+zankv数据节点配置参数说明:
+```
+{
+ "server_conf": {
+  "cluster_id": "test-qa-alpha-1",   ### 集群id, 用于区分不同的集群
+  "etcd_cluster_addresses": "http://127.0.0.1:2379,http://127.0.0.2:2379", ### etcd 集群地址列表
+  "broadcast_interface": "eth0",  ### 绑定的网卡, 使用网卡可以避免每台机子配置绑定ip
+  "broadcast_addr": "",   ### 绑定ip, 推荐使用网卡配置, 此项可以留空
+  "redis_api_port": 12381,   ### redis协议监听地址端口
+  "http_api_port": 12380,     ### http api 端口
+  "grpc_api_port": 12382,     ### grpc内部集群通信端口
+  "profile_port": 0,          ### debug数据端口, 默认是6666
+  "data_dir": "/data/zankv",   ### 数据目录
+  "data_rsync_module": "zankv",   ### rsync 模块, 名字必须保持和rsync配置吻合, rsync模块配置的数据目录路径必须和本配置的数据目录一致
+  "local_raft_addr": "http://0.0.0.0:12379",  ### 内部raft 传输层监听地址
+  "tags": null,    ### tag属性, 用于标识机器属性, rack-aware会使用此配置
+  "syncer_write_only": false,    ### 此配置用于跨机房多集群部署, 默认不需要
+  "syncer_normal_init": false,   ### 此配置用于跨机房数据同步初始化, 默认不需要
+  "learner_role": "",            ### 配置raft learner角色, 用于跨机房同步, 默认不需要
+  "remote_sync_cluster": "",     ### 跨机房集群的备机房地址, 默认不需要
+  "state_machine_type": "",      ### 状态机类型, 用于未来区分不同的状态机, 暂时不需要配置,目前仅支持rocksdb
+  "rsync_limit": 0,   ### 限制rsync传输的速度, 一般不需要配置, 会使用默认限制
+  "election_tick": 30,   ### raft leader失效间隔, 建议使用默认值
+  "tick_ms": 200,   ### raft 心跳包间隔, 建议使用默认值
+  "rocksdb_opts": {   ### rocksdb参数参见调优
+   "verify_read_checksum": false,
+   "use_shared_cache": true,
+   "use_shared_rate_limiter": true
+  },
+  "max_scan_job": 0   ### 允许的最大scan任何数量, 一般使用内置的默认值
+ }
+}
+
+```
+
+namespace创建参数建议3副本, 分区数可以预估集群最大规模, 一般初始化设置为集群最大机器数*4, 预留部分扩容能力. 一般来说集群建议最小规模是4台机器, 16分区. 理论上可以通过加机器扩容到 50TB容量左右. 如果需要继续扩容, 可以再创建更多分区的新namespace来完成.
+
+注意如果需要在较少的机器上创建较多分区数的namespace, 需要适当调小 rocksdb的 write_buffer_size参数以及namespace的snap_count参数, 以减少每个分区的内存占用
+
+### rocksdb调优
+
+由于底层使用rocksdb存储, 为了更好的适应各种硬件配置, 需要了解部分rocksdb的配置, 并根据具体环境做配置优化.
+具体可配置的参数含义如下:
+```
+{
+   "verify_read_checksum": false,  ### 读是否校验crc, 禁用可以减少CPU的使用, 大部分情况下可以禁用
+   "block_size": 0,   ### block大小, 一般使用默认值即可, 建议8KB~64KB之间
+   "block_cache": 0,  ### 建议使用默认值, 并且启用 use_shared_cache=true, 内部会自动根据操作系统可用内存调整.
+   "cache_index_and_filter_blocks": true,  ### 是否将索引和filter放入block cache, 建议小内存机器设置true, 避免数据增长占用过多内存, 大内存>64GB内存可以使用false, 会将block索引都缓存在内存, 加速访问
+   // 以下几个参数设置时, 注意保证 level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base减少写放大效应, 建议使用默认值, 如果机器内存较小, 可以适当等比例缩小
+   "write_buffer_size": 0, 
+   "min_write_buffer_number_to_merge": 0,
+   "level0_file_num_compaction_trigger": 0,
+   "max_bytes_for_level_base": 0,
+   "max_write_buffer_number": 4,  #### 建议 2~6之间, 根据操作系统不同内存大小调整
+   "target_file_size_base": 0,   ### 建议使用默认值
+   "max_background_flushes": 0,  ### 建议使用默认值, rocksdb刷盘线程
+   "max_background_compactions": 0,   ### 建议使用默认值, rocksdb compact线程
+   "min_level_to_compress": 0,   ### 建议使用默认值
+   "max_mainifest_file_size": 0,   ### 建议使用默认值
+   "rate_bytes_per_sec": 20000000,   ### rocksdb后台IO操作限速, 建议设置避免IO毛刺, 建议限速 20MB ~ 50MB 之间
+   "use_shared_cache": true,  ### 建议true, 所有实例共享block cache
+   "use_shared_rate_limiter": true   ### 建议true, 所有实例共享限速指标
+}
+```
+
 ## 操作和接口说明
 
 rsync进程:用于异常恢复时传输zankv的备份数据
@@ -108,7 +178,7 @@ restore -lookup lookuplist -data restore  [-ns namespace -table table_name -qps 
 ```
 
 
-## 跨机房同步运维
+## 跨机房运维
 
 同城3机房的情况, 使用默认的跨机房大集群模式部署即可, 使用raft自动同步和做故障切换.
 

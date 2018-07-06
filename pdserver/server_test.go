@@ -290,7 +290,7 @@ func TestRWMultiPartOnDifferentNodes(t *testing.T) {
 	for i := 0; i < partNum; i++ {
 		leader, nsNode := waitForLeader(t, ns, i)
 		assert.NotNil(t, leader)
-		stats := nsNode.Node.GetStats()
+		stats := nsNode.Node.GetStats("")
 		for _, st := range stats.TStats {
 			assert.Equal(t, table, st.Name)
 			t.Log(st)
@@ -534,7 +534,7 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 	for _, srv := range learnerSrvs {
 		nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
 		assert.Equal(t, commitID, nsNode.Node.GetCommittedIndex())
-		stats := nsNode.Node.GetStats()
+		stats := nsNode.Node.GetStats("")
 		assert.Equal(t, commitID, stats.InternalStats["synced_index"].(uint64))
 	}
 }

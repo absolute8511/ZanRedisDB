@@ -34,7 +34,6 @@ var (
 
 var (
 	waitMigrateInterval            = time.Minute * 16
-	waitEmergencyMigrateInterval   = time.Second * 60
 	waitRemoveRemovingNodeInterval = time.Minute * 5
 	nsCheckInterval                = time.Minute
 	nsCheckLearnerInterval         = time.Second * 10
@@ -43,7 +42,6 @@ var (
 
 func ChangeIntervalForTest() {
 	waitMigrateInterval = time.Second * 3
-	waitEmergencyMigrateInterval = time.Second
 	waitRemoveRemovingNodeInterval = time.Second * 3
 	nsCheckInterval = time.Second
 	balanceCheckInterval = time.Second * 5
