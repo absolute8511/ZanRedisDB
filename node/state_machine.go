@@ -29,6 +29,13 @@ const (
 var errIgnoredRemoteApply = errors.New("remote raft apply should be ignored")
 var errRemoteSnapTransferFailed = errors.New("remote raft snapshot transfer failed")
 
+func isUnrecoveryError(err error) bool {
+	if strings.HasPrefix(err.Error(), "IO error: No space left on device") {
+		return true
+	}
+	return false
+}
+
 type StateMachine interface {
 	ApplyRaftRequest(isReplaying bool, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
@@ -516,6 +523,9 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 					if err != nil {
 						kvsm.Infof("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
 						kvsm.w.Trigger(reqID, err)
+						if isUnrecoveryError(err) {
+							panic(err)
+						}
 					} else {
 						kvsm.w.Trigger(reqID, v)
 					}
