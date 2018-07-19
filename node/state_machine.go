@@ -538,7 +538,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 					batchReqIDList, batchReqRspList, dupCheckMap)
 			}
 			if req.Header.DataType == int32(CustomReq) {
-				forceBackup, retErr = kvsm.handleCustomRequest(req, reqID)
+				forceBackup, retErr = kvsm.handleCustomRequest(req, reqID, stop)
 			} else if req.Header.DataType == int32(SchemaChangeReq) {
 				kvsm.Infof("handle schema change: %v", string(req.Data))
 				var sc SchemaChange
@@ -578,7 +578,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 	return forceBackup, retErr
 }
 
-func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint64) (bool, error) {
+func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint64, stop chan struct{}) (bool, error) {
 	var p customProposeData
 	var forceBackup bool
 	var retErr error
@@ -619,7 +619,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 			err = common.RunFileSync(p.SyncAddr,
 				path.Join(rockredis.GetBackupDir(p.SyncPath),
 					rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)),
-				localPath, nil,
+				localPath, stop,
 			)
 			if err != nil {
 				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)
