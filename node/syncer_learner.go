@@ -396,14 +396,22 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 			// for test we use local
 			forceRemote = false
 		}
+		state, err := sm.lgSender.getRemoteSyncedRaft(stop)
+		if err == nil {
+			if state.IsNewer2(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index) {
+				sm.Infof("ignored restore snapshot since remote has newer raft: %v than %v", state, raftSnapshot.Metadata.String())
+				sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
+				return nil
+			}
+		}
 		syncAddr, syncDir := GetValidBackupInfo(sm.machineConfig, sm.clusterInfo, sm.fullNS, sm.ID, stop, raftSnapshot, retry, forceRemote)
 		// note the local sync path not supported, so we need try another replica if syncAddr is empty
 		if syncAddr == "" && syncDir == "" {
 			err = errors.New("no backup available from others")
 		} else {
-			err = sm.lgSender.notifyTransferSnap(raftSnapshot, syncAddr, syncDir)
+			err = sm.lgSender.waitTransferSnapStatus(raftSnapshot, syncAddr, syncDir, stop)
 			if err != nil {
-				sm.Infof("notify apply snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, err)
+				sm.Infof("wait transfer snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, err)
 			} else {
 				err := sm.lgSender.waitApplySnapStatus(raftSnapshot, stop)
 				if err != nil {

@@ -100,12 +100,19 @@ func (rss *remoteSyncedStateMgr) AddApplyingSnap(name string, state SyncedState)
 			delete(rss.remoteSnapshotsApplying, name)
 			canAdd = true
 		}
+	} else if !sas.SS.IsNewer(&state) {
+		if time.Since(sas.UpdatedTime) > proposeTimeout*10 {
+			nodeLog.Infof("%v got newer snapshot %v, old is %v", name,
+				state, sas)
+			delete(rss.remoteSnapshotsApplying, name)
+			canAdd = true
+		}
 	}
 	if canAdd {
 		sas = &SnapApplyStatus{
 			SS:          state,
 			StatusCode:  ApplySnapBegin,
-			Status:      applyStatusMsgs[1],
+			Status:      applyStatusMsgs[ApplySnapBegin],
 			UpdatedTime: time.Now(),
 		}
 		rss.remoteSnapshotsApplying[name] = sas
@@ -317,7 +324,9 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 	old, added := nd.remoteSyncedStates.AddApplyingSnap(name, ss)
 	if !added {
 		nd.rn.Infof("cluster %v applying snap %v already running while apply %v", name, old, ss)
-		return nil
+		if !old.SS.IsSame(&ss) {
+			return errors.New("another snapshot applying")
+		}
 	}
 
 	p := &customProposeData{
@@ -350,7 +359,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 	} else {
 		nd.rn.Infof("cluster %v applying transfer snap %v done", name, ss)
 	}
-	return nil
+	return err
 }
 
 func (nd *KVNode) GetApplyRemoteSnapStatus(name string) (*SnapApplyStatus, bool) {
