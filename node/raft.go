@@ -916,6 +916,12 @@ func (rc *raftNode) serveChannels() {
 				}
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
 				rc.Infof("raft applied incoming snapshot done: %v", rd.Snapshot.String())
+				if rd.Snapshot.Metadata.Index >= rc.lastIndex {
+					if !rc.IsReplayFinished() {
+						rc.Infof("replay finished at snapshot index: %v\n", rd.Snapshot.String())
+						rc.MarkReplayFinished()
+					}
+				}
 			}
 			rc.raftStorage.Append(rd.Entries)
 			if !isMeNewLeader {
