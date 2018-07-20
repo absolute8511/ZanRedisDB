@@ -23,7 +23,7 @@ var syncClusterTotalStats common.WriteStats
 
 var applyStatusMapping = map[int]syncerpb.RaftApplySnapStatus{
 	0: syncerpb.ApplyUnknown,
-	1: syncerpb.ApplyWaitingTransfer,
+	1: syncerpb.ApplyWaitingBegin,
 	2: syncerpb.ApplyWaitingTransfer,
 	3: syncerpb.ApplyTransferSuccess,
 	4: syncerpb.ApplyWaiting,
@@ -98,7 +98,11 @@ func (s *Server) NotifyTransferSnap(ctx context.Context, req *syncerpb.RaftApply
 		return &rpcErr, nil
 	}
 	sLog.Infof("raft need transfer snapshot from remote: %v", req.String())
-	kv.Node.BeginTransferRemoteSnap(req.ClusterName, req.Term, req.Index, req.SyncAddr, req.SyncPath)
+	err := kv.Node.BeginTransferRemoteSnap(req.ClusterName, req.Term, req.Index, req.SyncAddr, req.SyncPath)
+	if err != nil {
+		rpcErr.ErrCode = http.StatusInternalServerError
+		rpcErr.ErrMsg = err.Error()
+	}
 	return &rpcErr, nil
 }
 
@@ -143,8 +147,13 @@ func (s *Server) GetApplySnapStatus(ctx context.Context, req *syncerpb.RaftApply
 		if !ok {
 			status.Status = syncerpb.ApplyMissing
 		} else {
-			status.Status, _ = applyStatusMapping[ss.StatusCode]
-			status.StatusMsg = ss.Status
+			if ss.SS.SyncedTerm != req.Term || ss.SS.SyncedIndex != req.Index {
+				// another snapshot is applying
+				status.Status = syncerpb.ApplyMissing
+			} else {
+				status.Status, _ = applyStatusMapping[ss.StatusCode]
+				status.StatusMsg = ss.Status
+			}
 		}
 	}
 	sLog.Infof("raft apply snapshot from remote %v , status: %v", req.String(), status)

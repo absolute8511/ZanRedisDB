@@ -264,7 +264,7 @@ func (s *RemoteLogSender) notifyApplySnapWithOption(skip bool, raftSnapshot raft
 		return err
 	}
 	if rsp != nil && rsp.ErrCode != 0 && rsp.ErrCode != http.StatusOK {
-		nodeLog.Infof("notify apply snapshot failed: %v,  %v", addr, rsp)
+		nodeLog.Infof("notify apply snapshot failed: %v,  %v, %v", addr, rsp, raftSnapshot.Metadata.String())
 		return errors.New(rsp.String())
 	}
 	return nil
@@ -296,9 +296,48 @@ func (s *RemoteLogSender) getApplySnapStatus(raftSnapshot raftpb.Snapshot, addr 
 	if rsp == nil {
 		return &applyStatus, errors.New("nil snap status rsp")
 	}
-	nodeLog.Infof("apply snapshot status: %v,  %v", addr, rsp.String())
+	nodeLog.Infof("apply snapshot status: %v,  %v, %v", addr, rsp.String(), raftSnapshot.Metadata.String())
 	applyStatus = *rsp
 	return &applyStatus, nil
+}
+
+func (s *RemoteLogSender) waitTransferSnapStatus(raftSnapshot raftpb.Snapshot,
+	syncAddr string, syncPath string, stop chan struct{}) error {
+	for {
+		s.notifyTransferSnap(raftSnapshot, syncAddr, syncPath)
+		tm := time.NewTimer(time.Second * 5)
+		select {
+		case <-stop:
+			tm.Stop()
+			return common.ErrStopped
+		case <-tm.C:
+		}
+		tm.Stop()
+		addrs, err := s.getAllAddressesForPart()
+		if err != nil {
+			return err
+		}
+		allTransferring := true
+		for _, addr := range addrs {
+			applyStatus, err := s.getApplySnapStatus(raftSnapshot, addr)
+			if err != nil {
+				return err
+			}
+			if applyStatus.Status == syncerpb.ApplyWaitingBegin ||
+				applyStatus.Status == syncerpb.ApplyMissing {
+				allTransferring = false
+				break
+			}
+			if applyStatus.Status == syncerpb.ApplyFailed {
+				nodeLog.Infof("node %v failed to transfer snapshot : %v", addr, applyStatus)
+				return errors.New("some node failed to transfer snapshot")
+			}
+		}
+		if allTransferring {
+			break
+		}
+	}
+	return nil
 }
 
 func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
@@ -335,6 +374,10 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 				needWait = true
 			}
 			if applyStatus.Status == syncerpb.ApplyFailed {
+				nodeLog.Infof("node %v failed to apply snapshot : %v", addr, applyStatus)
+				return errors.New("some node failed to apply snapshot")
+			}
+			if applyStatus.Status == syncerpb.ApplyMissing {
 				nodeLog.Infof("node %v failed to apply snapshot : %v", addr, applyStatus)
 				return errors.New("some node failed to apply snapshot")
 			}
