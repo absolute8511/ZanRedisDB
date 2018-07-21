@@ -318,10 +318,14 @@ func (s *RemoteLogSender) waitTransferSnapStatus(raftSnapshot raftpb.Snapshot,
 			return err
 		}
 		allTransferring := true
+		allReady := true
 		for _, addr := range addrs {
 			applyStatus, err := s.getApplySnapStatus(raftSnapshot, addr)
 			if err != nil {
 				return err
+			}
+			if applyStatus.Status != syncerpb.ApplySuccess {
+				allReady = false
 			}
 			if applyStatus.Status == syncerpb.ApplyWaitingBegin ||
 				applyStatus.Status == syncerpb.ApplyMissing {
@@ -333,7 +337,7 @@ func (s *RemoteLogSender) waitTransferSnapStatus(raftSnapshot raftpb.Snapshot,
 				return errors.New("some node failed to transfer snapshot")
 			}
 		}
-		if allTransferring {
+		if allTransferring || allReady {
 			break
 		}
 	}
