@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func getTestDBNoTableCounter(t *testing.T) *RockDB {
@@ -54,6 +55,50 @@ func TestDB(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
+}
+
+func TestIsSameSST(t *testing.T) {
+	d1, err := ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	defer os.RemoveAll(d1)
+	// small file, large file
+	f1small := path.Join(d1, "f1small")
+	f2small := path.Join(d1, "f2small")
+	f3small := path.Join(d1, "f3small")
+	err = ioutil.WriteFile(f1small, []byte("aaa"), 0655)
+	assert.Nil(t, err)
+	err = ioutil.WriteFile(f2small, []byte("aaa"), 0655)
+	err = ioutil.WriteFile(f3small, []byte("aab"), 0655)
+	assert.Nil(t, isSameSSTFile(f1small, f2small))
+	assert.NotNil(t, isSameSSTFile(f2small, f3small))
+	assert.NotNil(t, isSameSSTFile(f1small, f3small))
+	fileData := make([]byte, 1024*256*2)
+	for i := 0; i < len(fileData); i++ {
+		fileData[i] = 'a'
+	}
+
+	f1large := path.Join(d1, "f1large")
+	f2large := path.Join(d1, "f2large")
+	f3large := path.Join(d1, "f3large")
+	f4large := path.Join(d1, "f4large")
+	err = ioutil.WriteFile(f1large, fileData, 0655)
+	assert.Nil(t, err)
+	err = ioutil.WriteFile(f2large, fileData, 0655)
+	assert.Nil(t, err)
+	fileData[0] = 'b'
+	err = ioutil.WriteFile(f3large, fileData, 0655)
+	assert.Nil(t, err)
+	fileData[1024*256+1] = 'b'
+	err = ioutil.WriteFile(f4large, fileData, 0655)
+	assert.Nil(t, err)
+	assert.Nil(t, isSameSSTFile(f1large, f2large))
+	assert.Nil(t, isSameSSTFile(f1large, f3large))
+	assert.NotNil(t, isSameSSTFile(f1large, f4large))
+	assert.Nil(t, isSameSSTFile(f2large, f3large))
+	assert.NotNil(t, isSameSSTFile(f2large, f4large))
+	assert.NotNil(t, isSameSSTFile(f3large, f4large))
+	assert.NotNil(t, isSameSSTFile(f1small, f1large))
+	assert.NotNil(t, isSameSSTFile(f3small, f3large))
 }
 
 func TestRockDB(t *testing.T) {

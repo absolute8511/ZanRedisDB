@@ -1,6 +1,8 @@
 package common
 
 import (
+	"errors"
+	"time"
 	//"github.com/Redundancy/go-sync"
 	"fmt"
 	"log"
@@ -13,16 +15,22 @@ import (
 var runningCh chan struct{}
 
 func init() {
-	runningCh = make(chan struct{}, 2)
+	runningCh = make(chan struct{}, 3)
 }
 
 var rsyncLimit = int64(51200)
+var ErrRsyncTransferOutofdate = errors.New("waiting transfer snapshot too long, maybe out of date")
 
 func SetRsyncLimit(limit int64) {
 	atomic.StoreInt64(&rsyncLimit, limit)
 }
 
 func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan struct{}) error {
+	// TODO: retrict the running number of rsync may cause transfer snapshot again and again.
+	// Because there are many partitions waiting transfer, 1->2->3->4.
+	// The later partition may wait too much time, in this case the snapshot maybe
+	// already out of date.
+	begin := time.Now()
 	select {
 	case runningCh <- struct{}{}:
 	case <-stopCh:
@@ -35,6 +43,9 @@ func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan stru
 		}
 	}()
 
+	if time.Since(begin) > time.Hour {
+		return ErrRsyncTransferOutofdate
+	}
 	var cmd *exec.Cmd
 	if filepath.Base(srcPath) == filepath.Base(dstPath) {
 		dir := filepath.Dir(dstPath)

@@ -1,6 +1,7 @@
 package rockredis
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"hash"
@@ -988,6 +989,50 @@ func (r *RockDB) Restore(term uint64, index uint64) error {
 	backupDir := r.GetBackupDir()
 	return r.restoreFromPath(backupDir, term, index)
 }
+func isSameSSTFile(f1 string, f2 string) error {
+	stat1, err1 := os.Stat(f1)
+	stat2, err2 := os.Stat(f2)
+	if err1 != nil || err2 != nil {
+		return fmt.Errorf("sst files not match err: %v, %v", err1, err2)
+	}
+	if stat1.Size() != stat2.Size() {
+		return fmt.Errorf("sst files mismatch size: %v, %v", stat1, stat2)
+	}
+	// sst meta is stored at the footer of file
+	// we check 256KB is enough for footer
+	rbytes := int64(256 * 1024)
+	roffset := stat1.Size() - rbytes
+	if roffset < 0 {
+		roffset = 0
+		rbytes = stat1.Size()
+	}
+	fs1, err1 := os.Open(f1)
+	fs2, err2 := os.Open(f2)
+	if err1 != nil || err2 != nil {
+		return fmt.Errorf("sst files not match err: %v, %v", err1, err2)
+	}
+	b1 := make([]byte, rbytes)
+	n1, err1 := fs1.ReadAt(b1, roffset)
+	if err1 != nil {
+		if err1 != io.EOF {
+			return fmt.Errorf("read file err: %v", err1)
+		}
+	}
+	b2 := make([]byte, rbytes)
+	n2, err2 := fs2.ReadAt(b2, roffset)
+	if err1 != nil {
+		if err1 != io.EOF {
+			return fmt.Errorf("read file err: %v", err1)
+		}
+	}
+	if n2 != n1 {
+		return fmt.Errorf("sst file footer not match")
+	}
+	if bytes.Equal(b1[:n1], b2[:n2]) {
+		return nil
+	}
+	return fmt.Errorf("sst file footer not match")
+}
 
 func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) error {
 	// write meta (snap term and index) and check the meta data in the backup
@@ -1034,19 +1079,15 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 		if strings.HasPrefix(shortName, "LOG") {
 			continue
 		}
+
 		if strings.HasSuffix(shortName, ".sst") {
 			if fullName, ok := ckSstNameMap[shortName]; ok {
-				stat1, err1 := os.Stat(fullName)
-				stat2, err2 := os.Stat(fn)
-				if err1 == nil && err2 == nil {
-					if stat1.Size() == stat2.Size() {
-						dbLog.Infof("keeping sst file: %v", fn)
-						continue
-					} else {
-						dbLog.Infof("no keeping sst file %v for mismatch size: %v, %v", fn, stat1, stat2)
-					}
+				err = isSameSSTFile(fullName, fn)
+				if err == nil {
+					dbLog.Infof("keeping sst file: %v", fn)
+					continue
 				} else {
-					dbLog.Infof("no keeping sst file %v for err: %v, %v", fn, err1, err2)
+					dbLog.Infof("no keeping sst file %v for not same: %v, %v", fn, err)
 				}
 			}
 		}
