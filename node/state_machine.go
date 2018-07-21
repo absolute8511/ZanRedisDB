@@ -370,6 +370,9 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 			kvsm.ID, stop, raftSnapshot, retry)
 		if err != nil {
 			kvsm.Infof("failed to prepare snapshot: %v", err)
+			if err == common.ErrRsyncTransferOutofdate {
+				return err
+			}
 		} else {
 			err = kvsm.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 			if err == nil {
