@@ -451,6 +451,11 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	assert.Equal(t, "12346", v)
 }
 
+func TestRecoveryNewerSnapReplaying(t *testing.T) {
+	// TODO: test recovery from newer snapshot, and no need
+	// replay old logs, check replaying status
+}
+
 func TestRestartFollower(t *testing.T) {
 	if testing.Verbose() {
 		SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
