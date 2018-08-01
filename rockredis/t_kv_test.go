@@ -1,10 +1,10 @@
 package rockredis
 
 import (
-	"bytes"
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 )
 
@@ -15,11 +15,9 @@ func TestKVCodec(t *testing.T) {
 
 	ek := encodeKVKey([]byte("key"))
 
-	if k, err := decodeKVKey(ek); err != nil {
-		t.Fatal(err)
-	} else if string(k) != "key" {
-		t.Fatal(string(k))
-	}
+	k, err := decodeKVKey(ek)
+	assert.Nil(t, err)
+	assert.Equal(t, "key", string(k))
 }
 
 func TestDBKV(t *testing.T) {
@@ -29,133 +27,88 @@ func TestDBKV(t *testing.T) {
 
 	key1 := []byte("test:testdb_kv_a")
 
-	if err := db.KVSet(0, key1, []byte("hello world 1")); err != nil {
-		t.Fatal(err)
-	}
+	err := db.KVSet(0, key1, []byte("hello world 1"))
+	assert.Nil(t, err)
 
 	key2 := []byte("test:testdb_kv_b")
 
-	if err := db.KVSet(0, key2, []byte("hello world 2")); err != nil {
-		t.Fatal(err)
-	}
+	err = db.KVSet(0, key2, []byte("hello world 2"))
+	assert.Nil(t, err)
 	v1, _ := db.KVGet(key1)
-	if string(v1) != "hello world 1" {
-		t.Error(v1)
-	}
+	assert.Equal(t, "hello world 1", string(v1))
 	v2, _ := db.KVGet(key2)
-	if string(v2) != "hello world 2" {
-		t.Error(v2)
-	}
+	assert.Equal(t, "hello world 2", string(v2))
 	num, err := db.GetTableKeyCount([]byte("test"))
-	if err != nil {
-		t.Error(err)
-	} else if num != 2 {
-		t.Errorf("table count not as expected: %v", num)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), num)
 
 	ay, errs := db.MGet(key1, key2)
-	if len(ay) != 2 {
-		t.Errorf("%v, %v", ay, errs)
-	}
-
-	if !bytes.Equal(v1, ay[0]) {
-		t.Errorf("%v, %v", ay[0], v1)
-	}
-
-	if !bytes.Equal(v2, ay[1]) {
-		t.Errorf("%v, %v", ay[1], v2)
-	}
+	assert.Equal(t, 2, len(errs))
+	assert.Nil(t, errs[0])
+	assert.Nil(t, errs[1])
+	assert.Equal(t, 2, len(ay))
+	assert.Equal(t, v1, ay[0])
+	assert.Equal(t, v2, ay[1])
 
 	key3 := []byte("test:testdb_kv_range")
 
-	if n, err := db.Append(0, key3, []byte("Hello")); err != nil {
-		t.Fatal(err)
-	} else if n != 5 {
-		t.Fatal(n)
-	}
+	n, err := db.Append(0, key3, []byte("Hello"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(5), n)
 
-	if n, err := db.Append(0, key3, []byte(" World")); err != nil {
-		t.Fatal(err)
-	} else if n != 11 {
-		t.Fatal(n)
-	}
+	n, err = db.Append(0, key3, []byte(" World"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), n)
 
-	if n, err := db.StrLen(key3); err != nil {
-		t.Fatal(err)
-	} else if n != 11 {
-		t.Fatal(n)
-	}
+	n, err = db.StrLen(key3)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), n)
 
-	if v, err := db.GetRange(key3, 0, 4); err != nil {
-		t.Fatal(err)
-	} else if string(v) != "Hello" {
-		t.Fatal(string(v))
-	}
+	v, err := db.GetRange(key3, 0, 4)
+	assert.Nil(t, err)
+	assert.Equal(t, "Hello", string(v))
 
-	if v, err := db.GetRange(key3, 0, -1); err != nil {
-		t.Fatal(err)
-	} else if string(v) != "Hello World" {
-		t.Fatal(string(v))
-	}
+	v, err = db.GetRange(key3, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, "Hello World", string(v))
 
-	if v, err := db.GetRange(key3, -5, -1); err != nil {
-		t.Fatal(err)
-	} else if string(v) != "World" {
-		t.Fatal(string(v))
-	}
+	v, err = db.GetRange(key3, -5, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, "World", string(v))
 
-	if n, err := db.SetRange(0, key3, 6, []byte("Redis")); err != nil {
-		t.Fatal(err)
-	} else if n != 11 {
-		t.Fatal(n)
-	}
+	n, err = db.SetRange(0, key3, 6, []byte("Redis"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), n)
 
-	if v, err := db.KVGet(key3); err != nil {
-		t.Fatal(err)
-	} else if string(v) != "Hello Redis" {
-		t.Fatal(string(v))
-	}
+	v, err = db.KVGet(key3)
+	assert.Nil(t, err)
+	assert.Equal(t, "Hello Redis", string(v))
 
 	key4 := []byte("test:testdb_kv_range_none")
-	if n, err := db.SetRange(0, key4, 6, []byte("Redis")); err != nil {
-		t.Fatal(err)
-	} else if n != 11 {
-		t.Fatal(n)
-	}
+	n, err = db.SetRange(0, key4, 6, []byte("Redis"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), n)
+
 	r, _ := db.KVExists(key3)
-	if r == 0 {
-		t.Errorf("key should exist: %v", r)
-	}
+	assert.NotEqual(t, int64(0), r)
 	r, err = db.SetNX(0, key3, []byte(""))
-	if err != nil {
-		t.Errorf("setnx failed: %v", err)
-	}
-	if r != 0 {
-		t.Errorf("should set only not exist: %v", r)
-	}
-	if v, err := db.KVGet(key3); err != nil {
-		t.Error(err)
-	} else if string(v) != "Hello Redis" {
-		t.Error(string(v))
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), r)
+
+	v, err = db.KVGet(key3)
+	assert.Nil(t, err)
+	assert.Equal(t, "Hello Redis", string(v))
+
 	num, err = db.GetTableKeyCount([]byte("test"))
-	if err != nil {
-		t.Error(err)
-	} else if num != 4 {
-		t.Errorf("table count not as expected: %v", num)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, int64(4), num)
 
 	db.KVDel(key3)
 	r, _ = db.KVExists(key3)
-	if r != 0 {
-		t.Errorf("key should not exist: %v", r)
-	}
+	assert.Equal(t, int64(0), r)
 	num, err = db.GetTableKeyCount([]byte("test"))
-	if err != nil {
-		t.Error(err)
-	} else if num != 3 {
-		t.Errorf("table count not as expected: %v", num)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), num)
 
 	key5 := []byte("test:test_kv_mset_key5")
 	key6 := []byte("test:test_kv_mset_key6")
@@ -186,6 +139,54 @@ func TestDBKV(t *testing.T) {
 		t.Errorf("table count not as expected: %v", num)
 	}
 
+}
+
+func TestDBKVBit(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_kv_bit")
+	n, err := db.BitSet(0, key, 5, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.BitGet(key, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitGet(key, 5)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.BitGet(key, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.BitCount(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.BitSet(0, key, 5, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	err = db.KVSet(0, key, []byte{0x00, 0x00, 0x00})
+	assert.Nil(t, err)
+
+	err = db.KVSet(0, key, []byte("foobar"))
+	assert.Nil(t, err)
+
+	n, err = db.BitCount(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(26), n)
+
+	n, err = db.BitCount(key, 0, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(4), n)
+
+	n, err = db.BitCount(key, 1, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(6), n)
 }
 
 func TestDBKVWithNoTable(t *testing.T) {
