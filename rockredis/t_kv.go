@@ -1,7 +1,10 @@
 package rockredis
 
 import (
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"math/bits"
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
@@ -10,10 +13,13 @@ import (
 
 const (
 	tsLen = 8
+	// 2MB
+	MaxBitOffset = 2 * 8 * 1024 * 1024
 )
 
 var errKVKey = errors.New("invalid encode kv key")
 var errInvalidDBValue = errors.New("invalide db value")
+var errBitOverflow = errors.New("bit offset overflowed")
 
 func convertRedisKeyToDBKVKey(key []byte) ([]byte, []byte, error) {
 	table, _, _ := extractTableFromRedisKey(key)
@@ -516,6 +522,111 @@ func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 	}
 
 	return int64(len(oldValue) - tsLen), nil
+}
+
+func (db *RockDB) BitSet(ts int64, key []byte, offset int64, on int) (int64, error) {
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return 0, err
+	}
+	if offset > MaxBitOffset {
+		return 0, errBitOverflow
+	}
+
+	if (on & ^1) != 0 {
+		return 0, fmt.Errorf("bit should be 0 or 1, got %d", on)
+	}
+	var v []byte
+	if v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, key); err != nil {
+		return 0, err
+	}
+	db.wb.Clear()
+	if v == nil {
+		db.IncrTableKeyCount(table, 1, db.wb)
+	} else if len(v) >= tsLen {
+		v = v[:len(v)-tsLen]
+	}
+
+	byteOffset := int(uint32(offset) >> 3)
+	expandLen := byteOffset + 1 - len(v)
+	if expandLen > 0 {
+		if on == 0 {
+			// not changed
+			return 0, nil
+		}
+		v = append(v, make([]byte, expandLen)...)
+	}
+	byteVal := v[byteOffset]
+	bit := 7 - uint8(uint32(offset)&0x7)
+	oldBit := byteVal & (1 << bit)
+
+	byteVal &= ^(1 << bit)
+	byteVal |= (uint8(on&0x1) << bit)
+	v[byteOffset] = byteVal
+	v = append(v, PutInt64(ts)...)
+	db.wb.Put(key, v)
+	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	if err != nil {
+		return 0, err
+	}
+	if oldBit > 0 {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func popcountBytes(s []byte) (count int64) {
+	for i := 0; i+8 <= len(s); i += 8 {
+		x := binary.LittleEndian.Uint64(s[i:])
+		count += int64(bits.OnesCount64(x))
+	}
+
+	s = s[len(s)&^7:]
+
+	if len(s) >= 4 {
+		count += int64(bits.OnesCount32(binary.LittleEndian.Uint32(s)))
+		s = s[4:]
+	}
+
+	if len(s) >= 2 {
+		count += int64(bits.OnesCount16(binary.LittleEndian.Uint16(s)))
+		s = s[2:]
+	}
+
+	if len(s) == 1 {
+		count += int64(bits.OnesCount8(s[0]))
+	}
+	return
+}
+
+func (db *RockDB) BitGet(key []byte, offset int64) (int64, error) {
+	v, err := db.KVGet(key)
+	if err != nil {
+		return 0, err
+	}
+
+	byteOffset := (uint32(offset) >> 3)
+	if byteOffset >= uint32(len(v)) {
+		return 0, nil
+	}
+	byteVal := v[byteOffset]
+	bit := 7 - uint8(uint32(offset)&0x7)
+	oldBit := byteVal & (1 << bit)
+	if oldBit > 0 {
+		return 1, nil
+	}
+
+	return 0, nil
+}
+
+func (db *RockDB) BitCount(key []byte, start, end int) (int64, error) {
+	v, err := db.KVGet(key)
+	if err != nil {
+		return 0, err
+	}
+	start, end = getRange(start, end, len(v))
+	v = v[start : end+1]
+	return popcountBytes(v), nil
 }
 
 func (db *RockDB) Expire(key []byte, duration int64) (int64, error) {

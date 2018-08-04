@@ -131,3 +131,7 @@ based on this golang sdk if you want use the redis client in other language.
 
 
 [client-sdk]: https://github.com/youzan/go-zanredisdb
+
+## Thanks
+
+Many thanks for these great projects which make this project possible: etcd, RocksDB, ledisdb, pika.
