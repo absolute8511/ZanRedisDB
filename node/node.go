@@ -31,6 +31,7 @@ var (
 	errUnknownData          = errors.New("unknown request data type")
 	errTooMuchBatchSize     = errors.New("the batch size exceed the limit")
 	errRaftNotReadyForWrite = errors.New("ERR_CLUSTER_CHANGED: the raft is not ready for write")
+	errWrongNumberArgs      = errors.New("ERR wrong number of arguments for redis command")
 )
 
 const (
