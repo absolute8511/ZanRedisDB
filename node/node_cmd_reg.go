@@ -5,6 +5,7 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	// kv
 	kvsm.router.RegisterInternal("del", kvsm.localDelCommand)
 	kvsm.router.RegisterInternal("set", kvsm.localSetCommand)
+	kvsm.router.RegisterInternal("setbit", kvsm.localBitSetCommand)
 	kvsm.router.RegisterInternal("setnx", kvsm.localSetnxCommand)
 	kvsm.router.RegisterInternal("mset", kvsm.localMSetCommand)
 	kvsm.router.RegisterInternal("incr", kvsm.localIncrCommand)
@@ -72,8 +73,11 @@ func (nd *KVNode) registerHandler() {
 	}
 	// for kv
 	nd.router.Register(false, "get", wrapReadCommandK(nd.getCommand))
+	nd.router.Register(false, "getbit", wrapReadCommandKAnySubkeyN(nd.getbitCommand, 1))
+	nd.router.Register(false, "bitcount", wrapReadCommandKAnySubkey(nd.bitcountCommand))
 	nd.router.Register(false, "mget", wrapReadCommandKK(nd.mgetCommand))
 	nd.router.Register(true, "set", wrapWriteCommandKV(nd, nd.setCommand))
+	nd.router.Register(true, "setbit", nd.setbitCommand)
 	nd.router.Register(true, "setnx", wrapWriteCommandKV(nd, nd.setnxCommand))
 	nd.router.Register(true, "incr", wrapWriteCommandK(nd, nd.incrCommand))
 	nd.router.Register(true, "incrby", wrapWriteCommandKV(nd, nd.incrbyCommand))

@@ -19,7 +19,7 @@ const (
 
 var errKVKey = errors.New("invalid encode kv key")
 var errInvalidDBValue = errors.New("invalide db value")
-var errBitOverflow = errors.New("bit offset overflowed")
+var ErrBitOverflow = errors.New("bit offset overflowed")
 
 func convertRedisKeyToDBKVKey(key []byte) ([]byte, []byte, error) {
 	table, _, _ := extractTableFromRedisKey(key)
@@ -530,7 +530,7 @@ func (db *RockDB) BitSet(ts int64, key []byte, offset int64, on int) (int64, err
 		return 0, err
 	}
 	if offset > MaxBitOffset {
-		return 0, errBitOverflow
+		return 0, ErrBitOverflow
 	}
 
 	if (on & ^1) != 0 {
@@ -625,6 +625,9 @@ func (db *RockDB) BitCount(key []byte, start, end int) (int64, error) {
 		return 0, err
 	}
 	start, end = getRange(start, end, len(v))
+	if start > end {
+		return 0, nil
+	}
 	v = v[start : end+1]
 	return popcountBytes(v), nil
 }

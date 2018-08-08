@@ -38,7 +38,7 @@ CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksd
 
 use the `dep ensure` to install other dependencies
 
-Build zankv and placedriver from the source (only support go version 1.8+, gcc 4.9+ or xcode-command-line-tools on Mac):
+Build zankv and placedriver from the source (only support go version 1.9+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
 make
 </pre>

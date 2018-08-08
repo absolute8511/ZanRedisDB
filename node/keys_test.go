@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/absolute8511/redcon"
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/rockredis"
 	"github.com/youzan/ZanRedisDB/stats"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
-	"github.com/absolute8511/redcon"
-	"github.com/stretchr/testify/assert"
 )
 
 func getTestKVNode(t *testing.T) (*KVNode, string, chan struct{}) {
@@ -150,6 +150,7 @@ func TestKVNode_kvCommand(t *testing.T) {
 	testKey2 := []byte("default:test:2")
 	testKey2Value := []byte("2")
 	testPFKey := []byte("default:test:pf1")
+	testBitKey := []byte("default:test:bit1")
 	tests := []struct {
 		name string
 		args redcon.Command
@@ -169,6 +170,9 @@ func TestKVNode_kvCommand(t *testing.T) {
 		{"exists", buildCommand([][]byte{[]byte("exists"), testKey})},
 		{"pfadd", buildCommand([][]byte{[]byte("pfadd"), testPFKey, testKeyValue})},
 		{"pfcount", buildCommand([][]byte{[]byte("pfcount"), testPFKey})},
+		{"setbit", buildCommand([][]byte{[]byte("setbit"), testBitKey, []byte("1"), []byte("1")})},
+		{"getbit", buildCommand([][]byte{[]byte("getbit"), testBitKey, []byte("1")})},
+		{"bitcount", buildCommand([][]byte{[]byte("bitcount"), testBitKey, []byte("1"), []byte("2")})},
 	}
 	defer os.RemoveAll(dataDir)
 	defer nd.Stop()

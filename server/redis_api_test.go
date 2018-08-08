@@ -332,6 +332,81 @@ func TestKVIncrDecr(t *testing.T) {
 	}
 }
 
+func TestKVBitOp(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:kv_bitop"
+	if n, err := goredis.Int64(c.Do("bitcount", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int64(c.Do("getbit", key, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int64(c.Do("setbit", key, 100, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int64(c.Do("getbit", key, 100)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("bitcount", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("setbit", key, 1, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("bitcount", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("bitcount", key, 0, 0)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("setbit", key, 8, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("bitcount", key, 0, 0)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("setbit", key, 7, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("bitcount", key, 0, 0)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int64(c.Do("bitcount", key, 0, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+}
+
 func TestKVBatch(t *testing.T) {
 
 	var wg sync.WaitGroup
@@ -545,6 +620,24 @@ func TestKVErrorParams(t *testing.T) {
 	assert.NotNil(t, err)
 
 	_, err = c.Do("mget")
+	assert.NotNil(t, err)
+
+	_, err = c.Do("getbit")
+	assert.NotNil(t, err)
+
+	_, err = c.Do("getbit", key1)
+	assert.NotNil(t, err)
+
+	_, err = c.Do("setbit", key1)
+	assert.NotNil(t, err)
+
+	_, err = c.Do("setbit")
+	assert.NotNil(t, err)
+
+	_, err = c.Do("bitcount")
+	assert.NotNil(t, err)
+
+	_, err = c.Do("bitcount", key1, "0")
 	assert.NotNil(t, err)
 }
 
