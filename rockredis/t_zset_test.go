@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 const (
@@ -278,7 +278,7 @@ func TestZSetOrder(t *testing.T) {
 		scores := []float64{0, 1, 2, 5, 6, 999}
 		for i := 0; i < len(datas); i++ {
 			if datas[i].Score != scores[i] {
-				t.Fatal(fmt.Sprintf("[%d]=%d", i, datas[i]))
+				t.Fatal(fmt.Sprintf("[%d]=%v", i, datas[i]))
 			}
 		}
 	}
