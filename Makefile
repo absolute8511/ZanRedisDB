@@ -7,6 +7,13 @@ COMMIT?=$(shell git rev-parse --short HEAD)
 BUILD_TIME?=$(shell date '+%Y-%m-%d_%H:%M:%S-%Z')
 GOFLAGS=-ldflags "-s -w -X ${PROJECT}/common.VerBinary=${VERBINARY} -X ${PROJECT}/common.Commit=${COMMIT} -X ${PROJECT}/common.BuildTime=${BUILD_TIME}"
 
+CGO_CFLAGS="-I${ROCKSDB}/include"
+CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy"
+
+ifeq (${GOOS},linux)
+	CGO_LDFLAGS=-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -lrt
+endif
+
 BLDDIR = build
 EXT=
 ifeq (${GOOS},windows)
@@ -23,7 +30,9 @@ $(BLDDIR)/restore:  $(wildcard apps/restore/*.go)
 
 $(BLDDIR)/%:
 	@mkdir -p $(dir $@)
-	go build ${GOFLAGS} -o $@ ./apps/$*
+	@echo $(GOOS)
+	@echo $(CGO_LDFLAGS)
+	CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go build ${GOFLAGS} -o $@ ./apps/$*
 
 $(APPS): %: $(BLDDIR)/%
 

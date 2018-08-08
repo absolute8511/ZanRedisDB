@@ -40,13 +40,13 @@ use the `dep ensure` to install other dependencies
 
 Build zankv and placedriver from the source (only support go version 1.9+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
-make
+ROCKSDB=/path/to/rocksdb make
 </pre>
 
 If you want package the binary release run the scripts
 <pre>
 ./pre-dist.sh
-./dist.sh
+ROCKSDB=/path/to/rocksdb ./dist.sh
 </pre>
 
 ## Deploy
