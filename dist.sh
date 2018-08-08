@@ -20,11 +20,13 @@ os=$(go env GOOS)
 version=$(awk '/VERBINARY\?/ {print $NF}' < $DIR/Makefile | sed 's/"//g')
 goversion=$(go version | awk '{print $3}')
 
+echo $ROCKSDB
+
 echo "... building v$version for $os/$arch"
 BUILD=$(mktemp -d -t zankvXXXXXX)
 TARGET="zankv-$version.$os-$arch.$goversion"
 LATEST="zankv-latest.$os-$arch.$goversion"
-GOOS=$os GOARCH=$arch \
+GOOS=$os GOARCH=$arch ROCKSDB=$ROCKSDB \
     make DESTDIR=$BUILD PREFIX=/$TARGET install
 pushd $BUILD
 tar czvf $TARGET.tar.gz $TARGET
