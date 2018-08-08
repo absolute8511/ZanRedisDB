@@ -337,9 +337,19 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := nsm.nsMetas[conf.BaseName]; !ok {
+	if oldMeta, ok := nsm.nsMetas[conf.BaseName]; !ok {
 		nsm.nsMetas[conf.BaseName] = NamespaceMeta{
 			PartitionNum: conf.PartitionNum,
+		}
+		nodeLog.Infof("namespace meta init: %v", conf)
+	} else {
+		if oldMeta.PartitionNum != conf.PartitionNum {
+			nodeLog.Errorf("namespace meta mismatch: %v, old: %v", conf, oldMeta)
+			// update the meta if mismatch, it may happen if create the same namespace with different
+			// config for old deleted namespace
+			nsm.nsMetas[conf.BaseName] = NamespaceMeta{
+				PartitionNum: conf.PartitionNum,
+			}
 		}
 	}
 
