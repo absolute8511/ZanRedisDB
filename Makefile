@@ -11,7 +11,7 @@ CGO_CFLAGS="-I${ROCKSDB}/include"
 CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy"
 
 ifeq (${GOOS},linux)
-	CGO_LDFLAGS=-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -lrt
+	CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -lrt"
 endif
 
 BLDDIR = build
