@@ -237,6 +237,15 @@ func (nd *KVNode) Stop() {
 	nd.rn.Infof("node %v stopped", nd.ns)
 }
 
+func (nd *KVNode) BackupDB() {
+	p := &customProposeData{
+		ProposeOp:  ProposeOp_Backup,
+		NeedBackup: true,
+	}
+	d, _ := json.Marshal(p)
+	nd.CustomPropose(d)
+}
+
 func (nd *KVNode) OptimizeDB(table string) {
 	nd.rn.Infof("node %v begin optimize db, table %v", nd.ns, table)
 	defer nd.rn.Infof("node %v end optimize db", nd.ns)
@@ -246,12 +255,7 @@ func (nd *KVNode) OptimizeDB(table string) {
 	if table == "" {
 		// since we can not know whether leader or follower is done on optimize
 		// we backup anyway after optimize
-		p := &customProposeData{
-			ProposeOp:  ProposeOp_Backup,
-			NeedBackup: true,
-		}
-		d, _ := json.Marshal(p)
-		nd.CustomPropose(d)
+		nd.BackupDB()
 	}
 }
 

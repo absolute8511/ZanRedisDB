@@ -178,6 +178,9 @@ func NewServer(conf ServerConfig) *Server {
 
 func (s *Server) Stop() {
 	sLog.Infof("server begin stopping")
+	s.nsMgr.BackupDB("")
+	// wait backup done
+	time.Sleep(time.Second * 3)
 	if s.dataCoord != nil {
 		s.dataCoord.Stop()
 	} else {
