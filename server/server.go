@@ -73,6 +73,12 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.ProfilePort == 0 {
 		conf.ProfilePort = 7666
 	}
+	if conf.DefaultSnapCount > 0 {
+		common.DefaultSnapCount = conf.DefaultSnapCount
+	}
+	if conf.DefaultSnapCatchup > 0 {
+		common.DefaultSnapCatchup = conf.DefaultSnapCatchup
+	}
 
 	if conf.SyncerWriteOnly {
 		node.SetSyncerOnly(true)
