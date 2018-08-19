@@ -25,6 +25,8 @@ type ServerConfig struct {
 	RemoteSyncCluster    string            `json:"remote_sync_cluster"`
 	StateMachineType     string            `json:"state_machine_type"`
 	RsyncLimit           int64             `json:"rsync_limit"`
+	DefaultSnapCount     int               `json:"default_snap_count"`
+	DefaultSnapCatchup   int               `json:"default_snap_catchup"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`

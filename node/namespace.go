@@ -528,7 +528,7 @@ func (nsm *NamespaceMgr) GetStats(leaderOnly bool, table string) []common.Namesp
 	return nsStats
 }
 
-func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
+func (nsm *NamespaceMgr) getNsNodeList(ns string) []*NamespaceNode {
 	nsm.mutex.RLock()
 	nodeList := make([]*NamespaceNode, 0, len(nsm.kvNodes))
 	for k, n := range nsm.kvNodes {
@@ -539,6 +539,23 @@ func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 		nodeList = append(nodeList, n)
 	}
 	nsm.mutex.RUnlock()
+	return nodeList
+}
+
+func (nsm *NamespaceMgr) BackupDB(ns string) {
+	nodeList := nsm.getNsNodeList(ns)
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return
+		}
+		if n.IsReady() {
+			n.Node.BackupDB()
+		}
+	}
+}
+
+func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
+	nodeList := nsm.getNsNodeList(ns)
 	for _, n := range nodeList {
 		if atomic.LoadInt32(&nsm.stopping) == 1 {
 			return
@@ -550,16 +567,10 @@ func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 }
 
 func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) error {
-	nsm.mutex.RLock()
-	nodeList := make([]*NamespaceNode, 0, len(nsm.kvNodes))
-	for k, n := range nsm.kvNodes {
-		baseName, _ := common.GetNamespaceAndPartition(k)
-		if ns != baseName {
-			continue
-		}
-		nodeList = append(nodeList, n)
+	if ns == "" {
+		return errors.New("namespace can not be empty")
 	}
-	nsm.mutex.RUnlock()
+	nodeList := nsm.getNsNodeList(ns)
 	for _, n := range nodeList {
 		if atomic.LoadInt32(&nsm.stopping) == 1 {
 			return common.ErrStopped

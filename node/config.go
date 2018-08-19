@@ -22,8 +22,8 @@ type NamespaceConfig struct {
 
 func NewNSConfig() *NamespaceConfig {
 	return &NamespaceConfig{
-		SnapCount:        400000,
-		SnapCatchup:      300000,
+		SnapCount:        common.DefaultSnapCount,
+		SnapCatchup:      common.DefaultSnapCatchup,
 		ExpirationPolicy: common.DefaultExpirationPolicy,
 	}
 }

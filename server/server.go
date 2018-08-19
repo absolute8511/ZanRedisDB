@@ -73,6 +73,12 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.ProfilePort == 0 {
 		conf.ProfilePort = 7666
 	}
+	if conf.DefaultSnapCount > 0 {
+		common.DefaultSnapCount = conf.DefaultSnapCount
+	}
+	if conf.DefaultSnapCatchup > 0 {
+		common.DefaultSnapCatchup = conf.DefaultSnapCatchup
+	}
 
 	if conf.SyncerWriteOnly {
 		node.SetSyncerOnly(true)
@@ -178,6 +184,9 @@ func NewServer(conf ServerConfig) *Server {
 
 func (s *Server) Stop() {
 	sLog.Infof("server begin stopping")
+	s.nsMgr.BackupDB("")
+	// wait backup done
+	time.Sleep(time.Second * 3)
 	if s.dataCoord != nil {
 		s.dataCoord.Stop()
 	} else {

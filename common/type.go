@@ -107,6 +107,11 @@ const (
 	DefaultExpirationPolicy = "local_deletion"
 )
 
+var (
+	DefaultSnapCount   = 400000
+	DefaultSnapCatchup = 300000
+)
+
 func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
 	switch s {
 	case "local_deletion":
