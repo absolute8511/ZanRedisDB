@@ -1,8 +1,8 @@
 package node
 
 import (
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) jsonGetCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -45,7 +45,7 @@ func (nd *KVNode) jsonmkGetCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
+	if len(cmd.Args[1:]) > common.MAX_BATCH_NUM {
 		conn.WriteError(errTooMuchBatchSize.Error())
 		return
 	}

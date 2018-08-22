@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var (
@@ -151,7 +151,7 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 }
 
 func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
 	if len(args) == 0 {

@@ -641,7 +641,7 @@ func (db *RockDB) LTrimBack(ts int64, key []byte, trimSize int64) (int64, error)
 }
 
 func (db *RockDB) LPush(ts int64, key []byte, args ...[]byte) (int64, error) {
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	return db.lpush(ts, key, listHeadSeq, args...)
@@ -721,7 +721,7 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	}
 
 	limit := (stop - start) + 1
-	if limit >= MAX_BATCH_NUM {
+	if limit > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
 	headSeq += start
@@ -756,7 +756,7 @@ func (db *RockDB) RPop(ts int64, key []byte) ([]byte, error) {
 }
 
 func (db *RockDB) RPush(ts int64, key []byte, args ...[]byte) (int64, error) {
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	return db.lpush(ts, key, listTailSeq, args...)
@@ -777,7 +777,7 @@ func (db *RockDB) LClear(key []byte) (int64, error) {
 }
 
 func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
-	if len(keys) >= MAX_BATCH_NUM {
+	if len(keys) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 
@@ -798,7 +798,7 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 }
 
 func (db *RockDB) lMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
-	if len(keys) >= MAX_BATCH_NUM {
+	if len(keys) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
 

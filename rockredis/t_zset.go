@@ -289,7 +289,7 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 	if len(args) == 0 {
 		return 0, nil
 	}
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	table, _, err := extractTableFromRedisKey(key)
@@ -460,7 +460,7 @@ func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 	if len(members) == 0 {
 		return 0, nil
 	}
-	if len(members) >= MAX_BATCH_NUM {
+	if len(members) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	table, _, err := extractTableFromRedisKey(key)
@@ -665,7 +665,7 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, minKey []byte, maxKey []b
 			return db.zRemAll(ts, key, wb)
 		}
 	}
-	if count >= MAX_BATCH_NUM {
+	if count > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	table, _, err := extractTableFromRedisKey(key)
@@ -724,13 +724,13 @@ func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset i
 		return []common.ScorePair{}, nil
 	}
 
-	if count >= MAX_BATCH_NUM {
+	if count > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
 	// if count == -1, check if we may get too much data
 	if count < 0 {
 		total, _ := db.ZCard(key)
-		if total >= MAX_BATCH_NUM {
+		if total > MAX_BATCH_NUM {
 			return nil, errTooMuchBatchSize
 		}
 	}
@@ -1001,12 +1001,12 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	} else {
 		max = zEncodeSetKey(table, rk, max)
 	}
-	if count >= MAX_BATCH_NUM {
+	if count > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
 	if count < 0 {
 		total, _ := db.ZCard(key)
-		if total >= MAX_BATCH_NUM {
+		if total > MAX_BATCH_NUM {
 			return nil, errTooMuchBatchSize
 		}
 	}

@@ -166,7 +166,7 @@ func wrapReadCommandKK(f common.CommandFunc) common.CommandFunc {
 			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 			return
 		}
-		if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
+		if len(cmd.Args[1:]) > common.MAX_BATCH_NUM {
 			conn.WriteError(errTooMuchBatchSize.Error())
 			return
 		}
@@ -203,7 +203,7 @@ func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc
 			return
 		}
 		args := cmd.Args[1:]
-		if len(args) >= common.MAX_BATCH_NUM {
+		if len(args) > common.MAX_BATCH_NUM {
 			conn.WriteError(errTooMuchBatchSize.Error())
 			return
 		}
@@ -310,7 +310,7 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.CommandFu
 			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
 			return
 		}
-		if len(cmd.Args[1:])/2 >= common.MAX_BATCH_NUM {
+		if len(cmd.Args[1:])/2 > common.MAX_BATCH_NUM {
 			conn.WriteError(errTooMuchBatchSize.Error())
 			return
 		}
@@ -364,7 +364,7 @@ func wrapWriteCommandKSubkeyVSubkeyV(kvn *KVNode, f common.CommandRspFunc) commo
 			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
 			return
 		}
-		if len(cmd.Args[2:])/2 >= common.MAX_BATCH_NUM {
+		if len(cmd.Args[2:])/2 > common.MAX_BATCH_NUM {
 			conn.WriteError(errTooMuchBatchSize.Error())
 			return
 		}
@@ -393,7 +393,7 @@ func wrapMergeCommandKK(f common.MergeCommandFunc) common.MergeCommandFunc {
 		if len(cmd.Args) < 2 {
 			return nil, fmt.Errorf("ERR wrong number of arguments for '%s' command", string(cmd.Args[0]))
 		}
-		if len(cmd.Args[1:]) >= common.MAX_BATCH_NUM {
+		if len(cmd.Args[1:]) > common.MAX_BATCH_NUM {
 			return nil, errTooMuchBatchSize
 		}
 		for i := 1; i < len(cmd.Args); i++ {
@@ -413,7 +413,7 @@ func wrapWriteMergeCommandKK(kvn *KVNode, f common.MergeWriteCommandFunc) common
 			return nil, fmt.Errorf("ERR wrong number of arguments for '%s' command", string(cmd.Args[0]))
 		}
 		args := cmd.Args[1:]
-		if len(args) >= common.MAX_BATCH_NUM {
+		if len(args) > common.MAX_BATCH_NUM {
 			return nil, errTooMuchBatchSize
 		}
 		for i, v := range args {
@@ -444,7 +444,7 @@ func wrapWriteMergeCommandKVKV(kvn *KVNode, f common.MergeWriteCommandFunc) comm
 		if len(cmd.Args) < 3 || len(cmd.Args[1:])%2 != 0 {
 			return nil, fmt.Errorf("ERR wrong number arguments for '%s' command", string(cmd.Args[0]))
 		}
-		if len(cmd.Args[1:])/2 >= common.MAX_BATCH_NUM {
+		if len(cmd.Args[1:])/2 > common.MAX_BATCH_NUM {
 			return nil, errTooMuchBatchSize
 		}
 		args := cmd.Args[1:]
