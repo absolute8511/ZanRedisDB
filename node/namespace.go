@@ -330,6 +330,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		Replicator:     conf.Replicator,
 		OptimizedFsync: conf.OptimizedFsync,
 		KeepWAL:        nsm.machineConf.KeepWAL,
+		KeepBackup:     nsm.machineConf.KeepBackup,
 	}
 	kv, err := NewKVNode(kvOpts, nsm.machineConf, raftConf, nsm.raftTransport,
 		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),

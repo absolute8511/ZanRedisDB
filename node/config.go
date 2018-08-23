@@ -45,6 +45,7 @@ type MachineConfig struct {
 	DataRootDir         string                `json:"data_root_dir"`
 	ElectionTick        int                   `json:"election_tick"`
 	TickMs              int                   `json:"tick_ms"`
+	KeepBackup          int                   `json:"keep_backup"`
 	KeepWAL             int                   `json:"keep_wal"`
 	LearnerRole         string                `json:"learner_role"`
 	RemoteSyncCluster   string                `json:"remote_sync_cluster"`
@@ -70,6 +71,7 @@ type RaftConfig struct {
 	RaftAddr       string                 `json:"raft_addr"`
 	DataDir        string                 `json:"data_dir"`
 	WALDir         string                 `json:"wal_dir"`
+	KeepBackup     int                    `json:"keep_backup"`
 	KeepWAL        int                    `json:"keep_wal"`
 	SnapDir        string                 `json:"snap_dir"`
 	RaftPeers      map[uint64]ReplicaInfo `json:"raft_peers"`
