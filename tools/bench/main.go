@@ -139,7 +139,7 @@ func benchSet() {
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		value := make([]byte, *valueSize)
 		copy(value, valueSample)
-		n := atomic.AddInt64(&kvSetBase, 1)
+		n := atomic.AddInt64(&kvSetBase, 1) % int64(*primaryKeyCnt)
 		tmp := fmt.Sprintf("%010d", int(n))
 		ts := time.Now().String()
 		index := 0
@@ -179,7 +179,7 @@ func benchSetEx() {
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
 		value := make([]byte, *valueSize)
 		copy(value, valueSample)
-		n := atomic.AddInt64(&kvSetBase, 1)
+		n := atomic.AddInt64(&kvSetBase, 1) % int64(*primaryKeyCnt)
 		ttl := rand.Int31n(int32(*maxExpireSecs-*minExpireSecs)) + int32(*minExpireSecs)
 		tmp := fmt.Sprintf("%010d-%d-%s", int(n), ttl, time.Now().String())
 		ts := time.Now().String()
@@ -204,7 +204,7 @@ func benchSetEx() {
 
 func benchGet() {
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
-		n := atomic.AddInt64(&kvGetBase, 1)
+		n := atomic.AddInt64(&kvGetBase, 1) % int64(*primaryKeyCnt)
 		return waitBench(c, "GET", n)
 	}
 
@@ -222,7 +222,7 @@ func benchRandGet() {
 
 func benchDel() {
 	f := func(c *goredis.PoolConn, cindex int, loopi int) error {
-		n := atomic.AddInt64(&kvDelBase, 1)
+		n := atomic.AddInt64(&kvDelBase, 1) % int64(*primaryKeyCnt)
 		return waitBench(c, "DEL", n)
 	}
 
