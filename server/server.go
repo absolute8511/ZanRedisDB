@@ -152,6 +152,8 @@ func NewServer(conf ServerConfig) *Server {
 		DataRootDir:       conf.DataDir,
 		TickMs:            conf.TickMs,
 		ElectionTick:      conf.ElectionTick,
+		KeepBackup:        conf.KeepBackup,
+		KeepWAL:           conf.KeepWAL,
 		LearnerRole:       conf.LearnerRole,
 		RemoteSyncCluster: conf.RemoteSyncCluster,
 		StateMachineType:  conf.StateMachineType,

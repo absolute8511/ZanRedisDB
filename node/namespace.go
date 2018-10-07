@@ -285,6 +285,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 
 	kvOpts := &KVOptions{
 		DataDir:          path.Join(nsm.machineConf.DataRootDir, conf.Name),
+		KeepBackup:       nsm.machineConf.KeepBackup,
 		EngType:          conf.EngType,
 		RockOpts:         nsm.machineConf.RocksDBOpts,
 		ExpirationPolicy: expPolicy,
@@ -329,10 +330,12 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		SnapCatchup:    conf.SnapCatchup,
 		Replicator:     conf.Replicator,
 		OptimizedFsync: conf.OptimizedFsync,
-		KeepWAL:        nsm.machineConf.KeepWAL,
-		KeepBackup:     nsm.machineConf.KeepBackup,
+		nodeConfig:     nsm.machineConf,
 	}
-	kv, err := NewKVNode(kvOpts, nsm.machineConf, raftConf, nsm.raftTransport,
+	d, _ = json.MarshalIndent(&raftConf, "", " ")
+	nodeLog.Infof("namespace raft config: %v", string(d))
+
+	kv, err := NewKVNode(kvOpts, raftConf, nsm.raftTransport,
 		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),
 		nsm.clusterInfo, nsm.newLeaderChan)
 	if err != nil {

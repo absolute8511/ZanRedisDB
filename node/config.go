@@ -71,8 +71,6 @@ type RaftConfig struct {
 	RaftAddr       string                 `json:"raft_addr"`
 	DataDir        string                 `json:"data_dir"`
 	WALDir         string                 `json:"wal_dir"`
-	KeepBackup     int                    `json:"keep_backup"`
-	KeepWAL        int                    `json:"keep_wal"`
 	SnapDir        string                 `json:"snap_dir"`
 	RaftPeers      map[uint64]ReplicaInfo `json:"raft_peers"`
 	SnapCount      int                    `json:"snap_count"`

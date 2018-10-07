@@ -66,9 +66,7 @@ func bench(cmd string, f func(c *goredis.PoolConn, cindex int, loopIter int) err
 			for j := 0; j < loop; j++ {
 				err = f(c, clientIndex, j)
 				if err != nil {
-					if atomic.AddInt64(&errCnt, 1) > int64(*clients)*100 {
-						break
-					}
+					atomic.AddInt64(&errCnt, 1)
 				}
 				atomic.AddInt64(&currentNumList[clientIndex], 1)
 			}

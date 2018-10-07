@@ -140,16 +140,15 @@ func (si *KVSnapInfo) GetData() ([]byte, error) {
 	return d, nil
 }
 
-func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConfig,
+func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	transport *rafthttp.Transport, join bool, deleteCb func(),
 	clusterInfo common.IClusterInfo, newLeaderChan chan string) (*KVNode, error) {
 	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
-	config.nodeConfig = machineConfig
 
 	stopChan := make(chan struct{})
 	w := wait.New()
-	sm, err := NewStateMachine(kvopts, *machineConfig, config.ID, config.GroupName, clusterInfo, w)
+	sm, err := NewStateMachine(kvopts, *config.nodeConfig, config.ID, config.GroupName, clusterInfo, w)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +162,7 @@ func NewKVNode(kvopts *KVOptions, machineConfig *MachineConfig, config *RaftConf
 		router:             common.NewCmdRouter(),
 		deleteCb:           deleteCb,
 		ns:                 config.GroupName,
-		machineConfig:      machineConfig,
+		machineConfig:      config.nodeConfig,
 		expirationPolicy:   kvopts.ExpirationPolicy,
 		remoteSyncedStates: newRemoteSyncedStateMgr(),
 	}
