@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/common/geohash"
-	"github.com/absolute8511/redcon"
 )
 
 var (
@@ -204,7 +204,11 @@ func (nd *KVNode) geoRadiusGeneric(conn redcon.Conn, cmd redcon.Command, stype s
 	var err error
 
 	if card, err := nd.store.ZCard(cmd.Args[1]); err != nil || card == 0 {
-		conn.WriteError("(empty list or set)")
+		if err != nil {
+			conn.WriteError(err.Error())
+		} else {
+			conn.WriteArray(0)
+		}
 		return
 	}
 

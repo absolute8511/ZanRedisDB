@@ -152,9 +152,31 @@ func TestKVNode_GeoCommand(t *testing.T) {
 		},
 	}
 
+	/* Test  georadius with empty. */
+	testCmd := "georadius"
+	cmdArgs := make([][]byte, 7)
+	cmdArgs[0] = []byte(testCmd)
+	cmdArgs[1] = testKey
+	cmdArgs[2] = []byte("0")
+	cmdArgs[3] = []byte("31")
+	cmdArgs[4] = []byte("100000")
+	cmdArgs[5] = []byte("km")
+	cmdArgs[6] = []byte("asc")
+	cmdArgs = cmdArgs[:7]
+
+	handlerCmd := buildCommand(cmdArgs)
+	c := &fakeRedisConn{}
+	handler, _, _ := nd.router.GetCmdHandler(testCmd)
+	handler(c, handlerCmd)
+
+	assert.Nil(t, c.GetError(), "command: georadius executed failed, %v", c.GetError())
+	assert.Equal(t, 0, c.rsp[0])
+	assert.Equal(t, 1, len(c.rsp))
+	c.Reset()
+
 	/* Test geoadd. */
-	testCmd := "geoadd"
-	cmdArgs := make([][]byte, len(tCases)*3+2)
+	testCmd = "geoadd"
+	cmdArgs = make([][]byte, len(tCases)*3+2)
 	cmdArgs[0] = []byte(testCmd)
 	cmdArgs[1] = testKey
 
@@ -165,9 +187,8 @@ func TestKVNode_GeoCommand(t *testing.T) {
 		j = j + 3
 	}
 
-	handlerCmd := buildCommand(cmdArgs)
-	c := &fakeRedisConn{}
-	handler, _, _ := nd.router.GetCmdHandler(testCmd)
+	handlerCmd = buildCommand(cmdArgs)
+	handler, _, _ = nd.router.GetCmdHandler(testCmd)
 	handler(c, handlerCmd)
 	assert.Nil(t, c.GetError())
 	c.Reset()
