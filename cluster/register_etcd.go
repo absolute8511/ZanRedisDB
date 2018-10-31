@@ -273,6 +273,7 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 					time.Sleep(time.Second)
 					continue
 				}
+				coordLog.Errorf("watch expired key[%s] : %v", etcdReg.namespaceRoot, rsp)
 				watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index+1, true)
 				// watch expired should be treated as changed of node
 			} else {
@@ -297,7 +298,9 @@ func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaI
 	coordLog.Infof("refreshing namespaces")
 	atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 0)
 
-	rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, true, true)
+	// since the scan is triggered by watch, we need get newest from quorum
+	// to avoid get the old data from follower and no any more update event on leader.
+	rsp, err := etcdReg.client.GetNewest(etcdReg.namespaceRoot, true, true)
 	if err != nil {
 		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		if client.IsKeyNotFound(err) {
@@ -800,6 +803,7 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 						time.Sleep(time.Second)
 						continue
 					}
+					coordLog.Errorf("watch expired key[%s] : %v", key, rsp)
 					watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
 					// should get the nodes to notify watcher since last watch is expired
 				} else {
@@ -808,7 +812,9 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 				}
 			}
 		}
-		dataNodes, err := etcdReg.getDataNodes()
+		// must use the rsp from watch to get the newest data
+		// otherwise, the get may get the old data from another follower
+		dataNodes, err := etcdReg.getDataNodesFromRsp(rsp)
 		if err != nil {
 			coordLog.Errorf("key[%s] getNodes error: %s", key, err.Error())
 			continue
@@ -830,6 +836,10 @@ func (etcdReg *PDEtcdRegister) getDataNodes() ([]NodeInfo, error) {
 		}
 		return nil, err
 	}
+	return etcdReg.getDataNodesFromRsp(rsp)
+}
+
+func (etcdReg *PDEtcdRegister) getDataNodesFromRsp(rsp *client.Response) ([]NodeInfo, error) {
 	dataNodes := make([]NodeInfo, 0)
 	for _, node := range rsp.Node.Nodes {
 		if node.Dir {
@@ -1060,6 +1070,8 @@ func (etcdReg *DNEtcdRegister) refresh(stopChan chan bool) {
 				_, err := etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
 				if err != nil {
 					coordLog.Errorf("set key error: %s", err.Error())
+				} else {
+					coordLog.Infof("refresh registered new node: %v", etcdReg.nodeValue)
 				}
 			}
 		}
