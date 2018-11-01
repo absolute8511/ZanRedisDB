@@ -763,11 +763,12 @@ func (etcdReg *PDEtcdRegister) CheckIfLeader() bool {
 }
 
 func (etcdReg *PDEtcdRegister) GetDataNodes() ([]NodeInfo, error) {
-	return etcdReg.getDataNodes()
+	n, _, err := etcdReg.getDataNodes(false)
+	return n, err
 }
 
 func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop chan struct{}) {
-	dataNodes, err := etcdReg.getDataNodes()
+	dataNodes, nIndex, err := etcdReg.getDataNodes(false)
 	if err == nil {
 		select {
 		case dataNodesChan <- dataNodes:
@@ -778,7 +779,7 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 	}
 
 	key := etcdReg.getDataNodeRootPath()
-	watcher := etcdReg.client.Watch(key, 0, true)
+	watcher := etcdReg.client.Watch(key, nIndex, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -812,9 +813,9 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 				}
 			}
 		}
-		// must use the rsp from watch to get the newest data
+		// must get the newest data
 		// otherwise, the get may get the old data from another follower
-		dataNodes, err := etcdReg.getDataNodesFromRsp(rsp)
+		dataNodes, _, err := etcdReg.getDataNodes(true)
 		if err != nil {
 			coordLog.Errorf("key[%s] getNodes error: %s", key, err.Error())
 			continue
@@ -828,18 +829,20 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 	}
 }
 
-func (etcdReg *PDEtcdRegister) getDataNodes() ([]NodeInfo, error) {
-	rsp, err := etcdReg.client.Get(etcdReg.getDataNodeRootPath(), false, false)
+func (etcdReg *PDEtcdRegister) getDataNodes(upToDate bool) ([]NodeInfo, uint64, error) {
+	var rsp *client.Response
+	var err error
+	if upToDate {
+		rsp, err = etcdReg.client.GetNewest(etcdReg.getDataNodeRootPath(), false, false)
+	} else {
+		rsp, err = etcdReg.client.Get(etcdReg.getDataNodeRootPath(), false, false)
+	}
 	if err != nil {
 		if client.IsKeyNotFound(err) {
-			return nil, ErrKeyNotFound
+			return nil, 0, ErrKeyNotFound
 		}
-		return nil, err
+		return nil, 0, err
 	}
-	return etcdReg.getDataNodesFromRsp(rsp)
-}
-
-func (etcdReg *PDEtcdRegister) getDataNodesFromRsp(rsp *client.Response) ([]NodeInfo, error) {
 	dataNodes := make([]NodeInfo, 0)
 	for _, node := range rsp.Node.Nodes {
 		if node.Dir {
@@ -852,7 +855,7 @@ func (etcdReg *PDEtcdRegister) getDataNodesFromRsp(rsp *client.Response) ([]Node
 		}
 		dataNodes = append(dataNodes, nodeInfo)
 	}
-	return dataNodes, nil
+	return dataNodes, rsp.Index, nil
 }
 
 func (etcdReg *PDEtcdRegister) CreateNamespacePartition(ns string, partition int) error {
