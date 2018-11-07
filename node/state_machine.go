@@ -394,11 +394,11 @@ func (kvsm *kvStoreSM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, 
 	return nil
 }
 
-func (kvsm *kvStoreSM) preCheckConflict(cmd redcon.Command, reqTs int64) bool {
+func (kvsm *kvStoreSM) preCheckConflict(cmd redcon.Command, reqTs int64) ConflictState {
 	cmdName := strings.ToLower(string(cmd.Args[0]))
 	h, ok := kvsm.cRouter.GetHandler(cmdName)
 	if !ok {
-		return true
+		return Conflict
 	}
 	return h(cmd, reqTs)
 }
@@ -439,7 +439,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 				if !isReplaying && reqList.Type == FromClusterSyncer && !IsSyncerOnly() {
 					// syncer only no need check conflict since it will be no write from redis api
 					conflict := kvsm.preCheckConflict(cmd, reqTs)
-					if conflict {
+					if conflict == Conflict {
 						kvsm.Infof("conflict sync: %v, %v, %v", string(cmd.Raw), req.String(), reqTs)
 						// just ignore sync, should not return error because the syncer will block retrying for error sync
 						kvsm.w.Trigger(reqID, nil)
@@ -449,7 +449,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 						// maybe unconsistence if write on slave after cluster switched,
 						// so we need log write here to know what writes are synced after we
 						// became the master cluster.
-						kvsm.Infof("write from syncer after syncer state changed: %v, %v, %v", string(cmd.Raw), req.String(), reqTs)
+						kvsm.Infof("write from syncer after syncer state changed, conflict state:%v: %v, %v, %v", conflict, string(cmd.Raw), req.String(), reqTs)
 					}
 				}
 				cmdStart := time.Now()
