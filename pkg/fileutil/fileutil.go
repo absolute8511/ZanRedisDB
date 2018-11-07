@@ -37,6 +37,10 @@ var (
 	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "pkg/fileutil")
 )
 
+func init() {
+	capnslog.SetFormatter(capnslog.NewDefaultFormatter(os.Stdout))
+}
+
 // IsDirWriteable checks if dir is writable by writing and removing a file
 // to dir. It returns nil if dir is writable.
 func IsDirWriteable(dir string) error {

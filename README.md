@@ -55,6 +55,7 @@ ROCKSDB=/path/to/rocksdb ./dist.sh
  * Deploy etcd cluster which is needed for the meta data for the namespaces
  * Deploy the placedriver which is used for data placement: `placedriver -config=/path/to/config`
  * Deploy the zankv for data storage server `zankv -config=/path/to/config`
+ * Init a namespace using the create the namespace API in placedriver
 
 ## OS-Level Tuning
 

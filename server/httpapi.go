@@ -107,6 +107,11 @@ func (s *Server) doBackup(w http.ResponseWriter, req *http.Request, ps httproute
 	return nil, nil
 }
 
+func (s *Server) doBackupAll(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	s.nsMgr.BackupDB("")
+	return nil, nil
+}
+
 func (s *Server) doOptimizeAll(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	s.OptimizeDB("", "")
 	return nil, nil
@@ -672,6 +677,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/kv/optimize/:namespace/:table", common.Decorate(s.doOptimize, log, common.V1))
 	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimizeAll, log, common.V1))
 	router.Handle("POST", "/kv/backup/:namespace", common.Decorate(s.doBackup, log, common.V1))
+	router.Handle("POST", "/kv/backup/", common.Decorate(s.doBackupAll, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))

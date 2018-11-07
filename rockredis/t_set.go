@@ -254,7 +254,7 @@ func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.Wr
 }
 
 func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	table, rk, _ := extractTableFromRedisKey(key)
@@ -432,7 +432,7 @@ func (db *RockDB) SClear(key []byte) (int64, error) {
 }
 
 func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
-	if len(keys) >= MAX_BATCH_NUM {
+	if len(keys) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	wb := gorocksdb.NewWriteBatch()
@@ -449,7 +449,7 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 }
 
 func (db *RockDB) sMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
-	if len(keys) >= MAX_BATCH_NUM {
+	if len(keys) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
 	for _, key := range keys {

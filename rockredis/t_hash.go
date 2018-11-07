@@ -231,7 +231,7 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value [
 
 func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	s := time.Now()
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
 	if len(args) == 0 {
@@ -345,7 +345,7 @@ func (db *RockDB) HKeyExists(key []byte) (int64, error) {
 }
 
 func (db *RockDB) HMget(key []byte, args ...[]byte) ([][]byte, error) {
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
 	var err error
@@ -360,7 +360,7 @@ func (db *RockDB) HMget(key []byte, args ...[]byte) ([][]byte, error) {
 }
 
 func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	if len(args) == 0 {
@@ -595,7 +595,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if length >= MAX_BATCH_NUM {
+	if length > MAX_BATCH_NUM {
 		return length, nil, errTooMuchBatchSize
 	}
 
@@ -643,7 +643,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if length >= MAX_BATCH_NUM {
+	if length > MAX_BATCH_NUM {
 		return length, nil, errTooMuchBatchSize
 	}
 	start := hEncodeStartKey(table, rk)
@@ -687,7 +687,7 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if length >= MAX_BATCH_NUM {
+	if length > MAX_BATCH_NUM {
 		return length, nil, errTooMuchBatchSize
 	}
 

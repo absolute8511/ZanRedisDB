@@ -27,6 +27,8 @@ type ServerConfig struct {
 	RsyncLimit           int64             `json:"rsync_limit"`
 	DefaultSnapCount     int               `json:"default_snap_count"`
 	DefaultSnapCatchup   int               `json:"default_snap_catchup"`
+	KeepBackup           int               `json:"keep_backup"`
+	KeepWAL              int               `json:"keep_wal"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`

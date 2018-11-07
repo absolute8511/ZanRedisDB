@@ -119,6 +119,12 @@ auto_balance_and_migrate = true
     }
 }
 ```
+You should at least 3 zankv nodes if you want make replicator=3.
+
+ * Init a namespace by sending the create the namespace API to placedriver
+ ```
+curl -X POST '127.0.0.1:13801/cluster/namespace/create?namespace=test_p4&partition_num=4&replicator=3'
+ ```
 
 ## API
 

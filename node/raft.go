@@ -1150,15 +1150,20 @@ func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 		rc.Infof("purge exit")
 		close(done)
 	}()
-	keep := rc.config.KeepWAL
-	if keep == 0 {
+	if rc.config.nodeConfig == nil {
+		// maybe in test
+		return
+	}
+	keepBackup := rc.config.nodeConfig.KeepBackup
+	keep := rc.config.nodeConfig.KeepWAL
+	if keep <= 1 {
 		keep = 20
 	}
-	if keep < 10 {
-		keep = 10
+	if keepBackup <= 1 {
+		keepBackup = 10
 	}
 	var serrc, werrc <-chan error
-	serrc = fileutil.PurgeFile(rc.config.SnapDir, "snap", 10, time.Minute*10, rc.stopc)
+	serrc = fileutil.PurgeFile(rc.config.SnapDir, "snap", uint(keepBackup), time.Minute*10, rc.stopc)
 	werrc = fileutil.PurgeFile(rc.config.WALDir, "wal", uint(keep), time.Minute*10, rc.stopc)
 	select {
 	case e := <-werrc:

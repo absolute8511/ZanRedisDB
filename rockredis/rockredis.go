@@ -147,6 +147,7 @@ type SharedRockConfig struct {
 }
 type RockConfig struct {
 	DataDir            string
+	KeepBackup         int
 	EnableTableCounter bool
 	// this will ignore all update and non-exist delete
 	EstimateTableCounter bool
@@ -880,7 +881,11 @@ func (r *RockDB) backupLoop() {
 				dbLog.Infof("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
 				// purge some old checkpoint
 				r.checkpointDirLock.Lock()
-				purgeOldCheckpoint(MaxCheckpointNum, r.GetBackupDir())
+				keepNum := MaxCheckpointNum
+				if r.cfg.KeepBackup > 0 {
+					keepNum = r.cfg.KeepBackup
+				}
+				purgeOldCheckpoint(keepNum, r.GetBackupDir())
 				purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote())
 				r.checkpointDirLock.Unlock()
 			}()
@@ -1114,7 +1119,11 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 	if err != nil {
 		dbLog.Infof("reopen the restored db failed:  %v\n", err)
 	} else {
-		purgeOldCheckpoint(MaxCheckpointNum, r.GetBackupDir())
+		keepNum := MaxCheckpointNum
+		if r.cfg.KeepBackup > 0 {
+			keepNum = r.cfg.KeepBackup
+		}
+		purgeOldCheckpoint(keepNum, r.GetBackupDir())
 		purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote())
 	}
 	return err
