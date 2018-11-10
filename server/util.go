@@ -18,22 +18,24 @@ var (
 )
 
 func GetIPv4ForInterfaceName(ifname string) string {
-	interfaces, _ := net.Interfaces()
-	for _, inter := range interfaces {
-		//log.Printf("found interface: %s\n", inter.Name)
-		if inter.Name == ifname {
-			if addrs, err := inter.Addrs(); err == nil {
-				for _, addr := range addrs {
-					switch ip := addr.(type) {
-					case *net.IPNet:
-						if ip.IP.DefaultMask() != nil {
-							return ip.IP.String()
-						}
-					}
-				}
+	inter, err := net.InterfaceByName(ifname)
+	if err != nil {
+		return ""
+	}
+
+	addrs, err := inter.Addrs()
+	if err != nil {
+		return ""
+	}
+
+	for _, addr := range addrs {
+		if ip, ok := addr.(*net.IPNet); ok {
+			if ip.IP.DefaultMask() != nil {
+				return ip.IP.String()
 			}
 		}
 	}
+
 	return ""
 }
 
