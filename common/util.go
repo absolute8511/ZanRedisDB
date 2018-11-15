@@ -172,6 +172,9 @@ func IsFullScanCommand(cmd string) bool {
 }
 
 func IsMergeIndexSearchCommand(cmd string) bool {
+	if len(cmd) != len("hidx.from") {
+		return false
+	}
 	return strings.ToLower(cmd) == "hidx.from"
 }
 

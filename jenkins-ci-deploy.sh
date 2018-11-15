@@ -61,7 +61,7 @@ git pull
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GOPATH=$DIR/.godeps gpm get || true
 
-./dist.sh
+ROCKSDB=$rocksdb ./dist.sh
 popd
 
 if [ ! -f "`pwd`/etcd-v2.3.8-linux-amd64/etcd" ] && [ -z "$etcdurl" ]; then

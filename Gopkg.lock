@@ -42,15 +42,15 @@
   revision = "a1e0c6f50cb0003220c0d1826c8cf8f9f85478b1"
 
 [[projects]]
-  branch = "master"
-  digest = "1:78f0edd57b7b3c40a43970235f83d49ee365b87a8738300c10bec68222179f78"
+  digest = "1:5ced5e29b089c54190dae59246df1bd96d38fb89a92b4d51fd3fc22facded871"
   name = "github.com/absolute8511/redigo"
   packages = [
     "internal",
     "redis",
   ]
   pruneopts = "UT"
-  revision = "d5cd6073d004f894aedf74c2d01a1bb1b700727b"
+  revision = "868eebcfefc3e3d881164a852e71e6b12c801a16"
+  version = "v1.3.2"
 
 [[projects]]
   branch = "master"
@@ -493,12 +493,12 @@
   version = "0.0.1"
 
 [[projects]]
-  digest = "1:1ddab88db198c15417bb09eefcdd33a66b3c542c4236368d50271da11424137f"
+  digest = "1:c99234442eb7a7d16394619a1eeb5628c093e719c3209f76b8c53802964fa8da"
   name = "github.com/youzan/go-zanredisdb"
   packages = ["."]
   pruneopts = "UT"
-  revision = "c2b0599b720df74f20f7a352728c8db03d941dc5"
-  version = "v0.2"
+  revision = "20fdf14f4e2db3c591e15860e2733b7de41b301f"
+  version = "v0.3.4"
 
 [[projects]]
   branch = "master"

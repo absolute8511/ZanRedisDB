@@ -51,10 +51,6 @@ required = [
   name = "github.com/absolute8511/redcon"
 
 [[constraint]]
-  branch = "master"
-  name = "github.com/absolute8511/redigo"
-
-[[constraint]]
   name = "github.com/coreos/etcd"
   version = "=3.1.15"
 
@@ -132,7 +128,7 @@ required = [
 
 [[constraint]]
   name = "github.com/youzan/go-zanredisdb"
-  version = "0.2.0"
+  version = "0.3.4"
 
 [[constraint]]
   branch = "master"
