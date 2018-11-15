@@ -75,7 +75,7 @@ func (s *RemoteLogSender) getZanCluster() *zanredisdb.Cluster {
 		Namespace:    s.ns,
 	}
 	conf.LookupList = append(conf.LookupList, s.remoteClusterAddr)
-	s.zanCluster = zanredisdb.NewCluster(conf)
+	s.zanCluster = zanredisdb.NewCluster(conf, nil)
 	return s.zanCluster
 }
 

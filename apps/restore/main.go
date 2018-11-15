@@ -350,7 +350,10 @@ func restore() {
 		Namespace:    oriNS,
 		Password:     *pass,
 	}
-	client := sdk.NewZanRedisClient(conf)
+	client, err := sdk.NewZanRedisClient(conf)
+	if err != nil {
+		panic(err)
+	}
 	client.Start()
 	defer client.Stop()
 

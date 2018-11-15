@@ -444,7 +444,10 @@ func backup(t string) {
 		Namespace:    *ns,
 		Password:     *pass,
 	}
-	client := sdk.NewZanRedisClient(conf)
+	client, err := sdk.NewZanRedisClient(conf)
+	if err != nil {
+		panic(err)
+	}
 	client.Start()
 	defer client.Stop()
 
@@ -453,7 +456,7 @@ func backup(t string) {
 	ch := client.DoFullScanChannel(t, *table, stopCh)
 	path := path.Join(*dataDir, fmt.Sprintf("%s:%s:%s:%s.db", t, time.Now().Format("2006-01-02"), *ns, *table))
 	var file *os.File
-	_, err := os.Stat(path)
+	_, err = os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			file, err = os.Create(path)
