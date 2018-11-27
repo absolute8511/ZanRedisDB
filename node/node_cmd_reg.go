@@ -5,6 +5,7 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	// kv
 	kvsm.router.RegisterInternal("del", kvsm.localDelCommand)
 	kvsm.router.RegisterInternal("set", kvsm.localSetCommand)
+	kvsm.router.RegisterInternal("getset", kvsm.localGetSetCommand)
 	kvsm.router.RegisterInternal("setbit", kvsm.localBitSetCommand)
 	kvsm.router.RegisterInternal("setnx", kvsm.localSetnxCommand)
 	kvsm.router.RegisterInternal("mset", kvsm.localMSetCommand)
@@ -77,6 +78,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "bitcount", wrapReadCommandKAnySubkey(nd.bitcountCommand))
 	nd.router.Register(false, "mget", wrapReadCommandKK(nd.mgetCommand))
 	nd.router.Register(true, "set", wrapWriteCommandKV(nd, nd.setCommand))
+	nd.router.Register(true, "getset", wrapWriteCommandKV(nd, nd.getsetCommand))
 	nd.router.Register(true, "setbit", nd.setbitCommand)
 	nd.router.Register(true, "setnx", wrapWriteCommandKV(nd, nd.setnxCommand))
 	nd.router.Register(true, "incr", wrapWriteCommandK(nd, nd.incrCommand))
@@ -200,6 +202,7 @@ func (kvsm *kvStoreSM) registerConflictHandlers() {
 	// only write command
 	kvsm.cRouter.Register("del", kvsm.checkKVConflict)
 	kvsm.cRouter.Register("set", kvsm.checkKVConflict)
+	kvsm.cRouter.Register("getset", kvsm.checkKVConflict)
 	kvsm.cRouter.Register("setnx", kvsm.checkKVConflict)
 	kvsm.cRouter.Register("incr", kvsm.checkKVConflict)
 	kvsm.cRouter.Register("incrby", kvsm.checkKVConflict)

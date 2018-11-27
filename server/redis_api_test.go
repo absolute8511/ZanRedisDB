@@ -127,6 +127,14 @@ func TestKV(t *testing.T) {
 	key1 := "default:test:a"
 	key2 := "default:test:b"
 	keyExpire := "default:test:xx"
+
+	if v, err := goredis.String(c.Do("getset", key1, "12345")); err != goredis.ErrNil {
+		t.Logf("getset %v", v)
+		t.Fatal(err)
+	} else if v != "" {
+		t.Fatal(v)
+	}
+
 	if ok, err := goredis.String(c.Do("set", key1, "1234")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
@@ -174,17 +182,17 @@ func TestKV(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	//if v, err := goredis.String(c.Do("getset", "a", "123")); err != nil {
-	//	t.Fatal(err)
-	//} else if v != "1234" {
-	//	t.Fatal(v)
-	//}
+	if v, err := goredis.String(c.Do("getset", key1, "123")); err != nil {
+		t.Fatal(err)
+	} else if v != "1234" {
+		t.Fatal(v)
+	}
 
-	//if v, err := goredis.String(c.Do("get", "a")); err != nil {
-	//	t.Fatal(err)
-	//} else if v != "123" {
-	//	t.Fatal(v)
-	//}
+	if v, err := goredis.String(c.Do("get", key1)); err != nil {
+		t.Fatal(err)
+	} else if v != "123" {
+		t.Fatal(v)
+	}
 
 	if n, err := goredis.Int(c.Do("exists", key1)); err != nil {
 		t.Fatal(err)

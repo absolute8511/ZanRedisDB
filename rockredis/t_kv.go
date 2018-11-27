@@ -339,6 +339,32 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	return err
 }
 
+func (db *RockDB) KVGetSet(ts int64, rawKey []byte, value []byte) ([]byte, error) {
+	table, key, err := convertRedisKeyToDBKVKey(rawKey)
+	if err != nil {
+		return nil, err
+	} else if err = checkValueSize(value); err != nil {
+		return nil, err
+	}
+	db.MaybeClearBatch()
+	v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		db.IncrTableKeyCount(table, 1, db.wb)
+	} else if len(v) >= tsLen {
+		v = v[:len(v)-tsLen]
+	}
+	tsBuf := PutInt64(ts)
+	value = append(value, tsBuf...)
+	db.wb.Put(key, value)
+
+	err = db.MaybeCommitBatch()
+
+	return v, err
+}
+
 func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) error {
 	table, key, err := convertRedisKeyToDBKVKey(rawKey)
 	if err != nil {
