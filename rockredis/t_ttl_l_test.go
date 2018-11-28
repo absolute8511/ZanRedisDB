@@ -227,6 +227,7 @@ func TestZSetTTL_L(t *testing.T) {
 func TestLocalDeletionTTLChecker(t *testing.T) {
 	oldCheckInterval := localExpCheckInterval
 	localExpCheckInterval = 5
+
 	defer func() {
 		localExpCheckInterval = oldCheckInterval
 	}()
