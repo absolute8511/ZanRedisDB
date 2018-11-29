@@ -3,8 +3,8 @@ package node
 import (
 	"errors"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) plsetCommand(cmd redcon.Command, rsp interface{}) (interface{}, error) {

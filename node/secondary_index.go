@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/rockredis"
-	"github.com/absolute8511/redcon"
 )
 
 type HindexSearchResults struct {

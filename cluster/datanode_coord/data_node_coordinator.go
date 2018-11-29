@@ -23,7 +23,7 @@ var (
 	ErrNamespaceNotReady = cluster.NewCoordErr("namespace node is not ready", cluster.CoordLocalErr)
 	ErrNamespaceInvalid  = errors.New("namespace name is invalid")
 	ErrNamespaceNotFound = errors.New("namespace is not found")
-	// the wait interval while check transfering leader between different partitions
+	// the wait interval while check transferring leader between different partitions
 	// to avoid too much partitions do the leader transfer in short time.
 	TransferLeaderWait    = time.Second * 20
 	CheckUnsyncedInterval = time.Minute * 5
