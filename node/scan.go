@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err error) {

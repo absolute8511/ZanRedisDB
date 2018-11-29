@@ -159,6 +159,7 @@ func TestKVNode_kvCommand(t *testing.T) {
 		{"mget", buildCommand([][]byte{[]byte("mget"), testKey, testKey2})},
 		{"exists", buildCommand([][]byte{[]byte("exists"), testKey, testKey2})},
 		{"set", buildCommand([][]byte{[]byte("set"), testKey, testKeyValue})},
+		{"getset", buildCommand([][]byte{[]byte("getset"), testKey, testKeyValue})},
 		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey, testKeyValue})},
 		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey2, testKey2Value})},
 		//{"mset", buildCommand([][]byte{[]byte("mset"), testKey, testKeyValue, testKey2, testKey2Value})},

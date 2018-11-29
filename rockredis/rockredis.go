@@ -511,6 +511,10 @@ func (r *RockDB) CompactTableRange(table string) {
 		}
 		// compact meta range
 		minKey, maxKey, err := getTableMetaRange(dtsMeta[i], []byte(table), nil, nil)
+		if err != nil {
+			dbLog.Infof("failed to get table %v data range: %v", table, err)
+			continue
+		}
 		var rg gorocksdb.Range
 		rg.Start = minKey
 		rg.Limit = maxKey

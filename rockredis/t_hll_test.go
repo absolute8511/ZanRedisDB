@@ -115,6 +115,7 @@ func TestDBHLLOp(t *testing.T) {
 	assert.True(t, v3 <= v11+v22, "merged count should not great than add")
 	db.Close()
 	db = getTestDBWithDir(t, db.cfg.DataDir)
+	defer db.Close()
 	v1Reopen, err := db.PFCount(0, key1)
 	assert.Nil(t, err)
 	rawV, _ := db.KVGet(key1)

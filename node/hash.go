@@ -3,8 +3,8 @@ package node
 import (
 	"strconv"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) hgetCommand(conn redcon.Conn, cmd redcon.Command) {

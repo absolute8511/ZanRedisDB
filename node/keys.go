@@ -106,6 +106,18 @@ func (nd *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command, v interface{}
 	conn.WriteString("OK")
 }
 
+func (nd *KVNode) getsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	if v == nil {
+		conn.WriteNull()
+		return
+	}
+	if rsp, ok := v.([]byte); ok {
+		conn.WriteBulk(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
 func (nd *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if rsp, ok := v.(int64); ok {
 		conn.WriteInt64(rsp)
@@ -192,6 +204,14 @@ func (nd *KVNode) pfaddCommand(conn redcon.Conn, cmd redcon.Command, v interface
 func (kvsm *kvStoreSM) localSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	err := kvsm.store.KVSet(ts, cmd.Args[1], cmd.Args[2])
 	return nil, err
+}
+
+func (kvsm *kvStoreSM) localGetSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	oldV, err := kvsm.store.KVGetSet(ts, cmd.Args[1], cmd.Args[2])
+	if oldV == nil {
+		return nil, err
+	}
+	return oldV, err
 }
 
 func (kvsm *kvStoreSM) localSetnxCommand(cmd redcon.Command, ts int64) (interface{}, error) {
