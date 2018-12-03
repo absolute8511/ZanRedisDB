@@ -143,6 +143,7 @@ func main() {
 			checkOK = false
 			break
 		}
+		log.Printf("log sync max timestamps  %v\n", syncTs)
 	case "check-sync-init":
 		syncTs, ok := checkLogSync(ss)
 		if !ok {
@@ -169,6 +170,7 @@ func main() {
 			checkOK = false
 			break
 		}
+		log.Printf("log sync max timestamps  %v\n", syncTs)
 	default:
 		log.Printf("unknown task %v\n", *task)
 		return
