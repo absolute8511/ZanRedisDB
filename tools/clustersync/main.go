@@ -15,7 +15,7 @@ import (
 var ip = flag.String("ip", "127.0.0.1", "server ip")
 var port = flag.Int("port", 6380, "server port")
 var task = flag.String("t", "", "check task type supported: check-sync-normal|check-sync-init")
-var namespace = flag.String("namespace", "", "the namespace")
+var ignoreNamespace = flag.String("ignore_namespace", "", "the namespace can be ignored")
 var stopWriteTs = flag.Int64("stopts", 0, "stop timestamps for check write syncer, the timestamps should be checked while actually stop")
 
 type RaftProgress struct {
@@ -53,6 +53,14 @@ func JsonString(v interface{}) string {
 func checkLogSync(ss LogSyncStats) (int64, bool) {
 	checkOK := true
 	maxTs := int64(0)
+	if *ignoreNamespace != "" {
+		for nspid, _ := range ss.LeaderRaftStats {
+			ns, _ := common.GetNamespaceAndPartition(nspid)
+			if ns == *ignoreNamespace {
+				delete(ss.LeaderRaftStats, nspid)
+			}
+		}
+	}
 	if len(ss.LogSynced) != len(ss.LeaderRaftStats) {
 		log.Printf("namespace partitions not match: %v, %v\n", len(ss.LeaderRaftStats), len(ss.LogSynced))
 		checkOK = false
