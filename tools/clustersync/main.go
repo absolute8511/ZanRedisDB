@@ -12,8 +12,8 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
-var ip = flag.String("ip", "127.0.0.1", "redis server ip")
-var port = flag.Int("port", 6380, "redis server port")
+var ip = flag.String("ip", "127.0.0.1", "server ip")
+var port = flag.Int("port", 6380, "server port")
 var task = flag.String("t", "", "check task type supported: check-sync-normal|check-sync-init")
 var namespace = flag.String("namespace", "", "the namespace")
 var stopWriteTs = flag.Int64("stopts", 0, "stop timestamps for check write syncer, the timestamps should be checked while actually stop")
@@ -54,27 +54,33 @@ func checkLogSync(ss LogSyncStats) (int64, bool) {
 	checkOK := true
 	maxTs := int64(0)
 	if len(ss.LogSynced) != len(ss.LeaderRaftStats) {
-		log.Printf("namespace partitions not match: %v, %v", len(ss.LeaderRaftStats), len(ss.LogSynced))
+		log.Printf("namespace partitions not match: %v, %v\n", len(ss.LeaderRaftStats), len(ss.LogSynced))
 		checkOK = false
 	}
 	for _, logsynced := range ss.LogSynced {
 		leaderRS, ok := ss.LeaderRaftStats[logsynced.Name]
 		if !ok {
-			log.Printf("namespace missing in syncer leader: %v", JsonString(logsynced))
+			log.Printf("namespace missing in syncer leader: %v\n", JsonString(logsynced))
 			checkOK = false
 			continue
 		}
+		delete(ss.LeaderRaftStats, logsynced.Name)
 		if leaderRS.Term != logsynced.Term || leaderRS.Commit != logsynced.Index {
-			log.Printf("namespace %v not synced with leader: %v, %v", logsynced.Name, JsonString(logsynced), JsonString(leaderRS))
+			log.Printf("namespace %v not synced with leader: %v, %v\n", logsynced.Name, JsonString(logsynced), JsonString(leaderRS))
 			checkOK = false
 			continue
 		}
 		if logsynced.Timestamp > maxTs {
 			maxTs = logsynced.Timestamp
 		}
+		log.Printf("namespace %v synced(%v-%v-%v)\n", logsynced.Name, logsynced.Term, logsynced.Index, logsynced.Timestamp)
 	}
 	if maxTs <= *stopWriteTs {
 		log.Printf("get log sync stats timestamps old %v, %v\n", maxTs, *stopWriteTs)
+		checkOK = false
+	}
+	if len(ss.LeaderRaftStats) > 0 {
+		log.Printf("namespace partitions not match: %v\n", ss.LeaderRaftStats)
 		checkOK = false
 	}
 	return maxTs, checkOK
@@ -96,6 +102,8 @@ func getLogSyncStats() (LogSyncStats, error) {
 }
 
 func main() {
+	flag.Parse()
+
 	ss, err := getLogSyncStats()
 	if err != nil {
 		return
