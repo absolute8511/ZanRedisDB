@@ -126,6 +126,7 @@ func main() {
 			break
 		}
 		// try get log syncer again to check if any timestamps changed.
+		time.Sleep(time.Second / 2)
 		ss, err := getLogSyncStats()
 		if err != nil {
 			log.Printf("get log sync stats err %v\n", err)
@@ -152,6 +153,7 @@ func main() {
 		}
 
 		// try get log syncer again to check if any timestamps changed.
+		time.Sleep(time.Second / 2)
 		ss, err := getLogSyncStats()
 		if err != nil {
 			log.Printf("get log sync stats err %v\n", err)
