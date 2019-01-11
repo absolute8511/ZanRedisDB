@@ -80,7 +80,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(true, "set", wrapWriteCommandKV(nd, nd.setCommand))
 	nd.router.Register(true, "getset", wrapWriteCommandKV(nd, nd.getsetCommand))
 	nd.router.Register(true, "setbit", nd.setbitCommand)
-	nd.router.Register(true, "setnx", wrapWriteCommandKV(nd, nd.setnxCommand))
+	nd.router.Register(true, "setnx", nd.setnxCommand)
 	nd.router.Register(true, "incr", wrapWriteCommandK(nd, nd.incrCommand))
 	nd.router.Register(true, "incrby", wrapWriteCommandKV(nd, nd.incrbyCommand))
 	nd.router.Register(true, "pfadd", wrapWriteCommandKAnySubkey(nd, nd.pfaddCommand, 0))
