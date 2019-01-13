@@ -83,7 +83,7 @@ func checkLogSync(ss LogSyncStats) (int64, bool) {
 		}
 		log.Printf("namespace %v synced(%v-%v-%v)\n", logsynced.Name, logsynced.Term, logsynced.Index, logsynced.Timestamp)
 	}
-	if maxTs <= *stopWriteTs {
+	if *stopWriteTs > 0 && maxTs <= *stopWriteTs {
 		log.Printf("get log sync stats timestamps old %v, %v\n", maxTs, *stopWriteTs)
 		checkOK = false
 	}
