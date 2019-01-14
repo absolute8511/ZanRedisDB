@@ -570,6 +570,8 @@ func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps htt
 		allUrls := make(map[string]bool)
 		recvLatency, syncLatency := node.GetLogLatencyStats()
 		recvStats, syncStats := s.GetLogSyncStatsInSyncLearner()
+		// note: it may happen one namespace is still waiting init, so
+		// this uninit namespace sync stats may be ignored in any stats.
 		for _, stat := range recvStats {
 			ninfos, err := s.dataCoord.GetSnapshotSyncInfo(stat.Name)
 			if err != nil {

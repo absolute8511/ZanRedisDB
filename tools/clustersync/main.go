@@ -17,6 +17,7 @@ var port = flag.Int("port", 6380, "server port")
 var task = flag.String("t", "", "check task type supported: check-sync-normal|check-sync-init")
 var ignoreNamespace = flag.String("ignore_namespace", "", "the namespace can be ignored")
 var stopWriteTs = flag.Int64("stopts", 0, "stop timestamps for check write syncer, the timestamps should be checked while actually stop")
+var minRaftGroups = flag.Int64("min_groups", 0, "the number desired for all raft groups, it should be added for all namespace partitions")
 
 type RaftProgress struct {
 	Match uint64 `json:"match"`
@@ -51,6 +52,9 @@ func JsonString(v interface{}) string {
 }
 
 func checkLogSync(ss LogSyncStats) (int64, bool) {
+	// note: it may happen one namespace is still waiting init, so
+	// this uninit namespace sync stats may be ignored in any stats.
+	// we should wait until all the namespace inited.
 	checkOK := true
 	maxTs := int64(0)
 	if *ignoreNamespace != "" {
@@ -63,6 +67,10 @@ func checkLogSync(ss LogSyncStats) (int64, bool) {
 	}
 	if len(ss.LogSynced) != len(ss.LeaderRaftStats) {
 		log.Printf("namespace partitions not match: %v, %v\n", len(ss.LeaderRaftStats), len(ss.LogSynced))
+		checkOK = false
+	}
+	if len(ss.LogSynced) < int(*minRaftGroups) {
+		log.Printf("namespace partitions too less: %v, %v\n", len(ss.LogSynced), *minRaftGroups)
 		checkOK = false
 	}
 	for _, logsynced := range ss.LogSynced {
