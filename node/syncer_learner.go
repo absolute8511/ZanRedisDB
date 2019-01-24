@@ -367,6 +367,7 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		return nil
 	}
 
+	sm.setReceivedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
 	sm.Infof("wait buffered send logs while restore from snapshot")
 	err = sm.waitBufferedLogs(0)
 	if err != nil {
@@ -384,7 +385,13 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	if syncerNormalInit {
 		// set term-index to remote cluster with skipped snap so we can
 		// avoid transfer the snapshot while the two clusters have the exactly same logs
-		return sm.lgSender.sendAndWaitApplySkippedSnap(raftSnapshot, stop)
+		err := sm.lgSender.sendAndWaitApplySkippedSnap(raftSnapshot, stop)
+		if err != nil {
+			return err
+		}
+		sm.Infof("init snap done %v-%v", raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
+		sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
+		return nil
 	}
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,

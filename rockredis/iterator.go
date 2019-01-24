@@ -146,6 +146,9 @@ func NewDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uin
 		upperBound = append(upperBound, 0)
 	}
 
+	// TODO: avoid large offset, which will scan too much data.
+	// Maybe return error to avoid impact the performance.
+
 	//dbLog.Infof("iterator %v : %v", lowerBound, upperBound)
 	dbit, err := NewDBIterator(db, false, true, lowerBound, upperBound, false)
 	if err != nil {

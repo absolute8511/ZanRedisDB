@@ -34,12 +34,12 @@
   revision = "5259284545fc48177fc5a0a49255c49cb41e2f06"
 
 [[projects]]
-  branch = "master"
-  digest = "1:b95a90875805b75a5b592017f7898e7f108c4fc7459d46f8dad3b4ec3a4a90d2"
+  digest = "1:b5cc037a300f39b1bf24d682304fabead140413bf7f7c8e8386d52d7d7b6b0e1"
   name = "github.com/absolute8511/redcon"
   packages = ["."]
   pruneopts = "UT"
-  revision = "a1e0c6f50cb0003220c0d1826c8cf8f9f85478b1"
+  revision = "8afd629b936ec06f454d233713029f9db326e56d"
+  version = "v0.8.0"
 
 [[projects]]
   digest = "1:5ced5e29b089c54190dae59246df1bd96d38fb89a92b4d51fd3fc22facded871"

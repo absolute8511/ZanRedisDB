@@ -16,12 +16,12 @@ func (nd *KVNode) Lookup(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	v, err := nd.store.LocalLookup(key)
+	v, err := nd.store.KVGet(key)
 	return v, err
 }
 
 func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, err := nd.store.LocalLookup(cmd.Args[1])
+	val, err := nd.store.KVGet(cmd.Args[1])
 	if err != nil || val == nil {
 		conn.WriteNull()
 	} else {
@@ -118,9 +118,24 @@ func (nd *KVNode) getsetCommand(conn redcon.Conn, cmd redcon.Command, v interfac
 	}
 }
 
-func (nd *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
+func (nd *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 3 {
+		conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
+		return
+	}
+	val, err := nd.store.KVGet(cmd.Args[1])
+	if err != nil || val == nil {
+	} else {
+		// already exist
+		conn.WriteInt64(0)
+		return
+	}
+	cmd, rsp, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
+	if !ok {
+		return
+	}
+	if rspV, ok := rsp.(int64); ok {
+		conn.WriteInt64(rspV)
 	} else {
 		conn.WriteError(errInvalidResponse.Error())
 	}

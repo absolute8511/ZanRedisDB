@@ -47,7 +47,7 @@ required = [
   name = "github.com/absolute8511/hyperloglog"
 
 [[constraint]]
-  branch = "master"
+  version = "0.8.0"
   name = "github.com/absolute8511/redcon"
 
 [[constraint]]
