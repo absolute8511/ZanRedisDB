@@ -23,6 +23,7 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 		return err
 	}
 	sortedParts := make(PartitionList, 0)
+	// TODO: allow loading learner concurrent for different namespace and partitions
 	for namespaceName, namespaceParts := range namespaceMap {
 		sortedParts = sortedParts[:0]
 		for _, part := range namespaceParts {
