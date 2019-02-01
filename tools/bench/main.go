@@ -21,7 +21,7 @@ var number = flag.Int("n", 1000, "request number")
 var clients = flag.Int("c", 50, "number of clients")
 var round = flag.Int("r", 1, "benchmark round number")
 var valueSize = flag.Int("vsize", 100, "kv value size")
-var tests = flag.String("t", "set,get,randget,del,lpush,lrange,lpop,hset,hget,hdel,zadd,zrange,zrevrange,zdel", "only run the comma separated list of tests")
+var tests = flag.String("t", "set,incr,get,randget,del,lpush,lrange,lpop,hset,hget,hdel,zadd,zrange,zrevrange,zdel", "only run the comma separated list of tests")
 var primaryKeyCnt = flag.Int("pkn", 100, "primary key count for hash,list,set,zset")
 var namespace = flag.String("namespace", "default", "the prefix namespace")
 var table = flag.String("table", "test", "the table to write")
@@ -133,7 +133,7 @@ func bench(cmd string, f func(c redis.Conn, cindex int, loopIter int) error) {
 	t2 := time.Now()
 	d := t2.Sub(t1)
 
-	fmt.Printf("%s: %s %0.3f micros/op, %0.2fop/s\n",
+	fmt.Printf("%s: %s %0.3f micros/op, %0.2fop/s, err: %v, num:%v\n",
 		cmd,
 		d.String(),
 		float64(d.Nanoseconds()/1e3)/float64(*number),
@@ -239,6 +239,16 @@ func benchSetEx() {
 	bench("setex", f)
 }
 
+func benchIncr() {
+	f := func(c redis.Conn, cindex int, loopi int) error {
+		n := atomic.AddInt64(&kvSetBase, 1) % int64(*primaryKeyCnt)
+		tmp := fmt.Sprintf("%010d", int(n))
+		return waitBench(c, "incr", tmp)
+	}
+
+	bench("incr", f)
+}
+
 func benchGet() {
 	f := func(c redis.Conn, cindex int, loopi int) error {
 		n := atomic.AddInt64(&kvGetBase, 1) % int64(*primaryKeyCnt)
@@ -251,7 +261,7 @@ func benchGet() {
 
 func benchRandGet() {
 	f := func(c redis.Conn, cindex int, loopi int) error {
-		n := rand.Int() % *number
+		n := rand.Int() % int(*primaryKeyCnt)
 		k := fmt.Sprintf("%010d", int(n))
 		return waitBench(c, "GET", k)
 	}
@@ -597,6 +607,8 @@ func main() {
 				benchSet()
 			case "setex":
 				benchSetEx()
+			case "incr":
+				benchIncr()
 			case "get":
 				benchGet()
 			case "randget":
