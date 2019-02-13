@@ -5,9 +5,9 @@ echo $TEST_RACE
 os=$(go env GOOS)
 
 if [ "$TEST_PD" = "true" ]; then
-  TESTDIRS=`go list ./... | grep -v vendor`
+  TESTDIRS=$(go list ./... | grep -v vendor)
 else
-  TESTDIRS=`go list ./... | grep -v pdserver | grep -v vendor`
+  TESTDIRS=$(go list ./... | grep -v pdserver | grep -v vendor)
 fi
 
 echo $TESTDIRS

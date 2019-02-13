@@ -7,7 +7,7 @@
 #sudo yum install devtoolset-3-gcc devtoolset-3-gcc-c++ devtoolset-3-gdb
 
 echo `pwd`
-GoDep=`go env GOPATH`/src/golang.org/x
+GoDep=$(go env GOPATH)/src/golang.org/x
 mkdir -p $GoDep
 if [ ! -d "$GoDep/net" ]; then
   pushd $GoDep && git clone https://github.com/golang/net.git && popd
@@ -16,7 +16,7 @@ if [ ! -d "$GoDep/sys" ]; then
   pushd $GoDep && git clone https://github.com/golang/sys.git && popd
 fi
 
-googleDep=`go env GOPATH`/src/google.golang.org
+googleDep=$(go env GOPATH)/src/google.golang.org
 mkdir -p $googleDep
 if [ ! -d "$googleDep/grpc" ]; then
   pushd $googleDep && git clone https://github.com/grpc/grpc-go.git grpc && popd
@@ -35,7 +35,7 @@ etcdurl=$ETCD_URL
 
 scl enable devtoolset-3 bash
 
-rocksdb=`pwd`/rocksdb
+rocksdb=$(pwd)/rocksdb
 if [ ! -f "$rocksdb/Makefile" ]; then
   rm -rf $rocksdb
   git clone https://github.com/absolute8511/rocksdb.git $rocksdb
@@ -49,10 +49,10 @@ popd
 LD=/opt/rh/devtoolset-3/root/usr/bin/ld CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/youzan/gorocksdb
 
 wget -c https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm
-export PATH=`pwd`:$PATH
+export PATH=$(pwd):$PATH
 
-echo `pwd`
-pushd `go env GOPATH`/src/github.com/youzan/ZanRedisDB/
+echo $(pwd)
+pushd $(go env GOPATH)/src/github.com/youzan/ZanRedisDB/
 git pull
 
 ./pre-dist.sh || true
@@ -64,7 +64,7 @@ GOPATH=$DIR/.godeps gpm get || true
 ROCKSDB=$rocksdb ./dist.sh
 popd
 
-if [ ! -f "`pwd`/etcd-v2.3.8-linux-amd64/etcd" ] && [ -z "$etcdurl" ]; then
+if [ ! -f "$(pwd)/etcd-v2.3.8-linux-amd64/etcd" ] && [ -z "$etcdurl" ]; then
   rm -rf etcd-v2.3.8-linux-amd64
   wget -c https://github.com/coreos/etcd/releases/download/v2.3.8/etcd-v2.3.8-linux-amd64.tar.gz
   tar -xvzf etcd-v2.3.8-linux-amd64.tar.gz 
@@ -77,7 +77,7 @@ fi
 echo $etcdurl
 echo $ETCD_URL
 
-cp -fp `go env GOPATH`/src/github.com/youzan/ZanRedisDB/dist/$LATEST.tar.gz .
+cp -fp $(go env GOPATH)/src/github.com/youzan/ZanRedisDB/dist/$LATEST.tar.gz .
 killall zankv || true
 killall placedriver || true
 killall etcd || true
