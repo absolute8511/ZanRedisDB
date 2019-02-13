@@ -794,23 +794,22 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 				coordLog.Infof("watch key[%s] canceled.", key)
 				close(dataNodesChan)
 				return
-			} else {
-				coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
-				//rewatch
-				if IsEtcdWatchExpired(err) {
-					rsp, err = etcdReg.client.Get(key, false, true)
-					if err != nil {
-						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
-						time.Sleep(time.Second)
-						continue
-					}
-					coordLog.Errorf("watch expired key[%s] : %v", key, rsp)
-					watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
-					// should get the nodes to notify watcher since last watch is expired
-				} else {
-					time.Sleep(5 * time.Second)
+			}
+			coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
+			//rewatch
+			if IsEtcdWatchExpired(err) {
+				rsp, err = etcdReg.client.Get(key, false, true)
+				if err != nil {
+					coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
+					time.Sleep(time.Second)
 					continue
 				}
+				coordLog.Errorf("watch expired key[%s] : %v", key, rsp)
+				watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
+				// should get the nodes to notify watcher since last watch is expired
+			} else {
+				time.Sleep(5 * time.Second)
+				continue
 			}
 		}
 		// must get the newest data
@@ -894,9 +893,8 @@ func (etcdReg *PDEtcdRegister) IsExistNamespace(ns string) (bool, error) {
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return false, nil
-		} else {
-			return false, err
 		}
+		return false, err
 	}
 	return true, nil
 }
@@ -906,9 +904,8 @@ func (etcdReg *PDEtcdRegister) IsExistNamespacePartition(ns string, partitionNum
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			return false, nil
-		} else {
-			return false, err
 		}
+		return false, err
 	}
 	return true, nil
 }
@@ -1205,23 +1202,22 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 				coordLog.Infof("watch key[%s] canceled.", key)
 				close(leader)
 				return nil
-			} else {
-				coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
-				//rewatch
-				if IsEtcdWatchExpired(err) {
-					isMissing = true
-					rsp, err = etcdReg.client.Get(key, false, true)
-					if err != nil {
-						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
-						time.Sleep(time.Second)
-						continue
-					}
-					coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
-					watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
-				} else {
-					time.Sleep(5 * time.Second)
+			}
+			coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
+			//rewatch
+			if IsEtcdWatchExpired(err) {
+				isMissing = true
+				rsp, err = etcdReg.client.Get(key, false, true)
+				if err != nil {
+					coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
+					time.Sleep(time.Second)
 					continue
 				}
+				coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
+				watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
+			} else {
+				time.Sleep(5 * time.Second)
+				continue
 			}
 		}
 		if rsp == nil {
