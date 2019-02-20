@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/youzan/gorocksdb"
 	hll "github.com/absolute8511/hyperloglog"
+	"github.com/youzan/gorocksdb"
 	//hll "github.com/axiomhq/hyperloglog"
 	"github.com/hashicorp/golang-lru"
 )
@@ -294,9 +294,11 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 	if len(elems) > MAX_BATCH_NUM*10 {
 		return 0, errTooMuchBatchSize
 	}
+	s := time.Now()
 	_, key, err := convertRedisKeyToDBKVKey(rawKey)
 
 	item, ok := db.hllCache.Get(rawKey)
+	cost1 := time.Since(s)
 
 	changed := false
 	var hllp *hll.HyperLogLogPlus
@@ -331,6 +333,7 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 			hllType: hllPlusDefault,
 		}
 	}
+	cost2 := time.Since(s)
 	item.Lock()
 	for _, elem := range elems {
 		db.hasher64.Write(elem)
@@ -343,6 +346,7 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 	if !changed {
 		return 0, nil
 	}
+	cost3 := time.Since(s)
 
 	cnt := atomic.LoadUint64(&item.cachedCount)
 	cnt = cnt | 0x8000000000000000
@@ -350,5 +354,9 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 	atomic.StoreInt64(&item.ts, ts)
 	item.flushed = false
 	db.hllCache.Add(rawKey, item)
+	cost4 := time.Since(s)
+	if cost4 >= time.Millisecond*100 {
+		dbLog.Infof("pfadd %v slow: %v, %v, %v, %v", string(rawKey), cost1, cost2, cost3, cost4)
+	}
 	return 1, nil
 }

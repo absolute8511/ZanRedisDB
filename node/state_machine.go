@@ -21,7 +21,7 @@ import (
 
 const (
 	maxDBBatchCmdNum = 100
-	dbWriteSlow      = time.Millisecond * 200
+	dbWriteSlow      = time.Millisecond * 100
 )
 
 // this error is used while the raft is applying the remote raft logs and notify we should

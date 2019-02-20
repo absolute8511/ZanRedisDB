@@ -40,6 +40,7 @@ const (
 	SchemaChangeReq int8 = 2
 	proposeTimeout       = time.Second * 4
 	proposeQueueLen      = 500
+	raftSlow             = time.Millisecond * 200
 )
 
 const (
@@ -436,6 +437,7 @@ func (nd *KVNode) handleProposeReq() {
 			//	realN, buffer, reqList.Reqs)
 			start := lastReq.reqData.Header.Timestamp
 			cost := reqList.Timestamp - start
+			raftCost := int64(0)
 			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
 				nd.rn.Infof("ignore slow for begin propose too late: %v, cost %v", len(reqList.Reqs), cost)
 				for _, r := range reqList.Reqs {
@@ -480,7 +482,12 @@ func (nd *KVNode) handleProposeReq() {
 					}
 				}
 				cancel()
-				cost = time.Now().UnixNano() - start
+				tn := time.Now().UnixNano()
+				cost = tn - start
+				raftCost = tn - reqList.Timestamp
+			}
+			if raftCost >= int64(raftSlow.Nanoseconds()) {
+				nd.rn.Infof("raft slow for batch propose: %v, cost %v", len(reqList.Reqs), raftCost)
 			}
 			if cost >= int64(time.Second.Nanoseconds())/2 {
 				nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
