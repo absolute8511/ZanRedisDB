@@ -571,7 +571,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 	}
 
 	cost := time.Since(start)
-	if cost >= time.Second {
+	if cost >= raftSlow {
 		kvsm.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
 	}
 	// used for grpc raft proposal, will notify that all the raft logs in this batch is done.

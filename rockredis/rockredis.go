@@ -70,6 +70,7 @@ type RockOptions struct {
 	UseSharedRateLimiter           bool   `json:"use_shared_rate_limiter,omitempty"`
 	DisableWAL                     bool   `json:"disable_wal,omitempty"`
 	DisableMergeCounter            bool   `json:"disable_merge_counter,omitempty"`
+	OptimizeFiltersForHits         bool   `json:"optimize_filters_for_hits,omitempty"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -316,12 +317,20 @@ func OpenRockDB(cfg *RockConfig) (*RockDB, error) {
 	// cache index and filter blocks can save some memory,
 	// if not cache, the index and filter will be pre-loaded in memory
 	bbto.SetCacheIndexAndFilterBlocks(cfg.CacheIndexAndFilterBlocks)
+	// set pin_l0_filter_and_index_blocks_in_cache = true if cache index is true to improve performance on read
+	// and see this https://github.com/facebook/rocksdb/pull/3692 if partitioned filter is on
+	bbto.SetPinL0FilterAndIndexBlocksInCache(true)
+
 	// /* filter should not block_based, use sst based to reduce cpu */
 	filter := gorocksdb.NewBloomFilter(10, false)
 	bbto.SetFilterPolicy(filter)
 	opts := gorocksdb.NewDefaultOptions()
 	// optimize filter for hit, use less memory since last level will has no bloom filter
-	// opts.OptimizeFilterForHits(true)
+	// If you're certain that Get() will mostly find a key you're looking for, you can set options.optimize_filters_for_hits = true
+	// to save memory usage for bloom filters
+	if cfg.OptimizeFiltersForHits {
+		opts.OptimizeFilterForHits(true)
+	}
 	opts.SetBlockBasedTableFactory(bbto)
 	if cfg.RockOptions.AdjustThreadPool {
 		if cfg.SharedConfig == nil || cfg.SharedConfig.SharedEnv == nil {
