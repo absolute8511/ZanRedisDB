@@ -27,7 +27,8 @@ import (
 const (
 	MaxCheckpointNum       = 10
 	MaxRemoteCheckpointNum = 3
-	HLLCacheSize           = 512
+	HLLReadCacheSize       = 512
+	HLLWriteCacheSize      = 64
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
@@ -464,7 +465,7 @@ func (r *RockDB) GetDataDir() string {
 
 func (r *RockDB) reOpenEng() error {
 	var err error
-	hcache, err := newHLLCache(HLLCacheSize, r)
+	hcache, err := newHLLCache(HLLReadCacheSize, HLLWriteCacheSize, r)
 	if err != nil {
 		return err
 	}

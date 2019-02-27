@@ -32,7 +32,8 @@ var errHLLCountOverflow = errors.New("hyperloglog count overflow")
 
 type hllCacheItem struct {
 	sync.Mutex
-	hllp        *hll.HyperLogLogPlus
+	hllp *hll.HyperLogLogPlus
+	// we use the highest bit to indicated if this cached count is out of date
 	cachedCount uint64
 	hllType     uint8
 	ts          int64
@@ -49,7 +50,9 @@ type hllCache struct {
 	db        *RockDB
 }
 
-func newHLLCache(size int, db *RockDB) (*hllCache, error) {
+// write cache size should not too much, it may cause flush slow if
+// too much dirty write need flush
+func newHLLCache(size int, wsize int, db *RockDB) (*hllCache, error) {
 	c := &hllCache{
 		db: db,
 	}
@@ -58,7 +61,7 @@ func newHLLCache(size int, db *RockDB) (*hllCache, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.lruCache, err = lru.NewWithEvict(size, c.onEvicted)
+	c.lruCache, err = lru.NewWithEvict(wsize, c.onEvicted)
 	return c, err
 }
 
@@ -87,7 +90,7 @@ func (c *hllCache) onEvicted(rawKey interface{}, value interface{}) {
 	if !ok {
 		return
 	}
-	if item.deleting {
+	if item.deleting || item.flushed {
 		return
 	}
 	wb := gorocksdb.NewWriteBatch()
@@ -343,10 +346,13 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 		db.hasher64.Reset()
 	}
 	item.Unlock()
+	cost3 := time.Since(s)
 	if !changed {
+		if cost3 >= time.Millisecond*100 {
+			dbLog.Infof("pfadd %v slow: %v, %v, %v", string(rawKey), cost1, cost2, cost3)
+		}
 		return 0, nil
 	}
-	cost3 := time.Since(s)
 
 	cnt := atomic.LoadUint64(&item.cachedCount)
 	cnt = cnt | 0x8000000000000000

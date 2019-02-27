@@ -208,7 +208,7 @@ func TestDBHLLOp(t *testing.T) {
 	db.PFAdd(0, key1, []byte(strconv.Itoa(0)))
 	db.PFAdd(0, key2, []byte(strconv.Itoa(0+totalCnt)))
 	// test cache evict to remove write cache
-	for i := 0; i < HLLCacheSize*2; i++ {
+	for i := 0; i < HLLReadCacheSize*2; i++ {
 		db.PFAdd(0, []byte(strconv.Itoa(i)), []byte(strconv.Itoa(i)))
 	}
 	// refill cache with key1, key2
@@ -217,7 +217,7 @@ func TestDBHLLOp(t *testing.T) {
 		db.PFAdd(0, key2, []byte(strconv.Itoa(i+totalCnt)))
 	}
 	// cache evict, remove read cache
-	for i := 0; i < HLLCacheSize*2; i++ {
+	for i := 0; i < HLLReadCacheSize*2; i++ {
 		db.PFAdd(0, []byte(strconv.Itoa(i)), []byte(strconv.Itoa(i)))
 	}
 	v3, err = db.PFCount(0, key1, key2)
