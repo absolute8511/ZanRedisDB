@@ -356,7 +356,7 @@ func TestListLPushRPop(t *testing.T) {
 			assert.Nil(t, err)
 			atomic.AddInt32(&pushed, 1)
 			time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
-			if time.Since(start) > time.Second*10 {
+			if time.Since(start) > time.Second*3 {
 				break
 			}
 		}
@@ -374,7 +374,7 @@ func TestListLPushRPop(t *testing.T) {
 				atomic.AddInt32(&poped, 1)
 			}
 			time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
-			if time.Since(start) > time.Second*10 {
+			if time.Since(start) > time.Second*3 {
 				break
 			}
 		}

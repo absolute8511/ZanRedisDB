@@ -27,8 +27,8 @@ import (
 const (
 	MaxCheckpointNum       = 10
 	MaxRemoteCheckpointNum = 3
-	HLLReadCacheSize       = 512
-	HLLWriteCacheSize      = 64
+	HLLReadCacheSize       = 1024
+	HLLWriteCacheSize      = 32
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))

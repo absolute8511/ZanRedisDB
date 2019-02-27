@@ -47,7 +47,7 @@ func (l *testLogger) OutputWarning(maxdepth int, s string) error {
 	return nil
 }
 
-func startTestServer(t *testing.T) (*Server, int, string) {
+func startTestServer(t *testing.T, port int) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
 	t.Logf("dir:%v\n", tmpDir)
@@ -55,8 +55,8 @@ func startTestServer(t *testing.T) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	raftAddr := "http://127.0.0.1:12345"
-	redisport := 22345
+	raftAddr := "http://127.0.0.1:" + strconv.Itoa(port)
+	redisport := port + 10000
 	var replica node.ReplicaInfo
 	replica.NodeID = 1
 	replica.ReplicaID = 1
@@ -107,7 +107,7 @@ func waitServerForLeader(t *testing.T, w time.Duration) {
 
 func getTestConn(t *testing.T) *goredis.PoolConn {
 	testOnce.Do(func() {
-		kvs, redisport, gtmpDir = startTestServer(t)
+		kvs, redisport, gtmpDir = startTestServer(t, 12345)
 		waitServerForLeader(t, time.Second*10)
 	},
 	)
@@ -669,9 +669,17 @@ func TestPFOp(t *testing.T) {
 	cnt, err = goredis.Int64(c.Do("pfadd", key1, 1))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), cnt)
+
+	cnt, err = goredis.Int64(c.Do("pfcount", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), cnt)
+
 	cnt, err = goredis.Int64(c.Do("pfadd", key1, 1))
 	assert.Nil(t, err)
-	assert.Equal(t, int64(0), cnt)
+
+	cnt, err = goredis.Int64(c.Do("pfcount", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), cnt)
 
 	// test pfadd with no element on exist key
 	cnt, err = goredis.Int64(c.Do("pfadd", key1))
