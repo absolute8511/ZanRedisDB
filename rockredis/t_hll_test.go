@@ -48,6 +48,10 @@ func TestHLLPlusPerf(t *testing.T) {
 		hllp.GobEncode()
 	}
 	t.Logf("small hll marshal cost: %v", time.Since(s))
+	for i := 0; i < 10000; i++ {
+		hllp.Count()
+	}
+	t.Logf("small hll count cost: %v", time.Since(s))
 	for i := 0; i < 100000; i++ {
 		hasher64.Write([]byte(strconv.Itoa(rand.Int())))
 		hllp.Add(hasher64)
@@ -55,7 +59,7 @@ func TestHLLPlusPerf(t *testing.T) {
 	}
 	//t.Log(hllp.Count())
 	t.Log(time.Since(s))
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10000; i++ {
 		hllp.Count()
 	}
 	b, err = hllp.GobEncode()
@@ -339,16 +343,16 @@ func TestDBHLLOp(t *testing.T) {
 	//assert.NotEqual(t, oldkey2, newkey2)
 	assert.NotEqual(t, v1, v11)
 	assert.NotEqual(t, v2, v22)
-	assert.True(t, int64(totalCnt-totalCnt/100) < v1, "error should be less than 1%")
-	assert.True(t, int64(totalCnt+totalCnt/100) > v1, "error should be less than 1%")
-	assert.True(t, int64(totalCnt-totalCnt/100) < v2, "error should be less than 1%")
-	assert.True(t, int64(totalCnt+totalCnt/100) > v2, "error should be less than 1%")
+	assert.True(t, int64(totalCnt-totalCnt/40) < v1, "error should be less than 2%")
+	assert.True(t, int64(totalCnt+totalCnt/40) > v1, "error should be less than 2%")
+	assert.True(t, int64(totalCnt-totalCnt/40) < v2, "error should be less than 2%")
+	assert.True(t, int64(totalCnt+totalCnt/40) > v2, "error should be less than 2%")
 	v33, err := db.PFCount(0, key1, key2)
 	assert.Nil(t, err)
 	t.Log(v33)
 	assert.NotEqual(t, v3, v33)
-	assert.True(t, v33 <= v1+v2+int64(totalCnt/50), "merged count should not diff too much")
-	assert.True(t, v33 >= v1+v2-int64(totalCnt/50), "merged count should not diff too much")
+	assert.True(t, v33 <= v1+v2+int64(totalCnt/20), "merged count should not diff too much")
+	assert.True(t, v33 >= v1+v2-int64(totalCnt/20), "merged count should not diff too much")
 	db.hllCache.Flush()
 	close(stopC)
 	// refill cache with key1, key2 to remove read cache
@@ -377,7 +381,7 @@ func TestDBHLLOp(t *testing.T) {
 	//assert.True(t, false, "failed")
 }
 
-func TestDBHLLDifferent(t *testing.T) {
+func TestDBHLLDifferentType(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -502,12 +506,13 @@ func TestDBHLLDifferent(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestDBHLLOpPerf(t *testing.T) {
+func TestDBHLLOpPerf1(t *testing.T) {
+	initHLLType = hllPlusDefault
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdb_hll_perf_a")
+	key1 := []byte("test:testdb_hll_perf1_a")
 	v1, err := db.PFCount(0, key1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), v1)
@@ -517,7 +522,7 @@ func TestDBHLLOpPerf(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), ret)
 
-	key2 := []byte("test:testdb_hll_perf_b")
+	key2 := []byte("test:testdb_hll_perf1_b")
 
 	stopC := make(chan bool, 0)
 	for i := 0; i < 5; i++ {
@@ -551,25 +556,111 @@ func TestDBHLLOpPerf(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 100; i++ {
 		db.PFAdd(0, key1, []byte(strconv.Itoa(i)))
 		db.PFAdd(0, key2, []byte(strconv.Itoa(i)))
 	}
 	db.hllCache.Flush()
+	kv1, _ := db.KVGet(key1)
+	kv2, _ := db.KVGet(key2)
+	t.Log(len(kv1))
+	t.Log(len(kv2))
+	t.Log(db.PFCount(0, key1))
+	t.Log(db.PFCount(0, key2))
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 10; i++ {
 		// test cache evict to remove write cache
-		for i := 0; i < HLLReadCacheSize*2; i++ {
-			db.PFAdd(0, []byte("test:"+strconv.Itoa(i)), []byte(strconv.Itoa(i)))
+		for j := 0; j < HLLReadCacheSize*2; j++ {
+			db.PFAdd(0, []byte("test:"+strconv.Itoa(j)), []byte(strconv.Itoa(i)))
 		}
 		// refill cache with key1, key2
-		for i := 0; i < MAX_BATCH_NUM*10; i++ {
-			db.PFAdd(0, key1, []byte(strconv.Itoa(i)))
-			db.PFAdd(0, key2, []byte(strconv.Itoa(i+MAX_BATCH_NUM*10)))
+		for j := 0; j < MAX_BATCH_NUM*2; j++ {
+			db.PFAdd(0, key1, []byte(strconv.Itoa(j)))
+			db.PFAdd(0, key2, []byte(strconv.Itoa(j+MAX_BATCH_NUM*10)))
 		}
 		// cache evict, remove read cache
-		for i := 0; i < HLLReadCacheSize*2; i++ {
-			db.PFAdd(0, []byte("test:"+strconv.Itoa(i)), []byte(strconv.Itoa(i)))
+		for j := 0; j < HLLReadCacheSize*2; j++ {
+			db.PFAdd(0, []byte("test:"+strconv.Itoa(j)), []byte(strconv.Itoa(i+1000)))
+		}
+		time.Sleep(time.Microsecond)
+	}
+}
+
+func TestDBHLLOpPerf3(t *testing.T) {
+	initHLLType = hllType3
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key1 := []byte("test:testdb_hll_perf3_a")
+	v1, err := db.PFCount(0, key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), v1)
+
+	var ret int64
+	ret, err = db.PFAdd(0, key1, []byte("hello world 1"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), ret)
+
+	key2 := []byte("test:testdb_hll_perf3_b")
+
+	stopC := make(chan bool, 0)
+	for i := 0; i < 5; i++ {
+		go func() {
+			var lastC1 int64
+			var lastC2 int64
+			var cnt int64
+			loop := true
+			for loop {
+				c1, err := db.PFCount(0, key1)
+				assert.Nil(t, err)
+				c2, err := db.PFCount(0, key2)
+				assert.Nil(t, err)
+				if c1 < lastC1 {
+					cnt++
+				}
+				if c2 < lastC2 {
+					cnt++
+				}
+				lastC1 = c1
+				lastC2 = c2
+				select {
+				case <-stopC:
+					loop = false
+					break
+				default:
+					time.Sleep(time.Microsecond)
+				}
+			}
+			assert.True(t, cnt < 10, "not increased count: %v", cnt)
+		}()
+	}
+
+	for i := 0; i < 100; i++ {
+		db.PFAdd(0, key1, []byte(strconv.Itoa(i)))
+		db.PFAdd(0, key2, []byte(strconv.Itoa(i)))
+	}
+	db.hllCache.Flush()
+	kv1, _ := db.KVGet(key1)
+	kv2, _ := db.KVGet(key2)
+	t.Log(len(kv1))
+	t.Log(len(kv2))
+	t.Log(db.PFCount(0, key1))
+	t.Log(db.PFCount(0, key2))
+
+	for i := 0; i < 10; i++ {
+		// test cache evict to remove write cache
+		for j := 0; j < HLLReadCacheSize*2; j++ {
+			db.PFAdd(0, []byte("test:"+strconv.Itoa(j)), []byte(strconv.Itoa(i)))
+		}
+		// refill cache with key1, key2
+		for j := 0; j < MAX_BATCH_NUM*2; j++ {
+			db.PFAdd(0, key1, []byte(strconv.Itoa(j)))
+			db.PFAdd(0, key2, []byte(strconv.Itoa(j+MAX_BATCH_NUM*10)))
+		}
+		// cache evict, remove read cache
+		for j := 0; j < HLLReadCacheSize*2; j++ {
+			db.PFAdd(0, []byte("test:"+strconv.Itoa(j)), []byte(strconv.Itoa(i+1000)))
 		}
 		time.Sleep(time.Microsecond)
 	}

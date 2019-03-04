@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	hllPrecision uint8 = 13
+	hllPrecision uint8 = 12
 	// to make it compatible for some different hll lib
 	// we add a flag to indicate which hll lib we are using
 	hllPlusDefault uint8 = 1
@@ -27,7 +27,7 @@ const (
 )
 
 //TODO: how to change this through raft and keep it after restart
-var initHLLType = hllType3
+var initHLLType = hllPlusDefault
 
 // pfcount use uint64 to storage the precomputed value, and the most significant bit is used
 // to indicate whether the cached value is valid.
