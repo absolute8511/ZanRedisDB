@@ -27,11 +27,27 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:908e3b615041300fbbdae3c74c8d7f4517ef2d0db98cba2ad60875b41aaa5e7b"
+  name = "github.com/absolute8511/go-hll"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "043118556d83d02b0f28ec7499a7d94613c9c57e"
+
+[[projects]]
+  branch = "master"
   digest = "1:d2c30722bd5f63f7d9af49c0dad62f604d8a44b2deebb59517933f4df027e3f5"
   name = "github.com/absolute8511/hyperloglog"
   packages = ["."]
   pruneopts = "UT"
   revision = "5259284545fc48177fc5a0a49255c49cb41e2f06"
+
+[[projects]]
+  digest = "1:34fa5126c5fad4afd312d1515512084045276d1aaae799a73c0bf205f96003dd"
+  name = "github.com/absolute8511/hyperloglog2"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "7636d856f700116b34a8876df8215713b2b4e158"
+  version = "v0.1.1"
 
 [[projects]]
   digest = "1:b5cc037a300f39b1bf24d682304fabead140413bf7f7c8e8386d52d7d7b6b0e1"
@@ -187,6 +203,22 @@
   version = "v1.1.0"
 
 [[projects]]
+  branch = "master"
+  digest = "1:b2a9da4dfb6d53e94d8bf6fbb23a9cee5fff7419167b97770b8e3b6a462f1742"
+  name = "github.com/dgryski/go-bits"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "bd8a69a71dc203aa976f9d918b428db9ac605f57"
+
+[[projects]]
+  branch = "master"
+  digest = "1:055e0539db2ff375e356db6961eae161858fc360bfa20c4f82ada1e271756176"
+  name = "github.com/dgryski/go-metro"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "280f6062b5bc97ee9b9afe7f2ccb361e59845baa"
+
+[[projects]]
   digest = "1:2cd7915ab26ede7d95b8749e6b1f933f1c6d5398030684e6505940a10f31cfda"
   name = "github.com/ghodss/yaml"
   packages = ["."]
@@ -249,6 +281,14 @@
   pruneopts = "UT"
   revision = "b4deda0973fb4c70b50d226b1af49f3da59f5265"
   version = "v1.1.0"
+
+[[projects]]
+  digest = "1:e4f5819333ac698d294fe04dbf640f84719658d5c7ce195b10060cc37292ce79"
+  name = "github.com/golang/snappy"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "2a8bb927dd31d8daada140a5d09578521ce5c36a"
+  version = "v0.0.1"
 
 [[projects]]
   branch = "master"
@@ -623,7 +663,9 @@
   input-imports = [
     "github.com/BurntSushi/toml",
     "github.com/absolute8511/glog",
+    "github.com/absolute8511/go-hll",
     "github.com/absolute8511/hyperloglog",
+    "github.com/absolute8511/hyperloglog2",
     "github.com/absolute8511/redcon",
     "github.com/absolute8511/redigo/redis",
     "github.com/coreos/etcd",
@@ -634,6 +676,7 @@
     "github.com/gobwas/glob",
     "github.com/gogo/protobuf/gogoproto",
     "github.com/golang/protobuf/proto",
+    "github.com/golang/snappy",
     "github.com/hashicorp/golang-lru",
     "github.com/judwhite/go-svc/svc",
     "github.com/julienschmidt/httprouter",
