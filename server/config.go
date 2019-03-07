@@ -29,6 +29,7 @@ type ServerConfig struct {
 	DefaultSnapCatchup   int               `json:"default_snap_catchup"`
 	KeepBackup           int               `json:"keep_backup"`
 	KeepWAL              int               `json:"keep_wal"`
+	UseBadgerWAL         bool              `json:"use_badger_wal"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`

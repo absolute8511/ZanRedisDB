@@ -76,6 +76,7 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 			ElectionTick:         5,
 			LearnerRole:          common.LearnerRoleLogSyncer,
 			RemoteSyncCluster:    "http://127.0.0.1:" + pdRemoteHttpPort,
+			UseBadgerWAL:         true,
 		}
 		kv := ds.NewServer(kvOpts)
 		kv.Start()
@@ -144,6 +145,7 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 			TickMs:               100,
 			ElectionTick:         5,
 			SyncerWriteOnly:      syncOnly,
+			UseBadgerWAL:         true,
 		}
 		kv := ds.NewServer(kvOpts)
 		kv.Start()

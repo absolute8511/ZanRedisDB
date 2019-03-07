@@ -16,7 +16,11 @@ package raft
 
 import (
 	"errors"
+	"fmt"
+	"io/ioutil"
+	"path"
 	"sync"
+	"time"
 
 	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
@@ -69,6 +73,17 @@ type Storage interface {
 	Snapshot() (pb.Snapshot, error)
 }
 
+type IExtRaftStorage interface {
+	Storage
+	// Close closes the Storage and performs finalization.
+	Close()
+	ApplySnapshot(pb.Snapshot) error
+	SetHardState(pb.HardState) error
+	CreateSnapshot(uint64, *pb.ConfState, []byte) (pb.Snapshot, error)
+	Compact(uint64) error
+	Append([]pb.Entry) error
+}
+
 // MemoryStorage implements the Storage interface backed by an
 // in-memory array.
 type MemoryStorage struct {
@@ -84,11 +99,31 @@ type MemoryStorage struct {
 }
 
 // NewMemoryStorage creates an empty MemoryStorage.
-func NewMemoryStorage() *MemoryStorage {
-	return &MemoryStorage{
+func NewMemoryStorage() IExtRaftStorage {
+	return NewMemoryStorageWithID(0, 0)
+}
+
+func NewMemoryStorageWithIDAndDir(id uint64, gid uint32, dir string) IExtRaftStorage {
+	if dir != "" {
+		dir = path.Join(dir, "badger")
+		bs, err := NewBadgerStorage(id, gid, dir)
+		if err == nil {
+			return bs
+		}
+	}
+	ms := &MemoryStorage{
 		// When starting from scratch populate the list with a dummy entry at term zero.
 		ents: make([]pb.Entry, 1),
 	}
+	return ms
+}
+
+func NewMemoryStorageWithID(id uint64, gid uint32) IExtRaftStorage {
+	tmpDir, _ := ioutil.TempDir("", fmt.Sprintf("raft-storage-%v-%v-%d", id, gid, time.Now().UnixNano()))
+	return NewMemoryStorageWithIDAndDir(id, gid, tmpDir)
+}
+
+func (ms *MemoryStorage) Close() {
 }
 
 // InitialState implements the Storage interface.

@@ -98,7 +98,7 @@ type raftNode struct {
 
 	// raft backing for the commit/error channel
 	node        raft.Node
-	raftStorage *raft.MemoryStorage
+	raftStorage raft.IExtRaftStorage
 	wal         *wal.WAL
 
 	persistStorage IRaftPersistStorage
@@ -136,13 +136,20 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		rconfig.SnapCatchup = rconfig.SnapCount / 2
 	}
 
+	rsDir := ""
+	if rconfig.nodeConfig.UseBadgerWAL {
+		rsDir = rconfig.WALDir
+		if err := os.MkdirAll(rsDir, common.DIR_PERM); err != nil {
+			nodeLog.Errorf("cannot create dir for badger wal (%v)", err)
+		}
+	}
 	rc := &raftNode{
 		commitC:       commitC,
 		config:        rconfig,
 		members:       make(map[uint64]*common.MemberInfo),
 		learnerMems:   make(map[uint64]*common.MemberInfo),
 		join:          join,
-		raftStorage:   raft.NewMemoryStorage(),
+		raftStorage:   raft.NewMemoryStorageWithIDAndDir(rconfig.ID, uint32(rconfig.GroupID), rsDir),
 		stopc:         make(chan struct{}),
 		ds:            ds,
 		reqIDGen:      idutil.NewGenerator(uint16(rconfig.ID), time.Now()),
@@ -810,6 +817,7 @@ func (rc *raftNode) serveChannels() {
 		rc.wgAsync.Wait()
 		rc.node.Stop()
 		rc.persistStorage.Close()
+		rc.raftStorage.Close()
 		rc.raftStorage = nil
 	}()
 

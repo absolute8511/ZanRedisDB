@@ -921,7 +921,7 @@ func (s messageSlice) Len() int           { return len(s) }
 func (s messageSlice) Less(i, j int) bool { return fmt.Sprint(s[i]) < fmt.Sprint(s[j]) }
 func (s messageSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-func commitNoopEntry(r *raft, s *MemoryStorage) {
+func commitNoopEntry(r *raft, s IExtRaftStorage) {
 	if r.state != StateLeader {
 		panic("it should only be used when it is the leader")
 	}

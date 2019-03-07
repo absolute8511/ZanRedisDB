@@ -26,7 +26,7 @@ import (
 )
 
 // nextEnts returns the appliable entries and updates the applied index
-func nextEnts(r *raft, s *MemoryStorage) (ents []pb.Entry) {
+func nextEnts(r *raft, s IExtRaftStorage) (ents []pb.Entry) {
 	// Transfer all unstable entries to "stable" storage.
 	s.Append(r.raftLog.unstableEntries())
 	r.raftLog.stableTo(r.raftLog.lastIndex(), r.raftLog.lastTerm())
@@ -34,6 +34,17 @@ func nextEnts(r *raft, s *MemoryStorage) (ents []pb.Entry) {
 	ents = r.raftLog.nextEnts()
 	r.raftLog.appliedTo(r.raftLog.committed)
 	return ents
+}
+
+func newInitedMemoryStorage(ents []pb.Entry) IExtRaftStorage {
+	testStorage := NewMemoryStorage()
+	ms, ok := testStorage.(*MemoryStorage)
+	if ok {
+		ms.ents = ents
+	} else {
+		testStorage.(*BadgerStorage).reset(ents)
+	}
+	return testStorage
 }
 
 type stateMachine interface {
@@ -860,7 +871,7 @@ func TestDuelingCandidates(t *testing.T) {
 	nt.send(pb.Message{From: 3, To: 3, Type: pb.MsgHup})
 
 	wlog := &raftLog{
-		storage:   &MemoryStorage{ents: []pb.Entry{{}, {Data: nil, Term: 1, Index: 1}}},
+		storage:   newInitedMemoryStorage([]pb.Entry{{}, {Data: nil, Term: 1, Index: 1}}),
 		committed: 1,
 		unstable:  unstable{offset: 2},
 	}
@@ -930,7 +941,7 @@ func TestDuelingPreCandidates(t *testing.T) {
 	nt.send(pb.Message{From: 3, To: 3, Type: pb.MsgHup})
 
 	wlog := &raftLog{
-		storage:   &MemoryStorage{ents: []pb.Entry{{}, {Data: nil, Term: 1, Index: 1}}},
+		storage:   newInitedMemoryStorage([]pb.Entry{{}, {Data: nil, Term: 1, Index: 1}}),
 		committed: 1,
 		unstable:  unstable{offset: 2},
 	}
@@ -990,9 +1001,9 @@ func TestCandidateConcede(t *testing.T) {
 		t.Errorf("term = %d, want %d", g, 1)
 	}
 	wantLog := ltoa(&raftLog{
-		storage: &MemoryStorage{
-			ents: []pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Index: 2, Data: data}},
-		},
+		storage: newInitedMemoryStorage(
+			[]pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Index: 2, Data: data}},
+		),
 		unstable:  unstable{offset: 3},
 		committed: 2,
 	})
@@ -1040,13 +1051,13 @@ func TestOldMessages(t *testing.T) {
 	tt.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("somedata")}}})
 
 	ilog := &raftLog{
-		storage: &MemoryStorage{
-			ents: []pb.Entry{
+		storage: newInitedMemoryStorage(
+			[]pb.Entry{
 				{}, {Data: nil, Term: 1, Index: 1},
 				{Data: nil, Term: 2, Index: 2}, {Data: nil, Term: 3, Index: 3},
 				{Data: []byte("somedata"), Term: 3, Index: 4},
 			},
-		},
+		),
 		unstable:  unstable{offset: 5},
 		committed: 4,
 	}
@@ -1101,9 +1112,9 @@ func TestProposal(t *testing.T) {
 		wantLog := newLog(NewMemoryStorage(), raftLogger)
 		if tt.success {
 			wantLog = &raftLog{
-				storage: &MemoryStorage{
-					ents: []pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Index: 2, Data: data}},
-				},
+				storage: newInitedMemoryStorage(
+					[]pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Index: 2, Data: data}},
+				),
 				unstable:  unstable{offset: 3},
 				committed: 2}
 		}
@@ -1140,9 +1151,9 @@ func TestProposalByProxy(t *testing.T) {
 		tt.send(pb.Message{From: 2, To: 2, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("somedata")}}})
 
 		wantLog := &raftLog{
-			storage: &MemoryStorage{
-				ents: []pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Data: data, Index: 2}},
-			},
+			storage: newInitedMemoryStorage(
+				[]pb.Entry{{}, {Data: nil, Term: 1, Index: 1}, {Term: 1, Data: data, Index: 2}},
+			),
 			unstable:  unstable{offset: 3},
 			committed: 2}
 		base := ltoa(wantLog)
@@ -1198,7 +1209,7 @@ func TestCommit(t *testing.T) {
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
 		storage.Append(tt.logs)
-		storage.hardState = pb.HardState{Term: tt.smTerm}
+		storage.SetHardState(pb.HardState{Term: tt.smTerm})
 
 		sm := newTestRaft(1, []uint64{1}, 5, 1, storage)
 		for j := 0; j < len(tt.matches); j++ {
@@ -1561,7 +1572,7 @@ func testRecvMsgVote(t *testing.T, msgType pb.MessageType) {
 		}
 		sm.Vote = tt.voteFor
 		sm.raftLog = &raftLog{
-			storage:  &MemoryStorage{ents: []pb.Entry{{}, {Index: 1, Term: 2}, {Index: 2, Term: 2}}},
+			storage:  newInitedMemoryStorage([]pb.Entry{{}, {Index: 1, Term: 2}, {Index: 2, Term: 2}}),
 			unstable: unstable{offset: 3},
 		}
 
@@ -2150,7 +2161,7 @@ func TestLeaderAppResp(t *testing.T) {
 		// thus the last log term must be 1 to be committed.
 		sm := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		sm.raftLog = &raftLog{
-			storage:  &MemoryStorage{ents: []pb.Entry{{}, {Index: 1, Term: 0}, {Index: 2, Term: 1}}},
+			storage:  newInitedMemoryStorage([]pb.Entry{{}, {Index: 1, Term: 0}, {Index: 2, Term: 1}}),
 			unstable: unstable{offset: 3},
 		}
 		sm.becomeCandidate()
@@ -2266,7 +2277,7 @@ func TestRecvMsgBeat(t *testing.T) {
 
 	for i, tt := range tests {
 		sm := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-		sm.raftLog = &raftLog{storage: &MemoryStorage{ents: []pb.Entry{{}, {Index: 1, Term: 0}, {Index: 2, Term: 1}}}}
+		sm.raftLog = &raftLog{storage: newInitedMemoryStorage([]pb.Entry{{}, {Index: 1, Term: 0}, {Index: 2, Term: 1}})}
 		sm.Term = 1
 		sm.state = tt.state
 		switch tt.state {
@@ -3649,7 +3660,7 @@ func votedWithConfig(configFunc func(*Config), vote, term uint64) *raft {
 
 type network struct {
 	peers   map[uint64]stateMachine
-	storage map[uint64]*MemoryStorage
+	storage map[uint64]IExtRaftStorage
 	dropm   map[connem]float64
 	ignorem map[pb.MessageType]bool
 }
@@ -3670,7 +3681,7 @@ func newNetworkWithConfig(configFunc func(*Config), peers ...stateMachine) *netw
 	peerGroups := grpsByIds(peerAddrs)
 
 	npeers := make(map[uint64]stateMachine, size)
-	nstorage := make(map[uint64]*MemoryStorage, size)
+	nstorage := make(map[uint64]IExtRaftStorage, size)
 
 	for j, p := range peers {
 		id := peerAddrs[j]

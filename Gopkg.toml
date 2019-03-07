@@ -103,6 +103,10 @@ required = [
   version = "0.8.0"
 
 [[constraint]]
+  name = "github.com/dgraph-io/badger"
+  branch = "master"
+
+[[constraint]]
   name = "github.com/shirou/gopsutil"
   version = "2.18.4"
 
