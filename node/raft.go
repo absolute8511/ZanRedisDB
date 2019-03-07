@@ -136,20 +136,16 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		rconfig.SnapCatchup = rconfig.SnapCount / 2
 	}
 
-	rsDir := ""
-	if rconfig.nodeConfig.UseBadgerWAL {
-		rsDir = rconfig.WALDir
-		if err := os.MkdirAll(rsDir, common.DIR_PERM); err != nil {
-			nodeLog.Errorf("cannot create dir for badger wal (%v)", err)
-		}
-	}
 	rc := &raftNode{
-		commitC:       commitC,
-		config:        rconfig,
-		members:       make(map[uint64]*common.MemberInfo),
-		learnerMems:   make(map[uint64]*common.MemberInfo),
-		join:          join,
-		raftStorage:   raft.NewMemoryStorageWithIDAndDir(rconfig.ID, uint32(rconfig.GroupID), rsDir),
+		commitC:     commitC,
+		config:      rconfig,
+		members:     make(map[uint64]*common.MemberInfo),
+		learnerMems: make(map[uint64]*common.MemberInfo),
+		join:        join,
+		raftStorage: raft.NewMemoryStorageWithIDAndDir(rconfig.ID,
+			uint32(rconfig.GroupID),
+			rconfig.RaftStorageDir,
+		),
 		stopc:         make(chan struct{}),
 		ds:            ds,
 		reqIDGen:      idutil.NewGenerator(uint16(rconfig.ID), time.Now()),
