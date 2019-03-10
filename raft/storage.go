@@ -100,6 +100,8 @@ type MemoryStorage struct {
 
 // NewMemoryStorage creates an empty MemoryStorage.
 func NewMemoryStorage() IExtRaftStorage {
+	// badger all raft test cost 5~6s
+	// memory cost 0.3s
 	return NewMemoryStorageWithID(0, 0)
 }
 

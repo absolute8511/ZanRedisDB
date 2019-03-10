@@ -49,6 +49,7 @@ func TestStorageTerm(t *testing.T) {
 
 	for i, tt := range tests {
 		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 
 		func() {
 			defer func() {
@@ -96,6 +97,7 @@ func TestStorageEntries(t *testing.T) {
 
 	for i, tt := range tests {
 		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		entries, err := s.Entries(tt.lo, tt.hi, tt.maxsize)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
@@ -109,6 +111,7 @@ func TestStorageEntries(t *testing.T) {
 func TestStorageLastIndex(t *testing.T) {
 	ents := []pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}}
 	s := newInitedMemoryStorage(ents)
+	defer s.Close()
 
 	last, err := s.LastIndex()
 	if err != nil {
@@ -131,6 +134,7 @@ func TestStorageLastIndex(t *testing.T) {
 func TestStorageFirstIndex(t *testing.T) {
 	ents := []pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}}
 	s := newInitedMemoryStorage(ents)
+	defer s.Close()
 
 	first, err := s.FirstIndex()
 	if err != nil {
@@ -168,6 +172,7 @@ func TestStorageCompact(t *testing.T) {
 
 	for i, tt := range tests {
 		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		err := s.Compact(tt.i)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
@@ -203,6 +208,7 @@ func TestStorageCreateSnapshot(t *testing.T) {
 
 	for i, tt := range tests {
 		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		snap, err := s.CreateSnapshot(tt.i, cs, data)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
@@ -258,6 +264,7 @@ func TestStorageAppend(t *testing.T) {
 
 	for i, tt := range tests {
 		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		err := s.Append(tt.entries)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
@@ -278,6 +285,7 @@ func TestStorageApplySnapshot(t *testing.T) {
 	}
 
 	s := NewMemoryStorage()
+	defer s.Close()
 
 	//Apply Snapshot successful
 	i := 0

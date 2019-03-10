@@ -26,6 +26,7 @@ import (
 func TestRawNodeStep(t *testing.T) {
 	for i, msgn := range raftpb.MessageType_name {
 		s := NewMemoryStorage()
+		defer s.Close()
 		rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
 		if err != nil {
 			t.Fatal(err)
@@ -48,6 +49,7 @@ func TestRawNodeStep(t *testing.T) {
 // send the given proposal and ConfChange to the underlying raft.
 func TestRawNodeProposeAndConfChange(t *testing.T) {
 	s := NewMemoryStorage()
+	defer s.Close()
 	var err error
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
@@ -119,6 +121,7 @@ func TestRawNodeProposeAndConfChange(t *testing.T) {
 // not affect the later propose to add new node.
 func TestRawNodeProposeAddDuplicateNode(t *testing.T) {
 	s := NewMemoryStorage()
+	defer s.Close()
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +205,7 @@ func TestRawNodeReadIndex(t *testing.T) {
 	wrs := []ReadState{{Index: uint64(1), RequestCtx: []byte("somedata")}}
 
 	s := NewMemoryStorage()
+	defer s.Close()
 	c := newTestConfig(1, nil, 10, 1, s)
 	rawNode, err := NewRawNode(c, []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
@@ -295,6 +299,7 @@ func TestRawNodeStart(t *testing.T) {
 	}
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
 		t.Fatal(err)
@@ -343,6 +348,7 @@ func TestRawNodeRestart(t *testing.T) {
 	}
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.SetHardState(st)
 	storage.Append(entries)
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), nil)
@@ -390,6 +396,7 @@ func TestRawNodeRestartFromSnapshot(t *testing.T) {
 	}
 
 	s := NewMemoryStorage()
+	defer s.Close()
 	s.SetHardState(st)
 	s.ApplySnapshot(snap)
 	s.Append(entries)
@@ -412,6 +419,7 @@ func TestRawNodeRestartFromSnapshot(t *testing.T) {
 
 func TestRawNodeStatus(t *testing.T) {
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
 		t.Fatal(err)
