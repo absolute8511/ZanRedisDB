@@ -158,7 +158,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 			BroadcastAddr: "127.0.0.1",
 			TickMs:        20,
 			ElectionTick:  20,
-			UseBadgerWAL:  true,
+			UseRocksWAL:   true,
 		}
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer

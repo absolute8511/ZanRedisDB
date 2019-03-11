@@ -146,7 +146,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	clusterInfo common.IClusterInfo, newLeaderChan chan string) (*KVNode, error) {
 	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
-	if config.nodeConfig.UseBadgerWAL {
+	if config.nodeConfig.UseRocksWAL {
 		rsDir := path.Join(config.DataDir, fmt.Sprintf("rs-%d", config.ID))
 		if err := os.MkdirAll(rsDir, common.DIR_PERM); err != nil {
 			nodeLog.Errorf("cannot create dir %v for raft storage (%v)", rsDir, err)

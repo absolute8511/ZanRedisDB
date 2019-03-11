@@ -47,7 +47,7 @@ type MachineConfig struct {
 	TickMs              int                   `json:"tick_ms"`
 	KeepBackup          int                   `json:"keep_backup"`
 	KeepWAL             int                   `json:"keep_wal"`
-	UseBadgerWAL        bool                  `json:"use_badger_wal"`
+	UseRocksWAL         bool                  `json:"use_rocks_wal"`
 	LearnerRole         string                `json:"learner_role"`
 	RemoteSyncCluster   string                `json:"remote_sync_cluster"`
 	StateMachineType    string                `json:"state_machine_type"`

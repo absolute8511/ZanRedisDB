@@ -28,7 +28,16 @@ func allEntries(s IExtRaftStorage) []pb.Entry {
 		all, _ := ds.allEntries(0, math.MaxUint64, math.MaxUint64)
 		return all
 	}
-	return s.(*MemoryStorage).ents
+	ms, ok := s.(*MemoryStorage)
+	if ok {
+		return ms.ents
+	}
+	rs, ok := s.(*RocksStorage)
+	if ok {
+		all, _ := rs.allEntries(0, math.MaxUint64, math.MaxUint64)
+		return all
+	}
+	panic("unknown raft storage")
 }
 
 func TestStorageTerm(t *testing.T) {

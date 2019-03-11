@@ -107,10 +107,12 @@ func NewMemoryStorage() IExtRaftStorage {
 
 func NewMemoryStorageWithIDAndDir(id uint64, gid uint32, dir string) IExtRaftStorage {
 	if dir != "" {
-		dir = path.Join(dir, "badger")
-		bs, err := NewBadgerStorage(id, gid, dir)
+		dir = path.Join(dir, "rocksdb")
+		bs, err := NewRocksStorage(id, gid, dir)
 		if err == nil {
 			return bs
+		} else {
+			raftLogger.Warningf("failed to open rocks raft db: %v, fallback to memory entries", err.Error())
 		}
 	}
 	ms := &MemoryStorage{

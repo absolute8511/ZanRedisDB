@@ -41,10 +41,19 @@ func newInitedMemoryStorage(ents []pb.Entry) IExtRaftStorage {
 	ms, ok := testStorage.(*MemoryStorage)
 	if ok {
 		ms.ents = ents
-	} else {
-		testStorage.(*BadgerStorage).reset(ents)
+		return testStorage
 	}
-	return testStorage
+	bs, ok := testStorage.(*BadgerStorage)
+	if ok {
+		bs.reset(ents)
+		return testStorage
+	}
+	rs, ok := testStorage.(*RocksStorage)
+	if ok {
+		rs.reset(ents)
+		return testStorage
+	}
+	panic("unknown raft storage")
 }
 
 func closeAndFreeRaft(r *raft) {

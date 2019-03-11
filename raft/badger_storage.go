@@ -76,7 +76,6 @@ func NewBadgerStorage(id uint64, gid uint32, dir string) (*BadgerStorage, error)
 
 	db, err := badger.Open(opt)
 	if err != nil {
-		raftLogger.Warningf("failed to open badger db: %v, fallback to memory entries", err.Error())
 		return nil, err
 	}
 	ms := &BadgerStorage{

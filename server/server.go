@@ -154,7 +154,7 @@ func NewServer(conf ServerConfig) *Server {
 		ElectionTick:      conf.ElectionTick,
 		KeepBackup:        conf.KeepBackup,
 		KeepWAL:           conf.KeepWAL,
-		UseBadgerWAL:      conf.UseBadgerWAL,
+		UseRocksWAL:       conf.UseRocksWAL,
 		LearnerRole:       conf.LearnerRole,
 		RemoteSyncCluster: conf.RemoteSyncCluster,
 		StateMachineType:  conf.StateMachineType,
