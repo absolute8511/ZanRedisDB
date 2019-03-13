@@ -180,7 +180,7 @@ func getTestClient(t *testing.T, ns string) *zanredisdb.ZanRedisClient {
 		Namespace:    ns,
 	}
 	conf.LookupList = append(conf.LookupList, "127.0.0.1:"+pdHttpPort)
-	c := zanredisdb.NewZanRedisClient(conf)
+	c, _ := zanredisdb.NewZanRedisClient(conf)
 	c.Start()
 	return c
 }

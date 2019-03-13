@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"sync"
+	"sync/atomic"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -31,6 +32,7 @@ type RocksStorage struct {
 	defaultWriteOpts *gorocksdb.WriteOptions
 	defaultReadOpts  *gorocksdb.ReadOptions
 	firstIndex       uint64
+	lastIndex        uint64
 	id               uint64
 	gid              uint32
 }
@@ -44,6 +46,10 @@ func NewRocksStorage(id uint64, gid uint32, dir string) (*RocksStorage, error) {
 	cfg.UseSharedRateLimiter = true
 	cfg.DisableMergeCounter = true
 	cfg.EnableTableCounter = false
+	cfg.OptimizeFiltersForHits = true
+	// basically, we no need compress wal since it will be cleaned after snapshot
+	cfg.MinLevelToCompress = 5
+	// TODO: use memtable_insert_with_hint_prefix_extractor to speed up insert
 	scf := engine.NewSharedRockConfig(cfg.RockOptions)
 	cfg.SharedConfig = scf
 	db, err := engine.NewRockEng(cfg)
@@ -114,6 +120,7 @@ func (ms *RocksStorage) reset(es []pb.Entry) error {
 	}
 	// clear cached index
 	ms.setCachedFirstIndex(0)
+	ms.setCachedLastIndex(0)
 	return ms.commitBatch(batch)
 }
 
@@ -217,9 +224,15 @@ func (ms *RocksStorage) Term(idx uint64) (uint64, error) {
 
 // LastIndex implements the Storage interface.
 func (ms *RocksStorage) LastIndex() (uint64, error) {
+	index := ms.lastIndexCached()
+	if index > 0 {
+		return index, nil
+	}
 	index, err := ms.seekEntry(nil, math.MaxUint64, true)
 	if err != nil {
 		raftLogger.Infof("failed to found last index: %v", err.Error())
+	} else {
+		ms.setCachedLastIndex(index)
 	}
 	return index, err
 }
@@ -241,6 +254,14 @@ func (ms *RocksStorage) setCachedFirstIndex(index uint64) {
 	ms.Lock()
 	ms.firstIndex = index
 	ms.Unlock()
+}
+
+func (ms *RocksStorage) setCachedLastIndex(index uint64) {
+	atomic.StoreUint64(&ms.lastIndex, index)
+}
+
+func (ms *RocksStorage) lastIndexCached() uint64 {
+	return atomic.LoadUint64(&ms.lastIndex)
 }
 
 func (ms *RocksStorage) firstIndexCached() uint64 {
@@ -345,6 +366,7 @@ func (ms *RocksStorage) ApplySnapshot(snap pb.Snapshot) error {
 	ms.snapshot = snap
 	// clear cached first index
 	ms.firstIndex = 0
+	ms.setCachedLastIndex(0)
 	ms.Unlock()
 
 	batch := ms.wb
@@ -389,6 +411,7 @@ func (ms *RocksStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte) 
 	ms.snapshot.Data = data
 	// clear cached first index
 	ms.firstIndex = 0
+	ms.setCachedLastIndex(0)
 	snap := ms.snapshot
 
 	return snap, nil
@@ -462,6 +485,7 @@ func (ms *RocksStorage) addEntries(batch *gorocksdb.WriteBatch, entries []pb.Ent
 
 	ms.writeEnts(batch, entries)
 	laste := entries[len(entries)-1].Index
+	ms.setCachedLastIndex(laste)
 	if laste < last {
 		ms.deleteFrom(batch, laste+1)
 	}
