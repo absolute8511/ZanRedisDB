@@ -126,7 +126,7 @@ type raftNode struct {
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries.
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
-	join bool, ds DataStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
+	join bool, ds DataStorage, rs raft.IExtRaftStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
 
 	commitC := make(chan applyInfo, 5000)
 	if rconfig.SnapCount <= 0 {
@@ -137,15 +137,12 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	}
 
 	rc := &raftNode{
-		commitC:     commitC,
-		config:      rconfig,
-		members:     make(map[uint64]*common.MemberInfo),
-		learnerMems: make(map[uint64]*common.MemberInfo),
-		join:        join,
-		raftStorage: raft.NewMemoryStorageWithIDAndDir(rconfig.ID,
-			uint32(rconfig.GroupID),
-			rconfig.RaftStorageDir,
-		),
+		commitC:       commitC,
+		config:        rconfig,
+		members:       make(map[uint64]*common.MemberInfo),
+		learnerMems:   make(map[uint64]*common.MemberInfo),
+		join:          join,
+		raftStorage:   rs,
 		stopc:         make(chan struct{}),
 		ds:            ds,
 		reqIDGen:      idutil.NewGenerator(uint16(rconfig.ID), time.Now()),

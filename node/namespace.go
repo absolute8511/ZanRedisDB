@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/rockredis"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"golang.org/x/net/context"
@@ -146,12 +148,13 @@ func (nn *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
 
 type NamespaceMeta struct {
 	PartitionNum int
+	walEng       *engine.RockEng
 }
 
 type NamespaceMgr struct {
 	mutex         sync.RWMutex
 	kvNodes       map[string]*NamespaceNode
-	nsMetas       map[string]NamespaceMeta
+	nsMetas       map[string]*NamespaceMeta
 	groups        map[uint64]string
 	machineConf   *MachineConfig
 	raftTransport *rafthttp.Transport
@@ -166,7 +169,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	ns := &NamespaceMgr{
 		kvNodes:       make(map[string]*NamespaceNode),
 		groups:        make(map[uint64]string),
-		nsMetas:       make(map[string]NamespaceMeta),
+		nsMetas:       make(map[string]*NamespaceMeta),
 		raftTransport: transport,
 		machineConf:   conf,
 		newLeaderChan: make(chan string, 2048),
@@ -243,10 +246,20 @@ func (nsm *NamespaceMgr) Stop() {
 		n.Close()
 	}
 	nsm.wg.Wait()
-	nodeLog.Infof("namespace manager stopped")
 	if nsm.machineConf.RocksDBSharedConfig != nil {
 		nsm.machineConf.RocksDBSharedConfig.Destroy()
 	}
+	nsm.mutex.RLock()
+	defer nsm.mutex.RUnlock()
+	for _, meta := range nsm.nsMetas {
+		if meta.walEng != nil {
+			meta.walEng.CloseAll()
+		}
+	}
+	if nsm.machineConf.WALRocksDBSharedConfig != nil {
+		nsm.machineConf.WALRocksDBSharedConfig.Destroy()
+	}
+	nodeLog.Infof("namespace manager stopped")
 }
 
 func (nsm *NamespaceMgr) IsAllRecoveryDone() bool {
@@ -272,6 +285,53 @@ func (nsm *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 	return tmp
 }
 
+func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
+	nodeLog.Infof("using rocksdb raft storage dir:%v", cfg.DataDir)
+	cfg.DisableWAL = true
+	cfg.DisableMergeCounter = true
+	cfg.EnableTableCounter = false
+	cfg.OptimizeFiltersForHits = true
+	// basically, we no need compress wal since it will be cleaned after snapshot
+	cfg.MinLevelToCompress = 5
+	// TODO: use memtable_insert_with_hint_prefix_extractor to speed up insert
+	db, err := engine.NewRockEng(cfg)
+	if err == nil {
+		err = db.OpenEng()
+		if err == nil {
+			return db
+		}
+	}
+	nodeLog.Warningf("failed to open rocks raft db: %v, fallback to memory entries", err.Error())
+	return nil
+}
+
+func (nsm *NamespaceMgr) getWALEng(ns string, dataDir string, id uint64, gid uint32, meta *NamespaceMeta) *engine.RockEng {
+	if !nsm.machineConf.UseRocksWAL || meta == nil {
+		return nil
+	}
+	rsDir := path.Join(dataDir, "rswal", ns)
+
+	if nsm.machineConf.SharedRocksWAL {
+		if meta.walEng != nil {
+			return meta.walEng
+		}
+	} else {
+		sharding := fmt.Sprintf("%v-%v", gid, id)
+		rsDir = path.Join(rsDir, sharding)
+	}
+
+	walEngCfg := engine.NewRockConfig()
+	walEngCfg.DataDir = rsDir
+	walEngCfg.RockOptions = nsm.machineConf.WALRocksDBOpts
+	walEngCfg.SharedConfig = nsm.machineConf.WALRocksDBSharedConfig
+	engine.FillDefaultOptions(&walEngCfg.RockOptions)
+	eng := initRaftStorageEng(walEngCfg)
+	if nsm.machineConf.SharedRocksWAL {
+		meta.walEng = eng
+	}
+	return eng
+}
+
 func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64, join bool) (*NamespaceNode, error) {
 	if atomic.LoadInt32(&nsm.stopping) == 1 {
 		return nil, errStopping
@@ -291,7 +351,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		ExpirationPolicy: expPolicy,
 		SharedConfig:     nsm.machineConf.RocksDBSharedConfig,
 	}
-	rockredis.FillDefaultOptions(&kvOpts.RockOpts)
+	engine.FillDefaultOptions(&kvOpts.RockOpts)
 
 	if conf.PartitionNum <= 0 {
 		return nil, errNamespaceConfInvalid
@@ -335,26 +395,35 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 	d, _ = json.MarshalIndent(&raftConf, "", " ")
 	nodeLog.Infof("namespace raft config: %v", string(d))
 
-	kv, err := NewKVNode(kvOpts, raftConf, nsm.raftTransport,
-		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),
-		nsm.clusterInfo, nsm.newLeaderChan)
-	if err != nil {
-		return nil, err
-	}
+	var meta *NamespaceMeta
 	if oldMeta, ok := nsm.nsMetas[conf.BaseName]; !ok {
-		nsm.nsMetas[conf.BaseName] = NamespaceMeta{
+		meta = &NamespaceMeta{
 			PartitionNum: conf.PartitionNum,
 		}
+		nsm.nsMetas[conf.BaseName] = meta
 		nodeLog.Infof("namespace meta init: %v", conf)
 	} else {
 		if oldMeta.PartitionNum != conf.PartitionNum {
 			nodeLog.Errorf("namespace meta mismatch: %v, old: %v", conf, oldMeta)
 			// update the meta if mismatch, it may happen if create the same namespace with different
 			// config for old deleted namespace
-			nsm.nsMetas[conf.BaseName] = NamespaceMeta{
+			if oldMeta.walEng != nil {
+				oldMeta.walEng.CloseAll()
+			}
+			meta = &NamespaceMeta{
 				PartitionNum: conf.PartitionNum,
 			}
+			nsm.nsMetas[conf.BaseName] = meta
 		}
+	}
+	rs := nsm.getWALEng(conf.BaseName, nsm.machineConf.DataRootDir, raftConf.ID, uint32(raftConf.GroupID), meta)
+	raftConf.SetEng(rs)
+
+	kv, err := NewKVNode(kvOpts, raftConf, nsm.raftTransport,
+		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),
+		nsm.clusterInfo, nsm.newLeaderChan)
+	if err != nil {
+		return nil, err
 	}
 
 	n := &NamespaceNode{
@@ -598,6 +667,26 @@ func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
 			nsm.kvNodes[ns] = nil
 			delete(nsm.kvNodes, ns)
 			delete(nsm.groups, gid)
+			baseNS, _ := common.GetNamespaceAndPartition(ns)
+			meta, ok := nsm.nsMetas[baseNS]
+			if ok {
+				found := false
+				// check if all parts of this namespace is deleted, if so we should remove meta
+				for fullName, _ := range nsm.kvNodes {
+					n, _ := common.GetNamespaceAndPartition(fullName)
+					if n == baseNS {
+						found = true
+						break
+					}
+				}
+				if !found {
+					nodeLog.Infof("all partitions of namespace %v deleted, removing meta", baseNS)
+					if meta.walEng != nil {
+						meta.walEng.CloseAll()
+					}
+					delete(nsm.nsMetas, baseNS)
+				}
+			}
 		}
 		nsm.mutex.Unlock()
 	}

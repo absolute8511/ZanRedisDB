@@ -15,7 +15,7 @@ import (
 )
 
 func getTestDBNoTableCounter(t *testing.T) *RockDB {
-	cfg := NewRockConfig()
+	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = false
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
@@ -26,7 +26,7 @@ func getTestDBNoTableCounter(t *testing.T) *RockDB {
 }
 
 func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
-	cfg := NewRockConfig()
+	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
 	cfg.DataDir = dataDir
 	testDB, err := OpenRockDB(cfg)
@@ -38,7 +38,7 @@ func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
 }
 
 func getTestDB(t *testing.T) *RockDB {
-	cfg := NewRockConfig()
+	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))

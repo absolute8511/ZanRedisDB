@@ -298,6 +298,10 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	return db, nil
 }
 
+func (r *RockEng) GetOpts() *gorocksdb.Options {
+	return r.dbOpts
+}
+
 func (r *RockEng) GetDataDir() string {
 	return path.Join(r.cfg.DataDir, "rocksdb")
 }
@@ -327,13 +331,15 @@ func (r *RockEng) CompactRange() {
 	r.eng.CompactRange(rg)
 }
 
-func (r *RockEng) CloseEng() {
+func (r *RockEng) CloseEng() bool {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
 			r.eng.Close()
 			dbLog.Infof("rocksdb engine closed: %v", r.GetDataDir())
+			return true
 		}
 	}
+	return false
 }
 
 func (r *RockEng) CloseAll() {

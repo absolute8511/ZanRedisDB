@@ -146,14 +146,6 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	clusterInfo common.IClusterInfo, newLeaderChan chan string) (*KVNode, error) {
 	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
-	if config.nodeConfig.UseRocksWAL {
-		rsDir := path.Join(config.DataDir, fmt.Sprintf("rs-%d", config.ID))
-		if err := os.MkdirAll(rsDir, common.DIR_PERM); err != nil {
-			nodeLog.Errorf("cannot create dir %v for raft storage (%v)", rsDir, err)
-		} else {
-			config.RaftStorageDir = rsDir
-		}
-	}
 
 	stopChan := make(chan struct{})
 	w := wait.New()
@@ -184,8 +176,18 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 
 	s.registerHandler()
 
+	var rs raft.IExtRaftStorage
+	if config.nodeConfig.UseRocksWAL && config.rockEng != nil {
+		rs = raft.NewRocksStorage(
+			config.ID,
+			uint32(config.GroupID),
+			config.nodeConfig.SharedRocksWAL,
+			config.rockEng)
+	} else {
+		rs = raft.NewRealMemoryStorage()
+	}
 	commitC, raftNode, err := newRaftNode(config, transport,
-		join, s, newLeaderChan)
+		join, s, rs, newLeaderChan)
 	if err != nil {
 		return nil, err
 	}

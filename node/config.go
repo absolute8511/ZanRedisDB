@@ -2,7 +2,7 @@ package node
 
 import (
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 type NamespaceConfig struct {
@@ -38,21 +38,24 @@ type RaftGroupConfig struct {
 
 type MachineConfig struct {
 	// server node id
-	NodeID              uint64                `json:"node_id"`
-	BroadcastAddr       string                `json:"broadcast_addr"`
-	HttpAPIPort         int                   `json:"http_api_port"`
-	LocalRaftAddr       string                `json:"local_raft_addr"`
-	DataRootDir         string                `json:"data_root_dir"`
-	ElectionTick        int                   `json:"election_tick"`
-	TickMs              int                   `json:"tick_ms"`
-	KeepBackup          int                   `json:"keep_backup"`
-	KeepWAL             int                   `json:"keep_wal"`
-	UseRocksWAL         bool                  `json:"use_rocks_wal"`
-	LearnerRole         string                `json:"learner_role"`
-	RemoteSyncCluster   string                `json:"remote_sync_cluster"`
-	StateMachineType    string                `json:"state_machine_type"`
-	RocksDBOpts         rockredis.RockOptions `json:"rocksdb_opts"`
-	RocksDBSharedConfig *rockredis.SharedRockConfig
+	NodeID                 uint64             `json:"node_id"`
+	BroadcastAddr          string             `json:"broadcast_addr"`
+	HttpAPIPort            int                `json:"http_api_port"`
+	LocalRaftAddr          string             `json:"local_raft_addr"`
+	DataRootDir            string             `json:"data_root_dir"`
+	ElectionTick           int                `json:"election_tick"`
+	TickMs                 int                `json:"tick_ms"`
+	KeepBackup             int                `json:"keep_backup"`
+	KeepWAL                int                `json:"keep_wal"`
+	UseRocksWAL            bool               `json:"use_rocks_wal"`
+	SharedRocksWAL         bool               `json:"shared_rocks_wal"`
+	LearnerRole            string             `json:"learner_role"`
+	RemoteSyncCluster      string             `json:"remote_sync_cluster"`
+	StateMachineType       string             `json:"state_machine_type"`
+	RocksDBOpts            engine.RockOptions `json:"rocksdb_opts"`
+	RocksDBSharedConfig    *engine.SharedRockConfig
+	WALRocksDBOpts         engine.RockOptions `json:"wal_rocksdb_opts"`
+	WALRocksDBSharedConfig *engine.SharedRockConfig
 }
 
 type ReplicaInfo struct {
@@ -79,5 +82,10 @@ type RaftConfig struct {
 	SnapCatchup    int                    `json:"snap_catchup"`
 	Replicator     int                    `json:"replicator"`
 	OptimizedFsync bool                   `json:"optimized_fsync"`
+	rockEng        *engine.RockEng
 	nodeConfig     *MachineConfig
+}
+
+func (rc *RaftConfig) SetEng(eng *engine.RockEng) {
+	rc.rockEng = eng
 }

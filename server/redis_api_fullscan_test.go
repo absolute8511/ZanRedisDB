@@ -39,14 +39,15 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 	replica.ReplicaID = 1
 	replica.RaftAddr = raftAddr
 	kvOpts := ServerConfig{
-		ClusterID:     "test",
-		DataDir:       tmpDir,
-		RedisAPIPort:  redisportFullScan,
-		LocalRaftAddr: raftAddr,
-		BroadcastAddr: "127.0.0.1",
-		TickMs:        100,
-		ElectionTick:  5,
-		UseRocksWAL:   true,
+		ClusterID:      "test",
+		DataDir:        tmpDir,
+		RedisAPIPort:   redisportFullScan,
+		LocalRaftAddr:  raftAddr,
+		BroadcastAddr:  "127.0.0.1",
+		TickMs:         100,
+		ElectionTick:   5,
+		UseRocksWAL:    true,
+		SharedRocksWAL: true,
 	}
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"

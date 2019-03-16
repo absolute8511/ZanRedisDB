@@ -348,7 +348,7 @@ func TestStopRaftWhenWaitingForApplyDone(t *testing.T) {
 		commitC:        commitC,
 		node:           n,
 		persistStorage: NewStorageRecorder(""),
-		raftStorage:    raft.NewMemoryStorageWithID(config.ID, uint32(config.GroupID)),
+		raftStorage:    raft.NewMemoryStorage(),
 		transport:      rafthttp.NewNopTransporter(),
 		stopc:          make(chan struct{}),
 	}
@@ -388,7 +388,7 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 		commitC:        commitC,
 		node:           n,
 		persistStorage: NewStorageRecorder(""),
-		raftStorage:    raft.NewMemoryStorageWithID(config.ID, uint32(config.GroupID)),
+		raftStorage:    raft.NewMemoryStorage(),
 		transport:      rafthttp.NewNopTransporter(),
 		stopc:          make(chan struct{}),
 	}

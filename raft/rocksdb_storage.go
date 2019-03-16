@@ -35,31 +35,10 @@ type RocksStorage struct {
 	lastIndex        uint64
 	id               uint64
 	gid              uint32
+	engShared        bool
 }
 
-func NewRocksStorage(id uint64, gid uint32, dir string) (*RocksStorage, error) {
-	raftLogger.Infof("using rocksdb raft storage dir:%v", dir)
-	cfg := engine.NewRockConfig()
-	cfg.DataDir = dir
-	cfg.DisableWAL = true
-	cfg.UseSharedCache = true
-	cfg.UseSharedRateLimiter = true
-	cfg.DisableMergeCounter = true
-	cfg.EnableTableCounter = false
-	cfg.OptimizeFiltersForHits = true
-	// basically, we no need compress wal since it will be cleaned after snapshot
-	cfg.MinLevelToCompress = 5
-	// TODO: use memtable_insert_with_hint_prefix_extractor to speed up insert
-	scf := engine.NewSharedRockConfig(cfg.RockOptions)
-	cfg.SharedConfig = scf
-	db, err := engine.NewRockEng(cfg)
-	if err != nil {
-		return nil, err
-	}
-	err = db.OpenEng()
-	if err != nil {
-		return nil, err
-	}
+func NewRocksStorage(id uint64, gid uint32, shared bool, db *engine.RockEng) *RocksStorage {
 	ms := &RocksStorage{
 		entryDB:          db,
 		wb:               gorocksdb.NewWriteBatch(),
@@ -67,12 +46,13 @@ func NewRocksStorage(id uint64, gid uint32, dir string) (*RocksStorage, error) {
 		defaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
 		id:               id,
 		gid:              gid,
+		engShared:        shared,
 	}
 	ms.defaultReadOpts.SetVerifyChecksums(false)
 	ms.defaultWriteOpts.DisableWAL(true)
 	snap, err := ms.Snapshot()
 	if !IsEmptySnap(snap) {
-		return ms, nil
+		return ms
 	}
 
 	_, err = ms.FirstIndex()
@@ -81,11 +61,13 @@ func NewRocksStorage(id uint64, gid uint32, dir string) (*RocksStorage, error) {
 		ents := make([]pb.Entry, 1)
 		ms.reset(ents)
 	}
-	return ms, nil
+	return ms
 }
 
 func (ms *RocksStorage) Close() {
-	ms.entryDB.CloseAll()
+	if !ms.engShared {
+		ms.entryDB.CloseAll()
+	}
 }
 
 func (ms *RocksStorage) entryKey(idx uint64) []byte {

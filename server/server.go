@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/engine"
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/cluster"
@@ -155,14 +155,23 @@ func NewServer(conf ServerConfig) *Server {
 		KeepBackup:        conf.KeepBackup,
 		KeepWAL:           conf.KeepWAL,
 		UseRocksWAL:       conf.UseRocksWAL,
+		SharedRocksWAL:    conf.SharedRocksWAL,
 		LearnerRole:       conf.LearnerRole,
 		RemoteSyncCluster: conf.RemoteSyncCluster,
 		StateMachineType:  conf.StateMachineType,
 		RocksDBOpts:       conf.RocksDBOpts,
+		WALRocksDBOpts:    conf.WALRocksDBOpts,
 	}
 	if mconf.RocksDBOpts.UseSharedCache || mconf.RocksDBOpts.AdjustThreadPool || mconf.RocksDBOpts.UseSharedRateLimiter {
-		sc := rockredis.NewSharedRockConfig(conf.RocksDBOpts)
+		sc := engine.NewSharedRockConfig(conf.RocksDBOpts)
 		mconf.RocksDBSharedConfig = sc
+	}
+
+	if mconf.UseRocksWAL {
+		if mconf.WALRocksDBOpts.UseSharedCache || mconf.WALRocksDBOpts.AdjustThreadPool || mconf.WALRocksDBOpts.UseSharedRateLimiter {
+			sc := engine.NewSharedRockConfig(conf.WALRocksDBOpts)
+			mconf.WALRocksDBSharedConfig = sc
+		}
 	}
 	s.nsMgr = node.NewNamespaceMgr(s.raftTransport, mconf)
 	myNode.RegID = mconf.NodeID

@@ -18,10 +18,10 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"path"
 	"sync"
 	"time"
 
+	"github.com/youzan/ZanRedisDB/engine"
 	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
@@ -98,23 +98,13 @@ type MemoryStorage struct {
 	ents []pb.Entry
 }
 
-// NewMemoryStorage creates an empty MemoryStorage.
+// NewMemoryStorage creates an default MemoryStorage.
+// This should only be used in test
 func NewMemoryStorage() IExtRaftStorage {
-	// badger all raft test cost 5~6s
-	// memory cost 0.3s
-	return NewMemoryStorageWithID(0, 0)
+	return newDefaultRaftStorage(0, 0)
 }
 
-func NewMemoryStorageWithIDAndDir(id uint64, gid uint32, dir string) IExtRaftStorage {
-	if dir != "" {
-		dir = path.Join(dir, "rocksdb")
-		bs, err := NewRocksStorage(id, gid, dir)
-		if err == nil {
-			return bs
-		} else {
-			raftLogger.Warningf("failed to open rocks raft db: %v, fallback to memory entries", err.Error())
-		}
-	}
+func NewRealMemoryStorage() *MemoryStorage {
 	ms := &MemoryStorage{
 		// When starting from scratch populate the list with a dummy entry at term zero.
 		ents: make([]pb.Entry, 1),
@@ -122,9 +112,34 @@ func NewMemoryStorageWithIDAndDir(id uint64, gid uint32, dir string) IExtRaftSto
 	return ms
 }
 
-func NewMemoryStorageWithID(id uint64, gid uint32) IExtRaftStorage {
+func newDefaultRaftStorage(id uint64, gid uint32) IExtRaftStorage {
 	tmpDir, _ := ioutil.TempDir("", fmt.Sprintf("raft-storage-%v-%v-%d", id, gid, time.Now().UnixNano()))
-	return NewMemoryStorageWithIDAndDir(id, gid, tmpDir)
+	cfg := engine.NewRockConfig()
+	cfg.DataDir = tmpDir
+	cfg.DisableWAL = true
+	cfg.UseSharedCache = true
+	cfg.UseSharedRateLimiter = true
+	cfg.DisableMergeCounter = true
+	cfg.EnableTableCounter = false
+	cfg.OptimizeFiltersForHits = true
+	// basically, we no need compress wal since it will be cleaned after snapshot
+	cfg.MinLevelToCompress = 5
+	// TODO: use memtable_insert_with_hint_prefix_extractor to speed up insert
+	scf := engine.NewSharedRockConfig(cfg.RockOptions)
+	cfg.SharedConfig = scf
+	db, err := engine.NewRockEng(cfg)
+	if err == nil {
+		err = db.OpenEng()
+		if err == nil {
+			return NewRocksStorage(id, gid, false, db)
+		}
+	}
+	raftLogger.Warningf("failed to open rocks raft db: %v, fallback to memory entries", err.Error())
+	ms := &MemoryStorage{
+		// When starting from scratch populate the list with a dummy entry at term zero.
+		ents: make([]pb.Entry, 1),
+	}
+	return ms
 }
 
 func (ms *MemoryStorage) Close() {
