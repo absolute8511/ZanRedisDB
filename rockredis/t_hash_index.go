@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -489,7 +490,7 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 	if dbLog.Level() >= common.LOG_DEBUG {
 		dbLog.Debugf("begin search index: %v-%v-%v, %v~%v", string(self.Table), string(self.Name), string(self.IndexField), min, max)
 	}
-	it, err := NewDBRangeLimitIterator(db.eng, min, max, rt, cond.Offset, cond.Limit, false)
+	it, err := engine.NewDBRangeLimitIterator(db.eng, min, max, rt, cond.Offset, cond.Limit, false)
 	if err != nil {
 		return n, nil, err
 	}

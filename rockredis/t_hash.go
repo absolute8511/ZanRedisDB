@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -433,7 +434,7 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 	}
 
 	if tableIndexes != nil || hlen <= RangeDeleteNum {
-		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+		it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		if err != nil {
 			return err
 		}
@@ -601,7 +602,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
 
 	start := hEncodeStartKey(table, rk)
 	stop := hEncodeStopKey(table, rk)
-	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -648,7 +649,7 @@ func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
 	}
 	start := hEncodeStartKey(table, rk)
 	stop := hEncodeStopKey(table, rk)
-	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -693,7 +694,7 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 
 	start := hEncodeStartKey(table, rk)
 	stop := hEncodeStopKey(table, rk)
-	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}

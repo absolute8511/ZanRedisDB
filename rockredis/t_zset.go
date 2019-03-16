@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -552,7 +553,7 @@ func (db *RockDB) ZCount(key []byte, min float64, max float64) (int64, error) {
 	}
 	minKey := zEncodeStartScoreKey(table, rk, min)
 	maxKey := zEncodeStopScoreKey(table, rk, max)
-	it, err := NewDBRangeIterator(db.eng, minKey, maxKey, common.RangeClose, false)
+	it, err := engine.NewDBRangeIterator(db.eng, minKey, maxKey, common.RangeClose, false)
 	if err != nil {
 		return 0, err
 	}
@@ -585,16 +586,16 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 			return 0, err
 		} else {
 			sk := zEncodeScoreKey(false, false, table, rk, member, s)
-			var rit *RangeLimitedIterator
+			var rit *engine.RangeLimitedIterator
 			if !reverse {
 				minKey := zEncodeStartKey(table, rk)
-				rit, err = NewDBRangeIterator(db.eng, minKey, sk, common.RangeClose, reverse)
+				rit, err = engine.NewDBRangeIterator(db.eng, minKey, sk, common.RangeClose, reverse)
 				if err != nil {
 					return 0, err
 				}
 			} else {
 				maxKey := zEncodeStopKey(table, rk)
-				rit, err = NewDBRangeIterator(db.eng, sk, maxKey, common.RangeClose, reverse)
+				rit, err = engine.NewDBRangeIterator(db.eng, sk, maxKey, common.RangeClose, reverse)
 				if err != nil {
 					return 0, err
 				}
@@ -673,7 +674,7 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, minKey []byte, maxKey []b
 		return 0, err
 	}
 
-	it, err := NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
+	it, err := engine.NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
 	if err != nil {
 		return 0, err
 	}
@@ -744,13 +745,13 @@ func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset i
 	v := make([]common.ScorePair, 0, nv)
 
 	var err error
-	var it *RangeLimitedIterator
+	var it *engine.RangeLimitedIterator
 	//if reverse and offset is 0, count < 0, we may use forward iterator then reverse
 	//because store iterator prev is slower than next
 	if !reverse || (offset == 0 && count < 0) {
-		it, err = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
+		it, err = engine.NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
 	} else {
-		it, err = NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, true)
+		it, err = engine.NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, true)
 	}
 	if err != nil {
 		return nil, err
@@ -1010,7 +1011,7 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 			return nil, errTooMuchBatchSize
 		}
 	}
-	it, err := NewDBRangeLimitIterator(db.eng, min, max, rangeType, offset, count, false)
+	it, err := engine.NewDBRangeLimitIterator(db.eng, min, max, rangeType, offset, count, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,7 +1069,7 @@ func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, r
 		max = zEncodeSetKey(table, rk, max)
 	}
 
-	it, err := NewDBRangeIterator(db.eng, min, max, rangeType, false)
+	it, err := engine.NewDBRangeIterator(db.eng, min, max, rangeType, false)
 	if err != nil {
 		return 0, err
 	}
@@ -1118,7 +1119,7 @@ func (db *RockDB) ZLexCount(key []byte, min []byte, max []byte, rangeType uint8)
 		max = zEncodeSetKey(table, rk, max)
 	}
 
-	it, err := NewDBRangeIterator(db.eng, min, max, rangeType, false)
+	it, err := engine.NewDBRangeIterator(db.eng, min, max, rangeType, false)
 	if err != nil {
 		return 0, err
 	}

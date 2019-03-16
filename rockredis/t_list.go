@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -134,7 +135,7 @@ func (db *RockDB) fixListKey(ts int64, key []byte) {
 	if err != nil {
 		return
 	}
-	rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
+	rit, err := engine.NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
 	if err != nil {
 		dbLog.Warningf("read list %v error: %v", string(key), err.Error())
 		return
@@ -511,7 +512,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	if size > RangeDeleteNum {
 		wb.DeleteRange(startKey, stopKey)
 	} else {
-		rit, err := NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
+		rit, err := engine.NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
 		if err != nil {
 			return 0
 		}
@@ -736,7 +737,7 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	rit, err := NewDBRangeLimitIterator(db.eng, startKey, stopKey, common.RangeClose, 0, int(limit), false)
+	rit, err := engine.NewDBRangeLimitIterator(db.eng, startKey, stopKey, common.RangeClose, 0, int(limit), false)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -141,7 +142,7 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	if num > RangeDeleteNum {
 		wb.DeleteRange(start, stop)
 	} else {
-		it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+		it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 		if err != nil {
 			return 0
 		}
@@ -351,7 +352,7 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 
 	v := make([][]byte, 0, num)
 
-	it, err := NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return nil, err
 	}
