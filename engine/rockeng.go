@@ -46,6 +46,7 @@ type RockOptions struct {
 	DisableWAL                     bool   `json:"disable_wal,omitempty"`
 	DisableMergeCounter            bool   `json:"disable_merge_counter,omitempty"`
 	OptimizeFiltersForHits         bool   `json:"optimize_filters_for_hits,omitempty"`
+	InsertHintFixedLen             int    `json:"insert_hint_fixed_len"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -255,6 +256,9 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		}
 	}
 
+	if cfg.InsertHintFixedLen > 0 {
+		opts.SetMemtableInsertWithHintFixedLengthPrefixExtractor(cfg.InsertHintFixedLen)
+	}
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
