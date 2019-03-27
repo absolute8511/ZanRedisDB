@@ -294,9 +294,9 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 	// basically, we no need compress wal since it will be cleaned after snapshot
 	cfg.MinLevelToCompress = 5
 	// TODO: check memtable_insert_with_hint_prefix_extractor and DeleteRange bug
-	//if cfg.InsertHintFixedLen == 0 {
-	//	cfg.InsertHintFixedLen = 10
-	//}
+	if cfg.InsertHintFixedLen == 0 {
+		cfg.InsertHintFixedLen = 10
+	}
 	db, err := engine.NewRockEng(cfg)
 	if err == nil {
 		err = db.OpenEng()

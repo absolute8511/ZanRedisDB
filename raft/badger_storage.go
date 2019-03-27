@@ -19,7 +19,6 @@ package raft
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"math"
 	"sync"
 	"time"
@@ -212,8 +211,6 @@ func (ms *BadgerStorage) Entries(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 
 	return ms.allEntries(lo, hi, maxSize)
 }
-
-var errNotFound = errors.New("Unable to find raft entry")
 
 func (ms *BadgerStorage) seekEntry(e *pb.Entry, seekTo uint64, reverse bool) (uint64, error) {
 	var index uint64

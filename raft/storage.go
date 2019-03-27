@@ -84,6 +84,8 @@ type IExtRaftStorage interface {
 	Append([]pb.Entry) error
 }
 
+var errNotFound = errors.New("Unable to find raft entry")
+
 // MemoryStorage implements the Storage interface backed by an
 // in-memory array.
 type MemoryStorage struct {
@@ -124,7 +126,10 @@ func newDefaultRaftStorage(id uint64, gid uint32) IExtRaftStorage {
 	cfg.OptimizeFiltersForHits = true
 	// basically, we no need compress wal since it will be cleaned after snapshot
 	cfg.MinLevelToCompress = 5
-	// TODO: use memtable_insert_with_hint_prefix_extractor to speed up insert
+	// use memtable_insert_with_hint_prefix_extractor to speed up insert
+	if cfg.InsertHintFixedLen == 0 {
+		cfg.InsertHintFixedLen = 10
+	}
 	scf := engine.NewSharedRockConfig(cfg.RockOptions)
 	cfg.SharedConfig = scf
 	db, err := engine.NewRockEng(cfg)

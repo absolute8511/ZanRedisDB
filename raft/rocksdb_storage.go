@@ -89,8 +89,11 @@ func (ms *RocksStorage) reset(es []pb.Entry) error {
 	batch := ms.wb
 	batch.Clear()
 
-	ms.deleteFrom(batch, 0)
-	err := ms.commitBatch(batch)
+	err := ms.deleteFrom(batch, 0)
+	if err != nil {
+		return err
+	}
+	err = ms.commitBatch(batch)
 	if err != nil {
 		return err
 	}
@@ -263,10 +266,19 @@ func (ms *RocksStorage) firstIndexCached() uint64 {
 // Keep the entry at the snapshot index, for simplification of logic.
 // It is the application's responsibility to not attempt to deleteUntil an index
 // greater than raftLog.applied.
-func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64, maxNum int) {
+func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64) error {
 	start := ms.entryKey(0)
 	stop := ms.entryKey(until)
-	batch.DeleteRange(start, stop)
+	//batch.DeleteRange(start, stop)
+	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for ; it.Valid(); it.Next() {
+		batch.Delete(it.Key())
+	}
+	return nil
 }
 
 // NumEntries return the number of all entries in db
@@ -420,7 +432,10 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 	ms.setCachedFirstIndex(0)
 	batch := ms.wb
 	batch.Clear()
-	ms.deleteUntil(batch, compactIndex, maxDeleteBatch)
+	err = ms.deleteUntil(batch, compactIndex)
+	if err != nil {
+		return err
+	}
 	return ms.commitBatch(batch)
 }
 
@@ -469,7 +484,10 @@ func (ms *RocksStorage) addEntries(batch *gorocksdb.WriteBatch, entries []pb.Ent
 	laste := entries[len(entries)-1].Index
 	ms.setCachedLastIndex(laste)
 	if laste < last {
-		ms.deleteFrom(batch, laste+1)
+		err = ms.deleteFrom(batch, laste+1)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -494,8 +512,17 @@ func (ms *RocksStorage) writeEnts(batch *gorocksdb.WriteBatch, es []pb.Entry) er
 	return nil
 }
 
-func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) {
+func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) error {
 	start := ms.entryKey(from)
-	end := ms.entryPrefixEnd()
-	batch.DeleteRange(start, end)
+	stop := ms.entryPrefixEnd()
+	//batch.DeleteRange(start, stop)
+	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for ; it.Valid(); it.Next() {
+		batch.Delete(it.Key())
+	}
+	return nil
 }
