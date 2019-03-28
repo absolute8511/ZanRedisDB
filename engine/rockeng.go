@@ -390,7 +390,11 @@ func (r *RockEng) CloseEng() bool {
 }
 
 func (r *RockEng) CloseAll() {
-	close(r.quit)
+	select {
+	case <-r.quit:
+	default:
+		close(r.quit)
+	}
 	r.CloseEng()
 	if r.dbOpts != nil {
 		r.dbOpts.Destroy()
