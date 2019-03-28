@@ -297,6 +297,7 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 	if cfg.InsertHintFixedLen == 0 {
 		cfg.InsertHintFixedLen = 10
 	}
+	cfg.AutoCompacted = true
 	db, err := engine.NewRockEng(cfg)
 	if err == nil {
 		err = db.OpenEng()
