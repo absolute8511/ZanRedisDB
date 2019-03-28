@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	startSep      byte = ':'
-	stopSep       byte = startSep + 1
-	maxWriteBatch      = 1000
+	startSep         byte = ':'
+	stopSep          byte = startSep + 1
+	maxWriteBatch         = 1000
+	compactThreshold      = 500000
 )
 
 // RocksStorage implements the Storage interface backed by rocksdb.
@@ -36,6 +37,7 @@ type RocksStorage struct {
 	id               uint64
 	gid              uint32
 	engShared        bool
+	deleted          int64
 }
 
 func NewRocksStorage(id uint64, gid uint32, shared bool, db *engine.RockEng) *RocksStorage {
@@ -277,6 +279,14 @@ func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64) e
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		batch.Delete(it.Key())
+		atomic.AddInt64(&ms.deleted, 1)
+	}
+	cnt := atomic.LoadInt64(&ms.deleted)
+	if cnt > compactThreshold {
+		rg := gorocksdb.Range{Start: start, Limit: stop}
+		raftLogger.Infof("begin compact raft storage engine for deleted: %v ", cnt)
+		go ms.entryDB.Eng().CompactRange(rg)
+		atomic.StoreInt64(&ms.deleted, 0)
 	}
 	return nil
 }
@@ -523,6 +533,7 @@ func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) err
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		batch.Delete(it.Key())
+		atomic.AddInt64(&ms.deleted, 1)
 	}
 	return nil
 }

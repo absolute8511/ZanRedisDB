@@ -333,6 +333,7 @@ func (r *RockEng) Eng() *gorocksdb.DB {
 func (r *RockEng) CompactRange() {
 	var rg gorocksdb.Range
 	r.eng.CompactRange(rg)
+	dbLog.Infof("compact rocksdb %v done", r.GetDataDir())
 }
 
 func (r *RockEng) CloseEng() bool {

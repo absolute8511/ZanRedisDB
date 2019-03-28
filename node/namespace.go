@@ -301,6 +301,7 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 	if err == nil {
 		err = db.OpenEng()
 		if err == nil {
+			go db.CompactRange()
 			return db
 		}
 	}
