@@ -57,6 +57,34 @@ func TestDB(t *testing.T) {
 	defer db.Close()
 }
 
+func TestDBCompact(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:test_kv_key")
+	value := []byte("value")
+	err := db.KVSet(0, key, value)
+	assert.Nil(t, err)
+	for i := 0; i < 100; i++ {
+		err := db.KVSet(0, []byte(string(key)+strconv.Itoa(i)), value)
+		assert.Nil(t, err)
+	}
+
+	v, err := db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	for i := 0; i < 50; i++ {
+		db.KVDel([]byte(string(key) + strconv.Itoa(i)))
+	}
+
+	db.CompactRange()
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+}
+
 func TestIsSameSST(t *testing.T) {
 	d1, err := ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)

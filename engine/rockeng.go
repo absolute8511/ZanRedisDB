@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	compactThreshold = 500000
+	compactThreshold = 5000000
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("rocksdb_eng"))
@@ -318,12 +318,15 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 func (r *RockEng) compactLoop() {
 	ticker := time.NewTicker(time.Hour)
 	interval := (time.Hour / time.Second).Nanoseconds()
+	dbLog.Infof("start auto compact loop : %v", interval)
 	for {
 		select {
 		case <-r.quit:
 			return
 		case <-ticker.C:
-			if r.DeletedBeforeCompact() > compactThreshold && (time.Now().Unix()-r.LastCompactTime()) > interval {
+			dbLog.Infof("check compact : %v", r.DeletedBeforeCompact(), r.LastCompactTime())
+			if (r.DeletedBeforeCompact() > compactThreshold) &&
+				(time.Now().Unix()-r.LastCompactTime()) > interval {
 				r.CompactRange()
 			}
 		}
