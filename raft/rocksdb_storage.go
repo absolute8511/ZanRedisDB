@@ -269,6 +269,7 @@ func (ms *RocksStorage) firstIndexCached() uint64 {
 func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64) error {
 	start := ms.entryKey(0)
 	stop := ms.entryKey(until)
+	raftLogger.Infof("compact raft storage to %d, %v~%v ", until, start, stop)
 	//batch.DeleteRange(start, stop)
 	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
 	if err != nil {
@@ -280,6 +281,7 @@ func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64) e
 		batch.Delete(it.Key())
 		cnt++
 	}
+	raftLogger.Infof("compact raft storage to %d , cnt: %v", until, cnt)
 	ms.entryDB.AddDeletedCnt(int64(cnt))
 	return nil
 }

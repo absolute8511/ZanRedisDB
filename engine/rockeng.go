@@ -324,7 +324,7 @@ func (r *RockEng) compactLoop() {
 		case <-r.quit:
 			return
 		case <-ticker.C:
-			dbLog.Infof("check compact : %v", r.DeletedBeforeCompact(), r.LastCompactTime())
+			dbLog.Infof("check compact : %v, %v", r.DeletedBeforeCompact(), r.LastCompactTime())
 			if (r.DeletedBeforeCompact() > compactThreshold) &&
 				(time.Now().Unix()-r.LastCompactTime()) > interval {
 				r.CompactRange()
