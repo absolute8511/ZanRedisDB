@@ -419,6 +419,8 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 				PartitionNum: conf.PartitionNum,
 			}
 			nsm.nsMetas[conf.BaseName] = meta
+		} else {
+			meta = oldMeta
 		}
 	}
 	rs := nsm.getWALEng(conf.BaseName, nsm.machineConf.DataRootDir, raftConf.ID, uint32(raftConf.GroupID), meta)
