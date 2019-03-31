@@ -440,7 +440,6 @@ func (ms *BadgerStorage) Snapshot() (pb.Snapshot, error) {
 // the dummy entry in BadgerStorage.
 func (ms *BadgerStorage) ApplySnapshot(snap pb.Snapshot) error {
 	ms.Lock()
-
 	//handle check for old snapshot being applied
 	msIndex := ms.snapshot.Metadata.Index
 	snapIndex := snap.Metadata.Index
@@ -463,6 +462,7 @@ func (ms *BadgerStorage) ApplySnapshot(snap pb.Snapshot) error {
 	if err := batch.Set(ms.entryKey(e.Index), data, 0); err != nil {
 		return err
 	}
+	ms.deleteUntil(batch, e.Index, maxDeleteBatch)
 	return batch.Flush()
 }
 

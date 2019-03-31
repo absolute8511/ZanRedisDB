@@ -2,6 +2,7 @@ package raft
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -62,6 +63,10 @@ func NewRocksStorage(id uint64, gid uint32, shared bool, db *engine.RockEng) *Ro
 		ms.reset(ents)
 	}
 	return ms
+}
+
+func (ms *RocksStorage) Eng() *engine.RockEng {
+	return ms.entryDB
 }
 
 func (ms *RocksStorage) Close() {
@@ -376,6 +381,10 @@ func (ms *RocksStorage) ApplySnapshot(snap pb.Snapshot) error {
 		return err
 	}
 	batch.Put(ms.entryKey(e.Index), data)
+	err = ms.deleteUntil(batch, e.Index)
+	if err != nil {
+		return err
+	}
 	return ms.commitBatch(batch)
 }
 
@@ -408,10 +417,8 @@ func (ms *RocksStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte) 
 		ms.snapshot.Metadata.ConfState = *cs
 	}
 	ms.snapshot.Data = data
-	// clear cached first index
-	ms.firstIndex = 0
-	ms.setCachedLastIndex(0)
 	snap := ms.snapshot
+	// no need clear first and last index in db since no changed on db
 
 	return snap, nil
 }
@@ -424,7 +431,7 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 	if err != nil {
 		return err
 	}
-	if compactIndex <= first-1 {
+	if compactIndex+1 <= first {
 		return ErrCompacted
 	}
 	li, err := ms.LastIndex()
@@ -433,6 +440,7 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 	}
 	if compactIndex > li {
 		raftLogger.Errorf("compact %d is out of bound lastindex(%d)", compactIndex, li)
+		return errors.New("compact is out of bound lastindex")
 	}
 	ms.setCachedFirstIndex(0)
 	batch := ms.wb
