@@ -16,6 +16,7 @@ package raft
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -26,6 +27,7 @@ import (
 func TestRawNodeStep(t *testing.T) {
 	for i, msgn := range raftpb.MessageType_name {
 		s := NewMemoryStorage()
+		defer s.Close()
 		rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
 		if err != nil {
 			t.Fatal(err)
@@ -48,6 +50,7 @@ func TestRawNodeStep(t *testing.T) {
 // send the given proposal and ConfChange to the underlying raft.
 func TestRawNodeProposeAndConfChange(t *testing.T) {
 	s := NewMemoryStorage()
+	defer s.Close()
 	var err error
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
@@ -56,6 +59,10 @@ func TestRawNodeProposeAndConfChange(t *testing.T) {
 	rd := rawNode.Ready()
 	s.Append(rd.Entries)
 	rawNode.Advance(rd)
+
+	if d := rawNode.Ready(); d.MustSync || !IsEmptyHardState(d.HardState) || len(d.Entries) > 0 {
+		t.Fatalf("expected empty hard state with must-sync=false: %#v", d)
+	}
 
 	rawNode.Campaign()
 	proposed := false
@@ -119,6 +126,7 @@ func TestRawNodeProposeAndConfChange(t *testing.T) {
 // not affect the later propose to add new node.
 func TestRawNodeProposeAddDuplicateNode(t *testing.T) {
 	s := NewMemoryStorage()
+	defer s.Close()
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +210,7 @@ func TestRawNodeReadIndex(t *testing.T) {
 	wrs := []ReadState{{Index: uint64(1), RequestCtx: []byte("somedata")}}
 
 	s := NewMemoryStorage()
+	defer s.Close()
 	c := newTestConfig(1, nil, 10, 1, s)
 	rawNode, err := NewRawNode(c, []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
@@ -295,6 +304,7 @@ func TestRawNodeStart(t *testing.T) {
 	}
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
 		t.Fatal(err)
@@ -339,10 +349,11 @@ func TestRawNodeRestart(t *testing.T) {
 		HardState: emptyState,
 		// commit up to commit index in st
 		CommittedEntries: entries[:st.Commit],
-		MustSync:         true,
+		MustSync:         false,
 	}
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.SetHardState(st)
 	storage.Append(entries)
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), nil)
@@ -386,10 +397,11 @@ func TestRawNodeRestartFromSnapshot(t *testing.T) {
 		HardState: emptyState,
 		// commit up to commit index in st
 		CommittedEntries: entries,
-		MustSync:         true,
+		MustSync:         false,
 	}
 
 	s := NewMemoryStorage()
+	defer s.Close()
 	s.SetHardState(st)
 	s.ApplySnapshot(snap)
 	s.Append(entries)
@@ -412,6 +424,7 @@ func TestRawNodeRestartFromSnapshot(t *testing.T) {
 
 func TestRawNodeStatus(t *testing.T) {
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), []Peer{{NodeID: 1, ReplicaID: 1}})
 	if err != nil {
 		t.Fatal(err)
@@ -419,5 +432,75 @@ func TestRawNodeStatus(t *testing.T) {
 	status := rawNode.Status()
 	if status == nil {
 		t.Errorf("expected status struct, got nil")
+	}
+}
+
+func BenchmarkStatusProgress(b *testing.B) {
+	setup := func(members int) *RawNode {
+		peers := make([]uint64, members)
+		for i := range peers {
+			peers[i] = uint64(i + 1)
+		}
+		cfg := newTestConfig(1, peers, 3, 1, NewMemoryStorage())
+		cfg.Logger = discardLogger
+		r := newRaft(cfg)
+		r.becomeFollower(1, 1)
+		r.becomeCandidate()
+		r.becomeLeader()
+		return &RawNode{raft: r}
+	}
+
+	for _, members := range []int{1, 3, 5, 100} {
+		b.Run(fmt.Sprintf("members=%d", members), func(b *testing.B) {
+			// NB: call getStatus through rn.Status because that incurs an additional
+			// allocation.
+			rn := setup(members)
+
+			b.Run("Status", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					_ = rn.Status()
+				}
+			})
+
+			b.Run("Status-example", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					s := rn.Status()
+					var n uint64
+					for _, pr := range s.Progress {
+						n += pr.Match
+					}
+					_ = n
+				}
+			})
+
+			b.Run("StatusWithoutProgress", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					_ = rn.StatusWithoutProgress()
+				}
+			})
+
+			b.Run("WithProgress", func(b *testing.B) {
+				b.ReportAllocs()
+				visit := func(uint64, ProgressType, Progress) {}
+
+				for i := 0; i < b.N; i++ {
+					rn.WithProgress(visit)
+				}
+			})
+			b.Run("WithProgress-example", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					var n uint64
+					visit := func(_ uint64, _ ProgressType, pr Progress) {
+						n += pr.Match
+					}
+					rn.WithProgress(visit)
+					_ = n
+				}
+			})
+		})
 	}
 }

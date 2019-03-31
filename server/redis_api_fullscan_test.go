@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/rockredis"
-	"github.com/siddontang/goredis"
-	"github.com/stretchr/testify/assert"
 )
 
 var testOnceFullScan sync.Once
@@ -39,13 +39,15 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 	replica.ReplicaID = 1
 	replica.RaftAddr = raftAddr
 	kvOpts := ServerConfig{
-		ClusterID:     "test",
-		DataDir:       tmpDir,
-		RedisAPIPort:  redisportFullScan,
-		LocalRaftAddr: raftAddr,
-		BroadcastAddr: "127.0.0.1",
-		TickMs:        100,
-		ElectionTick:  5,
+		ClusterID:      "test",
+		DataDir:        tmpDir,
+		RedisAPIPort:   redisportFullScan,
+		LocalRaftAddr:  raftAddr,
+		BroadcastAddr:  "127.0.0.1",
+		TickMs:         100,
+		ElectionTick:   5,
+		UseRocksWAL:    true,
+		SharedRocksWAL: true,
 	}
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"

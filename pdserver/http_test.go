@@ -76,6 +76,7 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 			ElectionTick:         5,
 			LearnerRole:          common.LearnerRoleLogSyncer,
 			RemoteSyncCluster:    "http://127.0.0.1:" + pdRemoteHttpPort,
+			UseRocksWAL:          true,
 		}
 		kv := ds.NewServer(kvOpts)
 		kv.Start()
@@ -144,6 +145,7 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 			TickMs:               100,
 			ElectionTick:         5,
 			SyncerWriteOnly:      syncOnly,
+			UseRocksWAL:          true,
 		}
 		kv := ds.NewServer(kvOpts)
 		kv.Start()
@@ -178,7 +180,7 @@ func getTestClient(t *testing.T, ns string) *zanredisdb.ZanRedisClient {
 		Namespace:    ns,
 	}
 	conf.LookupList = append(conf.LookupList, "127.0.0.1:"+pdHttpPort)
-	c := zanredisdb.NewZanRedisClient(conf)
+	c, _ := zanredisdb.NewZanRedisClient(conf)
 	c.Start()
 	return c
 }

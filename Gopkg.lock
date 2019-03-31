@@ -2,6 +2,14 @@
 
 
 [[projects]]
+  branch = "master"
+  digest = "1:6716c9fe6333591128e72848f246fc01dc72240e1e64185d8b4e124e7280b35d"
+  name = "github.com/AndreasBriese/bbloom"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "e2d15f34fcf99d5dbb871c820ec73f710fca9815"
+
+[[projects]]
   digest = "1:b16fbfbcc20645cb419f78325bb2e85ec729b338e996a228124d68931a6f2a37"
   name = "github.com/BurntSushi/toml"
   packages = ["."]
@@ -204,6 +212,21 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:aeeb89a995c4637dfbe66980a4fcf21b6b5bafa734f47f08da8bde70a6c30871"
+  name = "github.com/dgraph-io/badger"
+  packages = [
+    ".",
+    "options",
+    "pb",
+    "skl",
+    "table",
+    "y",
+  ]
+  pruneopts = "UT"
+  revision = "b669ca040b3d13fa5bbaa5eb04c6acc4807b887c"
+
+[[projects]]
+  branch = "master"
   digest = "1:b2a9da4dfb6d53e94d8bf6fbb23a9cee5fff7419167b97770b8e3b6a462f1742"
   name = "github.com/dgryski/go-bits"
   packages = ["."]
@@ -212,11 +235,27 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:ea678afd6431e09f84a56fc6915ccab9189ddd1379fed997e1433ead9586c50b"
+  name = "github.com/dgryski/go-farm"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "3adb47b1fb0f6d9efcc5051a6c62e2e413ac85a9"
+
+[[projects]]
+  branch = "master"
   digest = "1:055e0539db2ff375e356db6961eae161858fc360bfa20c4f82ada1e271756176"
   name = "github.com/dgryski/go-metro"
   packages = ["."]
   pruneopts = "UT"
   revision = "280f6062b5bc97ee9b9afe7f2ccb361e59845baa"
+
+[[projects]]
+  digest = "1:6f9339c912bbdda81302633ad7e99a28dfa5a639c864061f1929510a9a64aa74"
+  name = "github.com/dustin/go-humanize"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "9f541cc9db5d55bce703bd99987c9d5cb8eea45e"
+  version = "v1.0.0"
 
 [[projects]]
   digest = "1:2cd7915ab26ede7d95b8749e6b1f933f1c6d5398030684e6505940a10f31cfda"
@@ -392,6 +431,14 @@
   packages = ["llrb"]
   pruneopts = "UT"
   revision = "53be0d36a84c2a886ca057d34b6aa4468df9ccb4"
+
+[[projects]]
+  digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
+  version = "v0.8.1"
 
 [[projects]]
   digest = "1:0028cb19b2e4c3112225cd871870f2d9cf49b9b4276531f03438a88e94be86fe"
@@ -673,6 +720,8 @@
     "github.com/coreos/etcd/version",
     "github.com/coreos/go-semver/semver",
     "github.com/coreos/pkg/capnslog",
+    "github.com/dgraph-io/badger",
+    "github.com/dgraph-io/badger/options",
     "github.com/gobwas/glob",
     "github.com/gogo/protobuf/gogoproto",
     "github.com/golang/protobuf/proto",

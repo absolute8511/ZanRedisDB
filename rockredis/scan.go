@@ -3,8 +3,9 @@ package rockredis
 import (
 	"errors"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/gobwas/glob"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 var errDataType = errors.New("error data type")
@@ -78,9 +79,9 @@ func buildMatchRegexp(match string) (glob.Glob, error) {
 	return r, nil
 }
 
-func (db *RockDB) buildScanIterator(minKey []byte, maxKey []byte) (*RangeLimitedIterator, error) {
+func (db *RockDB) buildScanIterator(minKey []byte, maxKey []byte) (*engine.RangeLimitedIterator, error) {
 	tp := common.RangeOpen
-	return NewDBRangeIterator(db.eng, minKey, maxKey, tp, false)
+	return engine.NewDBRangeIterator(db.eng, minKey, maxKey, tp, false)
 }
 
 func buildScanKeyRange(storeDataType byte, key []byte) (minKey []byte, maxKey []byte, err error) {
@@ -261,7 +262,7 @@ func encodeSpecificDataScanKey(storeDataType byte, key []byte, cursor []byte) ([
 
 func (db *RockDB) buildSpecificDataScanIterator(storeDataType byte,
 	key []byte, cursor []byte,
-	count int) (*RangeLimitedIterator, error) {
+	count int) (*engine.RangeLimitedIterator, error) {
 
 	if err := checkKeySize(key); err != nil {
 		return nil, err

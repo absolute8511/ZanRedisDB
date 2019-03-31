@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -189,7 +190,7 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 	var scanned int64
 	checkStart := time.Now()
 
-	it, err := NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
+	it, err := engine.NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
 		common.RangeROpen, 0, -1, false)
 	if err != nil {
 		c.setNextCheckTime(now, false)

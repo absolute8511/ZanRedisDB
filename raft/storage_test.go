@@ -22,6 +22,24 @@ import (
 	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
+func allEntries(s IExtRaftStorage) []pb.Entry {
+	ds, ok := s.(*BadgerStorage)
+	if ok {
+		all, _ := ds.allEntries(0, math.MaxUint64, math.MaxUint64)
+		return all
+	}
+	ms, ok := s.(*MemoryStorage)
+	if ok {
+		return ms.ents
+	}
+	rs, ok := s.(*RocksStorage)
+	if ok {
+		all, _ := rs.allEntries(0, math.MaxUint64, math.MaxUint64)
+		return all
+	}
+	panic("unknown raft storage")
+}
+
 func TestStorageTerm(t *testing.T) {
 	ents := []pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}}
 	tests := []struct {
@@ -39,7 +57,8 @@ func TestStorageTerm(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		s := &MemoryStorage{ents: ents}
+		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 
 		func() {
 			defer func() {
@@ -86,7 +105,8 @@ func TestStorageEntries(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		s := &MemoryStorage{ents: ents}
+		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		entries, err := s.Entries(tt.lo, tt.hi, tt.maxsize)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
@@ -99,7 +119,8 @@ func TestStorageEntries(t *testing.T) {
 
 func TestStorageLastIndex(t *testing.T) {
 	ents := []pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}}
-	s := &MemoryStorage{ents: ents}
+	s := newInitedMemoryStorage(ents)
+	defer s.Close()
 
 	last, err := s.LastIndex()
 	if err != nil {
@@ -121,7 +142,8 @@ func TestStorageLastIndex(t *testing.T) {
 
 func TestStorageFirstIndex(t *testing.T) {
 	ents := []pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}}
-	s := &MemoryStorage{ents: ents}
+	s := newInitedMemoryStorage(ents)
+	defer s.Close()
 
 	first, err := s.FirstIndex()
 	if err != nil {
@@ -158,19 +180,22 @@ func TestStorageCompact(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		s := &MemoryStorage{ents: ents}
+		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		err := s.Compact(tt.i)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
 		}
-		if s.ents[0].Index != tt.windex {
-			t.Errorf("#%d: index = %d, want %d", i, s.ents[0].Index, tt.windex)
+		fi, _ := s.FirstIndex()
+		if fi-1 != tt.windex {
+			t.Errorf("#%d: index = %d, want %d", i, fi-1, tt.windex)
 		}
-		if s.ents[0].Term != tt.wterm {
-			t.Errorf("#%d: term = %d, want %d", i, s.ents[0].Term, tt.wterm)
+		all := allEntries(s)
+		if len(all) != tt.wlen {
+			t.Errorf("#%d: len = %d, want %d", i, len(all), tt.wlen)
 		}
-		if len(s.ents) != tt.wlen {
-			t.Errorf("#%d: len = %d, want %d", i, len(s.ents), tt.wlen)
+		if all[0].Term != tt.wterm {
+			t.Errorf("#%d: term = %d, want %d", i, all[0].Term, tt.wterm)
 		}
 	}
 }
@@ -191,7 +216,8 @@ func TestStorageCreateSnapshot(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		s := &MemoryStorage{ents: ents}
+		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		snap, err := s.CreateSnapshot(tt.i, cs, data)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
@@ -210,6 +236,11 @@ func TestStorageAppend(t *testing.T) {
 		werr     error
 		wentries []pb.Entry
 	}{
+		{
+			[]pb.Entry{{Index: 1, Term: 1}, {Index: 2, Term: 2}},
+			nil,
+			[]pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}},
+		},
 		{
 			[]pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}},
 			nil,
@@ -246,13 +277,15 @@ func TestStorageAppend(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		s := &MemoryStorage{ents: ents}
+		s := newInitedMemoryStorage(ents)
+		defer s.Close()
 		err := s.Append(tt.entries)
 		if err != tt.werr {
 			t.Errorf("#%d: err = %v, want %v", i, err, tt.werr)
 		}
-		if !reflect.DeepEqual(s.ents, tt.wentries) {
-			t.Errorf("#%d: entries = %v, want %v", i, s.ents, tt.wentries)
+		all := allEntries(s)
+		if !reflect.DeepEqual(all, tt.wentries) {
+			t.Errorf("#%d: entries = %v, want %v", i, all, tt.wentries)
 		}
 	}
 }
@@ -266,6 +299,7 @@ func TestStorageApplySnapshot(t *testing.T) {
 	}
 
 	s := NewMemoryStorage()
+	defer s.Close()
 
 	//Apply Snapshot successful
 	i := 0

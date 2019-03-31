@@ -1,10 +1,18 @@
-package rockredis
+package engine
 
 import (
 	"bytes"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/gorocksdb"
+)
+
+// make sure keep the same with rockredis
+const (
+	// for data
+	KVType   byte = 21
+	HashType byte = 22
+	tsLen         = 8
 )
 
 type Iterator interface {

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 type ServerConfig struct {
@@ -29,13 +29,16 @@ type ServerConfig struct {
 	DefaultSnapCatchup   int               `json:"default_snap_catchup"`
 	KeepBackup           int               `json:"keep_backup"`
 	KeepWAL              int               `json:"keep_wal"`
+	UseRocksWAL          bool              `json:"use_rocks_wal"`
+	SharedRocksWAL       bool              `json:"shared_rocks_wal"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`
 	// default rocksdb options, can be override by namespace config
-	RocksDBOpts rockredis.RockOptions `json:"rocksdb_opts"`
-	Namespaces  []NamespaceNodeConfig `json:"namespaces"`
-	MaxScanJob  int32                 `json:"max_scan_job"`
+	RocksDBOpts    engine.RockOptions    `json:"rocksdb_opts"`
+	WALRocksDBOpts engine.RockOptions    `json:"wal_rocksdb_opts"`
+	Namespaces     []NamespaceNodeConfig `json:"namespaces"`
+	MaxScanJob     int32                 `json:"max_scan_job"`
 }
 
 type NamespaceNodeConfig struct {

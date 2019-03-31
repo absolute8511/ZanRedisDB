@@ -116,6 +116,7 @@ func TestNodePropose(t *testing.T) {
 
 	n := newNode()
 	s := NewMemoryStorage()
+	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	go n.run(r)
 	n.Campaign(context.TODO())
@@ -156,6 +157,7 @@ func TestNodeReadIndex(t *testing.T) {
 
 	n := newNode()
 	s := NewMemoryStorage()
+	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	r.readStates = wrs
 
@@ -201,6 +203,7 @@ func TestDisableProposalForwarding(t *testing.T) {
 	cfg3.DisableProposalForwarding = true
 	r3 := newRaft(cfg3)
 	nt := newNetwork(r1, r2, r3)
+	defer nt.closeAll()
 
 	// elect r1 as leader
 	nt.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgHup})
@@ -232,6 +235,7 @@ func TestNodeReadIndexToOldLeader(t *testing.T) {
 	r3 := newTestRaft(3, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 
 	nt := newNetwork(r1, r2, r3)
+	defer nt.closeAll()
 
 	// elect r1 as leader
 	nt.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgHup})
@@ -299,6 +303,7 @@ func TestNodeProposeConfig(t *testing.T) {
 
 	n := newNode()
 	s := NewMemoryStorage()
+	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	go n.run(r)
 	n.Campaign(context.TODO())
@@ -337,6 +342,7 @@ func TestNodeProposeConfig(t *testing.T) {
 func TestNodeProposeAddDuplicateNode(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
+	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	go n.run(r)
 	n.Campaign(context.TODO())
@@ -409,6 +415,7 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 func TestBlockProposal(t *testing.T) {
 	n := newNode()
 	r := newTestRaft(1, []uint64{1}, 10, 1, NewMemoryStorage())
+	defer closeAndFreeRaft(r)
 	go n.run(r)
 	defer n.Stop()
 
@@ -440,6 +447,7 @@ func TestBlockProposal(t *testing.T) {
 func TestNodeTick(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
+	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	go n.run(r)
 	elapsed := r.electionElapsed
@@ -458,6 +466,7 @@ func TestNodeTick(t *testing.T) {
 func TestNodeStop(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
+	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	donec := make(chan struct{})
 
@@ -546,6 +555,7 @@ func TestNodeStart(t *testing.T) {
 		},
 	}
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	c := &Config{
 		ID:              1,
 		ElectionTick:    10,
@@ -600,6 +610,7 @@ func TestNodeRestart(t *testing.T) {
 	}
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.SetHardState(st)
 	storage.Append(entries)
 	grp := raftpb.Group{
@@ -662,6 +673,7 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 	}
 
 	s := NewMemoryStorage()
+	defer s.Close()
 	s.SetHardState(st)
 	s.ApplySnapshot(snap)
 	s.Append(entries)
@@ -700,6 +712,7 @@ func TestNodeAdvance(t *testing.T) {
 	defer cancel()
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	grp := raftpb.Group{
 		NodeId:        1,
 		RaftReplicaId: 1,
@@ -784,6 +797,7 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 	defer ticker.Stop()
 	n := newNode()
 	s := NewMemoryStorage()
+	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	go n.run(r)
 	n.Campaign(context.TODO())

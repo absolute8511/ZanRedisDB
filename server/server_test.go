@@ -149,15 +149,17 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 		replica.ReplicaID = uint64(1 + index)
 		replica.RaftAddr = raftAddr
 		kvOpts := ServerConfig{
-			ClusterID:     "unit-test-cluster",
-			DataDir:       tmpDir,
-			RedisAPIPort:  redisport,
-			GrpcAPIPort:   grpcPort,
-			HttpAPIPort:   httpPort,
-			LocalRaftAddr: raftAddr,
-			BroadcastAddr: "127.0.0.1",
-			TickMs:        20,
-			ElectionTick:  20,
+			ClusterID:      "unit-test-cluster",
+			DataDir:        tmpDir,
+			RedisAPIPort:   redisport,
+			GrpcAPIPort:    grpcPort,
+			HttpAPIPort:    httpPort,
+			LocalRaftAddr:  raftAddr,
+			BroadcastAddr:  "127.0.0.1",
+			TickMs:         20,
+			ElectionTick:   20,
+			UseRocksWAL:    true,
+			SharedRocksWAL: true,
 		}
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer

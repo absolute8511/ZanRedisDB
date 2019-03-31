@@ -62,13 +62,15 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 	replica.ReplicaID = 1
 	replica.RaftAddr = raftAddr
 	kvOpts := ServerConfig{
-		ClusterID:     "test",
-		DataDir:       tmpDir,
-		RedisAPIPort:  redisport,
-		LocalRaftAddr: raftAddr,
-		BroadcastAddr: "127.0.0.1",
-		TickMs:        100,
-		ElectionTick:  5,
+		ClusterID:      "test",
+		DataDir:        tmpDir,
+		RedisAPIPort:   redisport,
+		LocalRaftAddr:  raftAddr,
+		BroadcastAddr:  "127.0.0.1",
+		TickMs:         100,
+		ElectionTick:   5,
+		UseRocksWAL:    true,
+		SharedRocksWAL: true,
 	}
 
 	nsConf := node.NewNSConfig()

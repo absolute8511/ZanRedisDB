@@ -176,8 +176,18 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 
 	s.registerHandler()
 
+	var rs raft.IExtRaftStorage
+	if config.nodeConfig.UseRocksWAL && config.rockEng != nil {
+		rs = raft.NewRocksStorage(
+			config.ID,
+			uint32(config.GroupID),
+			config.nodeConfig.SharedRocksWAL,
+			config.rockEng)
+	} else {
+		rs = raft.NewRealMemoryStorage()
+	}
 	commitC, raftNode, err := newRaftNode(config, transport,
-		join, s, newLeaderChan)
+		join, s, rs, newLeaderChan)
 	if err != nil {
 		return nil, err
 	}

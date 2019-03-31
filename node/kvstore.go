@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
@@ -19,8 +20,8 @@ type KVOptions struct {
 	KeepBackup       int
 	EngType          string
 	ExpirationPolicy common.ExpirationPolicy
-	RockOpts         rockredis.RockOptions
-	SharedConfig     *rockredis.SharedRockConfig
+	RockOpts         engine.RockOptions
+	SharedConfig     *engine.SharedRockConfig
 }
 
 func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
@@ -38,7 +39,7 @@ func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
 func (s *KVStore) openDB() error {
 	var err error
 	if s.opts.EngType == rockredis.EngType {
-		cfg := rockredis.NewRockConfig()
+		cfg := rockredis.NewRockRedisDBConfig()
 		cfg.DataDir = s.opts.DataDir
 		cfg.RockOptions = s.opts.RockOpts
 		cfg.ExpirationPolicy = s.opts.ExpirationPolicy

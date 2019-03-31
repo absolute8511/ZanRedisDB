@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -168,7 +169,7 @@ func (db *RockDB) GetTables() [][]byte {
 	ch := make([][]byte, 0, 100)
 	s := encodeTableMetaStartKey()
 	e := encodeTableMetaStopKey()
-	it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+	it, err := engine.NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
 	if err != nil {
 		return nil
 	}
@@ -250,7 +251,7 @@ func (db *RockDB) GetHsetIndexTables() [][]byte {
 	ch := make([][]byte, 0, 100)
 	s := encodeTableIndexMetaStartKey(hsetIndexMeta)
 	e := encodeTableIndexMetaStopKey(hsetIndexMeta)
-	it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+	it, err := engine.NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
 	if err != nil {
 		return nil
 	}

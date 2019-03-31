@@ -11,7 +11,7 @@ import (
 )
 
 func getTestDBWithExpirationPolicy(t *testing.T, ePolicy common.ExpirationPolicy) *RockDB {
-	cfg := NewRockConfig()
+	cfg := NewRockRedisDBConfig()
 	cfg.ExpirationPolicy = ePolicy
 	cfg.EnableTableCounter = true
 
