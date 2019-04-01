@@ -6,6 +6,7 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -17,6 +18,7 @@ const (
 	startSep      byte = ':'
 	stopSep       byte = startSep + 1
 	maxWriteBatch      = 1000
+	slowStorage        = time.Millisecond * 100
 )
 
 // RocksStorage implements the Storage interface backed by rocksdb.
@@ -145,6 +147,7 @@ func (ms *RocksStorage) SetHardState(st pb.HardState) error {
 
 // Entries implements the Storage interface.
 func (ms *RocksStorage) Entries(lo, hi, maxSize uint64) ([]pb.Entry, error) {
+	s := time.Now()
 	first, err := ms.FirstIndex()
 	if err != nil {
 		return nil, err
@@ -161,7 +164,12 @@ func (ms *RocksStorage) Entries(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 		return nil, ErrUnavailable
 	}
 
-	return ms.allEntries(lo, hi, maxSize)
+	es, err := ms.allEntries(lo, hi, maxSize)
+	cost := time.Since(s)
+	if cost > slowStorage {
+		raftLogger.Infof("entries from raft storage slow: %v(%v-%v), %v", len(es), lo, hi, cost)
+	}
+	return es, err
 }
 
 func (ms *RocksStorage) seekEntry(e *pb.Entry, seekTo uint64, reverse bool) (uint64, error) {
@@ -458,13 +466,19 @@ func (ms *RocksStorage) commitBatch(batch *gorocksdb.WriteBatch) error {
 
 // Append the new entries to storage.
 func (ms *RocksStorage) Append(entries []pb.Entry) error {
+	s := time.Now()
 	batch := ms.wb
 	batch.Clear()
 	err := ms.addEntries(batch, entries)
 	if err != nil {
 		return err
 	}
-	return ms.commitBatch(batch)
+	err = ms.commitBatch(batch)
+	cost := time.Since(s)
+	if cost > slowStorage {
+		raftLogger.Infof("append to raft storage slow: %v, %v", len(entries), cost)
+	}
+	return err
 }
 
 func (ms *RocksStorage) addEntries(batch *gorocksdb.WriteBatch, entries []pb.Entry) error {
