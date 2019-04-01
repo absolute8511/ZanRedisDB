@@ -293,11 +293,16 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 	cfg.OptimizeFiltersForHits = true
 	// basically, we no need compress wal since it will be cleaned after snapshot
 	cfg.MinLevelToCompress = 5
-	// TODO: use memtable_insert_with_hint_prefix_extractor to speed up insert
+	// TODO: check memtable_insert_with_hint_prefix_extractor and DeleteRange bug
+	if cfg.InsertHintFixedLen == 0 {
+		cfg.InsertHintFixedLen = 10
+	}
+	cfg.AutoCompacted = true
 	db, err := engine.NewRockEng(cfg)
 	if err == nil {
 		err = db.OpenEng()
 		if err == nil {
+			go db.CompactRange()
 			return db
 		}
 	}
@@ -414,6 +419,8 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 				PartitionNum: conf.PartitionNum,
 			}
 			nsm.nsMetas[conf.BaseName] = meta
+		} else {
+			meta = oldMeta
 		}
 	}
 	rs := nsm.getWALEng(conf.BaseName, nsm.machineConf.DataRootDir, raftConf.ID, uint32(raftConf.GroupID), meta)

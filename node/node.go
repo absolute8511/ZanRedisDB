@@ -572,8 +572,9 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 		} else {
 			err = nil
 		}
-	case <-nd.stopChan:
-		err = common.ErrStopped
+	// we can avoid wait on stop since ctx will be returned (avoid concurrency performance degrade)
+	//case <-nd.stopChan:
+	//	err = common.ErrStopped
 	case <-ctx.Done():
 		err = ctx.Err()
 		if err == context.DeadlineExceeded {
@@ -622,20 +623,17 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	var err error
 	var rsp interface{}
 	var ok bool
-	select {
-	case rsp = <-ch:
-		if req.done != nil {
-			close(req.done)
-		}
-		if err, ok = rsp.(error); ok {
-			rsp = nil
-		} else {
-			err = nil
-		}
-	case <-nd.stopChan:
-		rsp = nil
-		err = common.ErrStopped
+	// will always return a response, timed out or get a error
+	rsp = <-ch
+	if req.done != nil {
+		close(req.done)
 	}
+	if err, ok = rsp.(error); ok {
+		rsp = nil
+	} else {
+		err = nil
+	}
+
 	if req.reqData.Header.DataType == int32(RedisReq) {
 		cost := time.Since(start)
 		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), cost.Nanoseconds()/1000)

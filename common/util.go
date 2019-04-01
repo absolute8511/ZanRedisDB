@@ -61,10 +61,6 @@ func IsValidNamespaceName(ns string) bool {
 	return isValidNameString(ns)
 }
 
-func IsValidTableName(tb []byte) bool {
-	return isValidName(tb)
-}
-
 func IsInternalTableName(tb string) bool {
 	return strings.HasPrefix(tb, InternalPrefix)
 }
@@ -74,13 +70,6 @@ func isValidNameString(name string) bool {
 		return false
 	}
 	return validNamespaceTableNameRegex.MatchString(name)
-}
-
-func isValidName(name []byte) bool {
-	if len(name) > 255 || len(name) < 1 {
-		return false
-	}
-	return validNamespaceTableNameRegex.Match(name)
 }
 
 func ExtractNamesapce(rawKey []byte) (string, []byte, error) {

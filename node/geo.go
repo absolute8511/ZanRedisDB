@@ -77,10 +77,6 @@ func (nd *KVNode) geoaddCommand(conn redcon.Conn, cmd redcon.Command) {
 			conn.WriteError(err.Error())
 			return
 		}
-		if common.IsValidTableName(key) {
-			conn.WriteError(common.ErrInvalidTableName.Error())
-			return
-		}
 		zaddCmd.Args[1] = key
 		sm, ok := nd.sm.(*kvStoreSM)
 		if !ok {

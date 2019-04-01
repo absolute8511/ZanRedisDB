@@ -54,6 +54,7 @@ func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint6
 	fullNS string, clusterInfo common.IClusterInfo, w wait.Wait) (StateMachine, error) {
 	if machineConfig.LearnerRole == "" {
 		if machineConfig.StateMachineType == "empty_sm" {
+			nodeLog.Infof("%v using empty sm for test", fullNS)
 			return &emptySM{w: w}, nil
 		}
 		kvsm, err := NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo)
@@ -81,6 +82,9 @@ type emptySM struct {
 func (esm *emptySM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	for _, req := range reqList.Reqs {
 		reqID := req.Header.ID
+		if reqID == 0 {
+			reqID = reqList.ReqId
+		}
 		esm.w.Trigger(reqID, nil)
 	}
 	return false, nil

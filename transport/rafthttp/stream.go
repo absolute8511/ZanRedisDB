@@ -26,13 +26,13 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/coreos/etcd/version"
+	"github.com/coreos/go-semver/semver"
 	"github.com/youzan/ZanRedisDB/pkg/httputil"
 	"github.com/youzan/ZanRedisDB/pkg/transport"
 	"github.com/youzan/ZanRedisDB/pkg/types"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/stats"
-	"github.com/coreos/etcd/version"
-	"github.com/coreos/go-semver/semver"
 )
 
 const (

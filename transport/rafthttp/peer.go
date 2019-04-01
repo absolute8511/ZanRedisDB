@@ -161,8 +161,15 @@ func startPeer(transport *Transport, urls types.URLs, peerID types.ID, ps *stats
 				if err := r.Process(ctx, mm); err != nil {
 					plog.Warningf("failed to process raft message (%v)", err)
 				}
-			case <-p.stopc:
-				return
+			default: // use default to avoid wait stopc every time (performance should be better)
+				select {
+				case mm := <-p.recvc:
+					if err := r.Process(ctx, mm); err != nil {
+						plog.Warningf("failed to process raft message (%v)", err)
+					}
+				case <-p.stopc:
+					return
+				}
 			}
 		}
 	}()
@@ -177,8 +184,15 @@ func startPeer(transport *Transport, urls types.URLs, peerID types.ID, ps *stats
 				if err := r.Process(ctx, mm); err != nil {
 					plog.Warningf("failed to process raft message (%v)", err)
 				}
-			case <-p.stopc:
-				return
+			default:
+				select {
+				case mm := <-p.propc:
+					if err := r.Process(ctx, mm); err != nil {
+						plog.Warningf("failed to process raft message (%v)", err)
+					}
+				case <-p.stopc:
+					return
+				}
 			}
 		}
 	}()

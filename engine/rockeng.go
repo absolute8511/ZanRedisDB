@@ -5,10 +5,15 @@ import (
 	"os"
 	"path"
 	"sync/atomic"
+	"time"
 
 	"github.com/shirou/gopsutil/mem"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/gorocksdb"
+)
+
+const (
+	compactThreshold = 5000000
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("rocksdb_eng"))
@@ -46,6 +51,7 @@ type RockOptions struct {
 	DisableWAL                     bool   `json:"disable_wal,omitempty"`
 	DisableMergeCounter            bool   `json:"disable_merge_counter,omitempty"`
 	OptimizeFiltersForHits         bool   `json:"optimize_filters_for_hits,omitempty"`
+	InsertHintFixedLen             int    `json:"insert_hint_fixed_len"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -126,6 +132,7 @@ type RockEngConfig struct {
 	DataDir            string
 	SharedConfig       *SharedRockConfig
 	EnableTableCounter bool
+	AutoCompacted      bool
 	RockOptions
 }
 
@@ -180,12 +187,15 @@ func (src *SharedRockConfig) Destroy() {
 }
 
 type RockEng struct {
-	cfg       *RockEngConfig
-	eng       *gorocksdb.DB
-	dbOpts    *gorocksdb.Options
-	lruCache  *gorocksdb.Cache
-	rl        *gorocksdb.RateLimiter
-	engOpened int32
+	cfg         *RockEngConfig
+	eng         *gorocksdb.DB
+	dbOpts      *gorocksdb.Options
+	lruCache    *gorocksdb.Cache
+	rl          *gorocksdb.RateLimiter
+	engOpened   int32
+	lastCompact int64
+	deletedCnt  int64
+	quit        chan struct{}
 }
 
 func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
@@ -255,6 +265,9 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		}
 	}
 
+	if cfg.InsertHintFixedLen > 0 {
+		opts.SetMemtableInsertWithHintFixedLengthPrefixExtractor(cfg.InsertHintFixedLen)
+	}
 	opts.SetCreateIfMissing(true)
 	opts.SetMaxOpenFiles(-1)
 	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
@@ -294,8 +307,30 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		dbOpts:   opts,
 		lruCache: lru,
 		rl:       rl,
+		quit:     make(chan struct{}),
+	}
+	if cfg.AutoCompacted {
+		go db.compactLoop()
 	}
 	return db, nil
+}
+
+func (r *RockEng) compactLoop() {
+	ticker := time.NewTicker(time.Hour)
+	interval := (time.Hour / time.Second).Nanoseconds()
+	dbLog.Infof("start auto compact loop : %v", interval)
+	for {
+		select {
+		case <-r.quit:
+			return
+		case <-ticker.C:
+			if (r.DeletedBeforeCompact() > compactThreshold) &&
+				(time.Now().Unix()-r.LastCompactTime()) > interval {
+				dbLog.Infof("auto compact : %v, %v", r.DeletedBeforeCompact(), r.LastCompactTime())
+				r.CompactRange()
+			}
+		}
+	}
 }
 
 func (r *RockEng) GetOpts() *gorocksdb.Options {
@@ -326,9 +361,24 @@ func (r *RockEng) Eng() *gorocksdb.DB {
 	return e
 }
 
+func (r *RockEng) DeletedBeforeCompact() int64 {
+	return atomic.LoadInt64(&r.deletedCnt)
+}
+
+func (r *RockEng) AddDeletedCnt(c int64) {
+	atomic.AddInt64(&r.deletedCnt, c)
+}
+
+func (r *RockEng) LastCompactTime() int64 {
+	return atomic.LoadInt64(&r.lastCompact)
+}
+
 func (r *RockEng) CompactRange() {
+	atomic.StoreInt64(&r.lastCompact, time.Now().Unix())
+	atomic.StoreInt64(&r.deletedCnt, 0)
 	var rg gorocksdb.Range
 	r.eng.CompactRange(rg)
+	dbLog.Infof("compact rocksdb %v done", r.GetDataDir())
 }
 
 func (r *RockEng) CloseEng() bool {
@@ -343,6 +393,11 @@ func (r *RockEng) CloseEng() bool {
 }
 
 func (r *RockEng) CloseAll() {
+	select {
+	case <-r.quit:
+	default:
+		close(r.quit)
+	}
 	r.CloseEng()
 	if r.dbOpts != nil {
 		r.dbOpts.Destroy()

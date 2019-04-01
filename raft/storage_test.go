@@ -141,11 +141,21 @@ func TestStorageLastIndex(t *testing.T) {
 }
 
 func TestStorageFirstIndex(t *testing.T) {
+	emptyStorage := NewMemoryStorage()
+	first, err := emptyStorage.FirstIndex()
+	if err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+	if first != 1 {
+		t.Errorf("first = %d, want %d", first, 1)
+	}
+	emptyStorage.Close()
+
 	ents := []pb.Entry{{Index: 3, Term: 3}, {Index: 4, Term: 4}, {Index: 5, Term: 5}}
 	s := newInitedMemoryStorage(ents)
 	defer s.Close()
 
-	first, err := s.FirstIndex()
+	first, err = s.FirstIndex()
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)
 	}

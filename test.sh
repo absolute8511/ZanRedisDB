@@ -13,7 +13,7 @@ fi
 echo $TESTDIRS
 
 CGO_CFLAGS="-I${ROCKSDB}/include"
-CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy"
+CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -ljemalloc"
 
 if [ "$os" == "linux" ]; then
   CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -lrt"

@@ -33,6 +33,8 @@ type Wait interface {
 	IsRegistered(id uint64) bool
 }
 
+type multList [16]*list
+
 type list struct {
 	l sync.RWMutex
 	m map[uint64]chan interface{}
@@ -40,10 +42,17 @@ type list struct {
 
 // New creates a Wait.
 func New() Wait {
-	return &list{m: make(map[uint64]chan interface{})}
+	ml := multList{}
+	for i, _ := range ml {
+		ml[i] = &list{
+			m: make(map[uint64]chan interface{}),
+		}
+	}
+	return ml
 }
 
-func (w *list) Register(id uint64) <-chan interface{} {
+func (mw multList) Register(id uint64) <-chan interface{} {
+	w := mw[id%uint64(len(mw))]
 	w.l.Lock()
 	defer w.l.Unlock()
 	ch := w.m[id]
@@ -56,7 +65,8 @@ func (w *list) Register(id uint64) <-chan interface{} {
 	return ch
 }
 
-func (w *list) Trigger(id uint64, x interface{}) {
+func (mw multList) Trigger(id uint64, x interface{}) {
+	w := mw[id%uint64(len(mw))]
 	w.l.Lock()
 	ch := w.m[id]
 	delete(w.m, id)
@@ -67,7 +77,8 @@ func (w *list) Trigger(id uint64, x interface{}) {
 	}
 }
 
-func (w *list) IsRegistered(id uint64) bool {
+func (mw multList) IsRegistered(id uint64) bool {
+	w := mw[id%uint64(len(mw))]
 	w.l.RLock()
 	defer w.l.RUnlock()
 	_, ok := w.m[id]

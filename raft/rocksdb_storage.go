@@ -2,9 +2,11 @@ package raft
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -16,6 +18,7 @@ const (
 	startSep      byte = ':'
 	stopSep       byte = startSep + 1
 	maxWriteBatch      = 1000
+	slowStorage        = time.Millisecond * 100
 )
 
 // RocksStorage implements the Storage interface backed by rocksdb.
@@ -64,6 +67,10 @@ func NewRocksStorage(id uint64, gid uint32, shared bool, db *engine.RockEng) *Ro
 	return ms
 }
 
+func (ms *RocksStorage) Eng() *engine.RockEng {
+	return ms.entryDB
+}
+
 func (ms *RocksStorage) Close() {
 	if !ms.engShared {
 		ms.entryDB.CloseAll()
@@ -89,8 +96,11 @@ func (ms *RocksStorage) reset(es []pb.Entry) error {
 	batch := ms.wb
 	batch.Clear()
 
-	ms.deleteFrom(batch, 0)
-	err := ms.commitBatch(batch)
+	err := ms.deleteFrom(batch, 0)
+	if err != nil {
+		return err
+	}
+	err = ms.commitBatch(batch)
 	if err != nil {
 		return err
 	}
@@ -137,6 +147,7 @@ func (ms *RocksStorage) SetHardState(st pb.HardState) error {
 
 // Entries implements the Storage interface.
 func (ms *RocksStorage) Entries(lo, hi, maxSize uint64) ([]pb.Entry, error) {
+	s := time.Now()
 	first, err := ms.FirstIndex()
 	if err != nil {
 		return nil, err
@@ -153,7 +164,12 @@ func (ms *RocksStorage) Entries(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 		return nil, ErrUnavailable
 	}
 
-	return ms.allEntries(lo, hi, maxSize)
+	es, err := ms.allEntries(lo, hi, maxSize)
+	cost := time.Since(s)
+	if cost > slowStorage {
+		raftLogger.Infof("entries from raft storage slow: %v(%v-%v), %v", len(es), lo, hi, cost)
+	}
+	return es, err
 }
 
 func (ms *RocksStorage) seekEntry(e *pb.Entry, seekTo uint64, reverse bool) (uint64, error) {
@@ -263,10 +279,24 @@ func (ms *RocksStorage) firstIndexCached() uint64 {
 // Keep the entry at the snapshot index, for simplification of logic.
 // It is the application's responsibility to not attempt to deleteUntil an index
 // greater than raftLog.applied.
-func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64, maxNum int) {
+func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64) error {
 	start := ms.entryKey(0)
 	stop := ms.entryKey(until)
-	batch.DeleteRange(start, stop)
+	raftLogger.Infof("compact raft storage to %d, %v~%v ", until, start, stop)
+	//batch.DeleteRange(start, stop)
+	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	cnt := 0
+	for ; it.Valid(); it.Next() {
+		batch.Delete(it.Key())
+		cnt++
+	}
+	raftLogger.Infof("compact raft storage to %d , cnt: %v", until, cnt)
+	ms.entryDB.AddDeletedCnt(int64(cnt))
+	return nil
 }
 
 // NumEntries return the number of all entries in db
@@ -359,6 +389,10 @@ func (ms *RocksStorage) ApplySnapshot(snap pb.Snapshot) error {
 		return err
 	}
 	batch.Put(ms.entryKey(e.Index), data)
+	err = ms.deleteUntil(batch, e.Index)
+	if err != nil {
+		return err
+	}
 	return ms.commitBatch(batch)
 }
 
@@ -391,10 +425,8 @@ func (ms *RocksStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte) 
 		ms.snapshot.Metadata.ConfState = *cs
 	}
 	ms.snapshot.Data = data
-	// clear cached first index
-	ms.firstIndex = 0
-	ms.setCachedLastIndex(0)
 	snap := ms.snapshot
+	// no need clear first and last index in db since no changed on db
 
 	return snap, nil
 }
@@ -407,7 +439,7 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 	if err != nil {
 		return err
 	}
-	if compactIndex <= first-1 {
+	if compactIndex+1 <= first {
 		return ErrCompacted
 	}
 	li, err := ms.LastIndex()
@@ -416,11 +448,15 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 	}
 	if compactIndex > li {
 		raftLogger.Errorf("compact %d is out of bound lastindex(%d)", compactIndex, li)
+		return errors.New("compact is out of bound lastindex")
 	}
 	ms.setCachedFirstIndex(0)
 	batch := ms.wb
 	batch.Clear()
-	ms.deleteUntil(batch, compactIndex, maxDeleteBatch)
+	err = ms.deleteUntil(batch, compactIndex)
+	if err != nil {
+		return err
+	}
 	return ms.commitBatch(batch)
 }
 
@@ -430,13 +466,19 @@ func (ms *RocksStorage) commitBatch(batch *gorocksdb.WriteBatch) error {
 
 // Append the new entries to storage.
 func (ms *RocksStorage) Append(entries []pb.Entry) error {
+	s := time.Now()
 	batch := ms.wb
 	batch.Clear()
 	err := ms.addEntries(batch, entries)
 	if err != nil {
 		return err
 	}
-	return ms.commitBatch(batch)
+	err = ms.commitBatch(batch)
+	cost := time.Since(s)
+	if cost > slowStorage {
+		raftLogger.Infof("append to raft storage slow: %v, %v", len(entries), cost)
+	}
+	return err
 }
 
 func (ms *RocksStorage) addEntries(batch *gorocksdb.WriteBatch, entries []pb.Entry) error {
@@ -469,7 +511,10 @@ func (ms *RocksStorage) addEntries(batch *gorocksdb.WriteBatch, entries []pb.Ent
 	laste := entries[len(entries)-1].Index
 	ms.setCachedLastIndex(laste)
 	if laste < last {
-		ms.deleteFrom(batch, laste+1)
+		err = ms.deleteFrom(batch, laste+1)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -494,8 +539,20 @@ func (ms *RocksStorage) writeEnts(batch *gorocksdb.WriteBatch, es []pb.Entry) er
 	return nil
 }
 
-func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) {
+func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) error {
 	start := ms.entryKey(from)
-	end := ms.entryPrefixEnd()
-	batch.DeleteRange(start, end)
+	stop := ms.entryPrefixEnd()
+	//batch.DeleteRange(start, stop)
+	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	cnt := 0
+	for ; it.Valid(); it.Next() {
+		batch.Delete(it.Key())
+		cnt++
+	}
+	ms.entryDB.AddDeletedCnt(int64(cnt))
+	return nil
 }
