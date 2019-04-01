@@ -52,6 +52,10 @@ func NewRocksStorage(id uint64, gid uint32, shared bool, db *engine.RockEng) *Ro
 		engShared:        shared,
 	}
 	ms.defaultReadOpts.SetVerifyChecksums(false)
+	ms.defaultReadOpts.SetFillCache(false)
+	// read raft always hit non-deleted range
+	ms.defaultReadOpts.SetIgnoreRangeDeletions(true)
+
 	ms.defaultWriteOpts.DisableWAL(true)
 	snap, err := ms.Snapshot()
 	if !IsEmptySnap(snap) {
@@ -180,7 +184,7 @@ func (ms *RocksStorage) seekEntry(e *pb.Entry, seekTo uint64, reverse bool) (uin
 		start = ms.entryPrefixStart()
 	}
 	//raftLogger.Infof("seek %v from %v to %v", seekTo, start, stop)
-	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeClose, reverse)
+	it, err := engine.NewDBRangeIteratorWithIgn(ms.entryDB.Eng(), start, stop, common.RangeClose, reverse, true)
 	if err != nil {
 		return 0, err
 	}
@@ -331,7 +335,7 @@ func (ms *RocksStorage) allEntries(lo, hi, maxSize uint64) (es []pb.Entry, rerr 
 	}
 	start := ms.entryKey(lo)
 	stop := ms.entryKey(hi) // Not included in results.
-	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
+	it, err := engine.NewDBRangeIteratorWithIgn(ms.entryDB.Eng(), start, stop, common.RangeROpen, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +470,9 @@ func (ms *RocksStorage) commitBatch(batch *gorocksdb.WriteBatch) error {
 
 // Append the new entries to storage.
 func (ms *RocksStorage) Append(entries []pb.Entry) error {
+	if len(entries) == 0 {
+		return nil
+	}
 	s := time.Now()
 	batch := ms.wb
 	batch.Clear()
@@ -543,7 +550,7 @@ func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) err
 	start := ms.entryKey(from)
 	stop := ms.entryPrefixEnd()
 	//batch.DeleteRange(start, stop)
-	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
+	it, err := engine.NewDBRangeIteratorWithIgn(ms.entryDB.Eng(), start, stop, common.RangeROpen, false, true)
 	if err != nil {
 		return err
 	}

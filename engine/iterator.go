@@ -195,6 +195,11 @@ func NewSnapshotDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, r
 
 func NewDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
 	reverse bool) (*RangeLimitedIterator, error) {
+	return NewDBRangeIteratorWithIgn(db, min, max, rtype, reverse, false)
+}
+
+func NewDBRangeIteratorWithIgn(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
+	reverse bool, ignoreDel bool) (*RangeLimitedIterator, error) {
 	upperBound := max
 	lowerBound := min
 	if rtype&common.RangeROpen <= 0 && upperBound != nil {
@@ -202,7 +207,7 @@ func NewDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
 		// however upperBound is exclusive
 		upperBound = append(upperBound, 0)
 	}
-	dbit, err := NewDBIterator(db, false, true, lowerBound, upperBound, false)
+	dbit, err := NewDBIterator(db, false, true, lowerBound, upperBound, ignoreDel)
 	if err != nil {
 		return nil, err
 	}
