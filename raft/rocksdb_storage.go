@@ -184,7 +184,12 @@ func (ms *RocksStorage) seekEntry(e *pb.Entry, seekTo uint64, reverse bool) (uin
 		start = ms.entryPrefixStart()
 	}
 	//raftLogger.Infof("seek %v from %v to %v", seekTo, start, stop)
-	it, err := engine.NewDBRangeIteratorWithIgn(ms.entryDB.Eng(), start, stop, common.RangeClose, reverse, true)
+	opts := engine.IteratorOpts{
+		Range:     engine.Range{Min: start, Max: stop, Type: common.RangeClose},
+		Reverse:   reverse,
+		IgnoreDel: true,
+	}
+	it, err := engine.NewDBRangeIteratorWithOpts(ms.entryDB.Eng(), opts)
 	if err != nil {
 		return 0, err
 	}
@@ -287,6 +292,11 @@ func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64) e
 	start := ms.entryKey(0)
 	stop := ms.entryKey(until)
 	raftLogger.Infof("compact raft storage to %d, %v~%v ", until, start, stop)
+	rg := gorocksdb.Range{
+		Start: start,
+		Limit: stop,
+	}
+	ms.entryDB.Eng().DeleteFilesInRange(rg)
 	//batch.DeleteRange(start, stop)
 	it, err := engine.NewDBRangeIterator(ms.entryDB.Eng(), start, stop, common.RangeROpen, false)
 	if err != nil {
@@ -335,7 +345,12 @@ func (ms *RocksStorage) allEntries(lo, hi, maxSize uint64) (es []pb.Entry, rerr 
 	}
 	start := ms.entryKey(lo)
 	stop := ms.entryKey(hi) // Not included in results.
-	it, err := engine.NewDBRangeIteratorWithIgn(ms.entryDB.Eng(), start, stop, common.RangeROpen, false, true)
+	opts := engine.IteratorOpts{
+		Range:     engine.Range{Min: start, Max: stop, Type: common.RangeROpen},
+		Reverse:   false,
+		IgnoreDel: true,
+	}
+	it, err := engine.NewDBRangeIteratorWithOpts(ms.entryDB.Eng(), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -550,7 +565,12 @@ func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) err
 	start := ms.entryKey(from)
 	stop := ms.entryPrefixEnd()
 	//batch.DeleteRange(start, stop)
-	it, err := engine.NewDBRangeIteratorWithIgn(ms.entryDB.Eng(), start, stop, common.RangeROpen, false, true)
+	opts := engine.IteratorOpts{
+		Range:     engine.Range{Min: start, Max: stop, Type: common.RangeROpen},
+		Reverse:   false,
+		IgnoreDel: true,
+	}
+	it, err := engine.NewDBRangeIteratorWithOpts(ms.entryDB.Eng(), opts)
 	if err != nil {
 		return err
 	}

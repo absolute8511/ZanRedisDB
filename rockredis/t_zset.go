@@ -648,14 +648,15 @@ func (db *RockDB) zRemAll(ts int64, key []byte, wb *gorocksdb.WriteBatch) (int64
 		}
 		wb.Delete(sk)
 	} else {
-		rmCnt, err := db.zRemRangeBytes(ts, key, minKey, maxKey, 0, -1, wb)
+		// remove all scan can ignore deleted to speed up scan
+		rmCnt, err := db.zRemRangeBytes(ts, key, minKey, maxKey, 0, -1, wb, true)
 		return rmCnt, err
 	}
 	return num, nil
 }
 
 func (db *RockDB) zRemRangeBytes(ts int64, key []byte, minKey []byte, maxKey []byte, offset int,
-	count int, wb *gorocksdb.WriteBatch) (int64, error) {
+	count int, wb *gorocksdb.WriteBatch, ignoreDel bool) (int64, error) {
 	if len(key) > MaxKeySize {
 		return 0, errKeySize
 	}
@@ -673,8 +674,13 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, minKey []byte, maxKey []b
 	if err != nil {
 		return 0, err
 	}
-
-	it, err := engine.NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeClose, offset, count, false)
+	opts := engine.IteratorOpts{
+		Range:     engine.Range{Min: minKey, Max: maxKey, Type: common.RangeClose},
+		Limit:     engine.Limit{Offset: offset, Count: count},
+		Reverse:   false,
+		IgnoreDel: ignoreDel,
+	}
+	it, err := engine.NewDBRangeLimitIteratorWithOpts(db.eng, opts)
 	if err != nil {
 		return 0, err
 	}
@@ -714,7 +720,7 @@ func (db *RockDB) zRemRange(ts int64, key []byte, min float64, max float64, offs
 	minKey := zEncodeStartScoreKey(table, rk, min)
 	maxKey := zEncodeStopScoreKey(table, rk, max)
 
-	return db.zRemRangeBytes(ts, key, minKey, maxKey, offset, count, wb)
+	return db.zRemRangeBytes(ts, key, minKey, maxKey, offset, count, wb, false)
 }
 
 func (db *RockDB) zRangeBytes(key []byte, minKey []byte, maxKey []byte, offset int, count int, reverse bool) ([]common.ScorePair, error) {
@@ -907,7 +913,7 @@ func (db *RockDB) ZRemRangeByRank(ts int64, key []byte, start int, stop int) (in
 	}
 	minKey := zEncodeStartKey(table, rk)
 	maxKey := zEncodeStopKey(table, rk)
-	rmCnt, err = db.zRemRangeBytes(ts, key, minKey, maxKey, offset, count, db.wb)
+	rmCnt, err = db.zRemRangeBytes(ts, key, minKey, maxKey, offset, count, db.wb, false)
 	if err == nil {
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	}

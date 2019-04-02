@@ -512,7 +512,12 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	if size > RangeDeleteNum {
 		wb.DeleteRange(startKey, stopKey)
 	} else {
-		rit, err := engine.NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
+		opts := engine.IteratorOpts{
+			Range:     engine.Range{Min: startKey, Max: stopKey, Type: common.RangeClose},
+			Reverse:   false,
+			IgnoreDel: true,
+		}
+		rit, err := engine.NewDBRangeIteratorWithOpts(db.eng, opts)
 		if err != nil {
 			return 0
 		}
