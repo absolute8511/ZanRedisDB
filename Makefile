@@ -2,7 +2,7 @@ PREFIX=/usr/local
 DESTDIR=
 BINDIR=${PREFIX}/bin
 PROJECT?=github.com/youzan/ZanRedisDB
-VERBINARY?= 0.5.3
+VERBINARY?= 0.6.0
 COMMIT?=$(shell git rev-parse --short HEAD)
 BUILD_TIME?=$(shell date '+%Y-%m-%d_%H:%M:%S-%Z')
 GOFLAGS=-ldflags "-s -w -X ${PROJECT}/common.VerBinary=${VERBINARY} -X ${PROJECT}/common.Commit=${COMMIT} -X ${PROJECT}/common.BuildTime=${BUILD_TIME}"

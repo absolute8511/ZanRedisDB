@@ -434,6 +434,7 @@ func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end [
 			continue
 		}
 		for _, rg := range rgs {
+			r.eng.DeleteFilesInRange(rg)
 			wb.DeleteRange(rg.Start, rg.Limit)
 		}
 		wb.DeleteRange(minMetaKey, maxMetaKey)
