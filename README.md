@@ -25,7 +25,7 @@ Build the rocksdb
 <pre>
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
-git checkout v5.8.8-share-rate-limiter
+git checkout v5.18-patched
 make static_lib
 </pre>
 

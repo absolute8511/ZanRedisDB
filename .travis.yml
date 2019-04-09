@@ -19,7 +19,7 @@ install:
   - export CXX="g++-4.9" CC="gcc-4.9"
   - sudo apt-get install libsnappy1 libsnappy-dev
   - git clone https://github.com/absolute8511/rocksdb.git /tmp/rocksdb
-  - pushd /tmp/rocksdb && git checkout v5.8.8-share-rate-limiter && USE_SSE=1 make static_lib && popd
+  - pushd /tmp/rocksdb && git checkout v5.18-patched && USE_SSE=1 make static_lib && popd
 script:
   - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/youzan/gorocksdb 
   - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go install -race github.com/youzan/gorocksdb 

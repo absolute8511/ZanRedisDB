@@ -42,7 +42,7 @@ if [ ! -f "$rocksdb/Makefile" ]; then
 fi
 pushd $rocksdb
 git pull
-git checkout v5.8.8-share-rate-limiter
+git checkout v5.18-patched
 CC=/opt/rh/devtoolset-3/root/usr/bin/gcc CXX=/opt/rh/devtoolset-3/root/usr/bin/g++ LD=/opt/rh/devtoolset-3/root/usr/bin/ld USE_SSE=1 make static_lib
 popd
 
