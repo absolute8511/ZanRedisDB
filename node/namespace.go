@@ -521,6 +521,23 @@ func (nsm *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 	return kv
 }
 
+func (nsm *NamespaceMgr) GetWALDBStats(leaderOnly bool) map[string]map[string]interface{} {
+	nsm.mutex.RLock()
+	nsStats := make(map[string]map[string]interface{}, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
+		dbStats := n.Node.GetWALDBInternalStats()
+		nsStats[k] = dbStats
+	}
+	nsm.mutex.RUnlock()
+	return nsStats
+}
+
 func (nsm *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
 	nsm.mutex.RLock()
 	nsStats := make(map[string]string, len(nsm.kvNodes))

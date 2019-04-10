@@ -649,6 +649,22 @@ func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprout
 	return ss, nil
 }
 
+func (s *Server) doWALDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
+	ss := s.GetWALDBStats(leaderOnly)
+	return ss, nil
+}
+
 func (s *Server) doDBPerf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -701,6 +717,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APITableStats, common.Decorate(s.doTableStats, common.V1))
 	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
+	router.Handle("GET", "/waldb/stats", common.Decorate(s.doWALDBStats, common.V1))
 	router.Handle("GET", "/db/perf", common.Decorate(s.doDBPerf, log, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 

@@ -353,6 +353,18 @@ func (nd *KVNode) GetDBInternalStats() string {
 	return ""
 }
 
+func (nd *KVNode) GetWALDBInternalStats() map[string]interface{} {
+	if nd.rn == nil {
+		return nil
+	}
+
+	eng := nd.rn.config.rockEng
+	if eng == nil {
+		return nil
+	}
+	return eng.GetInternalStatus()
+}
+
 func (nd *KVNode) GetStats(table string) common.NamespaceStats {
 	ns := nd.sm.GetStats(table)
 	ns.ClusterWriteStats = nd.clusterWriteStats.Copy()

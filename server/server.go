@@ -272,6 +272,10 @@ func (s *Server) GetDBStats(leaderOnly bool) map[string]string {
 	return s.nsMgr.GetDBStats(leaderOnly)
 }
 
+func (s *Server) GetWALDBStats(leaderOnly bool) map[string]map[string]interface{} {
+	return s.nsMgr.GetWALDBStats(leaderOnly)
+}
+
 func (s *Server) OptimizeDB(ns string, table string) {
 	s.nsMgr.OptimizeDB(ns, table)
 }
