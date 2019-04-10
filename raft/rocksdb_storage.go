@@ -471,8 +471,7 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 		return errors.New("compact is out of bound lastindex")
 	}
 	ms.setCachedFirstIndex(0)
-	batch := ms.wb
-	batch.Clear()
+	batch := gorocksdb.NewWriteBatch()
 	err = ms.deleteUntil(batch, compactIndex)
 	if err != nil {
 		return err
