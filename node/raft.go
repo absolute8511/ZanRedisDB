@@ -655,12 +655,12 @@ func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftp
 			rc.Errorf("save snapshot at index %v failed: %v", snap.Metadata, err)
 			return
 		}
-		rc.Infof("saved snapshot at index %d", snap.Metadata.Index)
 
 		compactIndex := uint64(1)
 		if snapi > uint64(rc.config.SnapCatchup) {
 			compactIndex = snapi - uint64(rc.config.SnapCatchup)
 		}
+		rc.Infof("saved snapshot at index %d, compact to: %v", snap.Metadata.Index, compactIndex)
 		if err := rc.raftStorage.Compact(compactIndex); err != nil {
 			if err == raft.ErrCompacted {
 				return
