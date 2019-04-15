@@ -1144,7 +1144,12 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 	}
 	if localNode == nil || localErr != nil {
 		cluster.CoordLog().Warningf("local namespace %v init failed: %v", nsInfo.GetDesp(), localErr)
-		return nil, cluster.ErrLocalInitNamespaceFailed
+		if localNode == nil {
+			return nil, cluster.ErrLocalInitNamespaceFailed
+		}
+		if localErr != node.ErrNamespaceAlreadyExist {
+			return nil, cluster.ErrLocalInitNamespaceFailed
+		}
 	}
 
 	localErr = localNode.SetMagicCode(nsInfo.MagicCode)
