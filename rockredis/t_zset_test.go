@@ -333,6 +333,73 @@ func TestZRangeLimit(t *testing.T) {
 	assert.Equal(t, MAX_BATCH_NUM-1, len(ay))
 }
 
+func TestZRangeLimitPreCheck(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:myzset_range_precheck")
+	for i := 0; i < MAX_BATCH_NUM-1; i++ {
+		m := fmt.Sprintf("%8d", i)
+		_, err := db.ZAdd(0, key, common.ScorePair{Score: float64(i), Member: []byte(m)})
+		assert.Nil(t, err)
+	}
+
+	maxMem := fmt.Sprintf("%8d", MAX_BATCH_NUM+1)
+	ay, err := db.ZRangeByLex(key, nil, nil, common.RangeClose, 0, -1)
+	assert.Nil(t, err)
+	for _, v := range ay {
+		t.Logf("zrange key: %v", v)
+	}
+	assert.Equal(t, MAX_BATCH_NUM-1, len(ay))
+	mems, err := db.ZRangeByScore(key, 0, float64(MAX_BATCH_NUM*2), 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, MAX_BATCH_NUM-1, len(mems))
+
+	elems, err := db.ZRange(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, MAX_BATCH_NUM-1, len(elems))
+
+	total := MAX_BATCH_NUM + 10
+	for i := MAX_BATCH_NUM; i < MAX_BATCH_NUM+10; i++ {
+		m := fmt.Sprintf("%8d", i)
+		_, err := db.ZAdd(0, key, common.ScorePair{Score: float64(i), Member: []byte(m)})
+		assert.Nil(t, err)
+	}
+	_, err = db.ZRange(key, 0, -1)
+	assert.Equal(t, errTooMuchBatchSize, err)
+	_, err = db.ZRange(key, total-10, -1)
+	assert.Nil(t, err)
+
+	_, err = db.ZRangeByLex(key, nil, []byte(maxMem), common.RangeClose, 0, -1)
+	assert.Equal(t, errTooMuchBatchSize, err)
+	_, err = db.ZRangeByLex(key, nil, nil, common.RangeClose, 0, -1)
+	assert.Equal(t, errTooMuchBatchSize, err)
+	ay, err = db.ZRangeByLex(key, nil, nil, common.RangeClose, total-10, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 9, len(ay))
+
+	r1 := fmt.Sprintf("%8d", 1)
+	r2 := fmt.Sprintf("%8d", 2)
+	// count = -1 , but have a small range should return the results
+	ay, err = db.ZRangeByLex(key, []byte(r1), []byte(r2), common.RangeClose, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+
+	_, err = db.ZRangeByScore(key, common.MinScore, common.MaxScore, 0, -1)
+	assert.Equal(t, errTooMuchBatchSize, err)
+	elems, err = db.ZRangeByScore(key, common.MinScore, common.MaxScore, total-10, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 9, len(elems))
+	elems, err = db.ZRangeByScore(key, 0, 1, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(elems))
+
+	ay, err = db.ZRangeByLex(key, nil, []byte(maxMem), common.RangeClose, 0, MAX_BATCH_NUM-1)
+	assert.Nil(t, err)
+	assert.Equal(t, MAX_BATCH_NUM-1, len(ay))
+}
+
 func TestZLex(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
