@@ -454,11 +454,12 @@ func (ms *RocksStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte) 
 // It is the application's responsibility to not attempt to compact an index
 // greater than raftLog.applied.
 func (ms *RocksStorage) Compact(compactIndex uint64) error {
-	first, err := ms.FirstIndex()
+	// we should use seek here, since FirstIndex() will return snapshot index
+	first, err := ms.seekEntry(nil, 0, false)
 	if err != nil {
 		return err
 	}
-	if compactIndex+1 <= first {
+	if compactIndex <= first {
 		return ErrCompacted
 	}
 	li, err := ms.LastIndex()
@@ -470,8 +471,7 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 		return errors.New("compact is out of bound lastindex")
 	}
 	ms.setCachedFirstIndex(0)
-	batch := ms.wb
-	batch.Clear()
+	batch := gorocksdb.NewWriteBatch()
 	err = ms.deleteUntil(batch, compactIndex)
 	if err != nil {
 		return err

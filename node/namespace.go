@@ -23,6 +23,7 @@ import (
 
 var (
 	ErrNamespaceAlreadyExist      = errors.New("namespace already exist")
+	ErrNamespaceAlreadyStarting   = errors.New("namespace is starting")
 	ErrRaftIDMismatch             = errors.New("raft id mismatch")
 	ErrRaftConfMismatch           = errors.New("raft config mismatch")
 	errTimeoutLeaderTransfer      = errors.New("raft leader transfer failed")
@@ -122,7 +123,16 @@ func (nn *NamespaceNode) GetMembers() []*common.MemberInfo {
 }
 
 func (nn *NamespaceNode) Start(forceStandaloneCluster bool) error {
+	if !atomic.CompareAndSwapInt32(&nn.ready, 0, -1) {
+		if atomic.LoadInt32(&nn.ready) == 1 {
+			// already started
+			return nil
+		}
+		// starting
+		return ErrNamespaceAlreadyStarting
+	}
 	if err := nn.Node.Start(forceStandaloneCluster); err != nil {
+		atomic.StoreInt32(&nn.ready, 0)
 		return err
 	}
 	atomic.StoreInt32(&nn.ready, 1)
@@ -519,6 +529,23 @@ func (nsm *NamespaceMgr) GetNamespaceNodeFromGID(gid uint64) *NamespaceNode {
 		return nil
 	}
 	return kv
+}
+
+func (nsm *NamespaceMgr) GetWALDBStats(leaderOnly bool) map[string]map[string]interface{} {
+	nsm.mutex.RLock()
+	nsStats := make(map[string]map[string]interface{}, len(nsm.kvNodes))
+	for k, n := range nsm.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		if leaderOnly && !n.Node.IsLead() {
+			continue
+		}
+		dbStats := n.Node.GetWALDBInternalStats()
+		nsStats[k] = dbStats
+	}
+	nsm.mutex.RUnlock()
+	return nsStats
 }
 
 func (nsm *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
