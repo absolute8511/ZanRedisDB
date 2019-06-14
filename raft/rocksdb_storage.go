@@ -472,6 +472,7 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 	}
 	ms.setCachedFirstIndex(0)
 	batch := gorocksdb.NewWriteBatch()
+	// TODO: delete too much will slow down the write in db, improve this to avoid high rt.
 	err = ms.deleteUntil(batch, compactIndex)
 	if err != nil {
 		return err

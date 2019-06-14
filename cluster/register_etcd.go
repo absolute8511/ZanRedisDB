@@ -950,6 +950,7 @@ func (etcdReg *PDEtcdRegister) DeleteNamespacePart(ns string, partition int) err
 			return err
 		}
 	}
+	atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 	return nil
 }
 
@@ -966,6 +967,7 @@ func (etcdReg *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partiti
 			return err
 		}
 		replicaInfo.epoch = EpochType(rsp.Node.ModifiedIndex)
+		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		return nil
 	}
 	rsp, err := etcdReg.client.CompareAndSwap(etcdReg.getNamespaceReplicaInfoPath(ns, partition), string(value), 0, "", uint64(oldGen))
@@ -973,6 +975,7 @@ func (etcdReg *PDEtcdRegister) UpdateNamespacePartReplicaInfo(ns string, partiti
 		return err
 	}
 	replicaInfo.epoch = EpochType(rsp.Node.ModifiedIndex)
+	atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 	return nil
 }
 
@@ -983,6 +986,7 @@ func (etcdReg *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, sc
 			return err
 		}
 		schema.Epoch = EpochType(rsp.Node.ModifiedIndex)
+		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		return nil
 	}
 
@@ -992,6 +996,7 @@ func (etcdReg *PDEtcdRegister) UpdateNamespaceSchema(ns string, table string, sc
 		return err
 	}
 	schema.Epoch = EpochType(rsp.Node.ModifiedIndex)
+	atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 	return nil
 }
 
