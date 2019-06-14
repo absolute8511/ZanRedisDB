@@ -128,6 +128,7 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 			key := item[0].([]byte)
 			keyLen := len(key)
 			if *readable {
+				file.WriteString("\n")
 			} else {
 				binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
 				n, err := file.Write(lenBuf)
@@ -172,6 +173,7 @@ func kvbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 		value := item[0].([]byte)
 		valLen := len(value)
 		if *readable {
+			file.WriteString("\n")
 		} else {
 			lenBuf := make([]byte, 4)
 			binary.BigEndian.PutUint32(lenBuf, uint32(valLen))
