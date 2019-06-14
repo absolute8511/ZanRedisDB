@@ -388,6 +388,9 @@ func TestZRangeLimitPreCheck(t *testing.T) {
 
 	_, err = db.ZRangeByScore(key, common.MinScore, common.MaxScore, 0, -1)
 	assert.Equal(t, errTooMuchBatchSize, err)
+	_, err = db.ZRangeByScore(key, 0, MAX_BATCH_NUM+1, 0, -1)
+	assert.Equal(t, errTooMuchBatchSize, err)
+
 	elems, err = db.ZRangeByScore(key, common.MinScore, common.MaxScore, total-10, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, 9, len(elems))
