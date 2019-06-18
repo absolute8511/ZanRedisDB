@@ -327,7 +327,8 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 		uri := "http://" + ssi.RemoteAddr + ":" +
 			ssi.HttpAPIPort + common.APICheckBackup + "/" + fullNS
 
-		sc, err := common.APIRequest("GET", uri, bytes.NewBuffer(body), time.Second*3, nil)
+		// check may use long time, so we need use large timeout here
+		sc, err := common.APIRequest("GET", uri, bytes.NewBuffer(body), time.Second*60, nil)
 		if err != nil {
 			nodeLog.Infof("request %v error: %v", uri, err)
 			continue
