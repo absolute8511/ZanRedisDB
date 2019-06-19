@@ -523,7 +523,7 @@ func (dc *DataCoordinator) isReplicaReadyForRaft(nsNode *node.NamespaceNode, toR
 			nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(nodeID)
 			code, err := common.APIRequest("GET",
 				"http://"+net.JoinHostPort(nip, httpPort)+common.APINodeAllReady,
-				nil, time.Second, nil)
+				nil, time.Second*10, nil)
 			if err != nil {
 				cluster.CoordLog().Infof("not ready from %v for transfer leader: %v, %v", nip, code, err.Error())
 				return false

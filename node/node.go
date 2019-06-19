@@ -524,6 +524,11 @@ func (nd *KVNode) handleProposeReq() {
 }
 
 func (nd *KVNode) IsWriteReady() bool {
+	// to allow write while replica changed from 1 to 2, we
+	// should check if the replicator is 2
+	if nd.rn.config.Replicator == 2 {
+		return atomic.LoadInt32(&nd.rn.memberCnt) > 0
+	}
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(nd.rn.config.Replicator/2)
 }
 
