@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
-	"github.com/absolute8511/redcon"
 )
 
 func dispatchHandlersAndWait(cmdName string, handlers []common.MergeCommandFunc, cmds []redcon.Command, concurrent bool) []interface{} {
@@ -121,6 +121,9 @@ func (s *Server) getHandlersForKeys(cmdName string,
 		if hasWrite && hasRead {
 			// never happen
 			return nil, nil, false, errInvalidCommand
+		}
+		if nsNode.Node.IsStopping() {
+			return nil, nil, false, common.ErrStopped
 		}
 		if !isWrite && !nsNode.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 			// read only to leader to avoid stale read
@@ -252,6 +255,9 @@ func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc
 				// read only to leader to avoid stale read
 				// TODO: also read command can request the raft read index if not leader
 				return nil, nil, needConcurrent, node.ErrNamespaceNotLeader
+			}
+			if v.Node.IsStopping() {
+				return nil, nil, needConcurrent, common.ErrStopped
 			}
 			handlers = append(handlers, h)
 			commands = append(commands, newCmd)
