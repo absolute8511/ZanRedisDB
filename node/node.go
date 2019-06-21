@@ -231,6 +231,10 @@ func (nd *KVNode) StopRaft() {
 	nd.rn.StopNode()
 }
 
+func (nd *KVNode) IsStopping() bool {
+	return atomic.LoadInt32(&nd.stopping) == 1
+}
+
 func (nd *KVNode) Stop() {
 	if !atomic.CompareAndSwapInt32(&nd.stopping, 0, 1) {
 		return
@@ -257,6 +261,9 @@ func (nd *KVNode) BackupDB() {
 }
 
 func (nd *KVNode) OptimizeDB(table string) {
+	if nd.IsStopping() {
+		return
+	}
 	nd.rn.Infof("node %v begin optimize db, table %v", nd.ns, table)
 	defer nd.rn.Infof("node %v end optimize db", nd.ns)
 	nd.sm.Optimize(table)
@@ -524,6 +531,11 @@ func (nd *KVNode) handleProposeReq() {
 }
 
 func (nd *KVNode) IsWriteReady() bool {
+	// to allow write while replica changed from 1 to 2, we
+	// should check if the replicator is 2
+	if nd.rn.config.Replicator == 2 {
+		return atomic.LoadInt32(&nd.rn.memberCnt) > 0
+	}
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(nd.rn.config.Replicator/2)
 }
 

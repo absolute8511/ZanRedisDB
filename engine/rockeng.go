@@ -384,6 +384,7 @@ func (r *RockEng) CompactRange() {
 func (r *RockEng) CloseEng() bool {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
+			r.eng.Shutdown()
 			r.eng.Close()
 			dbLog.Infof("rocksdb engine closed: %v", r.GetDataDir())
 			return true

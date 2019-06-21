@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
@@ -623,12 +624,32 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		// the transfer status already be saved.
 		kvsm.w.Trigger(reqID, err)
 		if err == nil {
+			srcInfo := p.SyncAddr + p.SyncPath
+			latest := rockredis.GetLatestCheckpoint(localPath)
+			srcPath := path.Join(rockredis.GetBackupDir(p.SyncPath),
+				rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex))
+			newPath := path.Join(localPath, rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex))
+			if latest != "" {
+				// reuse last synced to speed up rsync
+				// TODO: check if source node info is matched current snapshot source
+				d, _ := ioutil.ReadFile(path.Join(latest, "source_node_info"))
+				if d != nil && string(d) == srcInfo {
+					kvsm.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
+					err = os.Rename(latest, newPath)
+					if err != nil {
+						kvsm.Infof("transfer reuse old path failed to rename: %v", err.Error())
+					}
+				} else {
+					kvsm.Infof("transfer not reuse old path: %v since node info mismatch: %v, %v", latest, d, srcInfo)
+				}
+			}
 			// how to make sure the client is not timeout while transferring
 			err = common.RunFileSync(p.SyncAddr,
-				path.Join(rockredis.GetBackupDir(p.SyncPath),
-					rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex)),
+				srcPath,
 				localPath, stop,
 			)
+			// write source node info to allow reuse next time
+			ioutil.WriteFile(path.Join(newPath, "source_node_info"), []byte(srcInfo), common.FILE_PERM)
 			if err != nil {
 				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)
 			} else {
