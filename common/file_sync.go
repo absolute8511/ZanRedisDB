@@ -19,7 +19,13 @@ func init() {
 }
 
 var rsyncLimit = int64(51200)
-var ErrRsyncTransferOutofdate = errors.New("waiting transfer snapshot too long, maybe out of date")
+
+const (
+	SnapWaitTimeout = time.Minute * 20
+)
+
+var ErrTransferOutofdate = errors.New("waiting transfer snapshot too long, maybe out of date")
+var ErrRsyncFailed = errors.New("transfer snapshot failed due to rsync error")
 
 func SetRsyncLimit(limit int64) {
 	atomic.StoreInt64(&rsyncLimit, limit)
@@ -43,8 +49,8 @@ func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan stru
 		}
 	}()
 
-	if time.Since(begin) > time.Hour/2 {
-		return ErrRsyncTransferOutofdate
+	if time.Since(begin) > SnapWaitTimeout {
+		return ErrTransferOutofdate
 	}
 	var cmd *exec.Cmd
 	if filepath.Base(srcPath) == filepath.Base(dstPath) {
@@ -68,6 +74,7 @@ func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan stru
 	err := cmd.Run()
 	if err != nil {
 		log.Printf("cmd %v error: %v", cmd, err)
+		return ErrRsyncFailed
 	}
 	return err
 }

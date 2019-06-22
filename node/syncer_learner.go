@@ -25,6 +25,13 @@ const (
 
 var syncerNormalInit = false
 
+var remoteSnapRecoverCnt int64
+var maxRemoteRecover = int64(2)
+
+func SetMaxRemoteRecover(n int) {
+	atomic.StoreInt64(&maxRemoteRecover, int64(n))
+}
+
 func SetSyncerNormalInit() {
 	syncerNormalInit = true
 }
@@ -392,6 +399,25 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		sm.Infof("init snap done %v-%v", raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 		sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
 		return nil
+	}
+
+	atomic.AddInt64(&remoteSnapRecoverCnt, 1)
+	defer atomic.AddInt64(&remoteSnapRecoverCnt, -1)
+	start := time.Now()
+	for atomic.LoadInt64(&remoteSnapRecoverCnt) > atomic.LoadInt64(&maxRemoteRecover) {
+		t := time.NewTimer(time.Second * 10)
+		select {
+		case <-stop:
+			t.Stop()
+			return common.ErrStopped
+		case <-t.C:
+			t.Stop()
+			sm.Infof("waiting restore snapshot %v", raftSnapshot.Metadata.String())
+			if time.Since(start) > common.SnapWaitTimeout {
+				sm.Infof("waiting restore snapshot timeout : %v", raftSnapshot.Metadata.String())
+				return common.ErrTransferOutofdate
+			}
+		}
 	}
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,

@@ -433,11 +433,30 @@ func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps ht
 	if param == "" {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
 	}
+	sLog.Infof("syncer only state changed to : %v", param)
 	if param == "true" {
 		node.SetSyncerOnly(true)
 	} else {
 		node.SetSyncerOnly(false)
 	}
+	return nil, nil
+}
+
+func (s *Server) doSetMaxRemoteRecover(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	param := reqParams.Get("cnt")
+	if param == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	}
+	n, err := strconv.Atoi(param)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG"}
+	}
+	sLog.Infof("max remote recover changed to : %v", n)
+	node.SetMaxRemoteRecover(n)
 	return nil, nil
 }
 
@@ -710,6 +729,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/rsynclimit", common.Decorate(s.doSetRsyncLimit, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
 	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
+	router.Handle("POST", "/conf/set/maxremoterecover", common.Decorate(s.doSetMaxRemoteRecover, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
 
