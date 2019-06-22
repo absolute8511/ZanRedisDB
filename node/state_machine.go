@@ -635,12 +635,20 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 				d, _ := ioutil.ReadFile(path.Join(latest, "source_node_info"))
 				if d != nil && string(d) == srcInfo {
 					kvsm.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
-					err = os.Rename(latest, newPath)
-					if err != nil {
-						kvsm.Infof("transfer reuse old path failed to rename: %v", err.Error())
+					if latest != newPath {
+						err = os.Rename(latest, newPath)
+						if err != nil {
+							kvsm.Infof("transfer reuse old path failed to rename: %v", err.Error())
+						}
 					}
 				} else {
 					kvsm.Infof("transfer not reuse old path: %v since node info mismatch: %v, %v", latest, d, srcInfo)
+					if latest == newPath {
+						// it has the same dir with the transferring snap but with the different node info,
+						// we should clean the dir to avoid reuse the data from different node
+						os.RemoveAll(latest)
+						kvsm.Infof("clean old path: %v since node info mismatch and same with new", latest)
+					}
 				}
 			}
 			// how to make sure the client is not timeout while transferring

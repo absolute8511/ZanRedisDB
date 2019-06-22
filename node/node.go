@@ -1149,6 +1149,9 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 	nd.rn.RestoreMembers(si)
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
 	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot, nd.stopChan)
+	if err != nil {
+		return err
+	}
 	nd.remoteSyncedStates.RestoreStates(si.RemoteSyncedStates)
 	return err
 }
