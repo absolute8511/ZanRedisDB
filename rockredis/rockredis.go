@@ -95,18 +95,18 @@ func (self CheckpointSortNames) Less(i, j int) bool {
 	return lterm < rterm
 }
 
-func GetLatestCheckpoint(checkpointDir string) string {
+func GetLatestCheckpoint(checkpointDir string, skipN int) string {
 	checkpointList, err := filepath.Glob(path.Join(checkpointDir, "*-*"))
 	if err != nil {
 		return ""
 	}
-	if len(checkpointList) == 0 {
+	if len(checkpointList) <= skipN {
 		return ""
 	}
 
 	sortedNameList := CheckpointSortNames(checkpointList)
 	sort.Sort(sortedNameList)
-	return sortedNameList[len(sortedNameList)-1]
+	return sortedNameList[len(sortedNameList)-1-skipN]
 }
 
 func purgeOldCheckpoint(keepNum int, checkpointDir string) {
