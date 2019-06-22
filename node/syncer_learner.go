@@ -397,6 +397,7 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
 	retry := 0
+	var restoreErr error
 	for retry < 3 {
 		forceRemote := true
 		if enableTest {
@@ -410,33 +411,35 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 				sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
 				return nil
 			}
+		} else {
+			restoreErr = err
 		}
 		syncAddr, syncDir := GetValidBackupInfo(sm.machineConfig, sm.clusterInfo, sm.fullNS, sm.ID, stop, raftSnapshot, retry, forceRemote)
 		// note the local sync path not supported, so we need try another replica if syncAddr is empty
 		if syncAddr == "" && syncDir == "" {
-			err = errors.New("no backup available from others")
+			restoreErr = errors.New("no backup available from others")
 		} else {
-			err = sm.lgSender.waitTransferSnapStatus(raftSnapshot, syncAddr, syncDir, stop)
-			if err != nil {
-				sm.Infof("wait transfer snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, err)
+			restoreErr = sm.lgSender.waitTransferSnapStatus(raftSnapshot, syncAddr, syncDir, stop)
+			if restoreErr != nil {
+				sm.Infof("wait transfer snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, restoreErr)
 			} else {
-				err := sm.lgSender.waitApplySnapStatus(raftSnapshot, stop)
-				if err != nil {
-					sm.Infof("wait apply snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, err)
-				} else {
-					break
+				restoreErr = sm.lgSender.waitApplySnapStatus(raftSnapshot, stop)
+				if restoreErr != nil {
+					sm.Infof("wait apply snap %v,%v,%v failed: %v", raftSnapshot.Metadata, syncAddr, syncDir, restoreErr)
 				}
 			}
+			// the snapshot maybe out of date, so we do not retry here
+			break
 		}
 		retry++
 		select {
 		case <-stop:
-			return err
+			return restoreErr
 		case <-time.After(time.Second):
 		}
 	}
-	if err != nil {
-		return err
+	if restoreErr != nil {
+		return restoreErr
 	}
 
 	sm.Infof("apply snap done %v", raftSnapshot.Metadata)
