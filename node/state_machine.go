@@ -29,6 +29,7 @@ const (
 // not update the remote raft term-index state.
 var errIgnoredRemoteApply = errors.New("remote raft apply should be ignored")
 var errRemoteSnapTransferFailed = errors.New("remote raft snapshot transfer failed")
+var errNobackupAvailable = errors.New("no backup available from others")
 
 func isUnrecoveryError(err error) bool {
 	if strings.HasPrefix(err.Error(), "IO error: No space left on device") {
@@ -302,7 +303,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	}
 	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, fullNS, localID, stopChan, raftSnapshot, retry, false)
 	if syncAddr == "" && syncDir == "" {
-		return errors.New("no backup available from others")
+		return errNobackupAvailable
 	}
 	select {
 	case <-stopChan:

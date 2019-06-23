@@ -460,7 +460,8 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		syncAddr, syncDir := GetValidBackupInfo(sm.machineConfig, sm.clusterInfo, sm.fullNS, sm.ID, stop, raftSnapshot, retry, forceRemote)
 		// note the local sync path not supported, so we need try another replica if syncAddr is empty
 		if syncAddr == "" && syncDir == "" {
-			restoreErr = errors.New("no backup available from others")
+			// the snap may be out of date on others, so we can not restore from old snapshot
+			restoreErr = errNobackupAvailable
 		} else {
 			restoreErr = sm.lgSender.waitTransferSnapStatus(raftSnapshot, syncAddr, syncDir, stop)
 			if restoreErr != nil {
@@ -482,10 +483,15 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		}
 	}
 	if restoreErr != nil {
+		sm.Infof("restore snapshot %v failed: %v", raftSnapshot.Metadata.String(), restoreErr)
+		if restoreErr == errNobackupAvailable && startup {
+			sm.Infof("restore snapshot %v while startup failed due to no snapshot, we can ignore in learner while startup", raftSnapshot.Metadata.String())
+			return nil
+		}
 		return restoreErr
 	}
 
-	sm.Infof("apply snap done %v", raftSnapshot.Metadata)
+	sm.Infof("apply snap done %v", raftSnapshot.Metadata.String())
 	sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
 	return nil
 }
