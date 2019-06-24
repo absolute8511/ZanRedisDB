@@ -65,7 +65,7 @@ func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint6
 		}
 		kvsm.w = w
 		return kvsm, err
-	} else if machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
+	} else if common.IsRoleLogSyncer(machineConfig.LearnerRole) {
 		lssm, err := NewLogSyncerSM(opts, machineConfig, localID, fullNS, clusterInfo)
 		if err != nil {
 			return nil, err
@@ -315,6 +315,9 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	srcPath := path.Join(rockredis.GetBackupDir(syncDir),
 		rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index))
 
+	// TODO: since most backup on local is not transferred by others,
+	// if we need reuse we need check all backups that has source node info,
+	// and skip the latest snap file in snap dir.
 	newPath := handleReuseOldCheckpoint(srcInfo, localPath,
 		raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index,
 		2)
@@ -438,6 +441,8 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		case <-time.After(time.Second):
 		}
 	}
+	// TODO: if err is errNoBackupAvailable from others, it may out of date, while
+	// startup we can ignore this recover since it will send newest snapshot after startup from leader
 	return errors.New("failed to restore from snapshot")
 }
 

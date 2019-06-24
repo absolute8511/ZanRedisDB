@@ -168,7 +168,7 @@ func (dc *DataCoordinator) Start() error {
 
 		dc.wg.Add(1)
 		go dc.checkForUnsyncedNamespaces()
-	} else if dc.learnerRole == common.LearnerRoleLogSyncer {
+	} else if common.IsRoleLogSyncer(dc.learnerRole) {
 		dc.loadLocalNamespaceForLearners()
 		dc.wg.Add(1)
 		go dc.checkForUnsyncedLogSyncers()
@@ -885,7 +885,8 @@ func (dc *DataCoordinator) getRaftAddrForNode(nid string) (string, *cluster.Coor
 	return node.RaftTransportAddr, nil
 }
 
-func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInfo, raftID uint64, join bool) (*node.NamespaceConfig, *cluster.CoordErr) {
+func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInfo, raftID uint64,
+	join bool, forceStandaloneCluster bool) (*node.NamespaceConfig, *cluster.CoordErr) {
 	var err *cluster.CoordErr
 	nsConf := node.NewNSConfig()
 	nsConf.BaseName = nsInfo.Name
@@ -931,7 +932,12 @@ func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInf
 	}
 	if !join && len(nsConf.RaftGroupConf.SeedNodes) <= nsInfo.Replica/2 {
 		cluster.CoordLog().Warningf("seed nodes for namespace %v not enough: %v", nsInfo.GetDesp(), nsConf.RaftGroupConf)
-		return nil, cluster.ErrNamespaceConfInvalid
+		// we should allow single node as new raft cluster while in disaster re-init mode.
+		// In this case, we only have one seed node while init. (Notice, it may not allow write while init
+		// since the raft node is small than half of the replicator )
+		if !forceStandaloneCluster {
+			return nil, cluster.ErrNamespaceConfInvalid
+		}
 	}
 	return nsConf, nil
 }
@@ -1128,7 +1134,7 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 	if forceStandaloneCluster {
 		join = false
 	}
-	nsConf, err := dc.prepareNamespaceConf(nsInfo, raftID, join)
+	nsConf, err := dc.prepareNamespaceConf(nsInfo, raftID, join, forceStandaloneCluster)
 	if err != nil {
 		go dc.tryCheckNamespaces()
 		cluster.CoordLog().Warningf("prepare join namespace %v failed: %v", nsInfo.GetDesp(), err)

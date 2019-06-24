@@ -585,7 +585,7 @@ func (s *Server) doTableStats(w http.ResponseWriter, req *http.Request, ps httpr
 }
 
 func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	if s.conf.LearnerRole == common.LearnerRoleLogSyncer {
+	if common.IsRoleLogSyncer(s.conf.LearnerRole) {
 		allUrls := make(map[string]bool)
 		recvLatency, syncLatency := node.GetLogLatencyStats()
 		recvStats, syncStats := s.GetLogSyncStatsInSyncLearner()

@@ -126,7 +126,7 @@ func (sm *logSyncerSM) GetLogSyncStats() (common.LogSyncStats, common.LogSyncSta
 func (sm *logSyncerSM) GetStats(table string) common.NamespaceStats {
 	var ns common.NamespaceStats
 	stat := make(map[string]interface{})
-	stat["role"] = common.LearnerRoleLogSyncer
+	stat["role"] = sm.machineConfig.LearnerRole
 	stat["synced"] = atomic.LoadInt64(&sm.syncedCnt)
 	stat["synced_index"] = atomic.LoadUint64(&sm.syncedState.SyncedIndex)
 	stat["synced_term"] = atomic.LoadUint64(&sm.syncedState.SyncedTerm)
