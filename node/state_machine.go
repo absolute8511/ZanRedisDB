@@ -321,7 +321,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	// and skip the latest snap file in snap dir.
 	_, newPath := handleReuseOldCheckpoint(srcInfo, localPath,
 		raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index,
-		2)
+		0)
 
 	// copy backup data from the remote leader node, and recovery backup from it
 	// if local has some old backup data, we should use rsync to sync the data file
