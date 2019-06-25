@@ -86,6 +86,7 @@ func (rss *remoteSyncedStateMgr) RemoveApplyingSnap(name string, state SyncedSta
 func (rss *remoteSyncedStateMgr) AddApplyingSnap(name string, state SyncedState) (*SnapApplyStatus, bool) {
 	added := false
 	rss.Lock()
+	defer rss.Unlock()
 	sas, ok := rss.remoteSnapshotsApplying[name]
 	canAdd := false
 	if !ok {
@@ -118,7 +119,6 @@ func (rss *remoteSyncedStateMgr) AddApplyingSnap(name string, state SyncedState)
 		rss.remoteSnapshotsApplying[name] = sas
 		added = true
 	}
-	rss.Unlock()
 	return sas, added
 }
 

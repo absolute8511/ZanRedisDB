@@ -348,6 +348,7 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 	// first, query and wait all replicas to finish snapshot transfer
 	// if all done, notify apply the transferred snapshot and wait all done
 	// then wait all apply done.
+	lastNotifyApply := time.Now()
 	for {
 		select {
 		case <-stop:
@@ -361,7 +362,8 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 		// wait all became ApplyTransferSuccess or ApplySuccess
 		allReady := true
 		allTransferReady := true
-		needWait := false
+		needWaitTransfer := false
+		needWaitApply := false
 		for _, addr := range addrs {
 			applyStatus, err := s.getApplySnapStatus(raftSnapshot, addr)
 			if err != nil {
@@ -370,12 +372,18 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 			if applyStatus.Status != syncerpb.ApplySuccess {
 				allReady = false
 			}
-			if applyStatus.Status != syncerpb.ApplySuccess && applyStatus.Status != syncerpb.ApplyTransferSuccess {
+			if applyStatus.Status != syncerpb.ApplySuccess &&
+				applyStatus.Status != syncerpb.ApplyTransferSuccess &&
+				applyStatus.Status != syncerpb.ApplyWaiting {
 				allTransferReady = false
 			}
-			if applyStatus.Status == syncerpb.ApplyWaiting || applyStatus.Status == syncerpb.ApplyWaitingTransfer ||
+			if applyStatus.Status == syncerpb.ApplyWaitingTransfer ||
 				applyStatus.Status == syncerpb.ApplyUnknown {
-				needWait = true
+				needWaitTransfer = true
+			}
+			if applyStatus.Status == syncerpb.ApplyWaiting ||
+				applyStatus.Status == syncerpb.ApplyUnknown {
+				needWaitApply = true
 			}
 			if applyStatus.Status == syncerpb.ApplyFailed {
 				nodeLog.Infof("node %v failed to apply snapshot : %v", addr, applyStatus)
@@ -386,11 +394,16 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 				return errors.New("some node failed to apply snapshot")
 			}
 		}
-		if needWait {
+		if needWaitTransfer || needWaitApply {
 			select {
 			case <-stop:
 				return common.ErrStopped
 			case <-time.After(time.Second * 10):
+				if needWaitApply && allTransferReady && time.Since(lastNotifyApply) > time.Minute*5 {
+					// the proposal for apply snapshot may be lost, we need send it again to begin apply
+					s.notifyApplySnap(raftSnapshot)
+					lastNotifyApply = time.Now()
+				}
 				continue
 			}
 		}
@@ -399,6 +412,7 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 		}
 		if allTransferReady {
 			s.notifyApplySnap(raftSnapshot)
+			lastNotifyApply = time.Now()
 			time.Sleep(time.Second)
 		} else {
 			return errors.New("some node failed to apply snapshot")
