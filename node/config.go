@@ -47,6 +47,7 @@ type MachineConfig struct {
 	TickMs                 int                `json:"tick_ms"`
 	KeepBackup             int                `json:"keep_backup"`
 	KeepWAL                int                `json:"keep_wal"`
+	CheckTimeout           int                `json:"check_timeout"`
 	UseRocksWAL            bool               `json:"use_rocks_wal"`
 	SharedRocksWAL         bool               `json:"shared_rocks_wal"`
 	LearnerRole            string             `json:"learner_role"`

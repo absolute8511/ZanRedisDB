@@ -29,6 +29,7 @@ type ServerConfig struct {
 	DefaultSnapCatchup   int               `json:"default_snap_catchup"`
 	KeepBackup           int               `json:"keep_backup"`
 	KeepWAL              int               `json:"keep_wal"`
+	CheckTimeout         int               `json:"check_timeout"`
 	UseRocksWAL          bool              `json:"use_rocks_wal"`
 	SharedRocksWAL       bool              `json:"shared_rocks_wal"`
 
