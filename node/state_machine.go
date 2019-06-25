@@ -256,32 +256,33 @@ func checkLocalBackup(store *KVStore, rs raftpb.Snapshot) (bool, error) {
 	return store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
 }
 
-func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, index uint64, skipReuseN int) string {
+func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, index uint64, skipReuseN int) (string, string) {
 	newPath := path.Join(localPath, rockredis.GetCheckpointDir(term, index))
-	latest := rockredis.GetLatestCheckpoint(localPath, skipReuseN)
-	if latest != "" {
+	reused := ""
+
+	latest := rockredis.GetLatestCheckpoint(localPath, skipReuseN, func(dir string) bool {
 		// reuse last synced to speed up rsync
 		// check if source node info is matched current snapshot source
-		d, _ := ioutil.ReadFile(path.Join(latest, "source_node_info"))
+		d, _ := ioutil.ReadFile(path.Join(dir, "source_node_info"))
 		if d != nil && string(d) == srcInfo {
-			nodeLog.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
-			if latest != newPath {
-				err := os.Rename(latest, newPath)
-				if err != nil {
-					nodeLog.Infof("transfer reuse old path failed to rename: %v", err.Error())
-				}
-			}
-		} else {
-			nodeLog.Infof("transfer not reuse old path: %v since node info mismatch: %v, %v", latest, d, srcInfo)
-			if latest == newPath {
-				// it has the same dir with the transferring snap but with the different node info,
-				// we should clean the dir to avoid reuse the data from different node
-				os.RemoveAll(latest)
-				nodeLog.Infof("clean old path: %v since node info mismatch and same with new", latest)
-			}
+			return true
+		} else if dir == newPath {
+			// it has the same dir with the transferring snap but with the different node info,
+			// we should clean the dir to avoid reuse the data from different node
+			os.RemoveAll(dir)
+			nodeLog.Infof("clean old path: %v since node info mismatch and same with new", dir)
+		}
+		return false
+	})
+	if latest != "" && latest != newPath {
+		nodeLog.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
+		reused = latest
+		err := os.Rename(latest, newPath)
+		if err != nil {
+			nodeLog.Infof("transfer reuse old path failed to rename: %v", err.Error())
 		}
 	}
-	return newPath
+	return reused, newPath
 }
 
 func postFileSync(newPath string, srcInfo string) {
@@ -318,7 +319,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	// TODO: since most backup on local is not transferred by others,
 	// if we need reuse we need check all backups that has source node info,
 	// and skip the latest snap file in snap dir.
-	newPath := handleReuseOldCheckpoint(srcInfo, localPath,
+	_, newPath := handleReuseOldCheckpoint(srcInfo, localPath,
 		raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index,
 		2)
 
@@ -678,7 +679,7 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 			srcPath := path.Join(rockredis.GetBackupDir(p.SyncPath),
 				rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex))
 
-			newPath := handleReuseOldCheckpoint(srcInfo, localPath, p.RemoteTerm, p.RemoteIndex, 0)
+			_, newPath := handleReuseOldCheckpoint(srcInfo, localPath, p.RemoteTerm, p.RemoteIndex, 0)
 			// how to make sure the client is not timeout while transferring
 			err = common.RunFileSync(p.SyncAddr,
 				srcPath,
