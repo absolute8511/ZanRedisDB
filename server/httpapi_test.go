@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
 )
@@ -189,4 +190,87 @@ func TestMarshalRaftStats(t *testing.T) {
 	}
 	d, _ := json.Marshal(rstat)
 	t.Logf("%v =======", string(d))
+}
+
+func TestSetGetDynamicConf(t *testing.T) {
+	c := getMergeTestConn(t)
+	defer c.Close()
+	// empty str conf
+	uriGet := fmt.Sprintf("http://127.0.0.1:%v/conf/get?type=str&key=test_str",
+		redisportMerge+1)
+
+	type strConf struct {
+		Key   string
+		Value string
+	}
+	resp := strConf{}
+	sc, err := common.APIRequest("GET", uriGet, nil, time.Second*3, &resp)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	assert.Equal(t, "test_str", resp.Key)
+	assert.Equal(t, "test_str", resp.Value)
+
+	uriSet := fmt.Sprintf("http://127.0.0.1:%v/conf/set?type=str&key=test_str&value=",
+		redisportMerge+1)
+
+	sc, err = common.APIRequest("POST", uriSet, nil, time.Second*3, nil)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+
+	sc, err = common.APIRequest("GET", uriGet, nil, time.Second*3, &resp)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	assert.Equal(t, "test_str", resp.Key)
+	assert.Equal(t, "", resp.Value)
+
+	type intConf struct {
+		Key   string `json:"key,omitempty"`
+		Value int    `json:"value,omitempty"`
+	}
+	// change int conf
+	uriGet = fmt.Sprintf("http://127.0.0.1:%v/conf/get?type=int&key=empty_int",
+		redisportMerge+1)
+	respInt := intConf{}
+	sc, err = common.APIRequest("GET", uriGet, nil, time.Second*3, &respInt)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	assert.Equal(t, "empty_int", respInt.Key)
+	assert.Equal(t, 0, respInt.Value)
+	uriSet = fmt.Sprintf("http://127.0.0.1:%v/conf/set?type=int&key=empty_int&value=10",
+		redisportMerge+1)
+	sc, err = common.APIRequest("POST", uriSet, nil, time.Second*3, nil)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	sc, err = common.APIRequest("GET", uriGet, nil, time.Second*3, &respInt)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	assert.Equal(t, "empty_int", respInt.Key)
+	assert.Equal(t, 10, respInt.Value)
+
+	// set not exist int/str conf
+	uriSet = fmt.Sprintf("http://127.0.0.1:%v/conf/set?type=int&key=noexist_int&value=10",
+		redisportMerge+1)
+	sc, err = common.APIRequest("POST", uriSet, nil, time.Second*3, nil)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	uriGet = fmt.Sprintf("http://127.0.0.1:%v/conf/get?type=int&key=noexist_int",
+		redisportMerge+1)
+	sc, err = common.APIRequest("GET", uriGet, nil, time.Second*3, &respInt)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	assert.Equal(t, "noexist_int", respInt.Key)
+	assert.Equal(t, 0, respInt.Value)
+
+	uriSet = fmt.Sprintf("http://127.0.0.1:%v/conf/set?type=str&key=noexist_str&value=nostr",
+		redisportMerge+1)
+	sc, err = common.APIRequest("POST", uriSet, nil, time.Second*3, nil)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	uriGet = fmt.Sprintf("http://127.0.0.1:%v/conf/get?type=str&key=noexist_str",
+		redisportMerge+1)
+	sc, err = common.APIRequest("GET", uriGet, nil, time.Second*3, &resp)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, sc)
+	assert.Equal(t, "noexist_str", resp.Key)
+	assert.Equal(t, "nostr", resp.Value)
 }

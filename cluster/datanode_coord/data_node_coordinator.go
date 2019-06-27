@@ -286,7 +286,9 @@ func (dc *DataCoordinator) loadLocalNamespaceData() error {
 				continue
 			}
 
-			dyConf := &node.NamespaceDynamicConf{}
+			dyConf := &node.NamespaceDynamicConf{
+				nsInfo.Replica,
+			}
 			localNamespace.SetDynamicInfo(*dyConf)
 			localErr := dc.checkAndFixLocalNamespaceData(&nsInfo, localNamespace)
 			if localErr != nil {
@@ -1012,7 +1014,9 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroup(nsInfo cluster.PartitionMeta
 		return cluster.ErrCatchupRunningBusy
 	}
 
-	dyConf := &node.NamespaceDynamicConf{}
+	dyConf := &node.NamespaceDynamicConf{
+		nsInfo.Replica,
+	}
 	localNamespace.SetDynamicInfo(*dyConf)
 	if localNamespace.IsDataNeedFix() {
 		// clean local data
@@ -1163,7 +1167,9 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 		cluster.CoordLog().Warningf("local namespace %v init magic code failed: %v", nsInfo.GetDesp(), localErr)
 		return localNode, cluster.ErrLocalInitNamespaceFailed
 	}
-	dyConf := &node.NamespaceDynamicConf{}
+	dyConf := &node.NamespaceDynamicConf{
+		nsConf.Replicator,
+	}
 	localNode.SetDynamicInfo(*dyConf)
 	if err := localNode.Start(forceStandaloneCluster); err != nil {
 		return nil, cluster.ErrLocalInitNamespaceFailed

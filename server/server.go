@@ -154,7 +154,6 @@ func NewServer(conf ServerConfig) *Server {
 		ElectionTick:      conf.ElectionTick,
 		KeepBackup:        conf.KeepBackup,
 		KeepWAL:           conf.KeepWAL,
-		CheckTimeout:      conf.CheckTimeout,
 		UseRocksWAL:       conf.UseRocksWAL,
 		SharedRocksWAL:    conf.SharedRocksWAL,
 		LearnerRole:       conf.LearnerRole,

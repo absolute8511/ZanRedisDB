@@ -442,21 +442,57 @@ func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps ht
 	return nil, nil
 }
 
-func (s *Server) doSetMaxRemoteRecover(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doSetDynamicConf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
-	param := reqParams.Get("cnt")
-	if param == "" {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	paramT := reqParams.Get("type")
+	paramKey := reqParams.Get("key")
+	paramV := reqParams.Get("value")
+	if paramT == "int" {
+		n, err := strconv.Atoi(paramV)
+		if err != nil {
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG"}
+		}
+		common.SetIntDynamicConf(paramKey, n)
+	} else if paramT == "str" {
+		common.SetStrDynamicConf(paramKey, paramV)
+	} else {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG: param type should be int/str"}
 	}
-	n, err := strconv.Atoi(param)
+	sLog.Infof("conf %v changed to : %v", paramKey, paramV)
+	return nil, nil
+}
+
+func (s *Server) doGetDynamicConf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG"}
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
-	sLog.Infof("max remote recover changed to : %v", n)
-	node.SetMaxRemoteRecover(n)
+	paramT := reqParams.Get("type")
+	paramKey := reqParams.Get("key")
+	if paramT == "int" {
+		v := common.GetIntDynamicConf(paramKey)
+		return struct {
+			Key   string `json:"key"`
+			Value int    `json:"value"`
+		}{
+			Key:   paramKey,
+			Value: v,
+		}, nil
+	} else if paramT == "str" {
+		v := common.GetStrDynamicConf(paramKey)
+		return struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}{
+			Key:   paramKey,
+			Value: v,
+		}, nil
+	} else {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG: param type should be int/str"}
+	}
 	return nil, nil
 }
 
@@ -729,7 +765,8 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/rsynclimit", common.Decorate(s.doSetRsyncLimit, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
 	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
-	router.Handle("POST", "/conf/set/maxremoterecover", common.Decorate(s.doSetMaxRemoteRecover, log, common.V1))
+	router.Handle("POST", "/conf/set", common.Decorate(s.doSetDynamicConf, log, common.V1))
+	router.Handle("GET", "/conf/get", common.Decorate(s.doGetDynamicConf, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
 

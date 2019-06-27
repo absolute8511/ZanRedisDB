@@ -14,7 +14,7 @@ import (
 func Test_handleReuseOldCheckpoint(t *testing.T) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("sm-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
-	//defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir)
 	t.Logf("dir:%v\n", tmpDir)
 	terms := []uint64{
 		0x0001,
@@ -42,21 +42,26 @@ func Test_handleReuseOldCheckpoint(t *testing.T) {
 	}
 	destPath1 := path.Join(tmpDir, fmt.Sprintf("%016x-%016x", 1, 1))
 	destPath2 := path.Join(tmpDir, fmt.Sprintf("%016x-%016x", 2, 2))
+	lastPath := path.Join(tmpDir, fmt.Sprintf("%04x-%05x", terms[len(terms)-1], int(indexs[len(indexs)-1])+cntIdx-1))
+	firstPath := path.Join(tmpDir, fmt.Sprintf("%04x-%05x", terms[0], indexs[0]))
+	mid1Path := path.Join(tmpDir, fmt.Sprintf("%04x-%05x", terms[len(terms)-1], int(indexs[len(indexs)-1])+cntIdx/2))
+	mid2Path := path.Join(tmpDir, fmt.Sprintf("%04x-%05x", terms[len(terms)-2], int(indexs[len(indexs)-2])+cntIdx/2))
+	mid3Path := path.Join(tmpDir, fmt.Sprintf("%04x-%05x", terms[len(terms)-3], int(indexs[len(indexs)-3])+cntIdx/2))
 	tests := []struct {
 		name  string
 		args  args
 		want  string
 		want1 string
 	}{
-		{"src match in first", args{"matchfirst", tmpDir, 1, 1, 0}, path.Join(tmpDir, "031a-0c009"), destPath1},
-		{"src match in last", args{"matchlast", tmpDir, 1, 1, 0}, path.Join(tmpDir, "0001-01000"), destPath1},
+		{"src match in first", args{"matchfirst", tmpDir, 1, 1, 0}, lastPath, destPath1},
+		{"src match in last", args{"matchlast", tmpDir, 1, 1, 0}, firstPath, destPath1},
 		{"src not match", args{"notmatch", tmpDir, 1, 1, 0}, "", destPath1},
-		{"src match in middle", args{"matchmiddle", tmpDir, 1, 1, 0}, path.Join(tmpDir, "031a-0c005"), destPath1},
-		{"src match in same with old", args{"matchfirst", tmpDir, 0x01ba, 0x02ab46c3, 0}, path.Join(tmpDir, "031a-0c009"), path.Join(tmpDir, "00000000000001ba-0000000002ab46c3")},
+		{"src match in middle", args{"matchmiddle", tmpDir, 1, 1, 0}, mid1Path, destPath1},
+		{"src match in same with old", args{"matchfirst", tmpDir, 0x01ba, 0x02ab46c3, 0}, lastPath, path.Join(tmpDir, "00000000000001ba-0000000002ab46c3")},
 		{"src match first skip 1", args{"matchfirst", tmpDir, 2, 2, 1}, "", destPath2},
 		{"src match last skip 1", args{"matchlast", tmpDir, 2, 2, 1}, "", destPath2},
-		{"src match middle skip 1", args{"matchmiddle", tmpDir, 2, 2, 1}, path.Join(tmpDir, "021a-0b005"), destPath2},
-		{"src match middle skip 2", args{"matchmiddle", tmpDir, 2, 2, 2}, path.Join(tmpDir, "011a-0a005"), destPath2},
+		{"src match middle skip 1", args{"matchmiddle", tmpDir, 2, 2, 1}, mid2Path, destPath2},
+		{"src match middle skip 2", args{"matchmiddle", tmpDir, 2, 2, 2}, mid3Path, destPath2},
 		{"src match middle skip all", args{"matchmiddle", tmpDir, 2, 2, len(terms)}, "", destPath2},
 	}
 

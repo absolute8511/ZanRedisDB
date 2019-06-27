@@ -530,13 +530,20 @@ func (nd *KVNode) handleProposeReq() {
 	}
 }
 
+func (nd *KVNode) SetDynamicInfo(dync NamespaceDynamicConf) {
+	if nd.rn != nil && nd.rn.config != nil {
+		atomic.StoreInt32(&nd.rn.config.Replicator, int32(dync.Replicator))
+	}
+}
+
 func (nd *KVNode) IsWriteReady() bool {
 	// to allow write while replica changed from 1 to 2, we
 	// should check if the replicator is 2
-	if nd.rn.config.Replicator == 2 {
+	rep := atomic.LoadInt32(&nd.rn.config.Replicator)
+	if rep == 2 {
 		return atomic.LoadInt32(&nd.rn.memberCnt) > 0
 	}
-	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(nd.rn.config.Replicator/2)
+	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(rep/2)
 }
 
 func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {

@@ -29,6 +29,7 @@ func NewNSConfig() *NamespaceConfig {
 }
 
 type NamespaceDynamicConf struct {
+	Replicator int
 }
 
 type RaftGroupConfig struct {
@@ -47,7 +48,6 @@ type MachineConfig struct {
 	TickMs                 int                `json:"tick_ms"`
 	KeepBackup             int                `json:"keep_backup"`
 	KeepWAL                int                `json:"keep_wal"`
-	CheckTimeout           int                `json:"check_timeout"`
 	UseRocksWAL            bool               `json:"use_rocks_wal"`
 	SharedRocksWAL         bool               `json:"shared_rocks_wal"`
 	LearnerRole            string             `json:"learner_role"`
@@ -81,7 +81,7 @@ type RaftConfig struct {
 	RaftPeers      map[uint64]ReplicaInfo `json:"raft_peers"`
 	SnapCount      int                    `json:"snap_count"`
 	SnapCatchup    int                    `json:"snap_catchup"`
-	Replicator     int                    `json:"replicator"`
+	Replicator     int32                  `json:"replicator"`
 	OptimizedFsync bool                   `json:"optimized_fsync"`
 	rockEng        *engine.RockEng
 	nodeConfig     *MachineConfig

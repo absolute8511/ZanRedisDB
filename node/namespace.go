@@ -58,6 +58,7 @@ func (nn *NamespaceNode) SwitchForLearnerLeader(isLearnerLeader bool) {
 }
 
 func (nn *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
+	nn.Node.SetDynamicInfo(dync)
 }
 
 func (nn *NamespaceNode) SetMagicCode(magic int64) error {
@@ -403,7 +404,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		RaftPeers:      clusterNodes,
 		SnapCount:      conf.SnapCount,
 		SnapCatchup:    conf.SnapCatchup,
-		Replicator:     conf.Replicator,
+		Replicator:     int32(conf.Replicator),
 		OptimizedFsync: conf.OptimizedFsync,
 		nodeConfig:     nsm.machineConf,
 	}

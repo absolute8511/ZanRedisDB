@@ -377,10 +377,7 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 
 		// check may use long time, so we need use large timeout here, some slow disk
 		// may cause 10 min to check
-		to := time.Second * 60
-		if machineConfig.CheckTimeout > 0 {
-			to = time.Second * time.Duration(machineConfig.CheckTimeout)
-		}
+		to := time.Second * time.Duration(common.GetIntDynamicConf(common.ConfCheckSnapTimeout))
 		sc, err := common.APIRequest("GET", uri, bytes.NewBuffer(body), to, nil)
 		if err != nil {
 			nodeLog.Infof("request %v error: %v", uri, err)
@@ -423,6 +420,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
 	retry := 0
+	var finalErr error
 	for retry < 3 {
 		err := prepareSnapshotForStore(kvsm.store, kvsm.machineConfig, kvsm.clusterInfo, kvsm.fullNS,
 			kvsm.ID, stop, raftSnapshot, retry)
@@ -433,10 +431,13 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 				err == common.ErrStopped {
 				return err
 			}
+			finalErr = err
 		} else {
 			err = kvsm.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 			if err == nil {
 				return nil
+			} else {
+				finalErr = err
 			}
 		}
 		retry++
@@ -445,6 +446,13 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		case <-stop:
 			return err
 		case <-time.After(time.Second):
+		}
+	}
+	if finalErr == errNobackupAvailable && startup {
+		kvsm.Infof("failed to restore snapshot at startup since no any backup from anyware")
+		if common.IsConfSetted(common.ConfIgnoreStartupNoBackup) {
+			kvsm.Infof("ignore failed at startup for no any backup from anyware")
+			return nil
 		}
 	}
 	// TODO: if err is errNoBackupAvailable from others, it may out of date, while
@@ -685,12 +693,16 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 				rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex))
 
 			_, newPath := handleReuseOldCheckpoint(srcInfo, localPath, p.RemoteTerm, p.RemoteIndex, 0)
-			// how to make sure the client is not timeout while transferring
-			err = common.RunFileSync(p.SyncAddr,
-				srcPath,
-				localPath, stop,
-			)
-			postFileSync(newPath, srcInfo)
+
+			if common.IsConfSetted(common.ConfIgnoreRemoteFileSync) {
+				err = nil
+			} else {
+				err = common.RunFileSync(p.SyncAddr,
+					srcPath,
+					localPath, stop,
+				)
+				postFileSync(newPath, srcInfo)
+			}
 			if err != nil {
 				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)
 			} else {

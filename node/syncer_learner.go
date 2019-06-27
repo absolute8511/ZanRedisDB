@@ -27,11 +27,6 @@ const (
 var syncerNormalInit = false
 
 var remoteSnapRecoverCnt int64
-var maxRemoteRecover = int64(2)
-
-func SetMaxRemoteRecover(n int) {
-	atomic.StoreInt64(&maxRemoteRecover, int64(n))
-}
 
 func SetSyncerNormalInit() {
 	syncerNormalInit = true
@@ -427,7 +422,7 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	myRun := atomic.AddInt64(&remoteSnapRecoverCnt, 1)
 	defer atomic.AddInt64(&remoteSnapRecoverCnt, -1)
 	start := time.Now()
-	for myRun > atomic.LoadInt64(&maxRemoteRecover) {
+	for myRun > int64(common.GetIntDynamicConf(common.ConfMaxRemoteRecover)) {
 		oldRun := myRun
 		myRun, err = sm.waitAndCheckTransferLimit(start, stop)
 		if err != nil {
