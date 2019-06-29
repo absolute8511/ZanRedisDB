@@ -29,6 +29,7 @@ func NewNSConfig() *NamespaceConfig {
 }
 
 type NamespaceDynamicConf struct {
+	Replicator int
 }
 
 type RaftGroupConfig struct {
@@ -80,7 +81,7 @@ type RaftConfig struct {
 	RaftPeers      map[uint64]ReplicaInfo `json:"raft_peers"`
 	SnapCount      int                    `json:"snap_count"`
 	SnapCatchup    int                    `json:"snap_catchup"`
-	Replicator     int                    `json:"replicator"`
+	Replicator     int32                  `json:"replicator"`
 	OptimizedFsync bool                   `json:"optimized_fsync"`
 	rockEng        *engine.RockEng
 	nodeConfig     *MachineConfig

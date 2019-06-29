@@ -56,6 +56,10 @@ type DBIterator struct {
 // upper bound is exclusive
 func NewDBIterator(db *gorocksdb.DB, withSnap bool, prefixSame bool, lowbound []byte, upbound []byte, ignoreDel bool) (*DBIterator, error) {
 	db.RLock()
+	if !db.IsOpened() {
+		db.RUnlock()
+		return nil, common.ErrStopped
+	}
 	dbit := &DBIterator{
 		db: db,
 	}

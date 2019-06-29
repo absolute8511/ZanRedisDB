@@ -29,6 +29,7 @@ const (
 // not update the remote raft term-index state.
 var errIgnoredRemoteApply = errors.New("remote raft apply should be ignored")
 var errRemoteSnapTransferFailed = errors.New("remote raft snapshot transfer failed")
+var errNobackupAvailable = errors.New("no backup available from others")
 
 func isUnrecoveryError(err error) bool {
 	if strings.HasPrefix(err.Error(), "IO error: No space left on device") {
@@ -64,7 +65,7 @@ func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint6
 		}
 		kvsm.w = w
 		return kvsm, err
-	} else if machineConfig.LearnerRole == common.LearnerRoleLogSyncer {
+	} else if common.IsRoleLogSyncer(machineConfig.LearnerRole) {
 		lssm, err := NewLogSyncerSM(opts, machineConfig, localID, fullNS, clusterInfo)
 		if err != nil {
 			return nil, err
@@ -255,32 +256,33 @@ func checkLocalBackup(store *KVStore, rs raftpb.Snapshot) (bool, error) {
 	return store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
 }
 
-func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, index uint64, skipReuseN int) string {
+func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, index uint64, skipReuseN int) (string, string) {
 	newPath := path.Join(localPath, rockredis.GetCheckpointDir(term, index))
-	latest := rockredis.GetLatestCheckpoint(localPath, skipReuseN)
-	if latest != "" {
+	reused := ""
+
+	latest := rockredis.GetLatestCheckpoint(localPath, skipReuseN, func(dir string) bool {
 		// reuse last synced to speed up rsync
 		// check if source node info is matched current snapshot source
-		d, _ := ioutil.ReadFile(path.Join(latest, "source_node_info"))
+		d, _ := ioutil.ReadFile(path.Join(dir, "source_node_info"))
 		if d != nil && string(d) == srcInfo {
-			nodeLog.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
-			if latest != newPath {
-				err := os.Rename(latest, newPath)
-				if err != nil {
-					nodeLog.Infof("transfer reuse old path failed to rename: %v", err.Error())
-				}
-			}
-		} else {
-			nodeLog.Infof("transfer not reuse old path: %v since node info mismatch: %v, %v", latest, d, srcInfo)
-			if latest == newPath {
-				// it has the same dir with the transferring snap but with the different node info,
-				// we should clean the dir to avoid reuse the data from different node
-				os.RemoveAll(latest)
-				nodeLog.Infof("clean old path: %v since node info mismatch and same with new", latest)
-			}
+			return true
+		} else if dir == newPath {
+			// it has the same dir with the transferring snap but with the different node info,
+			// we should clean the dir to avoid reuse the data from different node
+			os.RemoveAll(dir)
+			nodeLog.Infof("clean old path: %v since node info mismatch and same with new", dir)
+		}
+		return false
+	})
+	if latest != "" && latest != newPath {
+		nodeLog.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
+		reused = latest
+		err := os.Rename(latest, newPath)
+		if err != nil {
+			nodeLog.Infof("transfer reuse old path failed to rename: %v", err.Error())
 		}
 	}
-	return newPath
+	return reused, newPath
 }
 
 func postFileSync(newPath string, srcInfo string) {
@@ -302,7 +304,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	}
 	syncAddr, syncDir := GetValidBackupInfo(machineConfig, clusterInfo, fullNS, localID, stopChan, raftSnapshot, retry, false)
 	if syncAddr == "" && syncDir == "" {
-		return errors.New("no backup available from others")
+		return errNobackupAvailable
 	}
 	select {
 	case <-stopChan:
@@ -314,9 +316,12 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	srcPath := path.Join(rockredis.GetBackupDir(syncDir),
 		rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index))
 
-	newPath := handleReuseOldCheckpoint(srcInfo, localPath,
+	// TODO: since most backup on local is not transferred by others,
+	// if we need reuse we need check all backups that has source node info,
+	// and skip the latest snap file in snap dir.
+	_, newPath := handleReuseOldCheckpoint(srcInfo, localPath,
 		raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index,
-		2)
+		0)
 
 	// copy backup data from the remote leader node, and recovery backup from it
 	// if local has some old backup data, we should use rsync to sync the data file
@@ -370,8 +375,10 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 		uri := "http://" + ssi.RemoteAddr + ":" +
 			ssi.HttpAPIPort + common.APICheckBackup + "/" + fullNS
 
-		// check may use long time, so we need use large timeout here
-		sc, err := common.APIRequest("GET", uri, bytes.NewBuffer(body), time.Second*60, nil)
+		// check may use long time, so we need use large timeout here, some slow disk
+		// may cause 10 min to check
+		to := time.Second * time.Duration(common.GetIntDynamicConf(common.ConfCheckSnapTimeout))
+		sc, err := common.APIRequest("GET", uri, bytes.NewBuffer(body), to, nil)
 		if err != nil {
 			nodeLog.Infof("request %v error: %v", uri, err)
 			continue
@@ -413,6 +420,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
 	retry := 0
+	var finalErr error
 	for retry < 3 {
 		err := prepareSnapshotForStore(kvsm.store, kvsm.machineConfig, kvsm.clusterInfo, kvsm.fullNS,
 			kvsm.ID, stop, raftSnapshot, retry)
@@ -423,10 +431,13 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 				err == common.ErrStopped {
 				return err
 			}
+			finalErr = err
 		} else {
 			err = kvsm.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 			if err == nil {
 				return nil
+			} else {
+				finalErr = err
 			}
 		}
 		retry++
@@ -437,6 +448,15 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		case <-time.After(time.Second):
 		}
 	}
+	if finalErr == errNobackupAvailable && startup {
+		kvsm.Infof("failed to restore snapshot at startup since no any backup from anyware")
+		if common.IsConfSetted(common.ConfIgnoreStartupNoBackup) {
+			kvsm.Infof("ignore failed at startup for no any backup from anyware")
+			return nil
+		}
+	}
+	// TODO: if err is errNoBackupAvailable from others, it may out of date, while
+	// startup we can ignore this recover since it will send newest snapshot after startup from leader
 	return errors.New("failed to restore from snapshot")
 }
 
@@ -672,13 +692,17 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 			srcPath := path.Join(rockredis.GetBackupDir(p.SyncPath),
 				rockredis.GetCheckpointDir(p.RemoteTerm, p.RemoteIndex))
 
-			newPath := handleReuseOldCheckpoint(srcInfo, localPath, p.RemoteTerm, p.RemoteIndex, 0)
-			// how to make sure the client is not timeout while transferring
-			err = common.RunFileSync(p.SyncAddr,
-				srcPath,
-				localPath, stop,
-			)
-			postFileSync(newPath, srcInfo)
+			_, newPath := handleReuseOldCheckpoint(srcInfo, localPath, p.RemoteTerm, p.RemoteIndex, 0)
+
+			if common.IsConfSetted(common.ConfIgnoreRemoteFileSync) {
+				err = nil
+			} else {
+				err = common.RunFileSync(p.SyncAddr,
+					srcPath,
+					localPath, stop,
+				)
+				postFileSync(newPath, srcInfo)
+			}
 			if err != nil {
 				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)
 			} else {

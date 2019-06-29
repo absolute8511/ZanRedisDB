@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,11 +27,6 @@ const (
 var syncerNormalInit = false
 
 var remoteSnapRecoverCnt int64
-var maxRemoteRecover = int64(2)
-
-func SetMaxRemoteRecover(n int) {
-	atomic.StoreInt64(&maxRemoteRecover, int64(n))
-}
 
 func SetSyncerNormalInit() {
 	syncerNormalInit = true
@@ -125,7 +121,7 @@ func (sm *logSyncerSM) GetLogSyncStats() (common.LogSyncStats, common.LogSyncSta
 func (sm *logSyncerSM) GetStats(table string) common.NamespaceStats {
 	var ns common.NamespaceStats
 	stat := make(map[string]interface{})
-	stat["role"] = common.LearnerRoleLogSyncer
+	stat["role"] = sm.machineConfig.LearnerRole
 	stat["synced"] = atomic.LoadInt64(&sm.syncedCnt)
 	stat["synced_index"] = atomic.LoadUint64(&sm.syncedState.SyncedIndex)
 	stat["synced_term"] = atomic.LoadUint64(&sm.syncedState.SyncedTerm)
@@ -352,6 +348,28 @@ func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop ch
 	}
 }
 
+func (sm *logSyncerSM) waitAndCheckTransferLimit(start time.Time, stop chan struct{}) (newMyRun int64, err error) {
+	r := rand.Int31n(10) + 10
+	t := time.NewTimer(time.Second * time.Duration(r))
+	atomic.AddInt64(&remoteSnapRecoverCnt, -1)
+	defer func() {
+		newMyRun = atomic.AddInt64(&remoteSnapRecoverCnt, 1)
+	}()
+	select {
+	case <-stop:
+		t.Stop()
+		err = common.ErrStopped
+		return newMyRun, err
+	case <-t.C:
+		t.Stop()
+		if time.Since(start) > common.SnapWaitTimeout {
+			err = common.ErrTransferOutofdate
+			return newMyRun, err
+		}
+	}
+	return newMyRun, err
+}
+
 func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	// get (term-index) from the remote cluster, if the remote cluster has
 	// greater (term-index) than snapshot, we can just ignore the snapshot restore
@@ -401,23 +419,17 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		return nil
 	}
 
-	atomic.AddInt64(&remoteSnapRecoverCnt, 1)
+	myRun := atomic.AddInt64(&remoteSnapRecoverCnt, 1)
 	defer atomic.AddInt64(&remoteSnapRecoverCnt, -1)
 	start := time.Now()
-	for atomic.LoadInt64(&remoteSnapRecoverCnt) > atomic.LoadInt64(&maxRemoteRecover) {
-		t := time.NewTimer(time.Second * 10)
-		select {
-		case <-stop:
-			t.Stop()
-			return common.ErrStopped
-		case <-t.C:
-			t.Stop()
-			sm.Infof("waiting restore snapshot %v", raftSnapshot.Metadata.String())
-			if time.Since(start) > common.SnapWaitTimeout {
-				sm.Infof("waiting restore snapshot timeout : %v", raftSnapshot.Metadata.String())
-				return common.ErrTransferOutofdate
-			}
+	for myRun > int64(common.GetIntDynamicConf(common.ConfMaxRemoteRecover)) {
+		oldRun := myRun
+		myRun, err = sm.waitAndCheckTransferLimit(start, stop)
+		if err != nil {
+			sm.Infof("waiting restore snapshot failed: %v", raftSnapshot.Metadata.String())
+			return err
 		}
+		sm.Infof("waiting restore snapshot %v, my run: %v, old: %v", raftSnapshot.Metadata.String(), myRun, oldRun)
 	}
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
@@ -443,7 +455,8 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		syncAddr, syncDir := GetValidBackupInfo(sm.machineConfig, sm.clusterInfo, sm.fullNS, sm.ID, stop, raftSnapshot, retry, forceRemote)
 		// note the local sync path not supported, so we need try another replica if syncAddr is empty
 		if syncAddr == "" && syncDir == "" {
-			restoreErr = errors.New("no backup available from others")
+			// the snap may be out of date on others, so we can not restore from old snapshot
+			restoreErr = errNobackupAvailable
 		} else {
 			restoreErr = sm.lgSender.waitTransferSnapStatus(raftSnapshot, syncAddr, syncDir, stop)
 			if restoreErr != nil {
@@ -465,10 +478,15 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		}
 	}
 	if restoreErr != nil {
+		sm.Infof("restore snapshot %v failed: %v", raftSnapshot.Metadata.String(), restoreErr)
+		if restoreErr == errNobackupAvailable && startup {
+			sm.Infof("restore snapshot %v while startup failed due to no snapshot, we can ignore in learner while startup", raftSnapshot.Metadata.String())
+			return nil
+		}
 		return restoreErr
 	}
 
-	sm.Infof("apply snap done %v", raftSnapshot.Metadata)
+	sm.Infof("apply snap done %v", raftSnapshot.Metadata.String())
 	sm.setSyncedState(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index, 0)
 	return nil
 }

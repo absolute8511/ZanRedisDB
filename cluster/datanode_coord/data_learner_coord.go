@@ -63,7 +63,9 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 				continue
 			}
 
-			dyConf := &node.NamespaceDynamicConf{}
+			dyConf := &node.NamespaceDynamicConf{
+				nsInfo.Replica,
+			}
 			localNamespace.SetDynamicInfo(*dyConf)
 			localErr := dc.checkAndFixLocalNamespaceData(&nsInfo, localNamespace)
 			if localErr != nil {
@@ -90,7 +92,9 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroupForLearner(nsInfo cluster.Par
 		localNamespace.SwitchForLearnerLeader(false)
 	}
 
-	dyConf := &node.NamespaceDynamicConf{}
+	dyConf := &node.NamespaceDynamicConf{
+		nsInfo.Replica,
+	}
 	localNamespace.SetDynamicInfo(*dyConf)
 	if localNamespace.IsDataNeedFix() {
 		// clean local data

@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -23,7 +25,8 @@ func getTestKVNode(t *testing.T) (*KVNode, string, chan struct{}) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("kvnode-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
 	t.Logf("dir:%v\n", tmpDir)
-	raftAddr := "http://127.0.0.1:12345"
+	rport := rand.Int31n(1000) + 33333
+	raftAddr := "http://127.0.0.1:" + strconv.Itoa(int(rport))
 	var replica ReplicaInfo
 	replica.NodeID = 1
 	replica.ReplicaID = 1

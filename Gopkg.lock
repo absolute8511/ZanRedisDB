@@ -580,12 +580,12 @@
   version = "0.0.1"
 
 [[projects]]
-  digest = "1:c99234442eb7a7d16394619a1eeb5628c093e719c3209f76b8c53802964fa8da"
+  digest = "1:db478aea9091542e5f85df1a946ad98a0ba327249c1ed28b1ccb77a6b119feea"
   name = "github.com/youzan/go-zanredisdb"
   packages = ["."]
   pruneopts = "UT"
-  revision = "20fdf14f4e2db3c591e15860e2733b7de41b301f"
-  version = "v0.3.4"
+  revision = "abd49eef98f2297bfba63220fca4b72848f22c9a"
+  version = "v0.3.5"
 
 [[projects]]
   branch = "master"

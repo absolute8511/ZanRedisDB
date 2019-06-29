@@ -21,6 +21,10 @@ const (
 	LearnerRoleSearcher  = "role_searcher"
 )
 
+func IsRoleLogSyncer(role string) bool {
+	return strings.HasPrefix(role, LearnerRoleLogSyncer)
+}
+
 var (
 	SCAN_CURSOR_SEP = []byte(";")
 	SCAN_NODE_SEP   = []byte(":")

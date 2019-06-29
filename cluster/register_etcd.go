@@ -1016,7 +1016,7 @@ func NewDNEtcdRegister(host string) (*DNEtcdRegister, error) {
 
 func (etcdReg *DNEtcdRegister) Register(nodeData *NodeInfo) error {
 	if nodeData.LearnerRole != "" &&
-		nodeData.LearnerRole != common.LearnerRoleLogSyncer &&
+		!common.IsRoleLogSyncer(nodeData.LearnerRole) &&
 		nodeData.LearnerRole != common.LearnerRoleSearcher {
 		return ErrLearnerRoleUnsupported
 	}
