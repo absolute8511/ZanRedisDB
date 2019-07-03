@@ -837,7 +837,16 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 	for _, replica := range nsInfo.RaftNodes {
 		if _, ok := currentNodes[replica]; ok {
 			aliveReplicas++
+			// if the other alive replica is not synced, it means the raft group may be unstable,
+			// so we should not remove any node until other replicas became stable to avoid a broken raft group.
+			synced, err := IsRaftNodeSynced(nsInfo, replica)
+			if err != nil || !synced {
+				cluster.CoordLog().Infof("namespace: %v replica %v is not synced while removing node, need wait", nsInfo.GetDesp(), replica)
+				return ErrNamespaceMigrateWaiting
+			}
 		} else {
+			cluster.CoordLog().Infof("failed raft node %v for namespace: %v",
+				replica, nsInfo.GetDesp())
 			if nsInfo.Removings == nil {
 				nsInfo.Removings = make(map[string]cluster.RemovingInfo)
 			}
@@ -851,6 +860,12 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 				}
 			}
 		}
+	}
+
+	// avoid removing any node if current alive replicas is not enough
+	if len(nsInfo.Removings) > 0 && aliveReplicas <= nsInfo.Replica/2 {
+		cluster.CoordLog().Infof("namespace: %v alive replica %v is not enough while removing node", nsInfo.GetDesp(), aliveReplicas)
+		return ErrNamespaceMigrateWaiting
 	}
 
 	if len(currentNodes) < nsInfo.Replica && len(nsInfo.Removings) > 0 {
@@ -884,6 +899,10 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 	// So we should add new replica before we continue remove replica.
 	// However, if there is a failed node in (1, 2) replicas, we can not add new because we can not have quorum voters in raft.
 	// In this way, we need wait failed node restart or we manual force recovery with standalone node.
+
+	// TODO: Consider the case while we force init a standalone raft which has only 1 replica, but the
+	// replicator desired is 4 or more. We will add one node and the isr is only 2 (not Quorum) and
+	// we should allow the standalone raft group to grow as needed.
 	if isrChanged && nsInfo.IsISRQuorum() {
 		if len(nsInfo.Removings) > 1 {
 			cluster.CoordLog().Infof("namespace should not have two removing nodes: %v", nsInfo)
