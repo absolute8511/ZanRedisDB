@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/spaolacci/murmur3"
 )
 
 var (
@@ -107,7 +107,7 @@ func IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, erro
 	return false, lastErr
 }
 
-// query the raft peers if the nid already in the raft group for the namespace and all logs synced in all peers
+// query the raft peers if all the isr nodes already in the raft group for the namespace and all logs synced in all peers
 func IsAllISRFullReady(nsInfo *cluster.PartitionMetaInfo) (bool, error) {
 	for _, nid := range nsInfo.GetISR() {
 		ok, err := IsRaftNodeFullReady(nsInfo, nid)
@@ -152,6 +152,19 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 			cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			return false, err
 		}
+	}
+	return true, nil
+}
+
+// check if all nodes in list is raft synced for the namespace-partition
+func IsRaftNodeSynced(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
+	nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(nid)
+	_, err := common.APIRequest("GET",
+		"http://"+net.JoinHostPort(nip, httpPort)+common.APIIsRaftSynced+"/"+nsInfo.GetDesp(),
+		nil, time.Second*10, nil)
+	if err != nil {
+		cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
+		return false, err
 	}
 	return true, nil
 }
