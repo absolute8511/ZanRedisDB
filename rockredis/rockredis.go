@@ -700,6 +700,9 @@ func (r *RockDB) isBackupOKInPath(backupDir string, term uint64, index uint64) (
 	if r.rockEng == nil {
 		return false, errDBClosed
 	}
+	if r.rockEng.GetOpts() == nil {
+		return false, errDBClosed
+	}
 	dbLog.Infof("begin check local checkpoint : %v", fullPath)
 	defer dbLog.Infof("check local checkpoint : %v done", fullPath)
 	ro := *(r.rockEng.GetOpts())
