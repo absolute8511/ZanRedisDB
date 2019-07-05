@@ -590,7 +590,6 @@ func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {
 }
 
 func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
-	// TODO:
 	// should not mark as remove while there is not enough for replica (more than half is dead)
 	ensureClusterReady(t, 5)
 
@@ -645,8 +644,63 @@ func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 }
 
 func TestMarkAsRemovingWhileOthersNotSynced(t *testing.T) {
-	// TODO:
 	// should not mark any failed node as removed while the other raft replicas are not synced (or have no leader)
+	ensureClusterReady(t, 5)
+
+	time.Sleep(time.Second)
+	ns := "test_mark_removing_no_leader"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	nodeWrapper, nsNode := waitForLeader(t, ns, 0)
+	follower, _ := getFollowerNode(t, ns, 0)
+	leader := nodeWrapper.s
+	assert.NotNil(t, leader)
+	dcoord := leader.GetCoord()
+	leaderID := dcoord.GetMyID()
+	assert.NotEqual(t, leaderID, follower.GetCoord().GetMyID())
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNsInfo := getNsInfo(t, ns, 0)
+	origNodes, _ := gpdServer.pdCoord.GetAllDataNodes()
+	time.Sleep(time.Second)
+	t.Logf("stopping follower node: %v", follower.GetCoord().GetMyID())
+	follower.Stop()
+	time.Sleep(time.Second)
+	allNodes, _ := gpdServer.pdCoord.GetAllDataNodes()
+	assert.Equal(t, len(origNodes)-1, len(allNodes))
+	// here we just stop the raft node and remove local data but keep the server running, this
+	// can make the raft group is not stable
+	t.Logf("stopping raft namespace node: %v", leaderID)
+	nsNode.Destroy()
+	gpdServer.pdCoord.SetClusterStableNodeNum(2)
+
+	removed := waitMarkAsRemovingUntilTimeout(t, ns, 0, time.Minute)
+	assert.Equal(t, 0, len(removed))
+	allNodes, _ = gpdServer.pdCoord.GetAllDataNodes()
+	assert.Equal(t, len(origNodes)-1, len(allNodes))
+	follower.Start()
+
+	waitEnoughReplica(t, ns, 0)
+	allNodes, _ = gpdServer.pdCoord.GetAllDataNodes()
+	assert.Equal(t, len(origNodes), len(allNodes))
+
+	newNsInfo := getNsInfo(t, ns, 0)
+	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
+	nodeWrapper, _ = waitForLeader(t, ns, 0)
+	newLeader := nodeWrapper.s
+	assert.NotNil(t, newLeader)
+	// since leader raft node is destroyed, we should have a new leader
+	newLeaderID := newLeader.GetCoord().GetMyID()
+	assert.NotEqual(t, leaderID, newLeaderID)
 }
 
 func TestRestartWithMigrate(t *testing.T) {
