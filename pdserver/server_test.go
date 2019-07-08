@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/siddontang/goredis"
+	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
 	zanredisdb "github.com/youzan/go-zanredisdb"
 
@@ -111,6 +112,30 @@ func waitMarkAsRemoving(t *testing.T, ns string, part int, leaderID string) {
 	}
 }
 
+func waitMarkAsRemovingUntilTimeout(t *testing.T, ns string, part int, until time.Duration) []string {
+	start := time.Now()
+	removed := make([]string, 0)
+	for {
+		if time.Since(start) > until {
+			break
+		}
+		allInfo, _, err := gpdServer.pdCoord.GetAllNamespaces()
+		assert.Nil(t, err)
+		nsInfo, ok := allInfo[ns]
+		assert.True(t, ok)
+		nsPartInfo, ok := nsInfo[part]
+		assert.True(t, ok)
+		if len(nsPartInfo.Removings) > 0 {
+			for nid, _ := range nsPartInfo.Removings {
+				removed = append(removed, nid)
+			}
+			break
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+	return removed
+}
+
 func waitRemoveFromRemoving(t *testing.T, ns string, part int) {
 	start := time.Now()
 	for {
@@ -151,6 +176,16 @@ func waitEnoughReplica(t *testing.T, ns string, part int) {
 		}
 		break
 	}
+}
+
+func getNsInfo(t *testing.T, ns string, part int) cluster.PartitionMetaInfo {
+	allInfo, _, err := gpdServer.pdCoord.GetAllNamespaces()
+	assert.Nil(t, err)
+	nsInfo, ok := allInfo[ns]
+	assert.True(t, ok)
+	nsPartInfo, ok := nsInfo[part]
+	assert.True(t, ok)
+	return nsPartInfo
 }
 
 func waitBalancedLeader(t *testing.T, ns string, part int) {
@@ -239,14 +274,6 @@ func getFollowerNode(t *testing.T, ns string, part int) (*ds.Server, *node.Names
 	return nil, nil
 }
 
-func TestClusterBalanceAcrossMultiDC(t *testing.T) {
-	// TODO:
-}
-
-func TestClusterRemoveNode(t *testing.T) {
-	// TODO: remove a node from api
-}
-
 func getTestRedisConn(t *testing.T, port int) *goredis.PoolConn {
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(port), "")
 	c.SetMaxIdleConns(4)
@@ -258,7 +285,7 @@ func getTestRedisConn(t *testing.T, port int) *goredis.PoolConn {
 }
 
 func TestRWMultiPartOnDifferentNodes(t *testing.T) {
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 
 	time.Sleep(time.Second)
 	ns := "test_multi_part_rw"
@@ -330,7 +357,7 @@ func TestRWMultiPartOnDifferentNodes(t *testing.T) {
 
 func TestLeaderLost(t *testing.T) {
 	// leader is lost and mark leader as removing
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 
 	time.Sleep(time.Second)
 	ns := "test_leader_lost"
@@ -389,7 +416,7 @@ func TestLeaderLost(t *testing.T) {
 
 func TestFollowerLost(t *testing.T) {
 	// test follower lost should keep old leader
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 
 	time.Sleep(time.Second)
 	ns := "test_follower_lost"
@@ -439,7 +466,7 @@ func TestFollowerLost(t *testing.T) {
 
 func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 	node.EnableForTest()
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 
 	time.Sleep(time.Second)
 	ns := "test_add_learner"
@@ -539,6 +566,14 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 	}
 }
 
+func TestClusterBalanceAcrossMultiDC(t *testing.T) {
+	// TODO:
+}
+
+func TestClusterRemoveNode(t *testing.T) {
+	// TODO: remove a node from api
+}
+
 func TestMigrateLeader(t *testing.T) {
 	// add new node and mark leader as removing.
 	// leader should transfer leader first and then propose remove self
@@ -555,8 +590,117 @@ func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {
 }
 
 func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
-	// TODO:
-	// should not mark as remove while there is not enough for replica
+	// should not mark as remove while there is not enough for replica (more than half is dead)
+	ensureClusterReady(t, 5)
+
+	time.Sleep(time.Second)
+	ns := "test_mark_removing_no_enough"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	nodeWrapper, nsNode := waitForLeader(t, ns, 0)
+	follower, _ := getFollowerNode(t, ns, 0)
+	leader := nodeWrapper.s
+	assert.NotNil(t, leader)
+	dcoord := leader.GetCoord()
+	leaderID := dcoord.GetMyID()
+	assert.NotEqual(t, leaderID, follower.GetCoord().GetMyID())
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNsInfo := getNsInfo(t, ns, 0)
+	time.Sleep(time.Second)
+	// make half replicas down and check if removing will happen
+	t.Logf("stopping follower node: %v", follower.GetCoord().GetMyID())
+	follower.Stop()
+	time.Sleep(time.Second)
+	t.Logf("stopping leader node: %v", leaderID)
+	leader.Stop()
+	gpdServer.pdCoord.SetClusterStableNodeNum(2)
+
+	removed := waitMarkAsRemovingUntilTimeout(t, ns, 0, time.Minute)
+	assert.Equal(t, 0, len(removed))
+	follower.Start()
+	leader.Start()
+
+	waitEnoughReplica(t, ns, 0)
+	waitForAllFullReady(t, ns, 0)
+
+	waitBalancedLeader(t, ns, 0)
+	newNsInfo := getNsInfo(t, ns, 0)
+	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
+	nodeWrapper, _ = waitForLeader(t, ns, 0)
+	newLeader := nodeWrapper.s
+	assert.NotNil(t, newLeader)
+	newLeaderID := newLeader.GetCoord().GetMyID()
+	assert.Equal(t, leaderID, newLeaderID)
+}
+
+func TestMarkAsRemovingWhileOthersNotSynced(t *testing.T) {
+	// should not mark any failed node as removed while the other raft replicas are not synced (or have no leader)
+	ensureClusterReady(t, 5)
+
+	time.Sleep(time.Second)
+	ns := "test_mark_removing_no_leader"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	nodeWrapper, nsNode := waitForLeader(t, ns, 0)
+	follower, _ := getFollowerNode(t, ns, 0)
+	leader := nodeWrapper.s
+	assert.NotNil(t, leader)
+	dcoord := leader.GetCoord()
+	leaderID := dcoord.GetMyID()
+	assert.NotEqual(t, leaderID, follower.GetCoord().GetMyID())
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNsInfo := getNsInfo(t, ns, 0)
+	origNodes, _ := gpdServer.pdCoord.GetAllDataNodes()
+	time.Sleep(time.Second)
+	t.Logf("stopping follower node: %v", follower.GetCoord().GetMyID())
+	follower.Stop()
+	time.Sleep(time.Second)
+	allNodes, _ := gpdServer.pdCoord.GetAllDataNodes()
+	assert.Equal(t, len(origNodes)-1, len(allNodes))
+	// here we just stop the raft node and remove local data but keep the server running, this
+	// can make the raft group is not stable
+	t.Logf("stopping raft namespace node: %v", leaderID)
+	nsNode.Destroy()
+	gpdServer.pdCoord.SetClusterStableNodeNum(2)
+
+	removed := waitMarkAsRemovingUntilTimeout(t, ns, 0, time.Minute)
+	assert.Equal(t, 0, len(removed))
+	allNodes, _ = gpdServer.pdCoord.GetAllDataNodes()
+	assert.Equal(t, len(origNodes)-1, len(allNodes))
+	follower.Start()
+
+	waitEnoughReplica(t, ns, 0)
+	allNodes, _ = gpdServer.pdCoord.GetAllDataNodes()
+	assert.Equal(t, len(origNodes), len(allNodes))
+
+	newNsInfo := getNsInfo(t, ns, 0)
+	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
+	nodeWrapper, _ = waitForLeader(t, ns, 0)
+	newLeader := nodeWrapper.s
+	assert.NotNil(t, newLeader)
+	// since leader raft node is destroyed, we should have a new leader
+	newLeaderID := newLeader.GetCoord().GetMyID()
+	assert.NotEqual(t, leaderID, newLeaderID)
 }
 
 func TestRestartWithMigrate(t *testing.T) {

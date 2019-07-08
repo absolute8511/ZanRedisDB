@@ -1010,7 +1010,15 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	}
 	firsti := applyEvent.ents[0].Index
 	if firsti > np.appliedi+1 {
-		nodeLog.Panicf("first index of committed entry[%d] should <= appliedi[%d] + 1", firsti, np.appliedi)
+		nodeLog.Errorf("first index of committed entry[%d] should <= appliedi[%d] + 1", firsti, np.appliedi)
+		go func() {
+			select {
+			case <-nd.stopChan:
+			default:
+				nd.Stop()
+			}
+		}()
+		return false, false
 	}
 	var ents []raftpb.Entry
 	if np.appliedi+1-firsti < uint64(len(applyEvent.ents)) {

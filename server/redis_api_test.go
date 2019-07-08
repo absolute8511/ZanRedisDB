@@ -7,6 +7,7 @@ import (
 	"path"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2949,5 +2950,74 @@ func TestJSONErrorParams(t *testing.T) {
 
 	if _, err := c.Do("json.objlen"); err == nil {
 		t.Fatalf("invalid err of %v", err)
+	}
+}
+
+func TestSyncerOnlyWrite(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key1 := "default:test:synceronly"
+	key2 := "default:test:synceronly2"
+	_, err := goredis.String(c.Do("set", key1, "1234"))
+	_, err = goredis.String(c.Do("set", key2, "1234"))
+	assert.Nil(t, err)
+	node.SetSyncerOnly(true)
+	defer node.SetSyncerOnly(false)
+
+	_, err = goredis.String(c.Do("getset", key1, "12345"))
+	assert.NotNil(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "The cluster is only allowing syncer write"))
+	_, err = goredis.String(c.Do("set", key1, "12345"))
+	assert.NotNil(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "The cluster is only allowing syncer write"))
+	_, err = goredis.String(c.Do("plset", key1, "12345"))
+	assert.NotNil(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "The cluster is only allowing syncer write"))
+
+	// failed write should not change the key value
+	if v, err := goredis.String(c.Do("get", key1)); err != nil {
+		t.Fatal(err)
+	} else if v != "1234" {
+		t.Fatal(v)
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"", "kv", "count", 5)); err != nil {
+		t.Error(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	}
+
+	if ay, err := goredis.Values(c.Do("SCAN", "default:testscan:"+"", "count", 5)); err != nil {
+		t.Error(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	}
+
+	if n, err := goredis.Int(c.Do("exists", key1)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("exists", key1, key2)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	_, err = goredis.Int(c.Do("del", key1, key2))
+	assert.NotNil(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "The cluster is only allowing syncer write"))
+
+	// failed del should not change the key
+	if n, err := goredis.Int(c.Do("exists", key1)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("exists", key1, key2)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
 	}
 }

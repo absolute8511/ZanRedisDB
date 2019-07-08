@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -11,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
-	"github.com/absolute8511/redcon"
 )
 
 var (
@@ -72,8 +73,11 @@ func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, []byte, error)
 
 		var wg sync.WaitGroup
 		var results []interface{}
-		handlers, cmds, _, err := s.GetMergeHandlers(cmd)
+		hasWrite, handlers, cmds, _, err := s.GetMergeHandlers(cmd)
 		if err == nil {
+			if hasWrite && node.IsSyncerOnly() {
+				return nil, nil, fmt.Errorf("The cluster is only allowing syncer write")
+			}
 			length := len(handlers)
 			everyCount := count / length
 			results = make([]interface{}, length)

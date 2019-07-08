@@ -444,3 +444,7 @@ func (s *Server) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 
 	return kv.Node.SaveDBFrom(r, msg)
 }
+
+func (s *Server) GetNsMgr() *node.NamespaceMgr {
+	return s.nsMgr
+}

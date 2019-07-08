@@ -185,8 +185,8 @@ func getTestClient(t *testing.T, ns string) *zanredisdb.ZanRedisClient {
 	return c
 }
 
-func startTestClusterAndCheck(t *testing.T) (*Server, []dataNodeWrapper, string) {
-	pd, kvList, tmpDir := startDefaultTestCluster(t, 4)
+func startTestClusterAndCheck(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
+	pd, kvList, tmpDir := startDefaultTestCluster(t, n)
 	time.Sleep(time.Second)
 	pduri := "http://127.0.0.1:" + pdHttpPort
 	uri := fmt.Sprintf("%s/datanodes", pduri)
@@ -243,9 +243,9 @@ func startTestClusterAndCheck(t *testing.T) (*Server, []dataNodeWrapper, string)
 	return pd, kvList, tmpDir
 }
 
-func ensureClusterReady(t *testing.T) {
+func ensureClusterReady(t *testing.T, n int) {
 	testOnce.Do(func() {
-		gpdServer, gkvList, gtmpDir = startTestClusterAndCheck(t)
+		gpdServer, gkvList, gtmpDir = startTestClusterAndCheck(t, n)
 	},
 	)
 }
@@ -379,10 +379,10 @@ func ensureDeleteNamespace(t *testing.T, pduri string, ns string) {
 }
 
 func TestClusterInitStart(t *testing.T) {
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 }
 func TestClusterSchemaAddIndex(t *testing.T) {
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 
 	time.Sleep(time.Second)
 	ns := "test_schema_ns"

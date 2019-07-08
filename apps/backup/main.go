@@ -22,6 +22,7 @@ var (
 	table    = flagSet.String("table", "", "table name of backup")
 	backType = flagSet.String("type", "all", "which type you want to backup,split by ',' for multiple")
 	qps      = flagSet.Int("qps", 1000, "qps")
+	readable = flagSet.Bool("readable", false, "output can be readable as text")
 	pass     = flagSet.String("pass", "", "password of zankv")
 )
 
@@ -126,19 +127,23 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 			lenBuf := make([]byte, 4)
 			key := item[0].([]byte)
 			keyLen := len(key)
-			binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
-			n, err := file.Write(lenBuf)
-			if err != nil {
-				fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
-				return
+			if *readable {
+				file.WriteString("\n")
+			} else {
+				binary.BigEndian.PutUint32(lenBuf, uint32(keyLen))
+				n, err := file.Write(lenBuf)
+				if err != nil {
+					fmt.Printf("write key's len error.[ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
+					return
+				}
+
+				if n != 4 {
+					fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
+					return
+				}
 			}
 
-			if n != 4 {
-				fmt.Printf("write key's len length error. [ns=%s, table=%s, key=%s, len=%d]\n", *ns, *table, string(key), n)
-				return
-			}
-
-			n, err = file.Write(key)
+			n, err := file.Write(key)
 			if err != nil {
 				fmt.Printf("write key error. [ns=%s, table=%s, key=%s, err=%v]\n", *ns, *table, string(key), err)
 				return
@@ -165,21 +170,25 @@ func backupCommon(tp []byte, ch chan interface{}, file *os.File, f writeFunc) {
 func kvbackup(ch chan interface{}, file *os.File, client *sdk.ZanRedisClient) {
 	tp := []byte{0}
 	backupCommon(tp, ch, file, func(key []byte, item []interface{}, file *os.File) error {
-		lenBuf := make([]byte, 4)
 		value := item[0].([]byte)
 		valLen := len(value)
-		binary.BigEndian.PutUint32(lenBuf, uint32(valLen))
-		n, err := file.Write(lenBuf)
-		if err != nil {
-			fmt.Printf("write val's len error. [ns=%s, table=%s, key=%s, val=%v, err=%v]\n", *ns, *table, string(key), value, err)
-			return err
-		}
-		if n != 4 {
-			fmt.Printf("write val's len length error. [ns=%s, table=%s, key=%s, val=%v, len=%d]\n", *ns, *table, string(key), value, n)
-			return errWriteLen
+		if *readable {
+			file.WriteString("\n")
+		} else {
+			lenBuf := make([]byte, 4)
+			binary.BigEndian.PutUint32(lenBuf, uint32(valLen))
+			n, err := file.Write(lenBuf)
+			if err != nil {
+				fmt.Printf("write val's len error. [ns=%s, table=%s, key=%s, val=%v, err=%v]\n", *ns, *table, string(key), value, err)
+				return err
+			}
+			if n != 4 {
+				fmt.Printf("write val's len length error. [ns=%s, table=%s, key=%s, val=%v, len=%d]\n", *ns, *table, string(key), value, n)
+				return errWriteLen
+			}
 		}
 
-		n, err = file.Write(value)
+		n, err := file.Write(value)
 		if err != nil {
 			fmt.Printf("write val error. [ns=%s, table=%s, key=%s, val=%v, err=%v]\n", *ns, *table, string(key), value, err)
 			return err

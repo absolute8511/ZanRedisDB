@@ -192,6 +192,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterMerge("hidx.from", nd.hindexSearchCommand)
 
 	nd.router.RegisterMerge("exists", wrapMergeCommandKK(nd.existsCommand))
+	// make sure the merged write command will be stopped if cluster is not allowed to write
 	nd.router.RegisterWriteMerge("del", wrapWriteMergeCommandKK(nd, nd.delCommand))
 	//nd.router.RegisterWriteMerge("mset", nd.msetCommand)
 	nd.router.RegisterWriteMerge("plset", wrapWriteMergeCommandKVKV(nd, nd.plsetCommand))
