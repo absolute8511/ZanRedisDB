@@ -32,6 +32,7 @@ var (
 	errTooMuchBatchSize     = errors.New("the batch size exceed the limit")
 	errRaftNotReadyForWrite = errors.New("ERR_CLUSTER_CHANGED: the raft is not ready for write")
 	errWrongNumberArgs      = errors.New("ERR wrong number of arguments for redis command")
+	ErrReadIndexTimeout     = errors.New("wait read index timeout")
 )
 
 const (
@@ -117,6 +118,11 @@ type KVNode struct {
 	expireHandler      *ExpireHandler
 	expirationPolicy   common.ExpirationPolicy
 	remoteSyncedStates *remoteSyncedStateMgr
+	commitWait         wait.WaitTime
+	// used for read index
+	readMu       sync.RWMutex
+	readWaitC    chan struct{}
+	readNotifier *notifier
 }
 
 type KVSnapInfo struct {
@@ -166,6 +172,9 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		machineConfig:      config.nodeConfig,
 		expirationPolicy:   kvopts.ExpirationPolicy,
 		remoteSyncedStates: newRemoteSyncedStateMgr(),
+		commitWait:         wait.NewTimeList(),
+		readWaitC:          make(chan struct{}, 1),
+		readNotifier:       newNotifier(),
 	}
 	if kvsm, ok := sm.(*kvStoreSM); ok {
 		s.store = kvsm.store
@@ -221,6 +230,11 @@ func (nd *KVNode) Start(standalone bool) error {
 	go func() {
 		defer nd.wg.Done()
 		nd.handleProposeReq()
+	}()
+	nd.wg.Add(1)
+	go func() {
+		defer nd.wg.Done()
+		nd.readIndexLoop()
 	}()
 
 	nd.expireHandler.Start()
@@ -851,45 +865,107 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 		return true
 	}
 	to := time.Second * 5
-	req := make([]byte, 8)
-	binary.BigEndian.PutUint64(req, nd.rn.reqIDGen.Next())
 	ctx, cancel := context.WithTimeout(context.Background(), to)
-	if err := nd.rn.node.ReadIndex(ctx, req); err != nil {
-		cancel()
-		if err == raft.ErrStopped {
-		}
-		nodeLog.Warningf("failed to get the read index from raft: %v", err)
-		return false
-	}
+	err := nd.linearizableReadNotify(ctx)
 	cancel()
 
-	var rs raft.ReadState
-	var (
-		timeout bool
-		done    bool
-	)
-	for !timeout && !done {
-		select {
-		case rs := <-nd.rn.readStateC:
-			done = bytes.Equal(rs.RequestCtx, req)
-			if !done {
-			}
-		case <-time.After(to):
-			nodeLog.Infof("timeout waiting for read index response")
-			timeout = true
-		case <-nd.stopChan:
-			return false
-		}
-	}
-	if !done {
+	if err != nil {
+		nodeLog.Infof("wait raft not synced,  %v", err.Error())
 		return false
 	}
-	ci := nd.GetCommittedIndex()
-	if rs.Index <= 0 || ci >= rs.Index-1 {
-		return true
+	return true
+}
+
+func (nd *KVNode) linearizableReadNotify(ctx context.Context) error {
+	nd.readMu.RLock()
+	n := nd.readNotifier
+	nd.readMu.RUnlock()
+
+	// signal linearizable loop for current notify if it hasn't been already
+	select {
+	case nd.readWaitC <- struct{}{}:
+	default:
 	}
-	nodeLog.Infof("not synced, committed %v, read index %v", ci, rs.Index)
-	return false
+
+	// wait for read state notification
+	select {
+	case <-n.c:
+		return n.err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-nd.stopChan:
+		return common.ErrStopped
+	}
+}
+
+func (nd *KVNode) readIndexLoop() {
+	var rs raft.ReadState
+	to := time.Second * 5
+	for {
+		req := make([]byte, 8)
+		id1 := nd.rn.reqIDGen.Next()
+		binary.BigEndian.PutUint64(req, id1)
+		select {
+		case <-nd.readWaitC:
+		case <-nd.stopChan:
+			return
+		}
+		nextN := newNotifier()
+		nd.readMu.Lock()
+		nr := nd.readNotifier
+		nd.readNotifier = nextN
+		nd.readMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), to)
+		if err := nd.rn.node.ReadIndex(ctx, req); err != nil {
+			cancel()
+			nr.notify(err)
+			if err == raft.ErrStopped {
+				return
+			}
+			nodeLog.Warningf("failed to get the read index from raft: %v", err)
+			continue
+		}
+		cancel()
+
+		var (
+			timeout bool
+			done    bool
+		)
+		for !timeout && !done {
+			select {
+			case rs := <-nd.rn.readStateC:
+				done = bytes.Equal(rs.RequestCtx, req)
+				if !done {
+					// a previous request might time out. now we should ignore the response of it and
+					// continue waiting for the response of the current requests.
+					id2 := uint64(0)
+					if len(rs.RequestCtx) == 8 {
+						id2 = binary.BigEndian.Uint64(rs.RequestCtx)
+					}
+					nodeLog.Infof("ignored out of date read index: %v, %v", id2, id1)
+				}
+			case <-time.After(to):
+				nodeLog.Infof("timeout waiting for read index response: %v", id1)
+				timeout = true
+				nr.notify(ErrReadIndexTimeout)
+			case <-nd.stopChan:
+				return
+			}
+		}
+		if !done {
+			continue
+		}
+		ci := nd.GetCommittedIndex()
+		if ci < rs.Index && rs.Index > 0 {
+			select {
+			case <-nd.commitWait.Wait(rs.Index):
+			case <-nd.stopChan:
+				return
+			}
+		}
+		nr.notify(nil)
+	}
 }
 
 func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
@@ -993,6 +1069,7 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	if lastCommittedIndex > nd.GetCommittedIndex() {
 		nd.SetCommittedIndex(lastCommittedIndex)
 	}
+	nd.commitWait.Trigger(lastCommittedIndex)
 	snapErr := nd.applySnapshot(np, applyEvent)
 	if applyEvent.applySnapshotResult != nil {
 		select {

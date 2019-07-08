@@ -12,6 +12,7 @@ import (
 	"github.com/siddontang/goredis"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
+	"github.com/youzan/ZanRedisDB/internal/test"
 	zanredisdb "github.com/youzan/go-zanredisdb"
 
 	"github.com/stretchr/testify/assert"
@@ -416,6 +417,7 @@ func TestLeaderLost(t *testing.T) {
 
 func TestFollowerLost(t *testing.T) {
 	// test follower lost should keep old leader
+
 	ensureClusterReady(t, 4)
 
 	time.Sleep(time.Second)
@@ -451,6 +453,10 @@ func TestFollowerLost(t *testing.T) {
 	waitEnoughReplica(t, ns, 0)
 
 	waitForAllFullReady(t, ns, 0)
+
+	// stop for a while and wait the data migrate to others
+	// and then start this node to join the cluster and wait
+	// data migrate back to this node
 
 	// restart old follower and wait balance
 	// the follower should be balanced to join with different replica id
@@ -703,16 +709,45 @@ func TestMarkAsRemovingWhileOthersNotSynced(t *testing.T) {
 	assert.NotEqual(t, leaderID, newLeaderID)
 }
 
-func TestRestartWithMigrate(t *testing.T) {
-	// TODO:
-	// stop for a while and wait the data migrate to others
-	// and then start this node to join the cluster and wait
-	// data migrate back to this node
-}
-
 func TestRestartCluster(t *testing.T) {
-	// TODO:
 	// stop all nodes in cluster and start one by one
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_restart_all"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	for _, kv := range gkvList {
+		kv.s.Stop()
+	}
+
+	time.Sleep(time.Second * 10)
+
+	for _, kv := range gkvList {
+		kv.s.Start()
+	}
+
+	waitEnoughReplica(t, ns, 0)
+	waitForAllFullReady(t, ns, 0)
+	waitBalancedAndExpectedLeader(t, ns, 0, leader.GetCoord().GetMyID())
+
+	newNs := getNsInfo(t, ns, 0)
+	test.Equal(t, oldNs.GetISR(), newNs.GetISR())
+	test.Equal(t, oldNs.GetRealLeader(), newNs.GetRealLeader())
 }
 
 func TestRestartWithForceAlone(t *testing.T) {
@@ -730,9 +765,10 @@ func TestInstallSnapshotFailed(t *testing.T) {
 func TestClusterBalanceWhileNewNodeAdding(t *testing.T) {
 	// TODO: while replica is not enough, we will add new replica node while check namespace,
 	// and then it should wait the new replica is raft synced before we can start to balance
+	// and new data should be balanced to new node
 }
 
 func TestClusterAddReplicaOneByOne(t *testing.T) {
-	// TODO: while replica is not enough, we will add new replica node while check namespace.
-	// If two replica are removed, we need add new replica one by one to avoid 2 failed node in raft.
+	// TODO:
+	// While increase replicas, we need add new replica one by one to avoid 2 failed node in raft.
 }
