@@ -113,12 +113,12 @@ type KVNode struct {
 	machineConfig      *MachineConfig
 	wg                 sync.WaitGroup
 	commitC            <-chan applyInfo
-	committedIndex     uint64
+	appliedIndex       uint64
 	clusterInfo        common.IClusterInfo
 	expireHandler      *ExpireHandler
 	expirationPolicy   common.ExpirationPolicy
 	remoteSyncedStates *remoteSyncedStateMgr
-	commitWait         wait.WaitTime
+	applyWait          wait.WaitTime
 	// used for read index
 	readMu       sync.RWMutex
 	readWaitC    chan struct{}
@@ -172,7 +172,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		machineConfig:      config.nodeConfig,
 		expirationPolicy:   kvopts.ExpirationPolicy,
 		remoteSyncedStates: newRemoteSyncedStateMgr(),
-		commitWait:         wait.NewTimeList(),
+		applyWait:          wait.NewTimeList(),
 		readWaitC:          make(chan struct{}, 1),
 		readNotifier:       newNotifier(),
 	}
@@ -836,12 +836,12 @@ func (nd *KVNode) Tick() {
 	nd.rn.node.Tick()
 }
 
-func (nd *KVNode) GetCommittedIndex() uint64 {
-	return atomic.LoadUint64(&nd.committedIndex)
+func (nd *KVNode) GetAppliedIndex() uint64 {
+	return atomic.LoadUint64(&nd.appliedIndex)
 }
 
-func (nd *KVNode) SetCommittedIndex(ci uint64) {
-	atomic.StoreUint64(&nd.committedIndex, ci)
+func (nd *KVNode) SetAppliedIndex(ci uint64) {
+	atomic.StoreUint64(&nd.appliedIndex, ci)
 }
 
 func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
@@ -956,10 +956,10 @@ func (nd *KVNode) readIndexLoop() {
 		if !done {
 			continue
 		}
-		ci := nd.GetCommittedIndex()
-		if ci < rs.Index && rs.Index > 0 {
+		ai := nd.GetAppliedIndex()
+		if ai < rs.Index && rs.Index > 0 {
 			select {
-			case <-nd.commitWait.Wait(rs.Index):
+			case <-nd.applyWait.Wait(rs.Index):
 			case <-nd.stopChan:
 				return
 			}
@@ -1059,17 +1059,7 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 }
 
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
-	var lastCommittedIndex uint64
-	if len(applyEvent.ents) > 0 {
-		lastCommittedIndex = applyEvent.ents[len(applyEvent.ents)-1].Index
-	}
-	if applyEvent.snapshot.Metadata.Index > lastCommittedIndex {
-		lastCommittedIndex = applyEvent.snapshot.Metadata.Index
-	}
-	if lastCommittedIndex > nd.GetCommittedIndex() {
-		nd.SetCommittedIndex(lastCommittedIndex)
-	}
-	nd.commitWait.Trigger(lastCommittedIndex)
+
 	snapErr := nd.applySnapshot(np, applyEvent)
 	if applyEvent.applySnapshotResult != nil {
 		select {
@@ -1138,6 +1128,14 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		<-nd.stopChan
 		return false, false
 	}
+	lastIndex := np.appliedi
+	if applyEvent.snapshot.Metadata.Index > lastIndex {
+		lastIndex = applyEvent.snapshot.Metadata.Index
+	}
+	if lastIndex > nd.GetAppliedIndex() {
+		nd.SetAppliedIndex(lastIndex)
+	}
+	nd.applyWait.Trigger(lastIndex)
 	return confChanged, forceBackup
 }
 

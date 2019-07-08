@@ -530,7 +530,7 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 			t.Errorf("timeout waiting add learner")
 			break
 		}
-		commitID := leaderNode.Node.GetCommittedIndex()
+		commitID := leaderNode.Node.GetAppliedIndex()
 		done := 0
 		for _, srv := range learnerSrvs {
 			nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
@@ -548,7 +548,7 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 					}
 					assert.True(t, found, "should found myself in learners")
 					_, remoteIndex, _ := remoteNode.Node.GetRemoteClusterSyncedRaft(TestClusterName)
-					learnerCI := nsNode.Node.GetCommittedIndex()
+					learnerCI := nsNode.Node.GetAppliedIndex()
 					t.Logf("commit %v , current remote :%v, learner: %v", commitID, remoteIndex, learnerCI)
 					if remoteIndex >= commitID && learnerCI == remoteIndex {
 						time.Sleep(time.Second)
@@ -563,10 +563,10 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 			break
 		}
 	}
-	commitID := leaderNode.Node.GetCommittedIndex()
+	commitID := leaderNode.Node.GetAppliedIndex()
 	for _, srv := range learnerSrvs {
 		nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
-		assert.Equal(t, commitID, nsNode.Node.GetCommittedIndex())
+		assert.Equal(t, commitID, nsNode.Node.GetAppliedIndex())
 		stats := nsNode.Node.GetStats("")
 		assert.Equal(t, commitID, stats.InternalStats["synced_index"].(uint64))
 	}
