@@ -981,6 +981,8 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
 
+	// TODO: do we need wait raft to persist the snap onto disk here?
+
 	// the snapshot restore may fail because of the remote snapshot is deleted
 	// and can not rsync from any other nodes.
 	// while starting we can not ignore or delete the snapshot since the wal may be cleaned on other snapshot.
@@ -1058,20 +1060,7 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 	return forceBackup
 }
 
-func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
-
-	snapErr := nd.applySnapshot(np, applyEvent)
-	if applyEvent.applySnapshotResult != nil {
-		select {
-		case applyEvent.applySnapshotResult <- snapErr:
-		case <-nd.stopChan:
-			return false, false
-		}
-	}
-	if snapErr != nil {
-		nd.rn.Errorf("apply snapshot failed: %v", snapErr.Error())
-		return false, false
-	}
+func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	if len(applyEvent.ents) == 0 {
 		return false, false
 	}
@@ -1102,10 +1091,15 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		isReplaying := evnt.Index <= nd.rn.lastIndex
 		switch evnt.Type {
 		case raftpb.EntryNormal:
-			forceBackup = nd.applyEntry(evnt, isReplaying)
+			needBackup := nd.applyEntry(evnt, isReplaying)
+			if needBackup {
+				forceBackup = true
+			}
 		case raftpb.EntryConfChange:
 			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
-			confChanged = changed
+			if changed {
+				confChanged = changed
+			}
 			shouldStop = shouldStop || removeSelf
 		}
 		np.appliedi = evnt.Index
@@ -1128,6 +1122,22 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		<-nd.stopChan
 		return false, false
 	}
+	return confChanged, forceBackup
+}
+
+func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
+	snapErr := nd.applySnapshot(np, applyEvent)
+	if applyEvent.applySnapshotResult != nil {
+		select {
+		case applyEvent.applySnapshotResult <- snapErr:
+		case <-nd.stopChan:
+		}
+	}
+	if snapErr != nil {
+		nd.rn.Errorf("apply snapshot failed: %v", snapErr.Error())
+	}
+	confChanged, forceBackup := nd.applyEntries(np, applyEvent)
+
 	lastIndex := np.appliedi
 	if applyEvent.snapshot.Metadata.Index > lastIndex {
 		lastIndex = applyEvent.snapshot.Metadata.Index
@@ -1173,6 +1183,10 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 				nodeLog.Panicf("wrong events : %v", ent)
 			}
 			confChanged, forceBackup := nd.applyAll(&np, &ent)
+
+			// wait for the raft routine to finish the disk writes before triggering a
+			// snapshot. or applied index might be greater than the last index in raft
+			// storage, since the raft routine might be slower than apply routine.
 			select {
 			case <-ent.raftDone:
 			case <-nd.stopChan:
