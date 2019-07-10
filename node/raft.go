@@ -881,6 +881,7 @@ func (rc *raftNode) serveChannels() {
 				applySnapshotResult = make(chan error, 1)
 			}
 
+			// TODO: do we need publish entry if commitedentries and snapshot is empty?
 			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotResult, raftDone, applyWaitDone)
 
 			if !raft.IsEmptySnap(rd.Snapshot) {
@@ -915,6 +916,8 @@ func (rc *raftNode) serveChannels() {
 					<-rc.stopc
 					return
 				}
+				// TODO: do we need to notify to tell that the snapshot has been perisisted onto the disk?
+
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
 				rc.Infof("raft applied incoming snapshot done: %v", rd.Snapshot.String())
 				if rd.Snapshot.Metadata.Index >= rc.lastIndex {

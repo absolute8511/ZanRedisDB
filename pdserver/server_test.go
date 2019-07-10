@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -577,7 +578,107 @@ func TestClusterBalanceAcrossMultiDC(t *testing.T) {
 }
 
 func TestClusterRemoveNode(t *testing.T) {
-	// TODO: remove a node from api
+	// remove a node from api and wait all data balanced to others
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_remove_node_by_api"
+	partNum := 4
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+
+	newDataNodes, dataDir := addMoreTestDataNodeToCluster(t, 1)
+	defer cleanDataNodes(newDataNodes, dataDir)
+	time.Sleep(time.Second)
+
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 10; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNsList := make([]cluster.PartitionMetaInfo, 0)
+	for i := 0; i < partNum; i++ {
+		oldNs := getNsInfo(t, ns, i)
+		t.Logf("part %v isr is %v", i, oldNs.GetISR())
+		oldNsList = append(oldNsList, oldNs)
+		waitBalancedLeader(t, ns, i)
+	}
+
+	nsNum := 0
+	for i := 0; i < partNum; i++ {
+		nsNode := newDataNodes[0].s.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(i))
+		if nsNode != nil {
+			nsNum++
+		}
+	}
+	assert.True(t, nsNum > 0)
+	// remove node from api
+	removedNodeID := newDataNodes[0].s.GetCoord().GetMyID()
+	gpdServer.pdCoord.MarkNodeAsRemoving(removedNodeID)
+	// wait balance
+	for i := 0; i < partNum; i++ {
+		start := time.Now()
+		for {
+			if time.Since(start) > time.Minute*2 {
+				t.Errorf("timeout wait removing partition %v on removed node", i)
+				break
+			}
+			time.Sleep(time.Second * 5)
+			nsInfo := getNsInfo(t, ns, i)
+			if len(nsInfo.Removings) > 0 {
+				continue
+			}
+			if len(nsInfo.GetISR()) != 3 {
+				continue
+			}
+			waitRemove := false
+			for _, nid := range nsInfo.GetISR() {
+				if nid == removedNodeID {
+					waitRemove = true
+					t.Logf("still waiting remove node: %v, %v", nsInfo.GetDesp(), nsInfo.GetISR())
+					break
+				}
+			}
+			if waitRemove {
+				continue
+			}
+			break
+		}
+		waitBalancedLeader(t, ns, i)
+	}
+
+	time.Sleep(time.Second * 5)
+	for i := 0; i < partNum; i++ {
+		for {
+			time.Sleep(time.Second)
+			waitRemoveFromRemoving(t, ns, i)
+			waitEnoughReplica(t, ns, i)
+			waitForAllFullReady(t, ns, i)
+			waitBalancedLeader(t, ns, i)
+			newNs := getNsInfo(t, ns, i)
+			newISR := newNs.GetISR()
+			if len(newISR) != 3 || len(newNs.Removings) > 0 {
+				// wait remove unneed replica
+				continue
+			}
+			break
+		}
+		nsInfo := getNsInfo(t, ns, i)
+		for _, nid := range nsInfo.GetISR() {
+			assert.NotEqual(t, nid, removedNodeID)
+		}
+	}
+	for i := 0; i < partNum; i++ {
+		nsNode := newDataNodes[0].s.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(i))
+		assert.Nil(t, nsNode)
+	}
 }
 
 func TestMigrateLeader(t *testing.T) {
@@ -597,15 +698,17 @@ func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {
 
 func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 	// should not mark as remove while there is not enough for replica (more than half is dead)
-	ensureClusterReady(t, 5)
+	ensureClusterReady(t, 4)
+	newNodes, dataDir := addMoreTestDataNodeToCluster(t, 1)
+	defer cleanDataNodes(newNodes, dataDir)
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+	ensureDataNodesReady(t, pduri, len(gkvList)+1)
 
 	time.Sleep(time.Second)
 	ns := "test_mark_removing_no_enough"
 	partNum := 1
 
-	pduri := "http://127.0.0.1:" + pdHttpPort
-
-	ensureDataNodesReady(t, pduri, len(gkvList))
 	enableAutoBalance(t, pduri, true)
 	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
@@ -651,62 +754,99 @@ func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 
 func TestMarkAsRemovingWhileOthersNotSynced(t *testing.T) {
 	// should not mark any failed node as removed while the other raft replicas are not synced (or have no leader)
-	ensureClusterReady(t, 5)
-
-	time.Sleep(time.Second)
-	ns := "test_mark_removing_no_leader"
-	partNum := 1
+	ensureClusterReady(t, 4)
+	newNodes, dataDir := addMoreTestDataNodeToCluster(t, 1)
+	defer cleanDataNodes(newNodes, dataDir)
 
 	pduri := "http://127.0.0.1:" + pdHttpPort
+	ensureDataNodesReady(t, pduri, len(gkvList)+1)
+	// stop 2 node in cluster to make sure the replica will be placed on the new added node
+	for i := 0; i < 2; i++ {
+		gkvList[i].s.Stop()
+	}
 
-	ensureDataNodesReady(t, pduri, len(gkvList))
+	time.Sleep(time.Second)
+	ns := "test_mark_removing_not_synced"
+	partNum := 1
+
 	enableAutoBalance(t, pduri, true)
 	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
-	nodeWrapper, nsNode := waitForLeader(t, ns, 0)
+	leaderWrapper, leaderNode := waitForLeader(t, ns, 0)
 	follower, _ := getFollowerNode(t, ns, 0)
-	leader := nodeWrapper.s
+	leader := leaderWrapper.s
 	assert.NotNil(t, leader)
 	dcoord := leader.GetCoord()
 	leaderID := dcoord.GetMyID()
 	assert.NotEqual(t, leaderID, follower.GetCoord().GetMyID())
 	// call this to propose some request to write raft logs
 	for i := 0; i < 5; i++ {
-		nsNode.Node.OptimizeDB("")
+		leaderNode.Node.OptimizeDB("")
 	}
 	oldNsInfo := getNsInfo(t, ns, 0)
 	origNodes, _ := gpdServer.pdCoord.GetAllDataNodes()
 	time.Sleep(time.Second)
-	t.Logf("stopping follower node: %v", follower.GetCoord().GetMyID())
-	follower.Stop()
-	time.Sleep(time.Second)
+	newNodeID := newNodes[0].s.GetCoord().GetMyID()
+	// stop the new node and another node
+	stoppedNode := follower
+	if newNodeID != follower.GetCoord().GetMyID() {
+		t.Logf("stopping follower node: %v", follower.GetCoord().GetMyID())
+		follower.Stop()
+		time.Sleep(time.Second)
+	} else if leaderID != newNodeID {
+		t.Logf("stopping leader node: %v", leader.GetCoord().GetMyID())
+		leader.Stop()
+		stoppedNode = leader
+		time.Sleep(time.Second)
+	}
 	allNodes, _ := gpdServer.pdCoord.GetAllDataNodes()
 	assert.Equal(t, len(origNodes)-1, len(allNodes))
 	// here we just stop the raft node and remove local data but keep the server running, this
 	// can make the raft group is not stable
-	t.Logf("stopping raft namespace node: %v", leaderID)
-	nsNode.Destroy()
+	t.Logf("stopping raft namespace node: %v", newNodeID)
+	newNodes[0].s.GetNamespaceFromFullName(ns + "-0").Destroy()
 	gpdServer.pdCoord.SetClusterStableNodeNum(2)
 
+	// should not remove any node since not full synced
 	removed := waitMarkAsRemovingUntilTimeout(t, ns, 0, time.Minute)
 	assert.Equal(t, 0, len(removed))
 	allNodes, _ = gpdServer.pdCoord.GetAllDataNodes()
 	assert.Equal(t, len(origNodes)-1, len(allNodes))
-	follower.Start()
 
+	newNsInfo := getNsInfo(t, ns, 0)
+	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
+
+	stoppedNode.Start()
 	waitEnoughReplica(t, ns, 0)
 	allNodes, _ = gpdServer.pdCoord.GetAllDataNodes()
 	assert.Equal(t, len(origNodes), len(allNodes))
 
-	newNsInfo := getNsInfo(t, ns, 0)
+	newNsInfo = getNsInfo(t, ns, 0)
 	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
-	nodeWrapper, _ = waitForLeader(t, ns, 0)
+	nodeWrapper, _ := waitForLeader(t, ns, 0)
 	newLeader := nodeWrapper.s
 	assert.NotNil(t, newLeader)
-	// since leader raft node is destroyed, we should have a new leader
-	newLeaderID := newLeader.GetCoord().GetMyID()
-	assert.NotEqual(t, leaderID, newLeaderID)
+
+	newNodes[0].s.Stop()
+	for i := 0; i < 2; i++ {
+		gkvList[i].s.Start()
+	}
+
+	waitMarkAsRemoving(t, ns, 0, newNodeID)
+	waitRemoveFromRemoving(t, ns, 0)
+
+	waitForAllFullReady(t, ns, 0)
+	waitBalancedLeader(t, ns, 0)
+	newNsInfo = getNsInfo(t, ns, 0)
+	nodeWrapper, _ = waitForLeader(t, ns, 0)
+	newLeader = nodeWrapper.s
+	assert.NotNil(t, newLeader)
+	assert.Equal(t, newNsInfo.GetISR()[0], newLeader.GetCoord().GetMyID())
+	assert.NotEqual(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
+	for _, nid := range newNsInfo.GetISR() {
+		assert.NotEqual(t, nid, newNodeID)
+	}
 }
 
 func TestRestartCluster(t *testing.T) {
@@ -762,13 +902,323 @@ func TestInstallSnapshotFailed(t *testing.T) {
 	// test case should make sure the snap will be not persisted to the stable storage since the snapshot data is failed to pull.
 }
 
-func TestClusterBalanceWhileNewNodeAdding(t *testing.T) {
-	// TODO: while replica is not enough, we will add new replica node while check namespace,
-	// and then it should wait the new replica is raft synced before we can start to balance
+func TestClusterBalanceToNewNode(t *testing.T) {
+	// It should wait raft synced before we can start to balance
 	// and new data should be balanced to new node
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_balance_add_new_node"
+	partNum := 4
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 10; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNsList := make([]cluster.PartitionMetaInfo, 0)
+	for i := 0; i < partNum; i++ {
+		oldNs := getNsInfo(t, ns, i)
+		t.Logf("part %v isr is %v", i, oldNs.GetISR())
+		oldNsList = append(oldNsList, oldNs)
+	}
+
+	newDataNodes, dataDir := addMoreTestDataNodeToCluster(t, 2)
+	defer cleanDataNodes(newDataNodes, dataDir)
+
+	// wait balance
+	time.Sleep(time.Second * 10)
+
+	start := time.Now()
+	for {
+		time.Sleep(time.Second)
+		needWait := false
+		for _, nn := range newDataNodes {
+			hasReplica := false
+			for i := 0; i < partNum; i++ {
+				nsNode := nn.s.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(i))
+				if nsNode != nil {
+					hasReplica = true
+					t.Logf("new node %v has replica for namespace: %v", nn.s.GetCoord().GetMyID(), nsNode.FullName())
+					break
+				}
+			}
+			if !hasReplica {
+				needWait = true
+				t.Logf("node %v has no replica for namespace", nn.s.GetCoord().GetMyID())
+			}
+		}
+		if !needWait {
+			break
+		}
+		if time.Since(start) > time.Minute {
+			t.Errorf("timeout wait cluster balance")
+			break
+		}
+	}
+
+	for i := 0; i < partNum; i++ {
+		waitEnoughReplica(t, ns, i)
+		waitForAllFullReady(t, ns, i)
+		waitBalancedLeader(t, ns, i)
+	}
+	newNsList := make([]cluster.PartitionMetaInfo, 0)
+	notChangedPart := 0
+	for i := 0; i < partNum; i++ {
+		for {
+			time.Sleep(time.Second * 3)
+			newNs := getNsInfo(t, ns, i)
+			t.Logf("part %v new isr is %v", i, newNs.GetISR())
+			newNsList = append(newNsList, newNs)
+			oldISR := oldNsList[i].GetISR()
+			sort.Sort(sort.StringSlice(oldISR))
+			newISR := newNs.GetISR()
+			sort.Sort(sort.StringSlice(newISR))
+			if len(newISR) != 3 || len(newNs.Removings) > 0 {
+				// wait remove unneed replica
+				continue
+			}
+			// maybe some part can be un moved
+			eq := assert.ObjectsAreEqual(oldISR, newISR)
+			if eq {
+				// not moved partition
+				notChangedPart++
+				t.Logf("un moved partition: %v, %v", i, newISR)
+			}
+			break
+		}
+	}
+	assert.True(t, notChangedPart <= partNum/2, "half partitions should be balanced to new")
+	time.Sleep(time.Second * 5)
+	for i := 0; i < partNum; i++ {
+		for {
+			waitRemoveFromRemoving(t, ns, i)
+			waitEnoughReplica(t, ns, i)
+			waitForAllFullReady(t, ns, i)
+			waitBalancedLeader(t, ns, i)
+			newNs := getNsInfo(t, ns, i)
+			newISR := newNs.GetISR()
+			if len(newISR) != 3 || len(newNs.Removings) > 0 {
+				// wait remove unneed replica
+				continue
+			}
+			break
+		}
+	}
+
+	for _, nn := range newDataNodes {
+		t.Logf("begin stopping new added node: %v", nn.s.GetCoord().GetMyID())
+		nn.s.Stop()
+
+		for i := 0; i < partNum; i++ {
+			start := time.Now()
+			for {
+				if time.Since(start) > time.Minute*2 {
+					t.Errorf("timeout wait cluster balance for stopped node")
+					break
+				}
+				time.Sleep(time.Second * 5)
+				needWait := false
+				nsInfo := getNsInfo(t, ns, i)
+				newISR := nsInfo.GetISR()
+				for _, nid := range nsInfo.GetISR() {
+					if nid == nn.s.GetCoord().GetMyID() {
+						needWait = true
+						t.Logf("stopped new node %v still has replica for namespace: %v, %v", nn.s.GetCoord().GetMyID(), nsInfo.GetISR(), nsInfo.GetDesp())
+						break
+					}
+				}
+				if _, ok := nsInfo.Removings[nn.s.GetCoord().GetMyID()]; ok {
+					needWait = true
+					t.Logf("stopped new node %v still waiting removing for namespace: %v", nn.s.GetCoord().GetMyID(), nsInfo.GetDesp())
+				}
+				if !needWait {
+					if len(newISR) != 3 || len(nsInfo.Removings) > 0 {
+						// wait remove unneed replica
+						continue
+					}
+					break
+					t.Logf("%v balanced isr: %v", nsInfo.GetDesp(), newISR)
+				}
+			}
+			waitBalancedLeader(t, ns, i)
+		}
+
+		time.Sleep(time.Second * 5)
+		for i := 0; i < partNum; i++ {
+			start := time.Now()
+			for {
+				if time.Since(start) > time.Minute*2 {
+					t.Errorf("timeout waiting balance for stopped")
+					break
+				}
+				waitRemoveFromRemoving(t, ns, i)
+				waitEnoughReplica(t, ns, i)
+				waitForAllFullReady(t, ns, i)
+				waitBalancedLeader(t, ns, i)
+				newNs := getNsInfo(t, ns, i)
+				newISR := newNs.GetISR()
+				if len(newISR) != 3 || len(newNs.Removings) > 0 {
+					// wait remove unneed replica
+					continue
+				}
+				t.Logf("%v balanced isr: %v", newNs.GetDesp(), newISR)
+				break
+			}
+		}
+	}
+
+	time.Sleep(time.Second * 5)
+	for i := 0; i < partNum; i++ {
+		waitEnoughReplica(t, ns, i)
+		waitForAllFullReady(t, ns, i)
+		waitBalancedLeader(t, ns, i)
+	}
+	newNsList = make([]cluster.PartitionMetaInfo, 0)
+	for i := 0; i < partNum; i++ {
+		newNs := getNsInfo(t, ns, i)
+		t.Logf("part %v final new isr is %v", i, newNs.GetISR())
+		newNsList = append(newNsList, newNs)
+		oldISR := oldNsList[i].GetISR()
+		sort.Sort(sort.StringSlice(oldISR))
+		newISR := newNs.GetISR()
+		sort.Sort(sort.StringSlice(newISR))
+		assert.Equal(t, oldISR, newISR)
+	}
+
+	for i := 0; i < partNum; i++ {
+		waitBalancedLeader(t, ns, i)
+		newNs := getNsInfo(t, ns, i)
+		t.Logf("new info for part %v: %v, %v", i, newNs.GetRealLeader(), newNs.GetISR())
+	}
 }
 
-func TestClusterAddReplicaOneByOne(t *testing.T) {
-	// TODO:
+func TestClusterIncrReplicaOneByOne(t *testing.T) {
 	// While increase replicas, we need add new replica one by one to avoid 2 failed node in raft.
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_increase_replicas"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 2)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 2, len(oldNs.GetISR()))
+
+	err := gpdServer.pdCoord.ChangeNamespaceMetaParam(ns, 4, "", 0)
+	assert.Nil(t, err)
+
+	lastNs := oldNs
+	for {
+		time.Sleep(time.Second)
+		newNs := getNsInfo(t, ns, 0)
+		t.Logf("new isr is: %v", newNs)
+		assert.True(t, len(newNs.GetISR()) <= len(lastNs.GetISR())+1)
+		lastNs = newNs
+		waitForAllFullReady(t, ns, 0)
+		if len(newNs.GetISR()) == 4 {
+			break
+		}
+	}
+	waitEnoughReplica(t, ns, 0)
+	waitForAllFullReady(t, ns, 0)
+	waitBalancedLeader(t, ns, 0)
+
+	newNs := getNsInfo(t, ns, 0)
+	t.Logf("new isr is: %v", newNs)
+	assert.Equal(t, 4, len(newNs.GetISR()))
+	for _, old := range oldNs.GetISR() {
+		found := false
+		for _, nid := range newNs.GetISR() {
+			if old == nid {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found)
+	}
+}
+
+func TestClusterDecrReplicaOneByOne(t *testing.T) {
+	// While decrease replicas, we need remove replica one by one to avoid 2 failed node in raft.
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_decrease_replicas"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 4)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 4, len(oldNs.GetISR()))
+
+	err := gpdServer.pdCoord.ChangeNamespaceMetaParam(ns, 2, "", 0)
+	assert.Nil(t, err)
+
+	lastNs := oldNs
+	for {
+		time.Sleep(time.Second)
+		newNs := getNsInfo(t, ns, 0)
+		t.Logf("new isr is: %v", newNs)
+		assert.True(t, len(newNs.GetISR()) >= len(lastNs.GetISR())-1)
+		lastNs = newNs
+		if len(newNs.Removings) > 0 {
+			continue
+		}
+		waitForAllFullReady(t, ns, 0)
+		if len(newNs.GetISR()) == 2 {
+			break
+		}
+	}
+	waitEnoughReplica(t, ns, 0)
+	waitForAllFullReady(t, ns, 0)
+	waitBalancedLeader(t, ns, 0)
+
+	newNs := getNsInfo(t, ns, 0)
+	t.Logf("new isr is: %v", newNs)
+	assert.Equal(t, 2, len(newNs.GetISR()))
+	assert.Equal(t, 0, len(newNs.Removings))
+	for _, nid := range newNs.GetISR() {
+		found := false
+		for _, old := range oldNs.GetISR() {
+			if old == nid {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found)
+	}
 }
