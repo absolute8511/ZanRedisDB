@@ -601,7 +601,7 @@ func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 			return
 		}
 		if snapData.Metadata.Index > np.appliedi {
-			rc.Infof("load snapshot error, snapshot index should not great than applied: %v", snapData.Metadata, np)
+			rc.Infof("load snapshot error, snapshot index should not great than applied: %v, %v", snapData.Metadata, np)
 			rc.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
 			return
 		}

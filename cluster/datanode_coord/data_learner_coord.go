@@ -224,7 +224,7 @@ func (dc *DataCoordinator) checkForUnsyncedLogSyncers() {
 			}
 
 			if !dc.isInLearnerGroup(*nsInfo, localNamespace) {
-				cluster.CoordLog().Infof("namespace %v removed since not in learner group", name, nsInfo.LearnerNodes)
+				cluster.CoordLog().Infof("namespace %v removed since not in learner group: %v", name, nsInfo.LearnerNodes)
 				dc.forceRemoveLocalNamespace(localNamespace)
 				continue
 			}

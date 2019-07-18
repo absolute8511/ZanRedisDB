@@ -659,7 +659,7 @@ func (etcdReg *PDEtcdRegister) Unregister(value *NodeInfo) error {
 
 	_, err := etcdReg.client.Delete(etcdReg.getPDNodePath(value), false)
 	if err != nil {
-		coordLog.Warningf("cluser[%s] node[%s] unregister failed: %v", etcdReg.clusterID, value, err)
+		coordLog.Warningf("cluser[%s] node[%v] unregister failed: %v", etcdReg.clusterID, value, err)
 		return err
 	}
 
@@ -1095,7 +1095,7 @@ func (etcdReg *DNEtcdRegister) Unregister(nodeData *NodeInfo) error {
 
 	_, err := etcdReg.client.Delete(etcdReg.getDataNodePath(nodeData), false)
 	if err != nil {
-		coordLog.Warningf("cluser[%s] node[%s] unregister failed: %v", etcdReg.clusterID, nodeData, err)
+		coordLog.Warningf("cluser[%s] node[%v] unregister failed: %v", etcdReg.clusterID, nodeData, err)
 		return err
 	}
 

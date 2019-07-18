@@ -986,7 +986,7 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	}
 	// signaled to load snapshot
 	nd.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
-	defer nd.rn.Infof("finished applying snapshot at index %d\n", np)
+	defer nd.rn.Infof("finished applying snapshot at index %v\n", np)
 
 	if applyEvent.snapshot.Metadata.Index <= np.appliedi {
 		nodeLog.Panicf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
