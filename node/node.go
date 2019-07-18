@@ -25,6 +25,18 @@ import (
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 )
 
+var enableSnapTransferTest = false
+var enableSnapSaveTest = false
+var enableSnapApplyTest = false
+var enableSnapApplyRestoreStorageTest = false
+
+func EnableSnapForTest(transfer bool, save bool, apply bool, restore bool) {
+	enableSnapTransferTest = transfer
+	enableSnapSaveTest = save
+	enableSnapApplyTest = apply
+	enableSnapApplyRestoreStorageTest = restore
+}
+
 var (
 	errInvalidResponse      = errors.New("Invalid response type")
 	errSyntaxError          = errors.New("syntax error")
@@ -968,9 +980,9 @@ func (nd *KVNode) readIndexLoop() {
 	}
 }
 
-func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
+func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	if raft.IsEmptySnap(applyEvent.snapshot) {
-		return nil
+		return
 	}
 	// signaled to load snapshot
 	nd.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
@@ -980,14 +992,18 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 		nodeLog.Panicf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
-
-	// TODO: do we need wait raft to persist the snap onto disk here?
-
-	// the snapshot restore may fail because of the remote snapshot is deleted
-	// and can not rsync from any other nodes.
-	// while starting we can not ignore or delete the snapshot since the wal may be cleaned on other snapshot.
-	if err := nd.RestoreFromSnapshot(false, applyEvent.snapshot); err != nil {
-		nodeLog.Error(err)
+	err := nd.PrepareSnapshot(applyEvent.snapshot)
+	if enableSnapTransferTest {
+		err = errors.New("auto test failed in snapshot transfer")
+	}
+	if applyEvent.applySnapshotResult != nil {
+		select {
+		case applyEvent.applySnapshotResult <- err:
+		case <-nd.stopChan:
+		}
+	}
+	if err != nil {
+		nd.rn.Errorf("prepare snapshot failed: %v", err.Error())
 		go func() {
 			select {
 			case <-nd.stopChan:
@@ -996,14 +1012,41 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 			}
 		}()
 		<-nd.stopChan
-		return err
+		return
+	}
+
+	// need wait raft to persist the snap onto disk here
+	select {
+	case <-applyEvent.raftDone:
+	case <-nd.stopChan:
+		return
+	}
+
+	// the snapshot restore may fail because of the remote snapshot is deleted
+	// and can not rsync from any other nodes.
+	// while starting we can not ignore or delete the snapshot since the wal may be cleaned on other snapshot.
+	if enableSnapApplyTest {
+		err = errors.New("failed to restore from snapshot in failed test")
+	} else {
+		err = nd.RestoreFromSnapshot(applyEvent.snapshot)
+	}
+	if err != nil {
+		nd.rn.Errorf("restore snapshot failed: %v", err.Error())
+		go func() {
+			select {
+			case <-nd.stopChan:
+			default:
+				nd.Stop()
+			}
+		}()
+		<-nd.stopChan
+		return
 	}
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
 	np.snapi = applyEvent.snapshot.Metadata.Index
 	np.appliedt = applyEvent.snapshot.Metadata.Term
 	np.appliedi = applyEvent.snapshot.Metadata.Index
-	return nil
 }
 
 // return (self removed, any conf changed, error)
@@ -1126,16 +1169,7 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 }
 
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
-	snapErr := nd.applySnapshot(np, applyEvent)
-	if applyEvent.applySnapshotResult != nil {
-		select {
-		case applyEvent.applySnapshotResult <- snapErr:
-		case <-nd.stopChan:
-		}
-	}
-	if snapErr != nil {
-		nd.rn.Errorf("apply snapshot failed: %v", snapErr.Error())
-	}
+	nd.applySnapshot(np, applyEvent)
 	confChanged, forceBackup := nd.applyEntries(np, applyEvent)
 
 	lastIndex := np.appliedi
@@ -1243,7 +1277,7 @@ func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 	return si, nil
 }
 
-func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
+func (nd *KVNode) PrepareSnapshot(raftSnapshot raftpb.Snapshot) error {
 	snapshot := raftSnapshot.Data
 	var si KVSnapInfo
 	err := json.Unmarshal(snapshot, &si)
@@ -1251,8 +1285,20 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 		return err
 	}
 	nd.rn.RestoreMembers(si)
+	nd.rn.Infof("prepare snapshot here: %v", raftSnapshot.String())
+	err = nd.sm.PrepareSnapshot(raftSnapshot, nd.stopChan)
+	return err
+}
+
+func (nd *KVNode) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
-	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot, nd.stopChan)
+	err := nd.sm.RestoreFromSnapshot(raftSnapshot, nd.stopChan)
+	if err != nil {
+		return err
+	}
+	snapshot := raftSnapshot.Data
+	var si KVSnapInfo
+	err = json.Unmarshal(snapshot, &si)
 	if err != nil {
 		return err
 	}

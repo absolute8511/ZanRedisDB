@@ -19,7 +19,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/cluster/pdnode_coord"
 	"github.com/youzan/ZanRedisDB/node"
-	ds "github.com/youzan/ZanRedisDB/server"
 )
 
 func TestMain(m *testing.M) {
@@ -30,6 +29,20 @@ func TestMain(m *testing.M) {
 
 	cleanAllCluster(ret)
 	os.Exit(ret)
+}
+
+func enableStaleRead(t *testing.T, addr string, enable bool) {
+	uri := fmt.Sprintf("%s/staleread?allow=true", addr)
+	if !enable {
+		uri = fmt.Sprintf("%s/staleread?allow=false", addr)
+	}
+	rsp, err := http.Post(uri, "", nil)
+	assert.Nil(t, err)
+	if rsp.StatusCode != 200 {
+		assert.FailNow(t, rsp.Status)
+	}
+	assert.Equal(t, 200, rsp.StatusCode)
+	rsp.Body.Close()
 }
 
 func enableAutoBalance(t *testing.T, pduri string, enable bool) {
@@ -261,7 +274,7 @@ func waitBalancedAndJoined(t *testing.T, ns string, part int, expected string) {
 	}
 }
 
-func getFollowerNode(t *testing.T, ns string, part int) (*ds.Server, *node.NamespaceNode) {
+func getFollowerNode(t *testing.T, ns string, part int) (dataNodeWrapper, *node.NamespaceNode) {
 	for _, kv := range gkvList {
 		nsNode := kv.s.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(part))
 		if nsNode == nil {
@@ -271,9 +284,9 @@ func getFollowerNode(t *testing.T, ns string, part int) (*ds.Server, *node.Names
 		if nsNode.Node.IsLead() {
 			continue
 		}
-		return kv.s, nsNode
+		return kv, nsNode
 	}
-	return nil, nil
+	return dataNodeWrapper{}, nil
 }
 
 func getTestRedisConn(t *testing.T, port int) *goredis.PoolConn {
@@ -438,7 +451,8 @@ func TestFollowerLost(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		nsNode.Node.OptimizeDB("")
 	}
-	follower, followerNode := getFollowerNode(t, ns, 0)
+	followerWrap, followerNode := getFollowerNode(t, ns, 0)
+	follower := followerWrap.s
 	oldFollowerReplicaID := followerNode.GetRaftID()
 	followerID := follower.GetCoord().GetMyID()
 	follower.Stop()
@@ -714,7 +728,8 @@ func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 	defer ensureDeleteNamespace(t, pduri, ns)
 
 	nodeWrapper, nsNode := waitForLeader(t, ns, 0)
-	follower, _ := getFollowerNode(t, ns, 0)
+	followerWrap, _ := getFollowerNode(t, ns, 0)
+	follower := followerWrap.s
 	leader := nodeWrapper.s
 	assert.NotNil(t, leader)
 	dcoord := leader.GetCoord()
@@ -774,7 +789,8 @@ func TestMarkAsRemovingWhileOthersNotSynced(t *testing.T) {
 	defer ensureDeleteNamespace(t, pduri, ns)
 
 	leaderWrapper, leaderNode := waitForLeader(t, ns, 0)
-	follower, _ := getFollowerNode(t, ns, 0)
+	followerWrap, _ := getFollowerNode(t, ns, 0)
+	follower := followerWrap.s
 	leader := leaderWrapper.s
 	assert.NotNil(t, leader)
 	dcoord := leader.GetCoord()
@@ -888,18 +904,6 @@ func TestRestartCluster(t *testing.T) {
 	newNs := getNsInfo(t, ns, 0)
 	test.Equal(t, oldNs.GetISR(), newNs.GetISR())
 	test.Equal(t, oldNs.GetRealLeader(), newNs.GetRealLeader())
-}
-
-func TestRestartWithForceAlone(t *testing.T) {
-	// TODO: test force restart with alone
-}
-
-func TestInstallSnapshotFailed(t *testing.T) {
-	// TODO: test the follower fall behind too much, and the leader send the snapshot to follower,
-	// However, the follower failed to pull the snapshot data from leader. So the raft node should stop
-	// and restart later.
-
-	// test case should make sure the snap will be not persisted to the stable storage since the snapshot data is failed to pull.
 }
 
 func TestClusterBalanceToNewNode(t *testing.T) {
@@ -1221,4 +1225,304 @@ func TestClusterDecrReplicaOneByOne(t *testing.T) {
 		}
 		assert.True(t, found)
 	}
+}
+
+func TestRestartWithForceAlone(t *testing.T) {
+	// TODO: test force restart with alone
+}
+
+func TestInstallSnapshotTransferFailed(t *testing.T) {
+	// Test the follower fall behind too much, and the leader send the snapshot to follower,
+	// However, the follower failed to pull the snapshot data from leader. So the raft node should stop
+	// and restart pull snapshot data later.
+
+	// test case should make sure the snap will be not persisted to the stable storage since the snapshot data is failed to pull.
+	// check data write after snapshot should not be read until the snapshot fail is recovered
+	node.EnableSnapForTest(true, false, false, false)
+	defer node.EnableSnapForTest(false, false, false, false)
+
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_snap_transfer_failed"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 3, len(oldNs.GetISR()))
+	foWrap, _ := getFollowerNode(t, ns, 0)
+	foWrap.s.Stop()
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	c := getTestRedisConn(t, dnw.redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "snap_transfer:k1")
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	leaderV, err := goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", leaderV)
+
+	foWrap.s.Start()
+	time.Sleep(time.Second * 10)
+	addr := fmt.Sprintf("http://127.0.0.1:%v", foWrap.httpPort)
+	enableStaleRead(t, addr, true)
+	// snapshort should failed
+	followerConn := getTestRedisConn(t, foWrap.redisPort)
+	defer followerConn.Close()
+	for i := 0; i < 10; i++ {
+		getV, err := goredis.String(followerConn.Do("get", key))
+		assert.NotNil(t, err)
+		t.Logf("read follower should failed: %v", err.Error())
+		assert.True(t, getV == "")
+		time.Sleep(time.Second)
+	}
+
+	node.EnableSnapForTest(false, false, false, false)
+	waitForAllFullReady(t, ns, 0)
+	time.Sleep(time.Second * 3)
+
+	getV, err := goredis.String(followerConn.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", getV)
+	enableStaleRead(t, addr, false)
+}
+
+func TestInstallSnapshotSaveRaftFailed(t *testing.T) {
+	// TODO: test the snapshot transfer to follower success, but the follower save snapshot meta to raft storage failed
+	// should restart to re-apply
+	// Fixme: currently, the hardstate and snapshot saving is not atomic, enable this test if we can make that.
+	return
+
+	defer node.EnableSnapForTest(false, false, false, false)
+
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_snap_save_failed"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 3, len(oldNs.GetISR()))
+
+	foWrap, _ := getFollowerNode(t, ns, 0)
+	foWrap.s.Stop()
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	c := getTestRedisConn(t, dnw.redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "snap_save:k1")
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	leaderV, err := goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", leaderV)
+	time.Sleep(time.Second * 5)
+
+	node.EnableSnapForTest(false, true, false, false)
+	foWrap.s.Start()
+	time.Sleep(time.Second * 10)
+	addr := fmt.Sprintf("http://127.0.0.1:%v", foWrap.httpPort)
+	enableStaleRead(t, addr, true)
+	// snapshort should failed
+	followerConn := getTestRedisConn(t, foWrap.redisPort)
+	defer followerConn.Close()
+	for i := 0; i < 10; i++ {
+		getV, err := goredis.String(followerConn.Do("get", key))
+		assert.NotNil(t, err)
+		t.Logf("read follower should failed: %v", err.Error())
+		assert.True(t, getV == "")
+		time.Sleep(time.Second)
+	}
+
+	node.EnableSnapForTest(false, false, false, false)
+	waitForAllFullReady(t, ns, 0)
+	time.Sleep(time.Second * 3)
+
+	getV, err := goredis.String(followerConn.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", getV)
+	enableStaleRead(t, addr, false)
+}
+
+func TestInstallSnapshotApplyFailed(t *testing.T) {
+	// test the snapshot transfer to follower success, but the follower apply failed
+	// should restart to re-apply, while restart the snapshot will be restored success and no need apply in raft loop
+	defer node.EnableSnapForTest(false, false, false, false)
+
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_snap_apply_failed"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 3, len(oldNs.GetISR()))
+
+	foWrap, _ := getFollowerNode(t, ns, 0)
+	foWrap.s.Stop()
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	c := getTestRedisConn(t, dnw.redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "snap_apply:k1")
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	leaderV, err := goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", leaderV)
+	time.Sleep(time.Second * 5)
+
+	node.EnableSnapForTest(false, false, true, false)
+	foWrap.s.Start()
+	// apply failed and restart success, so we can be ready after restart
+	waitForAllFullReady(t, ns, 0)
+	time.Sleep(time.Second * 3)
+	addr := fmt.Sprintf("http://127.0.0.1:%v", foWrap.httpPort)
+	enableStaleRead(t, addr, true)
+	followerConn := getTestRedisConn(t, foWrap.redisPort)
+	defer followerConn.Close()
+
+	getV, err := goredis.String(followerConn.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", getV)
+	enableStaleRead(t, addr, false)
+}
+
+func TestInstallSnapshotApplyRestoreFailed(t *testing.T) {
+	// restore failed will make sure apply snapshot and restart both failed to restore
+	defer node.EnableSnapForTest(false, false, false, false)
+
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_snap_apply_restore_failed"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 3, len(oldNs.GetISR()))
+
+	foWrap, _ := getFollowerNode(t, ns, 0)
+	foWrap.s.Stop()
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	c := getTestRedisConn(t, dnw.redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "snap_apply:k1")
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	leaderV, err := goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", leaderV)
+	time.Sleep(time.Second * 5)
+
+	node.EnableSnapForTest(false, false, false, true)
+	foWrap.s.Start()
+	time.Sleep(time.Second * 10)
+
+	addr := fmt.Sprintf("http://127.0.0.1:%v", foWrap.httpPort)
+	enableStaleRead(t, addr, true)
+	followerConn := getTestRedisConn(t, foWrap.redisPort)
+	defer followerConn.Close()
+
+	for i := 0; i < 10; i++ {
+		getV, err := goredis.String(followerConn.Do("get", key))
+		assert.NotNil(t, err)
+		t.Logf("read follower should failed: %v", err.Error())
+		assert.True(t, getV == "")
+		time.Sleep(time.Second)
+	}
+
+	node.EnableSnapForTest(false, false, false, false)
+	// apply failed and restart success, so we can be ready after restart
+	waitForAllFullReady(t, ns, 0)
+	time.Sleep(time.Second * 5)
+
+	getV, err := goredis.String(followerConn.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", getV)
+	enableStaleRead(t, addr, false)
 }

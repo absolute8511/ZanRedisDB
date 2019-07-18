@@ -71,7 +71,8 @@ type IRaftPersistStorage interface {
 
 type DataStorage interface {
 	CleanData() error
-	RestoreFromSnapshot(bool, raftpb.Snapshot) error
+	RestoreFromSnapshot(raftpb.Snapshot) error
+	PrepareSnapshot(raftpb.Snapshot) error
 	GetSnapshot(term uint64, index uint64) (Snapshot, error)
 	Stop()
 }
@@ -360,8 +361,19 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			rc.Infof("loading snapshot at term %d and index %d, snap: %v",
 				snapshot.Metadata.Term,
 				snapshot.Metadata.Index, snapshot.Metadata.ConfState)
-			if err := rc.ds.RestoreFromSnapshot(true, *snapshot); err != nil {
-				nodeLog.Error(err)
+			err := rc.ds.PrepareSnapshot(*snapshot)
+			if err == nil {
+				if err := rc.ds.RestoreFromSnapshot(*snapshot); err != nil {
+					nodeLog.Error(err)
+					return err
+				}
+			} else if err == errNobackupAvailable {
+				if common.IsConfSetted(common.ConfIgnoreStartupNoBackup) {
+					nodeLog.Infof("ignore failed at startup for no any backup from anyware")
+				} else {
+					return err
+				}
+			} else {
 				return err
 			}
 		}
@@ -876,22 +888,22 @@ func (rc *raftNode) serveChannels() {
 				}
 			}
 
-			var applySnapshotResult chan error
+			var applySnapshotTransferResult chan error
 			if !raft.IsEmptySnap(rd.Snapshot) {
-				applySnapshotResult = make(chan error, 1)
+				applySnapshotTransferResult = make(chan error, 1)
 			}
 
 			// TODO: do we need publish entry if commitedentries and snapshot is empty?
-			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotResult, raftDone, applyWaitDone)
+			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
 
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				// since the snapshot only has metadata, we need rsync the real snapshot data first.
 				// if the real snapshot failed to pull, we need stop raft and retry restart later.
-				rc.Infof("raft begin to apply incoming snapshot : %v", rd.Snapshot.String())
+				rc.Infof("raft begin to transfer incoming snapshot : %v", rd.Snapshot.String())
 				select {
-				case applyErr := <-applySnapshotResult:
+				case applyErr := <-applySnapshotTransferResult:
 					if applyErr != nil {
-						rc.Errorf("wait apply snapshot error: %v", applyErr)
+						rc.Errorf("wait transfer snapshot error: %v", applyErr)
 						go rc.ds.Stop()
 						<-rc.stopc
 						return
@@ -899,10 +911,12 @@ func (rc *raftNode) serveChannels() {
 				case <-rc.stopc:
 					return
 				}
+				rc.Infof("raft transfer incoming snapshot done : %v", rd.Snapshot.String())
 			}
 			if isMeNewLeader {
 				rc.transport.Send(rc.processMessages(rd.Messages))
 			}
+			// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
 			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
 				nodeLog.Errorf("raft save wal error: %v", err)
 				go rc.ds.Stop()
@@ -910,13 +924,16 @@ func (rc *raftNode) serveChannels() {
 				return
 			}
 			if !raft.IsEmptySnap(rd.Snapshot) {
-				if err := rc.persistStorage.SaveSnap(rd.Snapshot); err != nil {
+				err := rc.persistStorage.SaveSnap(rd.Snapshot)
+				if err != nil {
 					rc.Errorf("raft save snap error: %v", err)
 					go rc.ds.Stop()
 					<-rc.stopc
 					return
 				}
-				// TODO: do we need to notify to tell that the snapshot has been perisisted onto the disk?
+				rc.Infof("raft persist snapshot meta done : %v", rd.Snapshot.String())
+				// we need to notify to tell that the snapshot has been perisisted onto the disk
+				raftDone <- struct{}{}
 
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
 				rc.Infof("raft applied incoming snapshot done: %v", rd.Snapshot.String())

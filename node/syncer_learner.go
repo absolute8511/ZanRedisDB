@@ -370,7 +370,11 @@ func (sm *logSyncerSM) waitAndCheckTransferLimit(start time.Time, stop chan stru
 	return newMyRun, err
 }
 
-func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+func (sm *logSyncerSM) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+	return nil
+}
+
+func (sm *logSyncerSM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	// get (term-index) from the remote cluster, if the remote cluster has
 	// greater (term-index) than snapshot, we can just ignore the snapshot restore
 	// since we already synced the data in snapshot.
@@ -479,9 +483,8 @@ func (sm *logSyncerSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 	}
 	if restoreErr != nil {
 		sm.Infof("restore snapshot %v failed: %v", raftSnapshot.Metadata.String(), restoreErr)
-		if restoreErr == errNobackupAvailable && startup {
+		if restoreErr == errNobackupAvailable {
 			sm.Infof("restore snapshot %v while startup failed due to no snapshot, we can ignore in learner while startup", raftSnapshot.Metadata.String())
-			return nil
 		}
 		return restoreErr
 	}
