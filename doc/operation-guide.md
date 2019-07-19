@@ -74,6 +74,12 @@ namespace创建参数建议3副本, 分区数可以预估集群最大规模, 一
 
 rsync进程:用于异常恢复时传输zankv的备份数据
 
+传输速度可以动态配置限速:
+
+```json
+POST /rsynclimit?limit=80000
+```
+
 集群的一些统计数据, 可以分别从placedriver和zankv的接口获取,统计数据接口如下:
 
 placedriver API
@@ -97,6 +103,25 @@ zankv API
 
 /raft/stats
 获取raft集群状态, 用于判断异常信息
+```
+
+动态配置支持int和string两种类型, 对应的更改和获取接口如下:
+
+```json
+POST /conf/set?type=int&key=xxx&value=xxx
+POST /conf/set?type=str&key=xxx&value=xxx
+
+GET /conf/get?type=int&key=xxx
+GET /conf/get?type=str&key=xxx
+
+目前可以动态配置的参数如下:
+int类型:
+check_snap_timeout - 检查快照超时时间, 单位秒
+check_raft_timeout - 检查raft是否同步超时时间, 单位秒
+max_remote_recover - 跨机房同步时, 最大同时同步的分区数
+string类型:
+ignore_startup_nobackup - 启动时是否忽略快照不存在的错误.
+ignore_remote_file_sync - 是否忽略跨机房同步的快照传输
 ```
 
 ## 备份恢复
