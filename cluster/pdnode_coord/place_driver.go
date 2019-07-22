@@ -477,8 +477,17 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			coordErr := dp.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 			moved = true
 			if coordErr != nil {
+				cluster.CoordLog().Infof("namespace %v removing node: %v failed while balance",
+					namespaceInfo.GetDesp(), nid)
 				return moved, false
 			}
+			// Move only one node in a loop, we need wait the removing node be removed from raft group.
+			break
+		}
+		if len(namespaceInfo.Removings) > 0 {
+			// need wait moved node be removed from raft group
+			isAllBalanced = false
+			continue
 		}
 		expectLeader := partitionNodes[namespaceInfo.Partition][0]
 		if _, ok := namespaceInfo.Removings[expectLeader]; ok {

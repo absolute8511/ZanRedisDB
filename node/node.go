@@ -25,6 +25,18 @@ import (
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 )
 
+var enableSnapTransferTest = false
+var enableSnapSaveTest = false
+var enableSnapApplyTest = false
+var enableSnapApplyRestoreStorageTest = false
+
+func EnableSnapForTest(transfer bool, save bool, apply bool, restore bool) {
+	enableSnapTransferTest = transfer
+	enableSnapSaveTest = save
+	enableSnapApplyTest = apply
+	enableSnapApplyRestoreStorageTest = restore
+}
+
 var (
 	errInvalidResponse      = errors.New("Invalid response type")
 	errSyntaxError          = errors.New("syntax error")
@@ -32,6 +44,7 @@ var (
 	errTooMuchBatchSize     = errors.New("the batch size exceed the limit")
 	errRaftNotReadyForWrite = errors.New("ERR_CLUSTER_CHANGED: the raft is not ready for write")
 	errWrongNumberArgs      = errors.New("ERR wrong number of arguments for redis command")
+	ErrReadIndexTimeout     = errors.New("wait read index timeout")
 )
 
 const (
@@ -112,11 +125,16 @@ type KVNode struct {
 	machineConfig      *MachineConfig
 	wg                 sync.WaitGroup
 	commitC            <-chan applyInfo
-	committedIndex     uint64
+	appliedIndex       uint64
 	clusterInfo        common.IClusterInfo
 	expireHandler      *ExpireHandler
 	expirationPolicy   common.ExpirationPolicy
 	remoteSyncedStates *remoteSyncedStateMgr
+	applyWait          wait.WaitTime
+	// used for read index
+	readMu       sync.RWMutex
+	readWaitC    chan struct{}
+	readNotifier *notifier
 }
 
 type KVSnapInfo struct {
@@ -166,6 +184,9 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		machineConfig:      config.nodeConfig,
 		expirationPolicy:   kvopts.ExpirationPolicy,
 		remoteSyncedStates: newRemoteSyncedStateMgr(),
+		applyWait:          wait.NewTimeList(),
+		readWaitC:          make(chan struct{}, 1),
+		readNotifier:       newNotifier(),
 	}
 	if kvsm, ok := sm.(*kvStoreSM); ok {
 		s.store = kvsm.store
@@ -221,6 +242,11 @@ func (nd *KVNode) Start(standalone bool) error {
 	go func() {
 		defer nd.wg.Done()
 		nd.handleProposeReq()
+	}()
+	nd.wg.Add(1)
+	go func() {
+		defer nd.wg.Done()
+		nd.readIndexLoop()
 	}()
 
 	nd.expireHandler.Start()
@@ -822,12 +848,12 @@ func (nd *KVNode) Tick() {
 	nd.rn.node.Tick()
 }
 
-func (nd *KVNode) GetCommittedIndex() uint64 {
-	return atomic.LoadUint64(&nd.committedIndex)
+func (nd *KVNode) GetAppliedIndex() uint64 {
+	return atomic.LoadUint64(&nd.appliedIndex)
 }
 
-func (nd *KVNode) SetCommittedIndex(ci uint64) {
-	atomic.StoreUint64(&nd.committedIndex, ci)
+func (nd *KVNode) SetAppliedIndex(ci uint64) {
+	atomic.StoreUint64(&nd.appliedIndex, ci)
 }
 
 func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
@@ -851,65 +877,133 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 		return true
 	}
 	to := time.Second * 5
-	req := make([]byte, 8)
-	binary.BigEndian.PutUint64(req, nd.rn.reqIDGen.Next())
 	ctx, cancel := context.WithTimeout(context.Background(), to)
-	if err := nd.rn.node.ReadIndex(ctx, req); err != nil {
-		cancel()
-		if err == raft.ErrStopped {
-		}
-		nodeLog.Warningf("failed to get the read index from raft: %v", err)
-		return false
-	}
+	err := nd.linearizableReadNotify(ctx)
 	cancel()
 
-	var rs raft.ReadState
-	var (
-		timeout bool
-		done    bool
-	)
-	for !timeout && !done {
-		select {
-		case rs := <-nd.rn.readStateC:
-			done = bytes.Equal(rs.RequestCtx, req)
-			if !done {
-			}
-		case <-time.After(to):
-			nodeLog.Infof("timeout waiting for read index response")
-			timeout = true
-		case <-nd.stopChan:
-			return false
-		}
-	}
-	if !done {
+	if err != nil {
+		nodeLog.Infof("wait raft not synced,  %v", err.Error())
 		return false
 	}
-	ci := nd.GetCommittedIndex()
-	if rs.Index <= 0 || ci >= rs.Index-1 {
-		return true
-	}
-	nodeLog.Infof("not synced, committed %v, read index %v", ci, rs.Index)
-	return false
+	return true
 }
 
-func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
+func (nd *KVNode) linearizableReadNotify(ctx context.Context) error {
+	nd.readMu.RLock()
+	n := nd.readNotifier
+	nd.readMu.RUnlock()
+
+	// signal linearizable loop for current notify if it hasn't been already
+	select {
+	case nd.readWaitC <- struct{}{}:
+	default:
+	}
+
+	// wait for read state notification
+	select {
+	case <-n.c:
+		return n.err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-nd.stopChan:
+		return common.ErrStopped
+	}
+}
+
+func (nd *KVNode) readIndexLoop() {
+	var rs raft.ReadState
+	to := time.Second * 5
+	for {
+		req := make([]byte, 8)
+		id1 := nd.rn.reqIDGen.Next()
+		binary.BigEndian.PutUint64(req, id1)
+		select {
+		case <-nd.readWaitC:
+		case <-nd.stopChan:
+			return
+		}
+		nextN := newNotifier()
+		nd.readMu.Lock()
+		nr := nd.readNotifier
+		nd.readNotifier = nextN
+		nd.readMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), to)
+		if err := nd.rn.node.ReadIndex(ctx, req); err != nil {
+			cancel()
+			nr.notify(err)
+			if err == raft.ErrStopped {
+				return
+			}
+			nodeLog.Warningf("failed to get the read index from raft: %v", err)
+			continue
+		}
+		cancel()
+
+		var (
+			timeout bool
+			done    bool
+		)
+		for !timeout && !done {
+			select {
+			case rs := <-nd.rn.readStateC:
+				done = bytes.Equal(rs.RequestCtx, req)
+				if !done {
+					// a previous request might time out. now we should ignore the response of it and
+					// continue waiting for the response of the current requests.
+					id2 := uint64(0)
+					if len(rs.RequestCtx) == 8 {
+						id2 = binary.BigEndian.Uint64(rs.RequestCtx)
+					}
+					nodeLog.Infof("ignored out of date read index: %v, %v", id2, id1)
+				}
+			case <-time.After(to):
+				nodeLog.Infof("timeout waiting for read index response: %v", id1)
+				timeout = true
+				nr.notify(ErrReadIndexTimeout)
+			case <-nd.stopChan:
+				return
+			}
+		}
+		if !done {
+			continue
+		}
+		ai := nd.GetAppliedIndex()
+		if ai < rs.Index && rs.Index > 0 {
+			select {
+			case <-nd.applyWait.Wait(rs.Index):
+			case <-nd.stopChan:
+				return
+			}
+		}
+		nr.notify(nil)
+	}
+}
+
+func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	if raft.IsEmptySnap(applyEvent.snapshot) {
-		return nil
+		return
 	}
 	// signaled to load snapshot
 	nd.rn.Infof("applying snapshot at index %d, snapshot: %v\n", np.snapi, applyEvent.snapshot.String())
-	defer nd.rn.Infof("finished applying snapshot at index %d\n", np)
+	defer nd.rn.Infof("finished applying snapshot at index %v\n", np)
 
 	if applyEvent.snapshot.Metadata.Index <= np.appliedi {
 		nodeLog.Panicf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
-
-	// the snapshot restore may fail because of the remote snapshot is deleted
-	// and can not rsync from any other nodes.
-	// while starting we can not ignore or delete the snapshot since the wal may be cleaned on other snapshot.
-	if err := nd.RestoreFromSnapshot(false, applyEvent.snapshot); err != nil {
-		nodeLog.Error(err)
+	err := nd.PrepareSnapshot(applyEvent.snapshot)
+	if enableSnapTransferTest {
+		err = errors.New("auto test failed in snapshot transfer")
+	}
+	if applyEvent.applySnapshotResult != nil {
+		select {
+		case applyEvent.applySnapshotResult <- err:
+		case <-nd.stopChan:
+		}
+	}
+	if err != nil {
+		nd.rn.Errorf("prepare snapshot failed: %v", err.Error())
 		go func() {
 			select {
 			case <-nd.stopChan:
@@ -918,14 +1012,41 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) error {
 			}
 		}()
 		<-nd.stopChan
-		return err
+		return
+	}
+
+	// need wait raft to persist the snap onto disk here
+	select {
+	case <-applyEvent.raftDone:
+	case <-nd.stopChan:
+		return
+	}
+
+	// the snapshot restore may fail because of the remote snapshot is deleted
+	// and can not rsync from any other nodes.
+	// while starting we can not ignore or delete the snapshot since the wal may be cleaned on other snapshot.
+	if enableSnapApplyTest {
+		err = errors.New("failed to restore from snapshot in failed test")
+	} else {
+		err = nd.RestoreFromSnapshot(applyEvent.snapshot)
+	}
+	if err != nil {
+		nd.rn.Errorf("restore snapshot failed: %v", err.Error())
+		go func() {
+			select {
+			case <-nd.stopChan:
+			default:
+				nd.Stop()
+			}
+		}()
+		<-nd.stopChan
+		return
 	}
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
 	np.snapi = applyEvent.snapshot.Metadata.Index
 	np.appliedt = applyEvent.snapshot.Metadata.Term
 	np.appliedi = applyEvent.snapshot.Metadata.Index
-	return nil
 }
 
 // return (self removed, any conf changed, error)
@@ -982,29 +1103,7 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 	return forceBackup
 }
 
-func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
-	var lastCommittedIndex uint64
-	if len(applyEvent.ents) > 0 {
-		lastCommittedIndex = applyEvent.ents[len(applyEvent.ents)-1].Index
-	}
-	if applyEvent.snapshot.Metadata.Index > lastCommittedIndex {
-		lastCommittedIndex = applyEvent.snapshot.Metadata.Index
-	}
-	if lastCommittedIndex > nd.GetCommittedIndex() {
-		nd.SetCommittedIndex(lastCommittedIndex)
-	}
-	snapErr := nd.applySnapshot(np, applyEvent)
-	if applyEvent.applySnapshotResult != nil {
-		select {
-		case applyEvent.applySnapshotResult <- snapErr:
-		case <-nd.stopChan:
-			return false, false
-		}
-	}
-	if snapErr != nil {
-		nd.rn.Errorf("apply snapshot failed: %v", snapErr.Error())
-		return false, false
-	}
+func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	if len(applyEvent.ents) == 0 {
 		return false, false
 	}
@@ -1035,10 +1134,15 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		isReplaying := evnt.Index <= nd.rn.lastIndex
 		switch evnt.Type {
 		case raftpb.EntryNormal:
-			forceBackup = nd.applyEntry(evnt, isReplaying)
+			needBackup := nd.applyEntry(evnt, isReplaying)
+			if needBackup {
+				forceBackup = true
+			}
 		case raftpb.EntryConfChange:
 			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
-			confChanged = changed
+			if changed {
+				confChanged = changed
+			}
 			shouldStop = shouldStop || removeSelf
 		}
 		np.appliedi = evnt.Index
@@ -1061,6 +1165,21 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 		<-nd.stopChan
 		return false, false
 	}
+	return confChanged, forceBackup
+}
+
+func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
+	nd.applySnapshot(np, applyEvent)
+	confChanged, forceBackup := nd.applyEntries(np, applyEvent)
+
+	lastIndex := np.appliedi
+	if applyEvent.snapshot.Metadata.Index > lastIndex {
+		lastIndex = applyEvent.snapshot.Metadata.Index
+	}
+	if lastIndex > nd.GetAppliedIndex() {
+		nd.SetAppliedIndex(lastIndex)
+	}
+	nd.applyWait.Trigger(lastIndex)
 	return confChanged, forceBackup
 }
 
@@ -1098,6 +1217,10 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 				nodeLog.Panicf("wrong events : %v", ent)
 			}
 			confChanged, forceBackup := nd.applyAll(&np, &ent)
+
+			// wait for the raft routine to finish the disk writes before triggering a
+			// snapshot. or applied index might be greater than the last index in raft
+			// storage, since the raft routine might be slower than apply routine.
 			select {
 			case <-ent.raftDone:
 			case <-nd.stopChan:
@@ -1154,7 +1277,7 @@ func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
 	return si, nil
 }
 
-func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot) error {
+func (nd *KVNode) PrepareSnapshot(raftSnapshot raftpb.Snapshot) error {
 	snapshot := raftSnapshot.Data
 	var si KVSnapInfo
 	err := json.Unmarshal(snapshot, &si)
@@ -1162,8 +1285,20 @@ func (nd *KVNode) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot
 		return err
 	}
 	nd.rn.RestoreMembers(si)
+	nd.rn.Infof("prepare snapshot here: %v", raftSnapshot.String())
+	err = nd.sm.PrepareSnapshot(raftSnapshot, nd.stopChan)
+	return err
+}
+
+func (nd *KVNode) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot) error {
 	nd.rn.Infof("should recovery from snapshot here: %v", raftSnapshot.String())
-	err = nd.sm.RestoreFromSnapshot(startup, raftSnapshot, nd.stopChan)
+	err := nd.sm.RestoreFromSnapshot(raftSnapshot, nd.stopChan)
+	if err != nil {
+		return err
+	}
+	snapshot := raftSnapshot.Data
+	var si KVSnapInfo
+	err = json.Unmarshal(snapshot, &si)
 	if err != nil {
 		return err
 	}

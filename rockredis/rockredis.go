@@ -873,7 +873,7 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 					dbLog.Infof("keeping sst file: %v", fn)
 					continue
 				} else {
-					dbLog.Infof("no keeping sst file %v for not same: %v, %v", fn, err)
+					dbLog.Infof("no keeping sst file %v for not same: %v", fn, err)
 				}
 			}
 		}

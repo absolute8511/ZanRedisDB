@@ -1112,7 +1112,7 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 	// check namespace exist and prepare on local.
 	raftID, ok := nsInfo.RaftIDs[dc.GetMyID()]
 	if !ok {
-		cluster.CoordLog().Warningf("namespace %v has no raft id for local", nsInfo.GetDesp(), nsInfo.RaftIDs)
+		cluster.CoordLog().Warningf("namespace %v has no raft id for local: %v", nsInfo.GetDesp(), nsInfo.RaftIDs)
 		return nil, cluster.ErrNamespaceConfInvalid
 	}
 

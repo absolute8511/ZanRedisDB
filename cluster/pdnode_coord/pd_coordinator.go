@@ -38,6 +38,7 @@ var (
 	nsCheckInterval                = time.Minute
 	nsCheckLearnerInterval         = time.Second * 10
 	balanceCheckInterval           = time.Minute * 10
+	checkRemovingNodeInterval      = time.Minute
 )
 
 func ChangeIntervalForTest() {
@@ -45,6 +46,7 @@ func ChangeIntervalForTest() {
 	waitRemoveRemovingNodeInterval = time.Second * 5
 	nsCheckInterval = time.Second
 	balanceCheckInterval = time.Second * 5
+	checkRemovingNodeInterval = time.Second * 5
 }
 
 type PDCoordinator struct {
@@ -470,7 +472,7 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 	defer func() {
 		cluster.CoordLog().Infof("stop handle the removing nodes.")
 	}()
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(checkRemovingNodeInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -543,6 +545,7 @@ func (pdCoord *PDCoordinator) handleRemovingNodes(monitorChan chan struct{}) {
 							}
 							break
 						}
+						cluster.CoordLog().Infof("namespace %v data on node %v removing", namespaceInfo.GetDesp(), nid)
 						coordErr := pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 						if coordErr != nil {
 							anyPending = true
@@ -829,6 +832,7 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 		return cluster.ErrClusterChanged
 	}
 	if len(origNSInfo.Removings) > 0 {
+		cluster.CoordLog().Infof("namespace: %v still waiting removing node: %v", origNSInfo.GetDesp(), origNSInfo.Removings)
 		return ErrNamespaceMigrateWaiting
 	}
 	isrChanged := false
@@ -917,6 +921,7 @@ func (pdCoord *PDCoordinator) handleNamespaceMigrate(origNSInfo *cluster.Partiti
 		cluster.CoordLog().Infof("namespace %v migrate to replicas : %v", nsInfo.GetDesp(), nsInfo.RaftNodes)
 		*origNSInfo = *nsInfo
 	} else {
+		cluster.CoordLog().Infof("namespace %v waiting migrate : %v", nsInfo.GetDesp(), nsInfo)
 		return ErrNamespaceMigrateWaiting
 	}
 	return nil

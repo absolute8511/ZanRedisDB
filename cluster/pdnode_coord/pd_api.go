@@ -167,7 +167,7 @@ func (pdCoord *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newRepl
 
 	var meta cluster.NamespaceMetaInfo
 	if ok, _ := pdCoord.register.IsExistNamespace(namespace); !ok {
-		cluster.CoordLog().Infof("namespace not exist %v :%v", namespace)
+		cluster.CoordLog().Infof("namespace not exist %v ", namespace)
 		return cluster.ErrNamespaceNotCreated.ToErrorType()
 	} else {
 		oldMeta, err := pdCoord.register.GetNamespaceMetaInfo(namespace)
@@ -282,7 +282,7 @@ func (pdCoord *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map
 
 		tmpReplicaInfo := partReplicaList[i]
 		if len(tmpReplicaInfo.GetISR()) <= meta.Replica/2 {
-			cluster.CoordLog().Infof("failed update info for namespace : %v-%v since not quorum", namespace, i, tmpReplicaInfo)
+			cluster.CoordLog().Infof("failed update info for namespace : %v-%v since not quorum: %v", namespace, i, tmpReplicaInfo)
 			continue
 		}
 		commonErr := pdCoord.register.UpdateNamespacePartReplicaInfo(namespace, i, &tmpReplicaInfo, tmpReplicaInfo.Epoch())

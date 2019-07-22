@@ -262,7 +262,7 @@ func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *
 	start := time.Now()
 	for {
 		nsStats := node.Node.GetStats("")
-		ci := node.Node.GetCommittedIndex()
+		ci := node.Node.GetAppliedIndex()
 		if ci >= leaderci {
 			assert.Equal(t, leaderci, ci)
 
@@ -343,7 +343,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	node.SetSyncerOnly(true)
 	// wait raft log synced
 	time.Sleep(time.Second)
-	leaderci := leaderNode.Node.GetCommittedIndex()
+	leaderci := leaderNode.Node.GetAppliedIndex()
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
 	_, remoteIndex, ts := remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
 	assert.Equal(t, leaderci, remoteIndex)
@@ -366,7 +366,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	writeTs2 := time.Now().UnixNano()
 
 	time.Sleep(time.Second * 3)
-	newci := leaderNode.Node.GetCommittedIndex()
+	newci := leaderNode.Node.GetAppliedIndex()
 	assert.Equal(t, leaderci+1, newci)
 	leaderci = newci
 	t.Logf("current leader commit: %v", leaderci)
@@ -426,7 +426,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	err = learnerNode.Start(false)
 	assert.Nil(t, err)
 
-	leaderci = leaderNode.Node.GetCommittedIndex()
+	leaderci = leaderNode.Node.GetAppliedIndex()
 	t.Logf("current leader commit: %v", leaderci)
 
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
@@ -493,7 +493,7 @@ func TestRestartFollower(t *testing.T) {
 	follower, err = followerS.server.InitKVNamespace(m.ID, followerS.nsConf, true)
 	assert.Nil(t, err)
 	follower.Start(false)
-	leaderci := leaderNode.Node.GetCommittedIndex()
+	leaderci := leaderNode.Node.GetAppliedIndex()
 	waitSyncedWithCommit(t, time.Second*30, leaderci, follower, false)
 }
 
@@ -507,8 +507,7 @@ func TestRestartCluster(t *testing.T) {
 	leaderNode := waitForLeader(t, time.Minute)
 	assert.NotNil(t, leaderNode)
 
-	ci := leaderNode.Node.GetCommittedIndex()
-
+	ci := leaderNode.Node.GetAppliedIndex()
 	key := "default:test-cluster:a"
 	rsp, err := goredis.String(c.Do("set", key, "1234"))
 	assert.Nil(t, err)
@@ -532,11 +531,34 @@ func TestRestartCluster(t *testing.T) {
 	for _, s := range kvsCluster {
 		replicaNode := s.server.GetNamespaceFromFullName("default-0")
 		assert.NotNil(t, replicaNode)
-		newci := replicaNode.Node.GetCommittedIndex()
+		newci := replicaNode.Node.GetAppliedIndex()
 		assert.Equal(t, ci+1+1, newci)
 		if replicaNode.Node.IsLead() {
 			hasLeader = true
 		}
 	}
 	assert.Equal(t, true, hasLeader)
+}
+
+func TestReadWriteAfterStopped(t *testing.T) {
+	// TODO: stop all nodes in cluster and send read write should error
+	c := getTestClusterConn(t, true)
+	defer c.Close()
+
+	assert.Equal(t, 3, len(kvsCluster))
+
+	leaderNode := waitForLeader(t, time.Minute)
+	assert.NotNil(t, leaderNode)
+}
+
+func TestCompactCancelAfterStopped(t *testing.T) {
+	// TODO: stop all nodes in cluster should cancel the running compaction
+	// also check if compact error after closed
+	c := getTestClusterConn(t, true)
+	defer c.Close()
+
+	assert.Equal(t, 3, len(kvsCluster))
+
+	leaderNode := waitForLeader(t, time.Minute)
+	assert.NotNil(t, leaderNode)
 }

@@ -94,6 +94,44 @@ func startDefaultTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, s
 	return startTestCluster(t, false, TestClusterName, pdHttpPort, n, 17345)
 }
 
+func addMoreTestDataNodeToCluster(t *testing.T, n int) ([]dataNodeWrapper, string) {
+	basePort := 18345
+	clusterName := TestClusterName
+	syncOnly := false
+	kvList := make([]dataNodeWrapper, 0, n)
+	clusterTmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	t.Logf("dir:%v\n", clusterTmpDir)
+
+	for i := 0; i < n; i++ {
+		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
+		os.MkdirAll(tmpDir, common.DIR_PERM)
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+i*100)
+		redisPort := basePort + 10000 + i*100
+		httpPort := basePort + 20000 + i*100
+		rpcPort := basePort + 22000 + i*100
+		kvOpts := ds.ServerConfig{
+			ClusterID:            clusterName,
+			EtcdClusterAddresses: testEtcdServers,
+			DataDir:              tmpDir,
+			RedisAPIPort:         redisPort,
+			LocalRaftAddr:        raftAddr,
+			BroadcastAddr:        "127.0.0.1",
+			HttpAPIPort:          httpPort,
+			GrpcAPIPort:          rpcPort,
+			TickMs:               100,
+			ElectionTick:         5,
+			SyncerWriteOnly:      syncOnly,
+			UseRocksWAL:          true,
+		}
+		kv := ds.NewServer(kvOpts)
+		kv.Start()
+		time.Sleep(time.Second)
+		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})
+	}
+	return kvList, clusterTmpDir
+}
+
 func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort string, n int, basePort int) (*Server, []dataNodeWrapper, string) {
 	serverAddrList := strings.Split(testEtcdServers, ",")
 	rootPath := serverAddrList[0] + "/v2/keys/" + cluster.ROOT_DIR + "/" + clusterName + "/?recursive=true"
@@ -168,6 +206,16 @@ func cleanAllCluster(ret int) {
 			fmt.Println("removing: ", gtmpDir)
 			os.RemoveAll(gtmpDir)
 		}
+	}
+}
+
+func cleanDataNodes(dns []dataNodeWrapper, tmpDir string) {
+	for _, n := range dns {
+		n.s.Stop()
+	}
+	if strings.Contains(tmpDir, "rocksdb-test") {
+		fmt.Println("removing: ", tmpDir)
+		os.RemoveAll(tmpDir)
 	}
 }
 

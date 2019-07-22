@@ -200,8 +200,7 @@ func checkMergeAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
-	} else if n := ay[0].([]byte); string(n) != "" &&
-		string(n) != "" {
+	} else if n := ay[0].([]byte); string(n) != "" {
 		t.Fatal(string(n))
 	} else {
 		if len(ay[1].([]interface{})) != 0 {

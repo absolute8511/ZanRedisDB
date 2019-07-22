@@ -42,7 +42,8 @@ type StateMachine interface {
 	ApplyRaftRequest(isReplaying bool, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
-	RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error
+	PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
+	RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
 	CleanData() error
 	Optimize(string)
@@ -100,7 +101,12 @@ func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) 
 	var s KVSnapInfo
 	return &s, nil
 }
-func (esm *emptySM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+
+func (esm *emptySM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+	return nil
+}
+
+func (esm *emptySM) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	return nil
 }
 func (esm *emptySM) Destroy() {
@@ -415,7 +421,7 @@ func GetValidBackupInfo(machineConfig MachineConfig,
 	return syncAddr, syncDir
 }
 
-func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+func (kvsm *kvStoreSM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	// while startup we can use the local snapshot to restart,
 	// but while running, we should install the leader's snapshot,
 	// so we need remove local and sync from leader
@@ -433,12 +439,7 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 			}
 			finalErr = err
 		} else {
-			err = kvsm.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
-			if err == nil {
-				return nil
-			} else {
-				finalErr = err
-			}
+			return nil
 		}
 		retry++
 		kvsm.Infof("failed to restore snapshot: %v", err)
@@ -448,16 +449,18 @@ func (kvsm *kvStoreSM) RestoreFromSnapshot(startup bool, raftSnapshot raftpb.Sna
 		case <-time.After(time.Second):
 		}
 	}
-	if finalErr == errNobackupAvailable && startup {
+	if finalErr == errNobackupAvailable {
 		kvsm.Infof("failed to restore snapshot at startup since no any backup from anyware")
-		if common.IsConfSetted(common.ConfIgnoreStartupNoBackup) {
-			kvsm.Infof("ignore failed at startup for no any backup from anyware")
-			return nil
-		}
+		return finalErr
 	}
-	// TODO: if err is errNoBackupAvailable from others, it may out of date, while
-	// startup we can ignore this recover since it will send newest snapshot after startup from leader
-	return errors.New("failed to restore from snapshot")
+	return finalErr
+}
+
+func (kvsm *kvStoreSM) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
+	if enableSnapApplyRestoreStorageTest {
+		return errors.New("failed to restore from snapshot in failed test")
+	}
+	return kvsm.store.Restore(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index)
 }
 
 func (kvsm *kvStoreSM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error {
