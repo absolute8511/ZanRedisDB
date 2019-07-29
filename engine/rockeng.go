@@ -104,7 +104,7 @@ func FillDefaultOptions(opts *RockOptions) {
 		opts.MaxBackgroundFlushes = 2
 	}
 	if opts.MaxBackgroundCompactions <= 0 {
-		opts.MaxBackgroundCompactions = 4
+		opts.MaxBackgroundCompactions = 8
 	}
 	if opts.MinLevelToCompress <= 0 {
 		opts.MinLevelToCompress = 3
@@ -117,7 +117,7 @@ func FillDefaultOptions(opts *RockOptions) {
 			opts.BackgroundHighThread = 2
 		}
 		if opts.BackgroundLowThread <= 0 {
-			opts.BackgroundLowThread = 4
+			opts.BackgroundLowThread = 8
 		}
 	}
 }
@@ -160,10 +160,10 @@ func NewSharedRockConfig(opt RockOptions) *SharedRockConfig {
 	if opt.AdjustThreadPool {
 		rc.SharedEnv = gorocksdb.NewDefaultEnv()
 		if opt.BackgroundHighThread <= 0 {
-			opt.BackgroundHighThread = 3
+			opt.BackgroundHighThread = 2
 		}
 		if opt.BackgroundLowThread <= 0 {
-			opt.BackgroundLowThread = 6
+			opt.BackgroundLowThread = 8
 		}
 		rc.SharedEnv.SetBackgroundThreads(opt.BackgroundLowThread)
 		rc.SharedEnv.SetHighPriorityBackgroundThreads(opt.BackgroundHighThread)
