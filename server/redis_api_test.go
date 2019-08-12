@@ -73,6 +73,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 		UseRocksWAL:    true,
 		SharedRocksWAL: true,
 	}
+	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
 
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"

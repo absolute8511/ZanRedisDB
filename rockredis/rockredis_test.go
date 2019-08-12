@@ -17,6 +17,7 @@ import (
 func getTestDBNoTableCounter(t *testing.T) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = false
+	cfg.EnablePartitionedIndexFilter = true
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
@@ -29,6 +30,7 @@ func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
 	cfg.DataDir = dataDir
+	cfg.EnablePartitionedIndexFilter = true
 	testDB, err := OpenRockDB(cfg)
 	assert.Nil(t, err)
 	if testing.Verbose() {
@@ -40,6 +42,7 @@ func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
 func getTestDB(t *testing.T) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
+	cfg.EnablePartitionedIndexFilter = true
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
