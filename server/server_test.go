@@ -161,6 +161,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 			UseRocksWAL:    true,
 			SharedRocksWAL: true,
 		}
+		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer
 			// use test:// will ignore the remote cluster fail

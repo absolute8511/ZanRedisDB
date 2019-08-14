@@ -32,6 +32,7 @@ type RockOptions struct {
 	BlockSize                      int    `json:"block_size"`
 	BlockCache                     int64  `json:"block_cache"`
 	CacheIndexAndFilterBlocks      bool   `json:"cache_index_and_filter_blocks"`
+	EnablePartitionedIndexFilter   bool   `json:"enable_partitioned_index_filter"`
 	WriteBufferSize                int    `json:"write_buffer_size"`
 	MaxWriteBufferNumber           int    `json:"max_write_buffer_number"`
 	MinWriteBufferNumberToMerge    int    `json:"min_write_buffer_number_to_merge"`
@@ -117,7 +118,7 @@ func FillDefaultOptions(opts *RockOptions) {
 			opts.BackgroundHighThread = 2
 		}
 		if opts.BackgroundLowThread <= 0 {
-			opts.BackgroundLowThread = 8
+			opts.BackgroundLowThread = 16
 		}
 	}
 }
@@ -163,7 +164,7 @@ func NewSharedRockConfig(opt RockOptions) *SharedRockConfig {
 			opt.BackgroundHighThread = 2
 		}
 		if opt.BackgroundLowThread <= 0 {
-			opt.BackgroundLowThread = 8
+			opt.BackgroundLowThread = 16
 		}
 		rc.SharedEnv.SetBackgroundThreads(opt.BackgroundLowThread)
 		rc.SharedEnv.SetHighPriorityBackgroundThreads(opt.BackgroundHighThread)
@@ -231,6 +232,17 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	// set pin_l0_filter_and_index_blocks_in_cache = true if cache index is true to improve performance on read
 	// and see this https://github.com/facebook/rocksdb/pull/3692 if partitioned filter is on
 	bbto.SetPinL0FilterAndIndexBlocksInCache(true)
+
+	if cfg.EnablePartitionedIndexFilter {
+		//enable partitioned indexes and partitioned filters
+		bbto.SetCacheIndexAndFilterBlocksWithHighPriority(true)
+		bbto.SetIndexType(gorocksdb.IndexTypeTwoLevelIndexSearch)
+		bbto.SetPartitionFilters(true)
+		bbto.SetMetaDataBlockSize(1024 * 8)
+		bbto.SetCacheIndexAndFilterBlocks(true)
+	}
+	bbto.SetFormatVersion(4)
+	bbto.SetIndexBlockRestartInterval(16)
 
 	// /* filter should not block_based, use sst based to reduce cpu */
 	filter := gorocksdb.NewBloomFilter(10, false)
