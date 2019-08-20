@@ -317,6 +317,7 @@ func (nd *KVNode) DeleteRange(drange DeleteTableRange) error {
 	if err != nil {
 		nd.rn.Infof("node %v delete table range %v failed: %v", nd.ns, drange, err)
 	}
+	nd.rn.Infof("node %v delete table range %v ", nd.ns, drange)
 	return err
 }
 
@@ -1170,7 +1171,12 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	nd.applySnapshot(np, applyEvent)
+	start := time.Now()
 	confChanged, forceBackup := nd.applyEntries(np, applyEvent)
+	cost := time.Since(start)
+	if cost > raftSlow {
+		nd.rn.Infof("raft apply slow cost: %v, number %v", cost, len(applyEvent.ents))
+	}
 
 	lastIndex := np.appliedi
 	if applyEvent.snapshot.Metadata.Index > lastIndex {

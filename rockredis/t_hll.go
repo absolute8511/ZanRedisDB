@@ -13,8 +13,9 @@ import (
 	hll3 "github.com/absolute8511/hyperloglog2"
 	"github.com/golang/snappy"
 	"github.com/youzan/gorocksdb"
+
 	//hll "github.com/axiomhq/hyperloglog"
-	"github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru"
 )
 
 const (
@@ -260,6 +261,7 @@ type hllCache struct {
 
 // write cache size should not too much, it may cause flush slow if
 // too much dirty write need flush
+// TODO: delete range need to be handled to clean cache
 func newHLLCache(size int, wsize int, db *RockDB) (*hllCache, error) {
 	c := &hllCache{
 		db: db,
