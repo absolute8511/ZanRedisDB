@@ -997,6 +997,7 @@ func init() {
 	batchableCmds = make(map[string]bool)
 	// command need response value (not just error or ok) can not be batched
 	// batched command may cause the table count not-exactly.
+	// should use MaybeCommitBatch and MaybeClearBatch in command handler
 	batchableCmds["set"] = true
 	batchableCmds["setex"] = true
 	batchableCmds["del"] = true
