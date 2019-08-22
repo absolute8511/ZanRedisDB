@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
-	"github.com/absolute8511/redcon"
 )
 
 var (
@@ -17,6 +17,7 @@ var (
 	costStatsLevel    int32
 )
 
+// TODO: maybe provide reusable memory buffer for req and response
 func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	defer func() {
 		if e := recover(); e != nil {

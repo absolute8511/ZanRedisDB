@@ -4,10 +4,13 @@ import (
 	"fmt"
 	io "io"
 	"io/ioutil"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/rockredis"
@@ -107,4 +110,80 @@ func TestInitNodeWithSharedRocksdb(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, n0Rock.Eng(), n1Rock.Eng())
 	assert.Equal(t, n0Rock.Eng(), n2Rock.Eng())
+}
+
+type testMapGet struct {
+	mutex    sync.RWMutex
+	kvNodes  map[string]*NamespaceNode
+	nsMetas  map[string]*NamespaceMeta
+	kvNodes2 sync.Map
+	nsMetas2 sync.Map
+}
+
+func (m *testMapGet) getNode(nsBaseName string, pk []byte) *NamespaceNode {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	v, ok := m.nsMetas[nsBaseName]
+	if !ok {
+		return nil
+	}
+	pid := GetHashedPartitionID(pk, v.PartitionNum)
+	fullName := common.GetNsDesp(nsBaseName, pid)
+	n, ok := m.kvNodes[fullName]
+	if !ok {
+		return nil
+	}
+	return n
+}
+
+func (m *testMapGet) getNode2(nsBaseName string, pk []byte) *NamespaceNode {
+	v, ok := m.nsMetas2.Load(nsBaseName)
+	if !ok {
+		return nil
+	}
+	vv := v.(*NamespaceMeta)
+	pid := GetHashedPartitionID(pk, vv.PartitionNum)
+	fullName := common.GetNsDesp(nsBaseName, pid)
+	n, ok := m.kvNodes2.Load(fullName)
+	if !ok {
+		return nil
+	}
+	return n.(*NamespaceNode)
+}
+
+func BenchmarkNamespaceMgr_GetNamespaceNodeWithPrimaryKey(b *testing.B) {
+	nsm := &testMapGet{
+		kvNodes: make(map[string]*NamespaceNode),
+		nsMetas: make(map[string]*NamespaceMeta),
+	}
+	nsm.nsMetas["test"] = &NamespaceMeta{
+		PartitionNum: 16,
+	}
+	nsm.nsMetas2.Store("test", &NamespaceMeta{
+		PartitionNum: 16,
+	})
+	for i := 0; i < 16; i++ {
+		k := fmt.Sprintf("test-%v", i)
+		nsm.kvNodes[k] = &NamespaceNode{
+			ready: 1,
+		}
+		nsm.kvNodes2.Store(k, &NamespaceNode{
+			ready: 1,
+		})
+	}
+	b.ResetTimer()
+	var wg sync.WaitGroup
+	for g := 0; g < 1000; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < b.N; i++ {
+				got := nsm.getNode2("test", []byte(strconv.Itoa(i)))
+				if got == nil {
+					panic("failed get node")
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
