@@ -93,11 +93,6 @@ type nodeProgress struct {
 	appliedi  uint64
 }
 
-type internalReq struct {
-	reqData InternalRaftRequest
-	done    chan struct{}
-}
-
 type customProposeData struct {
 	ProposeOp   int
 	NeedBackup  bool
@@ -110,7 +105,7 @@ type customProposeData struct {
 
 // a key-value node backed by raft
 type KVNode struct {
-	reqProposeC        chan *internalReq
+	reqProposeC        chan InternalRaftRequest
 	rn                 *raftNode
 	store              *KVStore
 	sm                 StateMachine
@@ -172,7 +167,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:        make(chan *internalReq, proposeQueueLen),
+		reqProposeC:        make(chan InternalRaftRequest, proposeQueueLen),
 		stopChan:           stopChan,
 		stopDone:           make(chan struct{}),
 		store:              nil,
@@ -429,8 +424,8 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 
 func (nd *KVNode) handleProposeReq() {
 	var reqList BatchInternalRaftRequest
-	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
-	var lastReq *internalReq
+	reqList.Reqs = make([]InternalRaftRequest, 0, 100)
+	var lastReq InternalRaftRequest
 	// TODO: combine pipeline and batch to improve performance
 	// notice the maxPendingProposals config while using pipeline, avoid
 	// sending too much pipeline which overflow the proposal buffer.
@@ -450,7 +445,7 @@ func (nd *KVNode) handleProposeReq() {
 		for {
 			select {
 			case r := <-nd.reqProposeC:
-				nd.w.Trigger(r.reqData.Header.ID, common.ErrStopped)
+				nd.w.Trigger(r.Header.ID, common.ErrStopped)
 			default:
 				return
 			}
@@ -463,13 +458,13 @@ func (nd *KVNode) handleProposeReq() {
 		}
 		select {
 		case r := <-pc:
-			reqList.Reqs = append(reqList.Reqs, &r.reqData)
+			reqList.Reqs = append(reqList.Reqs, r)
 			lastReq = r
 		default:
 			if len(reqList.Reqs) == 0 {
 				select {
 				case r := <-nd.reqProposeC:
-					reqList.Reqs = append(reqList.Reqs, &r.reqData)
+					reqList.Reqs = append(reqList.Reqs, r)
 					lastReq = r
 				case <-nd.stopChan:
 					return
@@ -488,10 +483,9 @@ func (nd *KVNode) handleProposeReq() {
 				reqList.Reqs = reqList.Reqs[:0]
 				continue
 			}
-			lastReq.done = make(chan struct{})
 			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
 			//	realN, buffer, reqList.Reqs)
-			start := lastReq.reqData.Header.Timestamp
+			start := lastReq.Header.Timestamp
 			cost := reqList.Timestamp - start
 			raftCost := int64(0)
 			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
@@ -512,7 +506,6 @@ func (nd *KVNode) handleProposeReq() {
 				} else {
 					//lastReqList = append(lastReqList, lastReq)
 					select {
-					case <-lastReq.done:
 					case <-ctx.Done():
 						err := ctx.Err()
 						waitLeader := false
@@ -549,10 +542,10 @@ func (nd *KVNode) handleProposeReq() {
 				nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
 			}
 			for i := range reqList.Reqs {
-				reqList.Reqs[i] = nil
+				reqList.Reqs[i].Data = nil
 			}
 			reqList.Reqs = reqList.Reqs[:0]
-			lastReq = nil
+			lastReq.Data = nil
 		}
 	}
 }
@@ -656,7 +649,7 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	return err
 }
 
-func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
+func (nd *KVNode) queueRequest(req InternalRaftRequest) (interface{}, error) {
 	if !nd.IsWriteReady() {
 		return nil, errRaftNotReadyForWrite
 	}
@@ -664,17 +657,17 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		return nil, ErrNodeNoLeader
 	}
 	start := time.Now()
-	req.reqData.Header.Timestamp = start.UnixNano()
-	ch := nd.w.Register(req.reqData.Header.ID)
+	req.Header.Timestamp = start.UnixNano()
+	ch := nd.w.Register(req.Header.ID)
 	select {
 	case nd.reqProposeC <- req:
 	default:
 		select {
 		case nd.reqProposeC <- req:
 		case <-nd.stopChan:
-			nd.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
+			nd.w.Trigger(req.Header.ID, common.ErrStopped)
 		case <-time.After(proposeTimeout / 2):
-			nd.w.Trigger(req.reqData.Header.ID, common.ErrQueueTimeout)
+			nd.w.Trigger(req.Header.ID, common.ErrQueueTimeout)
 		}
 	}
 	//nd.rn.Infof("queue request: %v", req.reqData.String())
@@ -683,33 +676,31 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	var ok bool
 	// will always return a response, timed out or get a error
 	rsp = <-ch
-	if req.done != nil {
-		close(req.done)
-	}
+
 	if err, ok = rsp.(error); ok {
 		rsp = nil
 	} else {
 		err = nil
 	}
 
-	if req.reqData.Header.DataType == int32(RedisReq) {
+	if req.Header.DataType == int32(RedisReq) {
 		cost := time.Since(start)
-		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), cost.Nanoseconds()/1000)
+		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), cost.Nanoseconds()/1000)
 		if err == nil && !nd.IsWriteReady() {
 			nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
-				req.reqData.String())
+				req.String())
 			return nil, errRaftNotReadyForWrite
 		}
 		if cost >= time.Second {
 			nd.rn.Infof("write request %v slow cost: %v",
-				req.reqData.String(), cost)
+				req.String(), cost)
 		}
 	}
 	return rsp, err
 }
 
 func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(RedisReq),
 	}
@@ -717,14 +708,11 @@ func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 		Header: h,
 		Data:   buf,
 	}
-	req := &internalReq{
-		reqData: raftReq,
-	}
-	return nd.queueRequest(req)
+	return nd.queueRequest(raftReq)
 }
 
 func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(CustomReq),
 	}
@@ -732,14 +720,11 @@ func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
 		Header: h,
 		Data:   buf,
 	}
-	req := &internalReq{
-		reqData: raftReq,
-	}
-	return nd.queueRequest(req)
+	return nd.queueRequest(raftReq)
 }
 
 func (nd *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error {
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(SchemaChangeReq),
 	}
@@ -748,11 +733,8 @@ func (nd *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error
 		Header: h,
 		Data:   buf,
 	}
-	req := &internalReq{
-		reqData: raftReq,
-	}
 
-	_, err := nd.queueRequest(req)
+	_, err := nd.queueRequest(raftReq)
 	return err
 }
 

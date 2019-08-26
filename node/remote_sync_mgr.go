@@ -304,7 +304,7 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		p.ProposeOp = ProposeOp_ApplySkippedRemoteSnap
 	}
 	d, _ := json.Marshal(p)
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       0,
 		DataType: int32(CustomReq),
 	}
@@ -312,7 +312,7 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		Header: h,
 		Data:   d,
 	}
-	reqList.Reqs = append(reqList.Reqs, &raftReq)
+	reqList.Reqs = append(reqList.Reqs, raftReq)
 	buf, _ := reqList.Marshal()
 	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
 	if err != nil {
@@ -350,7 +350,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 	reqList.ReqNum = 1
 	reqList.Timestamp = time.Now().UnixNano()
 
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       0,
 		DataType: int32(CustomReq),
 	}
@@ -358,7 +358,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 		Header: h,
 		Data:   d,
 	}
-	reqList.Reqs = append(reqList.Reqs, &raftReq)
+	reqList.Reqs = append(reqList.Reqs, raftReq)
 	buf, _ := reqList.Marshal()
 	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
 	if err != nil {

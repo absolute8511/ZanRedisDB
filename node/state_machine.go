@@ -614,7 +614,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 					batchReqIDList, batchReqRspList, dupCheckMap)
 			}
 			if req.Header.DataType == int32(CustomReq) {
-				forceBackup, retErr = kvsm.handleCustomRequest(req, reqID, stop)
+				forceBackup, retErr = kvsm.handleCustomRequest(&req, reqID, stop)
 			} else if req.Header.DataType == int32(SchemaChangeReq) {
 				kvsm.Infof("handle schema change: %v", string(req.Data))
 				var sc SchemaChange
