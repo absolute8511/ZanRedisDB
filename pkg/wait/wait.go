@@ -21,13 +21,18 @@ import (
 	"sync"
 )
 
+type WaitResult interface {
+	GetResult() interface{}
+	WaitC() <-chan struct{}
+}
+
 // Wait is an interface that provides the ability to wait and trigger events that
 // are associated with IDs.
 type Wait interface {
 	// Register waits returns a chan that waits on the given ID.
 	// The chan will be triggered when Trigger is called with
 	// the same ID.
-	Register(id uint64) <-chan interface{}
+	Register(id uint64) WaitResult
 	// Trigger triggers the waiting chans with the given ID.
 	Trigger(id uint64, x interface{})
 	IsRegistered(id uint64) bool
@@ -35,9 +40,28 @@ type Wait interface {
 
 type multList [16]*list
 
+type resultData struct {
+	value interface{}
+	done  chan struct{}
+}
+
+func newResultData() *resultData {
+	return &resultData{
+		done: make(chan struct{}, 1),
+	}
+}
+
+func (rd *resultData) GetResult() interface{} {
+	return rd.value
+}
+
+func (rd *resultData) WaitC() <-chan struct{} {
+	return rd.done
+}
+
 type list struct {
 	l sync.RWMutex
-	m map[uint64]chan interface{}
+	m map[uint64]*resultData
 }
 
 // New creates a Wait.
@@ -45,36 +69,36 @@ func New() Wait {
 	ml := multList{}
 	for i, _ := range ml {
 		ml[i] = &list{
-			m: make(map[uint64]chan interface{}),
+			m: make(map[uint64]*resultData),
 		}
 	}
 	return ml
 }
 
-func (mw multList) Register(id uint64) <-chan interface{} {
+func (mw multList) Register(id uint64) WaitResult {
 	w := mw[id%uint64(len(mw))]
 	w.l.Lock()
 	defer w.l.Unlock()
-	ch := w.m[id]
-	if ch == nil {
-		ch = make(chan interface{}, 1)
-		w.m[id] = ch
+	rd := w.m[id]
+	if rd == nil {
+		rd = newResultData()
+		w.m[id] = rd
 	} else {
 		log.Panicf("dup id %x", id)
 	}
-	return ch
+	return rd
 }
 
 func (mw multList) Trigger(id uint64, x interface{}) {
 	w := mw[id%uint64(len(mw))]
 	w.l.Lock()
-	ch := w.m[id]
+	rd := w.m[id]
 	delete(w.m, id)
-	w.l.Unlock()
-	if ch != nil {
-		ch <- x
-		close(ch)
+	if rd != nil {
+		rd.value = x
+		close(rd.done)
 	}
+	w.l.Unlock()
 }
 
 func (mw multList) IsRegistered(id uint64) bool {
@@ -86,15 +110,15 @@ func (mw multList) IsRegistered(id uint64) bool {
 }
 
 type waitWithResponse struct {
-	ch <-chan interface{}
+	wr *resultData
 }
 
 func NewWithResponse(ch <-chan interface{}) Wait {
-	return &waitWithResponse{ch: ch}
+	return &waitWithResponse{wr: newResultData()}
 }
 
-func (w *waitWithResponse) Register(id uint64) <-chan interface{} {
-	return w.ch
+func (w *waitWithResponse) Register(id uint64) WaitResult {
+	return w.wr
 }
 func (w *waitWithResponse) Trigger(id uint64, x interface{}) {}
 func (w *waitWithResponse) IsRegistered(id uint64) bool {

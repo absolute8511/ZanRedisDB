@@ -238,7 +238,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 		return err
 	}
 
-	rc.Infof("wal meta: %v, restart with: %v", string(meta), st.String())
+	rc.Infof("wal meta: %v, restart with: %v, ents: %v", string(meta), st.String(), len(ents))
 	var m common.MemberInfo
 	err = json.Unmarshal(meta, &m)
 	if err != nil {
@@ -384,6 +384,7 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			err = rc.restartNode(c, snapshot)
 		}
 		if err != nil {
+			rc.Infof("restarting node failed: %v", err.Error())
 			return err
 		}
 	} else {
@@ -452,6 +453,7 @@ func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error
 	var err error
 	err = rc.replayWAL(snapshot, false)
 	if err != nil {
+		rc.Infof("restarting node failed to replay wal: %v", err.Error())
 		return err
 	}
 	rc.node = raft.RestartNode(c)
