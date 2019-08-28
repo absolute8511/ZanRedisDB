@@ -614,6 +614,7 @@ func (nd *KVNode) handleProposeReq() {
 				for _, r := range reqList.Reqs {
 					nd.w.Trigger(r.Header.ID, err)
 				}
+				wh.release()
 			} else {
 				for _, r := range reqList.Reqs {
 					wh.headers = append(wh.headers, r.Header)
