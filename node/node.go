@@ -480,23 +480,6 @@ func (nd *KVNode) handleProposeRsp() {
 			}
 		case <-wr.WaitC():
 			// this batch has been processed
-		//case <-ctx.Done():
-		//	select {
-		//	case <-wr.WaitC():
-		//		return
-		//	}
-		//	err := ctx.Err()
-		//	if err == context.DeadlineExceeded {
-		//		nd.rn.Infof("propose timeout: %v, %v", err.Error(), len(headers))
-		//	}
-		//	if err == context.Canceled {
-		//		// proposal canceled can be caused by leader transfer or no leader
-		//		err = ErrProposalCanceled
-		//		nd.rn.Infof("propose canceled : %v", len(headers))
-		//	}
-		//	for _, h := range headers {
-		//		nd.w.Trigger(h.ID, err)
-		//	}
 		case <-nd.stopChan:
 			for _, h := range headers {
 				nd.w.Trigger(h.ID, common.ErrStopped)
@@ -581,8 +564,6 @@ func (nd *KVNode) handleProposeReq() {
 			continue
 		}
 		//nd.rn.Infof("handle req %v", len(reqList.Reqs))
-		//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
-		//	realN, buffer, reqList.Reqs)
 		start := lastReq.reqData.Header.Timestamp
 		cost := reqList.Timestamp - start
 		raftCost := int64(0)
