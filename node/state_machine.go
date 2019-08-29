@@ -153,10 +153,6 @@ func (bo *kvbatchOperator) CommitBatch() {
 			bo.kvsm.w.Trigger(rid, bo.batchReqRspList[idx])
 		}
 	}
-	if len(bo.batchReqIDList) > 2 {
-		bo.kvsm.Infof("batch write db number: %v, cost: %v",
-			len(bo.batchReqIDList), batchCost)
-	}
 	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
 		bo.kvsm.Infof("slow batch write db, batch: %v, cost: %v",
 			len(bo.batchReqIDList), batchCost)
