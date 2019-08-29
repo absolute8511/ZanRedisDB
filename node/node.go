@@ -1142,7 +1142,7 @@ func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.Conf
 	return removeSelf, changed, err
 }
 
-func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
+func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOperator) bool {
 	forceBackup := false
 	if evnt.Data != nil {
 		// try redis command
@@ -1179,7 +1179,7 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
 		}
 		var retErr error
-		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, reqList, evnt.Term, evnt.Index, nd.stopChan)
+		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, batch, reqList, evnt.Term, evnt.Index, nd.stopChan)
 		if reqList.Type == FromClusterSyncer {
 			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
 		}
@@ -1213,16 +1213,20 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 	var shouldStop bool
 	var confChanged bool
 	forceBackup := false
+	batch := nd.sm.GetBatchOperator()
 	for i := range ents {
 		evnt := ents[i]
 		isReplaying := evnt.Index <= nd.rn.lastIndex
 		switch evnt.Type {
 		case raftpb.EntryNormal:
-			needBackup := nd.applyEntry(evnt, isReplaying)
+			needBackup := nd.applyEntry(evnt, isReplaying, batch)
 			if needBackup {
 				forceBackup = true
 			}
 		case raftpb.EntryConfChange:
+			if batch != nil && batch.IsBatched() {
+				batch.CommitBatch()
+			}
 			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
 			if changed {
 				confChanged = changed
@@ -1235,6 +1239,9 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 			nd.rn.Infof("replay finished at index: %v\n", evnt.Index)
 			nd.rn.MarkReplayFinished()
 		}
+	}
+	if batch != nil && batch.IsBatched() {
+		batch.CommitBatch()
 	}
 	if shouldStop {
 		nd.rn.Infof("I am removed from raft group: %v", nd.ns)

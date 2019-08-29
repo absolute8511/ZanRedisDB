@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -192,6 +193,31 @@ func TestKVNode_kvCommand(t *testing.T) {
 			_, err := handler(cmd.args)
 			assert.Nil(t, err)
 		}
+		t.Logf("handler response: %v", c.rsp)
 		assert.Nil(t, c.GetError())
 	}
+}
+
+func TestKVNode_kvbatchCommand(t *testing.T) {
+	nd, dataDir, stopC := getTestKVNode(t)
+	defer os.RemoveAll(dataDir)
+	defer nd.Stop()
+	defer close(stopC)
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			fc := &fakeRedisConn{}
+			for k := 0; k < 100; k++ {
+				fc.Reset()
+				setHandler, _, _ := nd.router.GetCmdHandler("set")
+				testKey := []byte(fmt.Sprintf("default:test:batch_%v_%v", index, k))
+				setHandler(fc, buildCommand([][]byte{[]byte("set"), testKey, testKey}))
+				assert.Nil(t, fc.GetError())
+				assert.Equal(t, "OK", fc.rsp[0])
+			}
+		}(i)
+	}
+	wg.Wait()
 }

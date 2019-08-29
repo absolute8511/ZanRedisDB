@@ -39,7 +39,7 @@ func isUnrecoveryError(err error) bool {
 }
 
 type StateMachine interface {
-	ApplyRaftRequest(isReplaying bool, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
+	ApplyRaftRequest(isReplaying bool, b IBatchOperator, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
 	PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
@@ -51,6 +51,7 @@ type StateMachine interface {
 	Start() error
 	Close()
 	CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error
+	GetBatchOperator() IBatchOperator
 }
 
 func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint64,
@@ -78,11 +79,100 @@ func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint6
 	}
 }
 
+type IBatchOperator interface {
+	SetBatched(bool)
+	IsBatched() bool
+	BeginBatch() error
+	AddBatchKey(string)
+	AddBatchRsp(uint64, interface{})
+	IsBatchable(string, string) bool
+	CommitBatch()
+}
+
+type kvbatchOperator struct {
+	batchReqIDList  []uint64
+	batchReqRspList []interface{}
+	batchStart      time.Time
+	batching        bool
+	dupCheckMap     map[string]bool
+	kvsm            *kvStoreSM
+}
+
+func (bo *kvbatchOperator) SetBatched(b bool) {
+	bo.batching = b
+	if b {
+		bo.batchStart = time.Now()
+	}
+}
+
+func (bo *kvbatchOperator) IsBatched() bool {
+	return bo.batching
+}
+
+func (bo *kvbatchOperator) BeginBatch() error {
+	err := bo.kvsm.store.BeginBatchWrite()
+	if err != nil {
+		return err
+	}
+	bo.SetBatched(true)
+	return nil
+}
+
+func (bo *kvbatchOperator) AddBatchKey(pk string) {
+	bo.dupCheckMap[string(pk)] = true
+}
+
+func (bo *kvbatchOperator) AddBatchRsp(reqID uint64, v interface{}) {
+	bo.batchReqIDList = append(bo.batchReqIDList, reqID)
+	bo.batchReqRspList = append(bo.batchReqRspList, v)
+}
+
+func (bo *kvbatchOperator) IsBatchable(cmdName string, pk string) bool {
+	_, ok := bo.dupCheckMap[string(pk)]
+	if rockredis.IsBatchableWrite(cmdName) &&
+		len(bo.batchReqIDList) < maxDBBatchCmdNum &&
+		!ok {
+		return true
+	}
+	return false
+}
+
+func (bo *kvbatchOperator) CommitBatch() {
+	err := bo.kvsm.store.CommitBatchWrite()
+	bo.SetBatched(false)
+	bo.dupCheckMap = make(map[string]bool)
+	batchCost := time.Since(bo.batchStart)
+	if nodeLog.Level() > common.LOG_DETAIL {
+		bo.kvsm.Infof("batching command number: %v", len(bo.batchReqIDList))
+	}
+	// write the future response or error
+	for idx, rid := range bo.batchReqIDList {
+		if err != nil {
+			bo.kvsm.w.Trigger(rid, err)
+		} else {
+			bo.kvsm.w.Trigger(rid, bo.batchReqRspList[idx])
+		}
+	}
+	if len(bo.batchReqIDList) > 2 {
+		bo.kvsm.Infof("batch write db number: %v, cost: %v",
+			len(bo.batchReqIDList), batchCost)
+	}
+	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
+		bo.kvsm.Infof("slow batch write db, batch: %v, cost: %v",
+			len(bo.batchReqIDList), batchCost)
+	}
+	if len(bo.batchReqIDList) > 0 {
+		bo.kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Nanoseconds()/1000, int64(len(bo.batchReqIDList)))
+	}
+	bo.batchReqIDList = bo.batchReqIDList[:0]
+	bo.batchReqRspList = bo.batchReqRspList[:0]
+}
+
 type emptySM struct {
 	w wait.Wait
 }
 
-func (esm *emptySM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+func (esm *emptySM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	for _, req := range reqList.Reqs {
 		reqID := req.Header.ID
 		if reqID == 0 {
@@ -109,9 +199,14 @@ func (esm *emptySM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan stru
 func (esm *emptySM) RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	return nil
 }
-func (esm *emptySM) Destroy() {
 
+func (esm *emptySM) GetBatchOperator() IBatchOperator {
+	return nil
 }
+
+func (esm *emptySM) Destroy() {
+}
+
 func (esm *emptySM) CleanData() error {
 	return nil
 }
@@ -189,6 +284,13 @@ func (kvsm *kvStoreSM) Close() {
 		return
 	}
 	kvsm.store.Close()
+}
+
+func (kvsm *kvStoreSM) GetBatchOperator() IBatchOperator {
+	return &kvbatchOperator{
+		dupCheckMap: make(map[string]bool),
+		kvsm:        kvsm,
+	}
 }
 
 func (kvsm *kvStoreSM) Optimize(table string) {
@@ -476,15 +578,9 @@ func (kvsm *kvStoreSM) preCheckConflict(cmd redcon.Command, reqTs int64) Conflic
 	return h(cmd, reqTs)
 }
 
-func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	forceBackup := false
 	start := time.Now()
-	batching := false
-	var batchReqIDList []uint64
-	var batchReqRspList []interface{}
-	var batchStart time.Time
-	dupCheckMap := make(map[string]bool, len(reqList.Reqs))
-	lastBatchCmd := ""
 	ts := reqList.Timestamp
 	if reqList.Type == FromClusterSyncer {
 		if nodeLog.Level() >= common.LOG_DETAIL {
@@ -528,30 +624,24 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
 				_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
-				_, ok := dupCheckMap[string(pk)]
 				handled := false
-				if rockredis.IsBatchableWrite(cmdName) &&
-					len(batchReqIDList) < maxDBBatchCmdNum &&
-					!ok {
-					if !batching {
-						err := kvsm.store.BeginBatchWrite()
+				if batch.IsBatchable(cmdName, string(pk)) {
+					if !batch.IsBatched() {
+						err := batch.BeginBatch()
 						if err != nil {
 							kvsm.Infof("begin batch command %v failed: %v, %v", cmdName, string(cmd.Raw), err)
 							kvsm.w.Trigger(reqID, err)
 							continue
 						}
-						batchStart = time.Now()
-						batching = true
 					}
 					handled = true
-					lastBatchCmd = cmdName
 					h, ok := kvsm.router.GetInternalCmdHandler(cmdName)
 					if !ok {
 						kvsm.Infof("unsupported redis command: %v", cmdName)
 						kvsm.w.Trigger(reqID, common.ErrInvalidCommand)
 					} else {
 						if pk != nil {
-							dupCheckMap[string(pk)] = true
+							batch.AddBatchKey(string(pk))
 						}
 						v, err := h(cmd, reqTs)
 						if err != nil {
@@ -562,8 +652,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 						if nodeLog.Level() > common.LOG_DETAIL {
 							kvsm.Infof("batching write command: %v", string(cmd.Raw))
 						}
-						batchReqIDList = append(batchReqIDList, reqID)
-						batchReqRspList = append(batchReqRspList, v)
+						batch.AddBatchRsp(reqID, v)
 						kvsm.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
 					}
 					if nodeLog.Level() > common.LOG_DETAIL {
@@ -573,10 +662,8 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 						continue
 					}
 				}
-				if batching {
-					batching = false
-					batchReqIDList, batchReqRspList, dupCheckMap = kvsm.processBatching(lastBatchCmd, reqList, batchStart,
-						batchReqIDList, batchReqRspList, dupCheckMap)
+				if batch.IsBatched() {
+					batch.CommitBatch()
 				}
 				if handled {
 					continue
@@ -608,10 +695,8 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 				}
 			}
 		} else {
-			if batching {
-				batching = false
-				batchReqIDList, batchReqRspList, dupCheckMap = kvsm.processBatching(lastBatchCmd, reqList, batchStart,
-					batchReqIDList, batchReqRspList, dupCheckMap)
+			if batch.IsBatched() {
+				batch.CommitBatch()
 			}
 			if req.Header.DataType == int32(CustomReq) {
 				forceBackup, retErr = kvsm.handleCustomRequest(&req, reqID, stop)
@@ -632,9 +717,10 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalR
 		}
 	}
 	// TODO: add test case for this
-	if batching {
-		kvsm.processBatching(lastBatchCmd, reqList, batchStart,
-			batchReqIDList, batchReqRspList, dupCheckMap)
+	if batch.IsBatched() && reqList.ReqId > 0 {
+		// reqid only be used for cluster sync grpc.
+		// we commit here to allow grpc get notify earlier.
+		batch.CommitBatch()
 	}
 	for _, req := range reqList.Reqs {
 		if kvsm.w.IsRegistered(req.Header.ID) {
@@ -732,34 +818,4 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		kvsm.w.Trigger(reqID, errUnknownData)
 	}
 	return forceBackup, retErr
-}
-
-// return if configure changed and whether need force backup
-func (kvsm *kvStoreSM) processBatching(cmdName string, reqList BatchInternalRaftRequest, batchStart time.Time, batchReqIDList []uint64, batchReqRspList []interface{},
-	dupCheckMap map[string]bool) ([]uint64, []interface{}, map[string]bool) {
-
-	err := kvsm.store.CommitBatchWrite()
-	dupCheckMap = make(map[string]bool, len(reqList.Reqs))
-	batchCost := time.Since(batchStart)
-	if nodeLog.Level() > common.LOG_DETAIL {
-		kvsm.Infof("batching command number: %v", len(batchReqIDList))
-	}
-	// write the future response or error
-	for idx, rid := range batchReqIDList {
-		if err != nil {
-			kvsm.w.Trigger(rid, err)
-		} else {
-			kvsm.w.Trigger(rid, batchReqRspList[idx])
-		}
-	}
-	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
-		kvsm.Infof("slow batch write db, command: %v, batch: %v, cost: %v",
-			cmdName, len(batchReqIDList), batchCost)
-	}
-	if len(batchReqIDList) > 0 {
-		kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Nanoseconds()/1000, int64(len(batchReqIDList)))
-	}
-	batchReqIDList = batchReqIDList[:0]
-	batchReqRspList = batchReqRspList[:0]
-	return batchReqIDList, batchReqRspList, dupCheckMap
 }
