@@ -220,4 +220,15 @@ func TestKVNode_kvbatchCommand(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+	fc := &fakeRedisConn{}
+	for i := 0; i < 50; i++ {
+		for k := 0; k < 100; k++ {
+			fc.Reset()
+			getHandler, _, _ := nd.router.GetCmdHandler("get")
+			testKey := []byte(fmt.Sprintf("default:test:batch_%v_%v", i, k))
+			getHandler(fc, buildCommand([][]byte{[]byte("get"), testKey}))
+			assert.Nil(t, fc.GetError())
+			assert.Equal(t, testKey, fc.rsp[0])
+		}
+	}
 }

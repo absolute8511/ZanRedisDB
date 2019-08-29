@@ -597,6 +597,10 @@ func (nd *KVNode) handleProposeReq() {
 				}
 				wh.release()
 			} else {
+				proposalCost := time.Now().UnixNano() - reqList.Timestamp
+				if proposalCost >= int64(raftSlow.Nanoseconds()) {
+					nd.rn.Infof("raft slow for batch propose: %v, cost %v, wait len: %v", len(reqList.Reqs), proposalCost, len(nd.waitReqCh))
+				}
 				for _, r := range reqList.Reqs {
 					wh.headers = append(wh.headers, r.Header)
 				}
@@ -613,15 +617,15 @@ func (nd *KVNode) handleProposeReq() {
 					return
 				}
 			}
-			if newCan != nil {
-				newCan()
-			}
 			tn := time.Now().UnixNano()
 			cost = tn - start
 			raftCost = tn - reqList.Timestamp
+			if newCan != nil {
+				newCan()
+			}
 		}
 		if raftCost >= int64(raftSlow.Nanoseconds()) {
-			nd.rn.Infof("raft slow for batch propose: %v, cost %v", len(reqList.Reqs), raftCost)
+			nd.rn.Infof("raft slow for batch propose: %v, cost %v, wait len: %v", len(reqList.Reqs), raftCost, len(nd.waitReqCh))
 		}
 		if cost >= int64(time.Second.Nanoseconds())/2 {
 			nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
