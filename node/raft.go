@@ -52,6 +52,7 @@ const (
 	releaseDelayAfterSnapshot = 30 * time.Second
 	maxSizePerMsg             = 1024 * 1024
 	maxInflightMsgs           = 256
+	commitBufferLen           = 5000
 )
 
 type Snapshot interface {
@@ -129,7 +130,7 @@ type raftNode struct {
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	join bool, ds DataStorage, rs raft.IExtRaftStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
 
-	commitC := make(chan applyInfo, 5000)
+	commitC := make(chan applyInfo, commitBufferLen)
 	if rconfig.SnapCount <= 0 {
 		rconfig.SnapCount = DefaultSnapCount
 	}
@@ -149,7 +150,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		reqIDGen:      idutil.NewGenerator(uint16(rconfig.ID), time.Now()),
 		msgSnapC:      make(chan raftpb.Message, maxInFlightMsgSnap),
 		transport:     transport,
-		readStateC:    make(chan raft.ReadState, 1),
+		readStateC:    make(chan raft.ReadState, 3),
 		newLeaderChan: newLeaderChan,
 	}
 	snapDir := rc.config.SnapDir
@@ -840,6 +841,7 @@ func (rc *raftNode) serveChannels() {
 				rc.Errorf("raft loop stopped")
 				return
 			}
+			start := time.Now()
 			if rd.SoftState != nil {
 				isMeNewLeader = (rd.RaftState == raft.StateLeader)
 				oldLead := atomic.LoadUint64(&rc.lead)
@@ -860,10 +862,16 @@ func (rc *raftNode) serveChannels() {
 			if len(rd.ReadStates) != 0 {
 				select {
 				case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
-				case <-time.After(time.Second):
-					nodeLog.Infof("timeout sending read state")
-				case <-rc.stopc:
-					return
+				default:
+					t := time.NewTimer(time.Millisecond * 10)
+					select {
+					case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
+					case <-t.C:
+						nodeLog.Infof("timeout sending read state")
+					case <-rc.stopc:
+						return
+					}
+					t.Stop()
 				}
 			}
 
@@ -897,6 +905,10 @@ func (rc *raftNode) serveChannels() {
 
 			// TODO: do we need publish entry if commitedentries and snapshot is empty?
 			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
+			cost := time.Since(start)
+			if cost >= raftSlow {
+				rc.Infof("raft publish entries %v slow : %v", len(rd.CommittedEntries), cost)
+			}
 
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				// since the snapshot only has metadata, we need rsync the real snapshot data first.
@@ -917,6 +929,11 @@ func (rc *raftNode) serveChannels() {
 			}
 			if isMeNewLeader {
 				rc.transport.Send(rc.processMessages(rd.Messages))
+			}
+
+			cost = time.Since(start)
+			if cost >= raftSlow {
+				rc.Infof("raft send messages %v slow : %v", len(rd.Messages), cost)
 			}
 			// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
 			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
@@ -947,6 +964,11 @@ func (rc *raftNode) serveChannels() {
 				}
 			}
 			rc.raftStorage.Append(rd.Entries)
+
+			cost = time.Since(start)
+			if cost >= raftSlow {
+				rc.Infof("raft save entries %v slow : %v", len(rd.Entries), cost)
+			}
 			if !isMeNewLeader {
 				msgs := rc.processMessages(rd.Messages)
 				raftDone <- struct{}{}
@@ -967,6 +989,11 @@ func (rc *raftNode) serveChannels() {
 				raftDone <- struct{}{}
 			}
 			rc.node.Advance()
+
+			cost = time.Since(start)
+			if cost >= raftSlow {
+				rc.Infof("raft advance slow : %v", len(rd.Entries), cost)
+			}
 		}
 	}
 }
