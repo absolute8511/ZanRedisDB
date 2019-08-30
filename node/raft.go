@@ -992,7 +992,7 @@ func (rc *raftNode) serveChannels() {
 
 			cost = time.Since(start)
 			if cost >= raftSlow {
-				rc.Infof("raft advance slow : %v", len(rd.Entries), cost)
+				rc.Infof("raft advance slow : %v", cost)
 			}
 		}
 	}
