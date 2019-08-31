@@ -841,7 +841,6 @@ func (rc *raftNode) serveChannels() {
 				rc.Errorf("raft loop stopped")
 				return
 			}
-			start := time.Now()
 			if rd.SoftState != nil {
 				isMeNewLeader = (rd.RaftState == raft.StateLeader)
 				oldLead := atomic.LoadUint64(&rc.lead)
@@ -905,11 +904,6 @@ func (rc *raftNode) serveChannels() {
 
 			// TODO: do we need publish entry if commitedentries and snapshot is empty?
 			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
-			cost := time.Since(start)
-			if cost >= raftSlow {
-				rc.Infof("raft publish entries %v slow : %v", len(rd.CommittedEntries), cost)
-			}
-
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				// since the snapshot only has metadata, we need rsync the real snapshot data first.
 				// if the real snapshot failed to pull, we need stop raft and retry restart later.
@@ -931,10 +925,6 @@ func (rc *raftNode) serveChannels() {
 				rc.transport.Send(rc.processMessages(rd.Messages))
 			}
 
-			cost = time.Since(start)
-			if cost >= raftSlow {
-				rc.Infof("raft send messages %v slow : %v", len(rd.Messages), cost)
-			}
 			// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
 			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
 				nodeLog.Errorf("raft save wal error: %v", err)
@@ -942,6 +932,7 @@ func (rc *raftNode) serveChannels() {
 				<-rc.stopc
 				return
 			}
+
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				err := rc.persistStorage.SaveSnap(rd.Snapshot)
 				if err != nil {
@@ -965,10 +956,6 @@ func (rc *raftNode) serveChannels() {
 			}
 			rc.raftStorage.Append(rd.Entries)
 
-			cost = time.Since(start)
-			if cost >= raftSlow {
-				rc.Infof("raft save entries %v slow : %v", len(rd.Entries), cost)
-			}
 			if !isMeNewLeader {
 				msgs := rc.processMessages(rd.Messages)
 				raftDone <- struct{}{}
@@ -989,11 +976,6 @@ func (rc *raftNode) serveChannels() {
 				raftDone <- struct{}{}
 			}
 			rc.node.Advance()
-
-			cost = time.Since(start)
-			if cost >= raftSlow {
-				rc.Infof("raft advance slow : %v", cost)
-			}
 		}
 	}
 }
