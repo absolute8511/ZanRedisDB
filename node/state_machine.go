@@ -138,11 +138,14 @@ func (bo *kvbatchOperator) IsBatchable(cmdName string, pk string) bool {
 }
 
 func (bo *kvbatchOperator) CommitBatch() {
+	if !bo.IsBatched() {
+		return
+	}
 	err := bo.kvsm.store.CommitBatchWrite()
 	bo.SetBatched(false)
 	bo.dupCheckMap = make(map[string]bool)
 	batchCost := time.Since(bo.batchStart)
-	if nodeLog.Level() > common.LOG_DETAIL {
+	if nodeLog.Level() >= common.LOG_DETAIL && len(bo.batchReqIDList) > 1 {
 		bo.kvsm.Infof("batching command number: %v", len(bo.batchReqIDList))
 	}
 	// write the future response or error
@@ -584,7 +587,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		}
 	}
 	var retErr error
-	for reqIndex, req := range reqList.Reqs {
+	for _, req := range reqList.Reqs {
 		reqTs := ts
 		if reqTs == 0 {
 			reqTs = req.Header.Timestamp
@@ -620,7 +623,6 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
 				_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
-				handled := false
 				if batch.IsBatchable(cmdName, string(pk)) {
 					if !batch.IsBatched() {
 						err := batch.BeginBatch()
@@ -630,70 +632,46 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 							continue
 						}
 					}
-					handled = true
-					h, ok := kvsm.router.GetInternalCmdHandler(cmdName)
-					if !ok {
-						kvsm.Infof("unsupported redis command: %v", cmdName)
-						kvsm.w.Trigger(reqID, common.ErrInvalidCommand)
-					} else {
-						if pk != nil {
-							batch.AddBatchKey(string(pk))
-						}
-						v, err := h(cmd, reqTs)
-						if err != nil {
-							kvsm.Infof("redis command %v error: %v, cmd: %v", cmdName, err, cmd)
-							kvsm.w.Trigger(reqID, err)
-							continue
-						}
-						if nodeLog.Level() > common.LOG_DETAIL {
-							kvsm.Infof("batching write command: %v", string(cmd.Raw))
-						}
-						batch.AddBatchRsp(reqID, v)
-						kvsm.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
-					}
-					if nodeLog.Level() > common.LOG_DETAIL {
-						kvsm.Infof("batching redis command: %v", cmdName)
-					}
-					if reqIndex < len(reqList.Reqs)-1 {
-						continue
-					}
-				}
-				if batch.IsBatched() {
+				} else {
 					batch.CommitBatch()
 				}
-				if handled {
-					continue
-				}
-
 				h, ok := kvsm.router.GetInternalCmdHandler(cmdName)
 				if !ok {
-					kvsm.Infof("unsupported redis command: %v", cmd)
+					kvsm.Infof("unsupported redis command: %v", cmdName)
 					kvsm.w.Trigger(reqID, common.ErrInvalidCommand)
 				} else {
-					v, err := h(cmd, reqTs)
-					cmdCost := time.Since(cmdStart)
-					if cmdCost > dbWriteSlow || nodeLog.Level() > common.LOG_DETAIL ||
-						(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
-						kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
+					if pk != nil && batch.IsBatched() {
+						batch.AddBatchKey(string(pk))
 					}
-
-					kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
-					// write the future response or error
+					v, err := h(cmd, reqTs)
 					if err != nil {
-						kvsm.Infof("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
+						kvsm.Errorf("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
 						kvsm.w.Trigger(reqID, err)
 						if isUnrecoveryError(err) {
 							panic(err)
 						}
 					} else {
-						kvsm.w.Trigger(reqID, v)
+						if batch.IsBatched() {
+							batch.AddBatchRsp(reqID, v)
+							if nodeLog.Level() > common.LOG_DETAIL {
+								kvsm.Infof("batching write command:%v, %v", cmdName, string(cmd.Raw))
+							}
+							kvsm.dbWriteStats.UpdateSizeStats(int64(len(cmd.Raw)))
+						} else {
+							kvsm.w.Trigger(reqID, v)
+							cmdCost := time.Since(cmdStart)
+							if cmdCost > dbWriteSlow || nodeLog.Level() > common.LOG_DETAIL ||
+								(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
+								kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
+							}
+							kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
+						}
 					}
 				}
 			}
 		} else {
-			if batch.IsBatched() {
-				batch.CommitBatch()
-			}
+			batch.CommitBatch()
+
 			if req.Header.DataType == int32(CustomReq) {
 				forceBackup, retErr = kvsm.handleCustomRequest(&req, reqID, stop)
 			} else if req.Header.DataType == int32(SchemaChangeReq) {
@@ -713,15 +691,17 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		}
 	}
 	// TODO: add test case for this
-	if batch.IsBatched() && reqList.ReqId > 0 {
+	if reqList.ReqId > 0 {
 		// reqid only be used for cluster sync grpc.
 		// we commit here to allow grpc get notify earlier.
 		batch.CommitBatch()
 	}
-	for _, req := range reqList.Reqs {
-		if kvsm.w.IsRegistered(req.Header.ID) {
-			kvsm.Infof("missing process request: %v", req.String())
-			kvsm.w.Trigger(req.Header.ID, errUnknownData)
+	if !batch.IsBatched() {
+		for _, req := range reqList.Reqs {
+			if kvsm.w.IsRegistered(req.Header.ID) {
+				kvsm.Infof("missing process request: %v", req.String())
+				kvsm.w.Trigger(req.Header.ID, errUnknownData)
+			}
 		}
 	}
 

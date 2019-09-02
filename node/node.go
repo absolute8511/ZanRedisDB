@@ -1228,7 +1228,7 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 				forceBackup = true
 			}
 		case raftpb.EntryConfChange:
-			if batch != nil && batch.IsBatched() {
+			if batch != nil {
 				batch.CommitBatch()
 			}
 			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
@@ -1244,7 +1244,7 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 			nd.rn.MarkReplayFinished()
 		}
 	}
-	if batch != nil && batch.IsBatched() {
+	if batch != nil {
 		batch.CommitBatch()
 	}
 	if shouldStop {

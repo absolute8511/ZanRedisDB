@@ -232,3 +232,59 @@ func TestKVNode_kvbatchCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
+	nd, dataDir, stopC := getTestKVNode(t)
+	defer os.RemoveAll(dataDir)
+	defer nd.Stop()
+	defer close(stopC)
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func(index int) {
+			defer wg.Done()
+			fc := &fakeRedisConn{}
+			for k := 0; k < 100; k++ {
+				fc.Reset()
+				setHandler, _, _ := nd.router.GetCmdHandler("set")
+				testKey := []byte(fmt.Sprintf("default:test:batchset_%v_%v", index, k))
+				setHandler(fc, buildCommand([][]byte{[]byte("set"), testKey, testKey}))
+				assert.Nil(t, fc.GetError())
+				assert.Equal(t, "OK", fc.rsp[0])
+			}
+		}(i)
+		go func(index int) {
+			defer wg.Done()
+			fc := &fakeRedisConn{}
+			for k := 0; k < 100; k++ {
+				fc.Reset()
+				setHandler, _, _ := nd.router.GetCmdHandler("incr")
+				testKey := []byte(fmt.Sprintf("default:test:nonbatch_%v_%v", index, k))
+				setHandler(fc, buildCommand([][]byte{[]byte("incr"), testKey}))
+				assert.Nil(t, fc.GetError())
+			}
+		}(i)
+	}
+	wg.Wait()
+	fc := &fakeRedisConn{}
+	for i := 0; i < 50; i++ {
+		for k := 0; k < 100; k++ {
+			fc.Reset()
+			getHandler, _, _ := nd.router.GetCmdHandler("get")
+			testKey := []byte(fmt.Sprintf("default:test:batchset_%v_%v", i, k))
+			getHandler(fc, buildCommand([][]byte{[]byte("get"), testKey}))
+			assert.Nil(t, fc.GetError())
+			assert.Equal(t, testKey, fc.rsp[0])
+		}
+	}
+	for i := 0; i < 50; i++ {
+		for k := 0; k < 100; k++ {
+			fc.Reset()
+			getHandler, _, _ := nd.router.GetCmdHandler("get")
+			testKey := []byte(fmt.Sprintf("default:test:nonbatch_%v_%v", i, k))
+			getHandler(fc, buildCommand([][]byte{[]byte("get"), testKey}))
+			assert.Nil(t, fc.GetError())
+			assert.Equal(t, []byte("1"), fc.rsp[0])
+		}
+	}
+}
