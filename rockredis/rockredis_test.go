@@ -182,38 +182,30 @@ func TestRockDB(t *testing.T) {
 	assert.Equal(t, 2, len(vlist))
 }
 
+func TestRockDBRevScanTableForHash(t *testing.T) {
+	testRockDBScanTableForHash(t, true)
+}
+
 func TestRockDBScanTableForHash(t *testing.T) {
+	testRockDBScanTableForHash(t, false)
+}
+
+func testRockDBScanTableForHash(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
 	total := 500
-	keyList1 := make([][]byte, 0, total*2)
-	keyList2 := make([][]byte, 0, total*2)
-	for i := 0; i < total; i++ {
-		keyList1 = append(keyList1, []byte("test:test_hash_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_hash_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < total; i++ {
-		keyList1 = append(keyList1, []byte("test:test_hash_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_hash_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
-		_, err := db.HSet(0, false, key, []byte("a"), key)
+	keyList1, keyList2 := fillScanKeysForType(t, "hash", total, func(key []byte, prefix string) {
+		_, err := db.HSet(0, false, key, []byte(prefix+":a"), key)
 		assert.Nil(t, err)
-		_, err = db.HSet(0, false, key, []byte("b"), key)
+		_, err = db.HSet(0, false, key, []byte(prefix+":b"), key)
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.HSet(0, false, key, []byte("a"), key)
-		assert.Nil(t, err)
-		_, err = db.HSet(0, false, key, []byte("b"), key)
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(HashType, []byte("test"))
 	maxKey := encodeDataTableEnd(HashType, []byte("test"))
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -223,7 +215,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test:a" && string(f) != "test:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -234,7 +226,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 
 	minKey = encodeDataTableStart(HashType, []byte("test2"))
 	maxKey = encodeDataTableEnd(HashType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -244,7 +236,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test2", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test2:a" && string(f) != "test2:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -265,7 +257,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 
 	minKey = encodeDataTableStart(HashType, []byte("test"))
 	maxKey = encodeDataTableEnd(HashType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -275,7 +267,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test:a" && string(f) != "test:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -286,7 +278,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 
 	minKey = encodeDataTableStart(HashType, []byte("test2"))
 	maxKey = encodeDataTableEnd(HashType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -296,7 +288,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test2", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test2:a" && string(f) != "test2:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -313,34 +305,28 @@ func TestRockDBScanTableForHash(t *testing.T) {
 	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
 }
 
+func TestRockDBRevScanTableForList(t *testing.T) {
+	testRockDBScanTableForList(t, true)
+}
+
 func TestRockDBScanTableForList(t *testing.T) {
+	testRockDBScanTableForList(t, false)
+}
+
+func testRockDBScanTableForList(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	keyList1 := make([][]byte, 0)
-	keyList2 := make([][]byte, 0)
 	totalCnt := 50
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_list_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_list_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_list_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_list_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
+	keyList1, keyList2 := fillScanKeysForType(t, "list", totalCnt, func(key []byte, prefix string) {
 		_, err := db.LPush(0, key, key, key)
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.LPush(0, key, key, key)
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(ListType, []byte("test"))
 	maxKey := encodeDataTableEnd(ListType, []byte("test"))
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -360,7 +346,7 @@ func TestRockDBScanTableForList(t *testing.T) {
 
 	minKey = encodeDataTableStart(ListType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ListType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -391,7 +377,7 @@ func TestRockDBScanTableForList(t *testing.T) {
 
 	minKey = encodeDataTableStart(ListType, []byte("test"))
 	maxKey = encodeDataTableEnd(ListType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -411,7 +397,7 @@ func TestRockDBScanTableForList(t *testing.T) {
 
 	minKey = encodeDataTableStart(ListType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ListType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -431,34 +417,28 @@ func TestRockDBScanTableForList(t *testing.T) {
 	}()
 }
 
+func TestRockDBRevScanTableForSet(t *testing.T) {
+	testRockDBScanTableForSet(t, true)
+}
+
 func TestRockDBScanTableForSet(t *testing.T) {
+	testRockDBScanTableForSet(t, false)
+}
+
+func testRockDBScanTableForSet(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	keyList1 := make([][]byte, 0)
-	keyList2 := make([][]byte, 0)
 	totalCnt := 50
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_set_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_set_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_set_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_set_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
-		_, err := db.SAdd(0, key, []byte("test:a"), []byte("test:b"))
+	keyList1, keyList2 := fillScanKeysForType(t, "set", totalCnt, func(key []byte, prefix string) {
+		_, err := db.SAdd(0, key, []byte(prefix+":a"), []byte(prefix+":b"))
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.SAdd(0, key, []byte("test2:a"), []byte("test2:b"))
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(SetType, []byte("test"))
 	maxKey := encodeDataTableEnd(SetType, []byte("test"))
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -480,7 +460,7 @@ func TestRockDBScanTableForSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(SetType, []byte("test2"))
 	maxKey = encodeDataTableEnd(SetType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -512,7 +492,7 @@ func TestRockDBScanTableForSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(SetType, []byte("test"))
 	maxKey = encodeDataTableEnd(SetType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -534,7 +514,7 @@ func TestRockDBScanTableForSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(SetType, []byte("test2"))
 	maxKey = encodeDataTableEnd(SetType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -562,37 +542,31 @@ func TestRockDBScanTableForSet(t *testing.T) {
 	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
 }
 
+func TestRockDBRevScanTableForZSet(t *testing.T) {
+	testRockDBScanTableForZSet(t, true)
+}
+
 func TestRockDBScanTableForZSet(t *testing.T) {
+	testRockDBScanTableForZSet(t, false)
+}
+
+func testRockDBScanTableForZSet(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	keyList1 := make([][]byte, 0)
-	keyList2 := make([][]byte, 0)
 	totalCnt := 50
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_zset_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_zset_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_zset_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_zset_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
-		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte("test:a")},
-			common.ScorePair{2, []byte("test:b")})
+
+	keyList1, keyList2 := fillScanKeysForType(t, "zset", totalCnt, func(key []byte, prefix string) {
+		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte(prefix + ":a")},
+			common.ScorePair{2, []byte(prefix + ":b")})
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte("test2:a")},
-			common.ScorePair{2, []byte("test2:b")})
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(ZScoreType, []byte("test"))
 	maxKey := encodeDataTableEnd(ZScoreType, []byte("test"))
 	t.Logf("scan test : %v, %v", minKey, maxKey)
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -618,7 +592,7 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(ZScoreType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ZScoreType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -654,7 +628,7 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(ZScoreType, []byte("test"))
 	maxKey = encodeDataTableEnd(ZScoreType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -680,7 +654,7 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(ZScoreType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ZScoreType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()

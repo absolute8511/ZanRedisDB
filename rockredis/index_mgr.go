@@ -432,7 +432,7 @@ func (im *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 					}
 					pkList = pkList[:0]
 					var err error
-					pkList, err = db.ScanWithBuffer(common.HASH, cursor, buildIndexBlock, "", pkList)
+					pkList, err = db.ScanWithBuffer(common.HASH, cursor, buildIndexBlock, "", pkList, false)
 					if err != nil {
 						dbLog.Infof("rebuild index for table %v error %v", buildTable, err)
 						return true, err

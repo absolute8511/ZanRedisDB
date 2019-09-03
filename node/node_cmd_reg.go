@@ -176,6 +176,9 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "hscan", wrapReadCommandKAnySubkey(nd.hscanCommand))
 	nd.router.Register(false, "sscan", wrapReadCommandKAnySubkey(nd.sscanCommand))
 	nd.router.Register(false, "zscan", wrapReadCommandKAnySubkey(nd.zscanCommand))
+	nd.router.Register(false, "hrevscan", wrapReadCommandKAnySubkey(nd.hscanCommand))
+	nd.router.Register(false, "srevscan", wrapReadCommandKAnySubkey(nd.sscanCommand))
+	nd.router.Register(false, "zrevscan", wrapReadCommandKAnySubkey(nd.zscanCommand))
 
 	// for geohash
 	nd.router.Register(true, "geoadd", nd.geoaddCommand)
@@ -188,6 +191,8 @@ func (nd *KVNode) registerHandler() {
 	//for cross mutil partion
 	nd.router.RegisterMerge("scan", wrapMergeCommand(nd.scanCommand))
 	nd.router.RegisterMerge("advscan", nd.advanceScanCommand)
+	nd.router.RegisterMerge("revscan", wrapMergeCommand(nd.scanCommand))
+	nd.router.RegisterMerge("advrevscan", nd.advanceScanCommand)
 	nd.router.RegisterMerge("fullscan", nd.fullScanCommand)
 	nd.router.RegisterMerge("hidx.from", nd.hindexSearchCommand)
 
