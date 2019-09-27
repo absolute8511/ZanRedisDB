@@ -52,7 +52,7 @@ func (exp *localExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]by
 	return rawValue, &h, nil
 }
 
-func (exp *localExpiration) isExpired(dataType byte, key []byte, rawValue []byte) (bool, error) {
+func (exp *localExpiration) isExpired(dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
 	return false, nil
 }
 

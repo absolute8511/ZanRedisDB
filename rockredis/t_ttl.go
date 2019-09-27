@@ -100,8 +100,9 @@ type expiredMetaBuffer interface {
 type expiration interface {
 	ExpireAt(dt byte, key []byte, rawValue []byte, when int64) error
 	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error)
+	// should be called only in read operation
 	ttl(dt byte, key []byte, rawValue []byte) (int64, error)
-	isExpired(dt byte, key []byte, rawValue []byte) (bool, error)
+	isExpired(dt byte, key []byte, rawValue []byte, useLock bool) (bool, error)
 	decodeRawValue(dt byte, rawValue []byte) ([]byte, *headerMetaValue, error)
 	encodeToRawValue(dt byte, h *headerMetaValue, realValue []byte) []byte
 	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error)

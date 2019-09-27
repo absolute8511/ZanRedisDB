@@ -107,9 +107,9 @@ func (exp *compactExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]
 	return rawValue[n:], h, nil
 }
 
-func (exp *compactExpiration) isExpired(dataType byte, key []byte, rawValue []byte) (bool, error) {
+func (exp *compactExpiration) isExpired(dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
 	if dataType != KVType {
-		return exp.localExp.isExpired(dataType, key, rawValue)
+		return exp.localExp.isExpired(dataType, key, rawValue, useLock)
 	}
 	if rawValue == nil {
 		return false, nil

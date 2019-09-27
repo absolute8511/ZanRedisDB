@@ -111,8 +111,9 @@ const (
 )
 
 const (
-	DefaultExpirationPolicy     = "local_deletion"
-	WaitCompactExpirationPolicy = "wait_compact"
+	DefaultExpirationPolicy             = "local_deletion"
+	ConsistencyDeletionExpirationPolicy = "consistency_deletion"
+	WaitCompactExpirationPolicy         = "wait_compact"
 )
 
 var (
@@ -124,7 +125,7 @@ func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
 	switch s {
 	case DefaultExpirationPolicy:
 		return LocalDeletion, nil
-	case "consistency_deletion":
+	case ConsistencyDeletionExpirationPolicy:
 		return ConsistencyDeletion, nil
 	case WaitCompactExpirationPolicy:
 		return WaitCompact, nil
@@ -144,11 +145,15 @@ const (
 	UnknownDataType
 )
 
+const (
+	ValueHeaderV1Str = "value_header_v1"
+)
+
 func StringToDataVersionType(s string) (DataVersionT, error) {
 	switch s {
 	case "":
 		return DefaultDataVer, nil
-	case "value_header_v1":
+	case ValueHeaderV1Str:
 		return ValueHeaderV1, nil
 	default:
 		return UnknownDataType, errors.New("unknown data version type")

@@ -93,15 +93,52 @@ func TestKVTTL_Compact(t *testing.T) {
 		t.Fatalf("ttl != setex: %v vs %v", v, ttl1)
 	}
 
-	if err := db.SetEx(tn, key1, ttl2, testValue); err != nil {
-		t.Fatal(err)
-	}
+	err := db.SetEx(tn, key1, ttl2, testValue)
+	assert.Nil(t, err)
 
-	if v, err := db.KVTtl(key1); err != nil {
-		t.Fatal(err)
-	} else if v != ttl2 {
-		t.Fatalf("ttl != setex: %v vs %v", v, ttl2)
-	}
+	v, err := db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl2, v)
+	// set, setnx, mset should clean ttl
+	err = db.KVSet(0, key1, testValue)
+	assert.Nil(t, err)
+	v, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), v)
+
+	err = db.SetEx(tn, key1, ttl2, testValue)
+	assert.Nil(t, err)
+	v, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl2, v)
+
+	// set not success should keep ttl
+	changed, err := db.SetNX(0, key1, testValue)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), changed)
+	v, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl2, v)
+
+	db.MSet(0, common.KVRecord{Key: key1, Value: testValue})
+	v, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), v)
+
+	err = db.SetEx(tn, key1, 1, testValue)
+	assert.Nil(t, err)
+	v, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), v)
+
+	time.Sleep(time.Second * 2)
+	// set success should clean ttl
+	changed, err = db.SetNX(0, key1, testValue)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), changed)
+	v, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), v)
 }
 
 func TestKVTTL_CompactKeepTTL(t *testing.T) {
@@ -224,6 +261,23 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	} else if v != -1 {
 		t.Fatalf("should expired: %v", v)
 	}
+	v, err := db.KVGet(key1)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	vlist, errs := db.MGet(key1)
+	assert.Nil(t, errs[0])
+	assert.Nil(t, vlist[0])
+	v, err = db.KVGetSet(0, key1, []byte("new"))
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	if v, err := db.KVTtl(key1); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatalf("should has no expired: %v", v)
+	}
+	v, err = db.KVGet(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("new"), v)
 }
 
 func TestKVTTL_CompactOverflow(t *testing.T) {

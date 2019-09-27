@@ -96,7 +96,9 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 	nsConf.Replicator = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	nsConf.ExpirationPolicy = "consistency_deletion"
+	//nsConf.ExpirationPolicy = common.ConsistencyDeletionExpirationPolicy
+	nsConf.ExpirationPolicy = common.WaitCompactExpirationPolicy
+	nsConf.DataVersion = common.ValueHeaderV1Str
 	kv := NewServer(kvOpts)
 	if _, err := kv.InitKVNamespace(1, nsConf, false); err != nil {
 		t.Fatalf("failed to init namespace: %v", err)

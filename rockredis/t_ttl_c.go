@@ -29,10 +29,17 @@ func (exp *consistencyExpiration) decodeRawValue(dataType byte, rawValue []byte)
 	return rawValue, &h, nil
 }
 
-func (exp *consistencyExpiration) isExpired(dataType byte, key []byte, rawValue []byte) (bool, error) {
+func (exp *consistencyExpiration) isExpired(dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
 	mk := expEncodeMetaKey(dataType, key)
 
-	t, err := Int64(exp.db.eng.GetBytes(exp.db.defaultReadOpts, mk))
+	var t int64
+	var err error
+	if useLock {
+		t, err = Int64(exp.db.eng.GetBytes(exp.db.defaultReadOpts, mk))
+	} else {
+		t, err = Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk))
+	}
+	dbLog.Infof("key %v ttl: %v", string(key), t)
 	if err != nil || t == 0 {
 		return false, err
 	}
@@ -57,7 +64,7 @@ func (exp *consistencyExpiration) ExpireAt(dataType byte, key []byte, rawValue [
 func (exp *consistencyExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	mk := expEncodeMetaKey(dataType, key)
 
-	if t, err := Int64(exp.db.eng.GetBytes(exp.db.defaultReadOpts, mk)); err != nil {
+	if t, err := Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk)); err != nil {
 		return rawValue, err
 	} else if t != 0 {
 		wb.Delete(expEncodeTimeKey(dataType, key, t))
@@ -78,11 +85,12 @@ func (exp *consistencyExpiration) rawExpireAt(dataType byte, key []byte, rawValu
 
 func (exp *consistencyExpiration) ttl(dataType byte, key []byte, rawValue []byte) (int64, error) {
 	mk := expEncodeMetaKey(dataType, key)
-
 	t, err := Int64(exp.db.eng.GetBytes(exp.db.defaultReadOpts, mk))
+
 	if err != nil || t == 0 {
 		t = -1
 	} else {
+		dbLog.Infof("key %v ttl: %v", string(key), t)
 		t -= time.Now().Unix()
 		if t <= 0 {
 			t = -1
@@ -105,7 +113,7 @@ func (exp *consistencyExpiration) Stop() {
 func (exp *consistencyExpiration) delExpire(dataType byte, key []byte, rawValue []byte, keepV bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	mk := expEncodeMetaKey(dataType, key)
 
-	if t, err := Int64(exp.db.eng.GetBytes(exp.db.defaultReadOpts, mk)); err != nil {
+	if t, err := Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk)); err != nil {
 		return rawValue, err
 	} else if t == 0 {
 		return rawValue, nil
