@@ -21,6 +21,7 @@ const (
 var (
 	ErrLocalBatchFullToCommit = errors.New("batched is fully filled and should commit right now")
 	ErrLocalBatchedBuffFull   = errors.New("the local batched buffer is fully filled")
+	errChangeTTLNotSupported  = errors.New("change ttl is not supported in current expire policy")
 )
 
 type localExpiration struct {
@@ -42,36 +43,49 @@ func newLocalExpiration(db *RockDB) *localExpiration {
 	return exp
 }
 
-func (exp *localExpiration) expireAt(dataType byte, key []byte, when int64) error {
-	wb := exp.db.wb
-	wb.Clear()
-
-	tk := expEncodeTimeKey(dataType, key, when)
-	mk := expEncodeMetaKey(dataType, key)
-
-	wb.Put(tk, mk)
-
-	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
-		return err
-	} else {
-		exp.setNextCheckTime(when, false)
-		return nil
-	}
+func (exp *localExpiration) encodeToRawValue(dataType byte, h *headerMetaValue, rawValue []byte) []byte {
+	return rawValue
 }
 
-func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch) error {
-	tk := expEncodeTimeKey(dataType, key, when)
-	mk := expEncodeMetaKey(dataType, key)
-	wb.Put(tk, mk)
+func (exp *localExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]byte, *headerMetaValue, error) {
+	var h headerMetaValue
+	return rawValue, &h, nil
+}
+
+func (exp *localExpiration) isExpired(dataType byte, key []byte, rawValue []byte) (bool, error) {
+	return false, nil
+}
+
+func (exp *localExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) error {
+	if when == 0 {
+		return errChangeTTLNotSupported
+	}
+	wb := exp.db.wb
+	wb.Clear()
+	_, err := exp.rawExpireAt(dataType, key, rawValue, when, wb)
+	if err != nil {
+		return err
+	}
+	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (exp *localExpiration) ttl(byte, []byte) (int64, error) {
+func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
+	tk := expEncodeTimeKey(dataType, key, when)
+	mk := expEncodeMetaKey(dataType, key)
+	wb.Put(tk, mk)
+	exp.setNextCheckTime(when, false)
+	return rawValue, nil
+}
+
+func (exp *localExpiration) ttl(byte, []byte, []byte) (int64, error) {
 	return -1, nil
 }
 
-func (exp *localExpiration) delExpire(byte, []byte, *gorocksdb.WriteBatch) error {
-	return nil
+func (exp *localExpiration) delExpire(dt byte, key []byte, rawv []byte, keepV bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
+	return rawv, nil
 }
 
 func (exp *localExpiration) check(buffer common.ExpiredDataBuffer, stop chan struct{}) error {

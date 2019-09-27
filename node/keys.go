@@ -106,6 +106,22 @@ func (nd *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command, v interface{}
 	conn.WriteString("OK")
 }
 
+func (nd *KVNode) setRangeCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
+func (nd *KVNode) appendCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
+	if rsp, ok := v.(int64); ok {
+		conn.WriteInt64(rsp)
+	} else {
+		conn.WriteError(errInvalidResponse.Error())
+	}
+}
+
 func (nd *KVNode) getsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
 	if v == nil {
 		conn.WriteNull()
@@ -287,4 +303,18 @@ func (kvsm *kvStoreSM) localBitSetCommand(cmd redcon.Command, ts int64) (interfa
 		return 0, err
 	}
 	return kvsm.store.BitSet(ts, cmd.Args[1], offset, int(on))
+}
+
+func (kvsm *kvStoreSM) localAppendCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	ret, err := kvsm.store.Append(ts, cmd.Args[1], cmd.Args[2])
+	return ret, err
+}
+
+func (kvsm *kvStoreSM) localSetRangeCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	offset, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	ret, err := kvsm.store.SetRange(ts, cmd.Args[1], int(offset), cmd.Args[3])
+	return ret, err
 }

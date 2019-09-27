@@ -413,7 +413,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(HashType, key, wb)
+		db.delExpire(HashType, key, nil, false, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -492,7 +492,7 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	}
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(HashType, hkey, wb)
+		db.delExpire(HashType, hkey, nil, false, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -524,7 +524,7 @@ func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
 	}
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(HashType, hkey, wb)
+		db.delExpire(HashType, hkey, nil, false, wb)
 	}
 
 	return err
@@ -715,11 +715,11 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 	return length, valCh, nil
 }
 
-func (db *RockDB) HExpire(key []byte, duration int64) (int64, error) {
+func (db *RockDB) HExpire(ts int64, key []byte, duration int64) (int64, error) {
 	if exists, err := db.HKeyExists(key); err != nil || exists != 1 {
 		return 0, err
 	} else {
-		if err2 := db.expire(HashType, key, duration); err2 != nil {
+		if err2 := db.ExpireAt(HashType, key, nil, duration+ts/int64(time.Second)); err2 != nil {
 			return 0, err2
 		} else {
 			return 1, nil
@@ -732,18 +732,13 @@ func (db *RockDB) HPersist(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	if ttl, err := db.ttl(HashType, key); err != nil || ttl < 0 {
+	if ttl, err := db.ttl(HashType, key, nil); err != nil || ttl < 0 {
 		return 0, err
 	}
 
-	db.wb.Clear()
-	if err := db.delExpire(HashType, key, db.wb); err != nil {
+	err := db.expiration.ExpireAt(HashType, key, nil, 0)
+	if err != nil {
 		return 0, err
-	} else {
-		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
 	}
+	return 1, nil
 }

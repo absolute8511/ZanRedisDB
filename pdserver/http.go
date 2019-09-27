@@ -439,9 +439,17 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_REPLICATOR"}
 	}
 
+	dataVersion := reqParams.Get("data_version")
+	dv, err := common.StringToDataVersionType(dataVersion)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_DATA_VERSION"}
+	}
 	expPolicy := reqParams.Get("expiration_policy")
 	if expPolicy == "" {
 		expPolicy = common.DefaultExpirationPolicy
+		if dv == common.ValueHeaderV1 {
+			expPolicy = common.WaitCompactExpirationPolicy
+		}
 	} else if _, err := common.StringToExpirationPolicy(expPolicy); err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_EXPIRATION_POLICY"}
 	}
@@ -465,6 +473,7 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 	meta.Replica = replicator
 	meta.EngType = engType
 	meta.ExpirationPolicy = expPolicy
+	meta.DataVersion = dataVersion
 	meta.Tags = make(map[string]interface{})
 	for _, tag := range tagList {
 		if strings.TrimSpace(tag) != "" {

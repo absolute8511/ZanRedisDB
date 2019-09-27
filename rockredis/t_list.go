@@ -3,6 +3,7 @@ package rockredis
 import (
 	"encoding/binary"
 	"errors"
+	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -333,7 +334,7 @@ func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {
 		// list is empty after delete
 		db.IncrTableKeyCount(table, -1, wb)
 		//delete the expire data related to the list key
-		db.delExpire(ListType, key, wb)
+		db.delExpire(ListType, key, nil, false, wb)
 	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return value, err
@@ -408,7 +409,7 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 	if llen > 0 && newLen == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 		//delete the expire data related to the list key
-		db.delExpire(ListType, key, wb)
+		db.delExpire(ListType, key, nil, false, wb)
 	}
 
 	return db.eng.Write(db.defaultWriteOpts, wb)
@@ -479,7 +480,7 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 		// list is empty after trim
 		db.IncrTableKeyCount(table, -1, wb)
 		//delete the expire data related to the list key
-		db.delExpire(ListType, key, wb)
+		db.delExpire(ListType, key, nil, false, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -776,7 +777,7 @@ func (db *RockDB) LClear(key []byte) (int64, error) {
 	num := db.lDelete(key, db.wb)
 	if num > 0 {
 		//delete the expire data related to the list key
-		db.delExpire(ListType, key, db.wb)
+		db.delExpire(ListType, key, nil, false, db.wb)
 	}
 	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	return num, err
@@ -793,7 +794,7 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 			return 0, err
 		}
 		db.lDelete(key, db.wb)
-		db.delExpire(ListType, key, db.wb)
+		db.delExpire(ListType, key, nil, false, db.wb)
 	}
 	err := db.eng.Write(db.defaultWriteOpts, db.wb)
 	if err != nil {
@@ -813,7 +814,7 @@ func (db *RockDB) lMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) err
 			return err
 		}
 		db.lDelete(key, wb)
-		db.delExpire(ListType, key, wb)
+		db.delExpire(ListType, key, nil, false, wb)
 	}
 	return nil
 }
@@ -830,11 +831,11 @@ func (db *RockDB) LKeyExists(key []byte) (int64, error) {
 	return 0, err
 }
 
-func (db *RockDB) LExpire(key []byte, duration int64) (int64, error) {
+func (db *RockDB) LExpire(ts int64, key []byte, duration int64) (int64, error) {
 	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
 		return 0, err
 	} else {
-		if err2 := db.expire(ListType, key, duration); err2 != nil {
+		if err2 := db.ExpireAt(ListType, key, nil, duration+ts/int64(time.Second)); err2 != nil {
 			return 0, err2
 		} else {
 			return 1, nil
@@ -847,18 +848,14 @@ func (db *RockDB) LPersist(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	if ttl, err := db.ttl(ListType, key); err != nil || ttl < 0 {
+	if ttl, err := db.ttl(ListType, key, nil); err != nil || ttl < 0 {
 		return 0, err
 	}
 
-	db.wb.Clear()
-	if err := db.delExpire(ListType, key, db.wb); err != nil {
+	err := db.expiration.ExpireAt(ListType, key, nil, 0)
+	if err != nil {
 		return 0, err
-	} else {
-		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
 	}
+
+	return 1, nil
 }

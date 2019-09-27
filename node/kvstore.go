@@ -20,6 +20,7 @@ type KVOptions struct {
 	KeepBackup       int
 	EngType          string
 	ExpirationPolicy common.ExpirationPolicy
+	DataVersion      common.DataVersionT
 	RockOpts         engine.RockOptions
 	SharedConfig     *engine.SharedRockConfig
 }
@@ -43,6 +44,7 @@ func (s *KVStore) openDB() error {
 		cfg.DataDir = s.opts.DataDir
 		cfg.RockOptions = s.opts.RockOpts
 		cfg.ExpirationPolicy = s.opts.ExpirationPolicy
+		cfg.DataVersion = s.opts.DataVersion
 		cfg.SharedConfig = s.opts.SharedConfig
 		cfg.KeepBackup = s.opts.KeepBackup
 		s.RockDB, err = rockredis.OpenRockDB(cfg)

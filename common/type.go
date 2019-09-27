@@ -104,11 +104,15 @@ const (
 	//
 	PeriodicalRotation
 
+	// WaitCompact indicates that all ttl will be stored in the values and will be checked while compacting and reading
+	WaitCompact
+
 	UnknownPolicy
 )
 
 const (
-	DefaultExpirationPolicy = "local_deletion"
+	DefaultExpirationPolicy     = "local_deletion"
+	WaitCompactExpirationPolicy = "wait_compact"
 )
 
 var (
@@ -118,12 +122,36 @@ var (
 
 func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
 	switch s {
-	case "local_deletion":
+	case DefaultExpirationPolicy:
 		return LocalDeletion, nil
 	case "consistency_deletion":
 		return ConsistencyDeletion, nil
+	case WaitCompactExpirationPolicy:
+		return WaitCompact, nil
 	default:
 		return UnknownPolicy, errors.New("unknown policy")
+	}
+}
+
+type DataVersionT int
+
+const (
+	DefaultDataVer DataVersionT = iota
+
+	//ValueHeaderV1 will add header to kv values to store ttl or other header data
+	ValueHeaderV1
+
+	UnknownDataType
+)
+
+func StringToDataVersionType(s string) (DataVersionT, error) {
+	switch s {
+	case "":
+		return DefaultDataVer, nil
+	case "value_header_v1":
+		return ValueHeaderV1, nil
+	default:
+		return UnknownDataType, errors.New("unknown data version type")
 	}
 }
 

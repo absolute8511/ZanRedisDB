@@ -98,38 +98,45 @@ type expiredMetaBuffer interface {
 }
 
 type expiration interface {
-	rawExpireAt(byte, []byte, int64, *gorocksdb.WriteBatch) error
-	expireAt(byte, []byte, int64) error
-	ttl(byte, []byte) (int64, error)
-	delExpire(byte, []byte, *gorocksdb.WriteBatch) error
+	ExpireAt(dt byte, key []byte, rawValue []byte, when int64) error
+	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error)
+	ttl(dt byte, key []byte, rawValue []byte) (int64, error)
+	isExpired(dt byte, key []byte, rawValue []byte) (bool, error)
+	decodeRawValue(dt byte, rawValue []byte) ([]byte, *headerMetaValue, error)
+	encodeToRawValue(dt byte, h *headerMetaValue, realValue []byte) []byte
+	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error)
 	check(common.ExpiredDataBuffer, chan struct{}) error
 	Start()
 	Stop()
 	Destroy()
 }
 
-func (db *RockDB) expire(dataType byte, key []byte, duration int64) error {
-	return db.expiration.expireAt(dataType, key, time.Now().Unix()+duration)
+func (db *RockDB) expire(ts int64, dataType byte, key []byte, rawValue []byte, duration int64) error {
+	return db.expiration.ExpireAt(dataType, key, rawValue, ts/int64(time.Second)+duration)
 }
 
 func (db *RockDB) KVTtl(key []byte) (t int64, err error) {
-	return db.ttl(KVType, key)
+	_, _, v, _, err := db.getRawDBKVValue(key, true)
+	if err != nil || v == nil {
+		return -1, err
+	}
+	return db.ttl(KVType, key, v)
 }
 
 func (db *RockDB) HashTtl(key []byte) (t int64, err error) {
-	return db.ttl(HashType, key)
+	return db.ttl(HashType, key, nil)
 }
 
 func (db *RockDB) ListTtl(key []byte) (t int64, err error) {
-	return db.ttl(ListType, key)
+	return db.ttl(ListType, key, nil)
 }
 
 func (db *RockDB) SetTtl(key []byte) (t int64, err error) {
-	return db.ttl(SetType, key)
+	return db.ttl(SetType, key, nil)
 }
 
 func (db *RockDB) ZSetTtl(key []byte) (t int64, err error) {
-	return db.ttl(ZSetType, key)
+	return db.ttl(ZSetType, key, nil)
 }
 
 type TTLChecker struct {

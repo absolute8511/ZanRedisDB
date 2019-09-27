@@ -62,6 +62,7 @@ type NamespaceMetaInfo struct {
 	SnapCount        int
 	Tags             map[string]interface{}
 	ExpirationPolicy string
+	DataVersion      string
 }
 
 func (self *NamespaceMetaInfo) MetaEpoch() EpochType {

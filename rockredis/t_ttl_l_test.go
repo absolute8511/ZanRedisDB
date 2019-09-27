@@ -18,8 +18,9 @@ func TestKVTTL_L(t *testing.T) {
 
 	key1 := []byte("test:testdbTTL_kv_l")
 	var ttl1 int64 = rand.Int63()
+	tn := time.Now().UnixNano()
 
-	if v, err := db.Expire(key1, ttl1); err != nil {
+	if v, err := db.Expire(tn, key1, ttl1); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist key != 0")
@@ -29,15 +30,13 @@ func TestKVTTL_L(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v, err := db.Expire(key1, ttl1); err != nil {
+	if v, err := db.Expire(tn, key1, ttl1); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from expire != 1")
 	}
 
-	if v, err := db.Persist(key1); err != nil {
-		t.Fatal(err)
-	} else if v != 0 {
+	if v, _ := db.Persist(key1); v != 0 {
 		t.Fatal("return value from persist of LocalDeletion Policy != 0")
 	}
 
@@ -68,7 +67,8 @@ func TestHashTTL_L(t *testing.T) {
 	hashKey := []byte("test:testdbTTL_hash_l")
 	var hashTTL int64 = rand.Int63()
 
-	if v, err := db.HExpire(hashKey, hashTTL); err != nil {
+	tn := time.Now().UnixNano()
+	if v, err := db.HExpire(tn, hashKey, hashTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist hash key != 0")
@@ -84,7 +84,7 @@ func TestHashTTL_L(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v, err := db.HExpire(hashKey, hashTTL); err != nil {
+	if v, err := db.HExpire(tn, hashKey, hashTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from hexpire != 1")
@@ -111,7 +111,8 @@ func TestListTTL_L(t *testing.T) {
 	listKey := []byte("test:testdbTTL_list_l")
 	var listTTL int64 = rand.Int63()
 
-	if v, err := db.LExpire(listKey, listTTL); err != nil {
+	tn := time.Now().UnixNano()
+	if v, err := db.LExpire(tn, listKey, listTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist list key != 0")
@@ -122,7 +123,7 @@ func TestListTTL_L(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v, err := db.LExpire(listKey, listTTL); err != nil {
+	if v, err := db.LExpire(tn, listKey, listTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from lexpire != 1")
@@ -149,7 +150,8 @@ func TestSetTTL_L(t *testing.T) {
 	setKey := []byte("test:testdbTTL_set_l")
 	var setTTL int64 = rand.Int63()
 
-	if v, err := db.SExpire(setKey, setTTL); err != nil {
+	tn := time.Now().UnixNano()
+	if v, err := db.SExpire(tn, setKey, setTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist set key != 0")
@@ -160,7 +162,7 @@ func TestSetTTL_L(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v, err := db.SExpire(setKey, setTTL); err != nil {
+	if v, err := db.SExpire(tn, setKey, setTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from sexpire != 1")
@@ -187,7 +189,8 @@ func TestZSetTTL_L(t *testing.T) {
 	zsetKey := []byte("test:testdbTTL_zset_l")
 	var zsetTTL int64 = rand.Int63()
 
-	if v, err := db.ZExpire(zsetKey, zsetTTL); err != nil {
+	tn := time.Now().UnixNano()
+	if v, err := db.ZExpire(tn, zsetKey, zsetTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist zset key != 0")
@@ -204,7 +207,7 @@ func TestZSetTTL_L(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v, err := db.ZExpire(zsetKey, zsetTTL); err != nil {
+	if v, err := db.ZExpire(tn, zsetKey, zsetTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from zexpire != 1")
@@ -279,7 +282,8 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 			db.ZAdd(0, tZsetKey, members...)
 		}
 
-		if err := db.expire(dataType, []byte(key), 8); err != nil {
+		tn := time.Now().UnixNano()
+		if err := db.expire(tn, dataType, []byte(key), nil, 8); err != nil {
 			t.Fatal(err)
 		}
 	}

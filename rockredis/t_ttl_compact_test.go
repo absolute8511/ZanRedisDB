@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"bytes"
+	math "math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -10,19 +11,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/gorocksdb"
 )
 
-func TestKVTTL_C(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestKVTTL_Compact(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdbTTL_kv_c")
-	var ttl1 int64 = rand.Int63() - 10
+	key1 := []byte("test:testdbTTL_kv_compact")
+	var ttl1 int64 = int64(rand.Int31())
 	ttl2 := ttl1 + 10
 	tn := time.Now().UnixNano()
-
 	if v, err := db.Expire(tn, key1, ttl1); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
@@ -51,6 +50,7 @@ func TestKVTTL_C(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
+	// test change ttl
 	if v, err := db.Expire(tn, key1, ttl2); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
@@ -96,6 +96,7 @@ func TestKVTTL_C(t *testing.T) {
 	if err := db.SetEx(tn, key1, ttl2, testValue); err != nil {
 		t.Fatal(err)
 	}
+
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
 	} else if v != ttl2 {
@@ -103,12 +104,12 @@ func TestKVTTL_C(t *testing.T) {
 	}
 }
 
-func TestKVTTL_C_KeepTTL(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestKVTTL_CompactKeepTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdbTTL_kv_c_keepttl")
+	key1 := []byte("test:testdbTTL_kv_compact_keepttl")
 	var ttl1 int64 = int64(rand.Int31())
 	tn := time.Now().UnixNano()
 	if c, err := db.Incr(0, key1); err != nil {
@@ -147,9 +148,6 @@ func TestKVTTL_C_KeepTTL(t *testing.T) {
 	} else if v != ttl1 {
 		t.Fatal("ttl != expire")
 	}
-	v, err := db.KVGet(key1)
-	assert.Nil(t, err)
-	assert.Equal(t, "2append", string(v))
 	// setrange
 	_, err = db.SetRange(0, key1, 1, []byte("range"))
 	assert.Nil(t, err)
@@ -158,7 +156,7 @@ func TestKVTTL_C_KeepTTL(t *testing.T) {
 	} else if v != ttl1 {
 		t.Fatal("ttl != expire")
 	}
-	v, err = db.KVGet(key1)
+	v, err := db.KVGet(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, "2ranged", string(v))
 	db.KVDel(key1)
@@ -184,12 +182,12 @@ func TestKVTTL_C_KeepTTL(t *testing.T) {
 	assert.Equal(t, int64(1), bitV)
 }
 
-func TestKVTTL_C_TTLExpired(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestKVTTL_Compact_TTLExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdbTTL_kv_c_keepttl")
+	key1 := []byte("test:testdbTTL_kv_compact_ttlexpire")
 	var ttl1 int64 = int64(2)
 	tn := time.Now().UnixNano()
 	if c, err := db.Incr(0, key1); err != nil {
@@ -228,7 +226,39 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	}
 }
 
-func TestHashTTL_C(t *testing.T) {
+func TestKVTTL_CompactOverflow(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key1 := []byte("test:testdbTTL_kv_compact")
+	var ttl1 int64 = math.MaxUint32
+	tn := time.Now().UnixNano()
+	err := db.KVSet(0, key1, []byte("hello world 1"))
+	assert.Nil(t, err)
+
+	_, err = db.Expire(tn, key1, ttl1)
+	assert.NotNil(t, err)
+
+	if v, err := db.KVTtl(key1); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatal("ttl != -1")
+	}
+
+	tn = time.Now().UnixNano()
+	testValue := []byte("test value for SetEx command")
+	err = db.SetEx(tn, key1, ttl1, testValue)
+	assert.NotNil(t, err)
+
+	if v, err := db.KVTtl(key1); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatalf("ttl != setex: %v vs %v", v, ttl1)
+	}
+}
+
+func TestHashTTL_Compact(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -290,7 +320,7 @@ func TestHashTTL_C(t *testing.T) {
 	}
 }
 
-func TestListTTL_C(t *testing.T) {
+func TestListTTL_Compact(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -347,7 +377,7 @@ func TestListTTL_C(t *testing.T) {
 	}
 }
 
-func TestSetTTL_C(t *testing.T) {
+func TestSetTTL_Compact(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -404,7 +434,7 @@ func TestSetTTL_C(t *testing.T) {
 	}
 }
 
-func TestZSetTTL_C(t *testing.T) {
+func TestZSetTTL_Compact(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -467,35 +497,8 @@ func TestZSetTTL_C(t *testing.T) {
 	}
 }
 
-type TExpiredDataBuffer struct {
-	db           *RockDB
-	wb           *gorocksdb.WriteBatch
-	kTypeMap     map[string]byte
-	expiredCount int
-	t            *testing.T
-}
-
-func (buff *TExpiredDataBuffer) Write(dt common.DataType, key []byte) error {
-	buff.expiredCount += 1
-	if kt, ok := buff.kTypeMap[string(key)]; !ok {
-		buff.t.Fatalf("unknown expired key: %v", string(key))
-	} else if dataType2CommonType(kt) != dt {
-		buff.t.Fatalf("mismatched key-type, %s - %d, should be [%s - %d]", string(key), dt, string(key), dataType2CommonType(kt))
-	} else {
-		buff.wb.Clear()
-		buff.db.delExpire(kt, key, nil, false, buff.wb)
-		buff.db.eng.Write(buff.db.defaultWriteOpts, buff.wb)
-		delete(buff.kTypeMap, string(key))
-	}
-	return nil
-}
-
-func (buff *TExpiredDataBuffer) Full() bool {
-	return false
-}
-
-func TestConsistencyTTLChecker(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestDBCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
@@ -513,28 +516,4 @@ func TestConsistencyTTLChecker(t *testing.T) {
 	}
 
 	time.Sleep(3 * time.Second)
-	buffer := &TExpiredDataBuffer{
-		t:        t,
-		db:       db,
-		wb:       gorocksdb.NewWriteBatch(),
-		kTypeMap: kTypeMap,
-	}
-
-	if err := db.CheckExpiredData(buffer, make(chan struct{})); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(kTypeMap) != 0 {
-		t.Fatal("not all keys has expired")
-	}
-
-	buffer.expiredCount = 0
-
-	if err := db.CheckExpiredData(buffer, make(chan struct{})); err != nil {
-		t.Fatal(err)
-	}
-
-	if buffer.expiredCount != 0 {
-		t.Fatal("find some keys expired after all the keys stored has expired and deleted")
-	}
 }

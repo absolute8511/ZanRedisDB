@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -488,7 +489,7 @@ func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(ZSetType, key, wb)
+		db.delExpire(ZSetType, key, nil, false, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -644,7 +645,7 @@ func (db *RockDB) zRemAll(ts int64, key []byte, wb *gorocksdb.WriteBatch) (int64
 		wb.DeleteRange(minSetKey, maxSetKey)
 		if num > 0 {
 			db.IncrTableKeyCount(table, -1, wb)
-			db.delExpire(ZSetType, key, wb)
+			db.delExpire(ZSetType, key, nil, false, wb)
 		}
 		wb.Delete(sk)
 	} else {
@@ -704,7 +705,7 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, minKey []byte, maxKey []b
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(ZSetType, key, wb)
+		db.delExpire(ZSetType, key, nil, false, wb)
 	}
 
 	return num, nil
@@ -1102,7 +1103,7 @@ func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, r
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(ZSetType, key, wb)
+		db.delExpire(ZSetType, key, nil, false, wb)
 	}
 
 	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
@@ -1153,11 +1154,11 @@ func (db *RockDB) ZKeyExists(key []byte) (int64, error) {
 	return 0, err
 }
 
-func (db *RockDB) ZExpire(key []byte, duration int64) (int64, error) {
+func (db *RockDB) ZExpire(ts int64, key []byte, duration int64) (int64, error) {
 	if exists, err := db.ZKeyExists(key); err != nil || exists != 1 {
 		return 0, err
 	} else {
-		if err2 := db.expire(ZSetType, key, duration); err2 != nil {
+		if err2 := db.ExpireAt(ZSetType, key, nil, duration+ts/int64(time.Second)); err2 != nil {
 			return 0, err2
 		} else {
 			return 1, nil
@@ -1170,18 +1171,13 @@ func (db *RockDB) ZPersist(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	if ttl, err := db.ttl(ZSetType, key); err != nil || ttl < 0 {
+	if ttl, err := db.ttl(ZSetType, key, nil); err != nil || ttl < 0 {
 		return 0, err
 	}
 
-	db.wb.Clear()
-	if err := db.delExpire(ZSetType, key, db.wb); err != nil {
+	err := db.ExpireAt(ZSetType, key, nil, 0)
+	if err != nil {
 		return 0, err
-	} else {
-		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
 	}
+	return 1, nil
 }

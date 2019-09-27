@@ -3,6 +3,7 @@ package rockredis
 import (
 	"encoding/binary"
 	"errors"
+	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -158,7 +159,7 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	}
 	if num > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(SetType, key, wb)
+		db.delExpire(SetType, key, nil, false, wb)
 	}
 
 	wb.Delete(sk)
@@ -418,7 +419,7 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 		return 0, err
 	} else if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(SetType, key, wb)
+		db.delExpire(SetType, key, nil, false, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -467,11 +468,11 @@ func (db *RockDB) sMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) err
 	return nil
 }
 
-func (db *RockDB) SExpire(key []byte, duration int64) (int64, error) {
+func (db *RockDB) SExpire(ts int64, key []byte, duration int64) (int64, error) {
 	if exists, err := db.SKeyExists(key); err != nil || exists != 1 {
 		return 0, err
 	} else {
-		if err2 := db.expire(SetType, key, duration); err2 != nil {
+		if err2 := db.ExpireAt(SetType, key, nil, duration+ts/int64(time.Second)); err2 != nil {
 			return 0, err2
 		} else {
 			return 1, nil
@@ -484,18 +485,13 @@ func (db *RockDB) SPersist(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	if ttl, err := db.ttl(SetType, key); err != nil || ttl < 0 {
+	if ttl, err := db.ttl(SetType, key, nil); err != nil || ttl < 0 {
 		return 0, err
 	}
 
-	db.wb.Clear()
-	if err := db.delExpire(SetType, key, db.wb); err != nil {
+	err := db.ExpireAt(SetType, key, nil, 0)
+	if err != nil {
 		return 0, err
-	} else {
-		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
 	}
+	return 1, nil
 }

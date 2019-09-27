@@ -54,6 +54,7 @@ type RockRedisDBConfig struct {
 	// this will ignore all update and non-exist delete
 	EstimateTableCounter bool
 	ExpirationPolicy     common.ExpirationPolicy
+	DataVersion          common.DataVersionT
 }
 
 func NewRockRedisDBConfig() *RockRedisDBConfig {
@@ -186,6 +187,8 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 		db.expiration = newConsistencyExpiration(db)
 	case common.LocalDeletion:
 		db.expiration = newLocalExpiration(db)
+	case common.WaitCompact:
+		db.expiration = newCompactExpiration(db)
 	//TODO
 	//case common.PeriodicalRotation:
 	default:

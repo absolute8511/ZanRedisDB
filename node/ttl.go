@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var (
@@ -89,7 +89,7 @@ func (kvsm *kvStoreSM) localExpireCommand(cmd redcon.Command, ts int64) (interfa
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.Expire(cmd.Args[1], int64(duration))
+		return kvsm.store.Expire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -97,7 +97,7 @@ func (kvsm *kvStoreSM) localHashExpireCommand(cmd redcon.Command, ts int64) (int
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.HExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.HExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -105,7 +105,7 @@ func (kvsm *kvStoreSM) localListExpireCommand(cmd redcon.Command, ts int64) (int
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.LExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.LExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -113,7 +113,7 @@ func (kvsm *kvStoreSM) localSetExpireCommand(cmd redcon.Command, ts int64) (inte
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.SExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.SExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -121,7 +121,7 @@ func (kvsm *kvStoreSM) localZSetExpireCommand(cmd redcon.Command, ts int64) (int
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.ZExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.ZExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
