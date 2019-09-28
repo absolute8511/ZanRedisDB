@@ -261,6 +261,9 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	} else if v != -1 {
 		t.Fatalf("should expired: %v", v)
 	}
+	exist, err := db.KVExists(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), exist)
 	v, err := db.KVGet(key1)
 	assert.Nil(t, err)
 	assert.Nil(t, v)

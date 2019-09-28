@@ -192,6 +192,7 @@ func (db *RockDB) DelKeys(keys ...[]byte) (int64, error) {
 
 func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
 	keyList := make([][]byte, len(keys))
+	valueList := make([][]byte, len(keys))
 	errs := make([]error, len(keys))
 	for i, k := range keys {
 		_, kk, err := convertRedisKeyToDBKVKey(k)
@@ -203,10 +204,10 @@ func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
 		}
 	}
 	cnt := int64(0)
-	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, keyList, errs)
-	for i, v := range keyList {
+	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, valueList, errs)
+	for i, v := range valueList {
 		if errs[i] == nil && v != nil {
-			expired, _ := db.expiration.isExpired(KVType, nil, v, true)
+			expired, _ := db.expiration.isExpired(KVType, keys[i], v, true)
 			if expired {
 				continue
 			}
@@ -234,7 +235,7 @@ func (db *RockDB) KVGet(key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if expired {
+	if expired || v == nil {
 		return nil, nil
 	}
 	if len(v) >= tsLen {
@@ -427,13 +428,12 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 		}
 	}
 	value = db.expiration.encodeToRawValue(KVType, nil, value)
-	tsBuf := PutInt64(ts)
-	value = append(value, tsBuf...)
-
 	value, err = db.rawExpireAt(KVType, rawKey, value, duration+ts/int64(time.Second), db.wb)
 	if err != nil {
 		return err
 	}
+	tsBuf := PutInt64(ts)
+	value = append(value, tsBuf...)
 
 	db.wb.Put(key, value)
 	err = db.MaybeCommitBatch()

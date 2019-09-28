@@ -39,7 +39,6 @@ func (exp *consistencyExpiration) isExpired(dataType byte, key []byte, rawValue 
 	} else {
 		t, err = Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk))
 	}
-	dbLog.Infof("key %v ttl: %v", string(key), t)
 	if err != nil || t == 0 {
 		return false, err
 	}
@@ -64,12 +63,16 @@ func (exp *consistencyExpiration) ExpireAt(dataType byte, key []byte, rawValue [
 func (exp *consistencyExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	mk := expEncodeMetaKey(dataType, key)
 
-	if t, err := Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk)); err != nil {
+	t, err := Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk))
+	if err != nil {
 		return rawValue, err
-	} else if t != 0 {
+	}
+	if t == when {
+		return rawValue, nil
+	}
+	if t != 0 {
 		wb.Delete(expEncodeTimeKey(dataType, key, t))
 	}
-
 	tk := expEncodeTimeKey(dataType, key, when)
 	if when == 0 {
 		wb.Delete(mk)
@@ -90,13 +93,10 @@ func (exp *consistencyExpiration) ttl(dataType byte, key []byte, rawValue []byte
 	if err != nil || t == 0 {
 		t = -1
 	} else {
-		dbLog.Infof("key %v ttl: %v", string(key), t)
 		t -= time.Now().Unix()
 		if t <= 0 {
 			t = -1
 		}
-		//TODO, if the key has expired, remove it right now
-		// if t == -1 : to remove ????
 	}
 	return t, err
 }
@@ -113,16 +113,17 @@ func (exp *consistencyExpiration) Stop() {
 func (exp *consistencyExpiration) delExpire(dataType byte, key []byte, rawValue []byte, keepV bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	mk := expEncodeMetaKey(dataType, key)
 
-	if t, err := Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk)); err != nil {
+	t, err := Int64(exp.db.eng.GetBytesNoLock(exp.db.defaultReadOpts, mk))
+	if err != nil {
 		return rawValue, err
-	} else if t == 0 {
-		return rawValue, nil
-	} else {
-		tk := expEncodeTimeKey(dataType, key, t)
-		wb.Delete(tk)
-		wb.Delete(mk)
+	}
+	if t == 0 {
 		return rawValue, nil
 	}
+	tk := expEncodeTimeKey(dataType, key, t)
+	wb.Delete(tk)
+	wb.Delete(mk)
+	return rawValue, nil
 }
 
 type expiredBufferWrapper struct {

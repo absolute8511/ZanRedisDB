@@ -102,6 +102,7 @@ type expiration interface {
 	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error)
 	// should be called only in read operation
 	ttl(dt byte, key []byte, rawValue []byte) (int64, error)
+	// if in raft write loop should avoid lock, otherwise lock should be used
 	isExpired(dt byte, key []byte, rawValue []byte, useLock bool) (bool, error)
 	decodeRawValue(dt byte, rawValue []byte) ([]byte, *headerMetaValue, error)
 	encodeToRawValue(dt byte, h *headerMetaValue, realValue []byte) []byte
