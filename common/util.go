@@ -112,6 +112,9 @@ func DeepCopyCmd(cmd redcon.Command) redcon.Command {
 }
 
 func IsMergeScanCommand(cmd string) bool {
+	if len(cmd) < 4 {
+		return false
+	}
 	switch len(cmd) {
 	case 4:
 		if (cmd[0] == 's' || cmd[0] == 'S') &&
@@ -130,6 +133,15 @@ func IsMergeScanCommand(cmd string) bool {
 			(cmd[6] == 'n' || cmd[6] == 'N') {
 			return true
 		}
+		if (cmd[0] == 'r' || cmd[0] == 'R') &&
+			(cmd[1] == 'e' || cmd[1] == 'E') &&
+			(cmd[2] == 'v' || cmd[2] == 'V') &&
+			(cmd[3] == 's' || cmd[3] == 'S') &&
+			(cmd[4] == 'c' || cmd[4] == 'C') &&
+			(cmd[5] == 'a' || cmd[5] == 'A') &&
+			(cmd[6] == 'n' || cmd[6] == 'N') {
+			return true
+		}
 	case 8:
 		if (cmd[0] == 'f' || cmd[0] == 'F') &&
 			(cmd[1] == 'u' || cmd[1] == 'U') &&
@@ -139,6 +151,19 @@ func IsMergeScanCommand(cmd string) bool {
 			(cmd[5] == 'c' || cmd[5] == 'C') &&
 			(cmd[6] == 'a' || cmd[6] == 'A') &&
 			(cmd[7] == 'n' || cmd[7] == 'N') {
+			return true
+		}
+	case 10:
+		if (cmd[0] == 'a' || cmd[0] == 'A') &&
+			(cmd[1] == 'd' || cmd[1] == 'D') &&
+			(cmd[2] == 'v' || cmd[2] == 'V') &&
+			(cmd[3] == 'r' || cmd[3] == 'R') &&
+			(cmd[4] == 'e' || cmd[4] == 'E') &&
+			(cmd[5] == 'v' || cmd[5] == 'V') &&
+			(cmd[6] == 's' || cmd[6] == 'S') &&
+			(cmd[7] == 'c' || cmd[7] == 'C') &&
+			(cmd[8] == 'a' || cmd[8] == 'A') &&
+			(cmd[9] == 'n' || cmd[9] == 'N') {
 			return true
 		}
 	}

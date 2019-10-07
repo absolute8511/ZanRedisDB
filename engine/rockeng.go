@@ -154,6 +154,9 @@ func NewSharedRockConfig(opt RockOptions) *SharedRockConfig {
 				opt.BlockCache = 1024 * 1024 * 128 * 10
 			} else {
 				opt.BlockCache = int64(v.Total / 10)
+				if opt.CacheIndexAndFilterBlocks || opt.EnablePartitionedIndexFilter {
+					opt.BlockCache *= 2
+				}
 			}
 		}
 		rc.SharedCache = gorocksdb.NewLRUCache(opt.BlockCache)

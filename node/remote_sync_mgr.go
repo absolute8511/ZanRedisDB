@@ -9,6 +9,8 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
+const syncStateTimeout = time.Minute * 5
+
 type SyncedState struct {
 	SyncedTerm  uint64 `json:"synced_term,omitempty"`
 	SyncedIndex uint64 `json:"synced_index,omitempty"`
@@ -97,12 +99,12 @@ func (rss *remoteSyncedStateMgr) AddApplyingSnap(name string, state SyncedState)
 	} else if sas.StatusCode == ApplySnapBegin || sas.StatusCode == ApplySnapFailed || sas.StatusCode == ApplySnapApplying {
 		// begin -> transferring, may lost if proposal dropped,
 		// so we check the time and restart
-		if time.Since(sas.UpdatedTime) > proposeTimeout*10 {
+		if time.Since(sas.UpdatedTime) > syncStateTimeout {
 			delete(rss.remoteSnapshotsApplying, name)
 			canAdd = true
 		}
 	} else if !sas.SS.IsNewer(&state) {
-		if time.Since(sas.UpdatedTime) > proposeTimeout*10 {
+		if time.Since(sas.UpdatedTime) > syncStateTimeout {
 			nodeLog.Infof("%v got newer snapshot %v, old is %v", name,
 				state, sas)
 			delete(rss.remoteSnapshotsApplying, name)
@@ -278,7 +280,12 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		}
 		if oldS.StatusCode != ApplySnapTransferred {
 			nd.rn.Infof("remote cluster %v snapshot not ready for apply: %v", name, oldS)
-			return errors.New("apply remote snapshot status invalid")
+			// it may be changed to applying but proposal failed, so we need proposal again
+			if oldS.StatusCode == ApplySnapApplying && time.Since(oldS.UpdatedTime) > syncStateTimeout {
+				nd.rn.Infof("remote cluster %v snapshot waiting applying too long: %v", name, oldS)
+			} else {
+				return errors.New("apply remote snapshot status invalid")
+			}
 		}
 		// set the snap status to applying and the snap status will be updated if apply done or failed
 		nd.remoteSyncedStates.UpdateApplyingSnapStatus(name, oldS.SS, ApplySnapApplying)
@@ -297,7 +304,7 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		p.ProposeOp = ProposeOp_ApplySkippedRemoteSnap
 	}
 	d, _ := json.Marshal(p)
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       0,
 		DataType: int32(CustomReq),
 	}
@@ -305,7 +312,7 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		Header: h,
 		Data:   d,
 	}
-	reqList.Reqs = append(reqList.Reqs, &raftReq)
+	reqList.Reqs = append(reqList.Reqs, raftReq)
 	buf, _ := reqList.Marshal()
 	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
 	if err != nil {
@@ -343,7 +350,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 	reqList.ReqNum = 1
 	reqList.Timestamp = time.Now().UnixNano()
 
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       0,
 		DataType: int32(CustomReq),
 	}
@@ -351,7 +358,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 		Header: h,
 		Data:   d,
 	}
-	reqList.Reqs = append(reqList.Reqs, &raftReq)
+	reqList.Reqs = append(reqList.Reqs, raftReq)
 	buf, _ := reqList.Marshal()
 	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
 	if err != nil {

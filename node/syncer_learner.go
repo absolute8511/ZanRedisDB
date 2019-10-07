@@ -141,6 +141,10 @@ func (sm *logSyncerSM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop ch
 	return nil
 }
 
+func (sm *logSyncerSM) GetBatchOperator() IBatchOperator {
+	return nil
+}
+
 func (sm *logSyncerSM) Start() error {
 	sm.wg.Add(1)
 	go func() {
@@ -506,18 +510,18 @@ func (sm *logSyncerSM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, 
 	p.RemoteIndex = index
 	p.Data, _ = req.Marshal()
 	rreq.Data, _ = json.Marshal(p)
-	rreq.Header = &RequestHeader{
+	rreq.Header = RequestHeader{
 		DataType:  int32(CustomReq),
 		ID:        0,
 		Timestamp: reqList.Timestamp,
 	}
-	reqList.Reqs = append(reqList.Reqs, &rreq)
+	reqList.Reqs = append(reqList.Reqs, rreq)
 	reqList.ReqId = rreq.Header.ID
-	_, err := sm.ApplyRaftRequest(false, reqList, term, index, stop)
+	_, err := sm.ApplyRaftRequest(false, nil, reqList, term, index, stop)
 	return err
 }
 
-func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		sm.Debugf("applying in log syncer: %v at (%v, %v)", reqList.String(), term, index)
 	}

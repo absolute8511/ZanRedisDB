@@ -259,8 +259,8 @@ type node struct {
 
 func newNode() node {
 	return node{
-		propc:      make(chan msgWithDrop),
-		recvc:      make(chan msgWithDrop),
+		propc:      make(chan msgWithDrop, 10),
+		recvc:      make(chan msgWithDrop, 10),
 		confc:      make(chan pb.ConfChange),
 		confstatec: make(chan pb.ConfState),
 		readyc:     make(chan Ready),

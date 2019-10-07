@@ -214,7 +214,7 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value [
 		defer tableIndexes.Unlock()
 		hindex = tableIndexes.GetHIndexNoLock(string(field))
 	}
-	db.wb.Clear()
+	db.MaybeClearBatch()
 
 	created, err := db.hSetField(ts, checkNX, key, field, value, db.wb, hindex)
 	if err != nil {
@@ -222,7 +222,7 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value [
 	}
 	c1 := time.Since(s)
 
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.MaybeCommitBatch()
 	c2 := time.Since(s)
 	if c2 > time.Second/3 {
 		dbLog.Infof("key %v slow write cost: %v, %v", string(key), c1, c2)
@@ -247,7 +247,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
 	}
-	db.wb.Clear()
+	db.MaybeClearBatch()
 
 	c1 := time.Since(s)
 	var num int64
@@ -292,7 +292,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	}
 	c3 := time.Since(s)
 
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.MaybeCommitBatch()
 	c4 := time.Since(s)
 	if c4 > time.Second/3 {
 		dbLog.Infof("key %v slow write cost: %v, %v, %v, %v", string(key), c1, c2, c3, c4)

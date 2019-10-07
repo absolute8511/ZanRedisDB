@@ -8,6 +8,7 @@ import (
 	_ "net/http/pprof"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -736,6 +737,24 @@ func (s *Server) doDBPerf(w http.ResponseWriter, req *http.Request, ps httproute
 	return nil, nil
 }
 
+func setBlockRateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	rate, err := strconv.Atoi(req.FormValue("rate"))
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: fmt.Sprintf("invalid block rate : %s", err.Error())}
+	}
+	runtime.SetBlockProfileRate(rate)
+	return nil, nil
+}
+
+func setMutexProfileHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	rate, err := strconv.Atoi(req.FormValue("rate"))
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: fmt.Sprintf("invalid block rate : %s", err.Error())}
+	}
+	runtime.SetMutexProfileFraction(rate)
+	return nil, nil
+}
+
 func (s *Server) initHttpHandler() {
 	log := common.HttpLog(sLog, common.LOG_INFO)
 	debugLog := common.HttpLog(sLog, common.LOG_DEBUG)
@@ -778,6 +797,8 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/db/perf", common.Decorate(s.doDBPerf, log, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 
+	router.Handle("POST", "/debug/setblockrate", common.Decorate(setBlockRateHandler, log, common.V1))
+	router.Handle("POST", "/debug/setmutexrate", common.Decorate(setMutexProfileHandler, log, common.V1))
 	s.router = router
 }
 

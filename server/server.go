@@ -391,6 +391,33 @@ func (s *Server) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgVoteResp {
 		sLog.Infof("got message from raft transport %v ", m.String())
 	}
+
+	if len(m.Entries) > 0 {
+		// we debug the slow raft log transfer
+		level := atomic.LoadInt32(&costStatsLevel)
+		evnt := m.Entries[0]
+		if evnt.Data != nil && level > 2 {
+			var reqList node.BatchInternalRaftRequest
+			reqList.Unmarshal(evnt.Data)
+			if reqList.Timestamp > 0 {
+				n := time.Now().UnixNano()
+				rt := n - reqList.Timestamp
+				if rt > int64(time.Millisecond*100) {
+					sLog.Infof("recieve raft request slow cost: %v, src: %v", rt, reqList.String())
+					if len(m.Entries) > 1 || len(reqList.Reqs) > 1 {
+						oldest := reqList.Reqs[0].Header.Timestamp
+						newest := m.Entries[len(m.Entries)-1]
+						reqList.Unmarshal(newest.Data)
+						if len(reqList.Reqs) > 0 {
+							diff := reqList.Reqs[len(reqList.Reqs)-1].Header.Timestamp - oldest
+							sLog.Infof("recieve raft request slow, max time diff: %v", diff)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	kv := s.nsMgr.GetNamespaceNodeFromGID(m.ToGroup.GroupId)
 	if kv == nil {
 		sLog.Errorf("from %v, to %v(%v), kv namespace not found while processing %v, %v, %v ",

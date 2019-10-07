@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"net/http"
 	"path"
 	"reflect"
 	"strconv"
@@ -25,6 +26,17 @@ var kvs *Server
 var redisport int
 var OK = "OK"
 var gtmpDir string
+
+func changeLogLevel(t *testing.T, l int, port int) {
+	url := fmt.Sprintf("http://127.0.0.1:%v/loglevel/set?loglevel=%d", port, l)
+	rsp, err := http.Post(url, "json", nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if rsp.StatusCode != http.StatusOK {
+		t.Error(rsp.Status)
+	}
+}
 
 type testLogger struct {
 	t *testing.T
@@ -66,6 +78,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 		ClusterID:      "test",
 		DataDir:        tmpDir,
 		RedisAPIPort:   redisport,
+		HttpAPIPort:    redisport + 1,
 		LocalRaftAddr:  raftAddr,
 		BroadcastAddr:  "127.0.0.1",
 		TickMs:         100,
@@ -2503,21 +2516,22 @@ func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
 		if string(v) != vv {
 			if len(v) == len(vv)+8 {
 				if string(v[:len(vv)]) != vv {
-					t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+					t.Errorf(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
 				}
 			} else if len(v)+8 == len(vv) {
 				if string(v) != vv[:len(v)] {
-					t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+					t.Errorf(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
 				}
 			} else {
-				t.Fatal(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
+				t.Errorf(fmt.Sprintf("%d %s != %v", i, string(v), values[i]))
 			}
 		}
 	}
 }
 
 func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+"", tp, "count", 5)); err != nil {
+	var cursor string
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:", tp, "count", 5)); err != nil {
 		t.Error(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2525,10 +2539,11 @@ func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 	} else if n := ay[0].([]byte); string(n) != "MDpOQT09Ow==" {
 		t.Fatal(string(n))
 	} else {
+		cursor = string(n)
 		checkScanValues(t, ay[1], "0", "1", "2", "3", "4")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpOQT09Ow==", tp, "count", 6)); err != nil {
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:"+cursor, tp, "count", 6)); err != nil {
 		t.Fatal(err)
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
@@ -2538,8 +2553,51 @@ func checkAdvanceScan(t *testing.T, c *goredis.PoolConn, tp string) {
 		checkScanValues(t, ay[1], "5", "6", "7", "8", "9")
 	}
 
-	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpkR1Z6ZEhOallXNDZPUT09Ow==", tp, "count", 0)); err != nil {
+	// cursor 9 for base64(0:base64(9);) is MDpPUT09Ow==
+	if ay, err := goredis.Values(c.Do("ADVSCAN", "default:testscan:MDpPUT09Ow==", tp, "count", 1)); err != nil {
 		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "" {
+		t.Fatal(string(n))
+	} else {
+		if len(ay[1].([]interface{})) != 0 {
+			t.Fatal(ay[1])
+		}
+	}
+}
+
+func checkAdvanceRevScan(t *testing.T, c *goredis.PoolConn, tp string) {
+	var cursor string
+	// use cursor 0::; to search, base64 is base64(0:base64(:);)
+	if ay, err := goredis.Values(c.Do("ADVREVSCAN", "default:testscan:MDpPZz09Ow==", tp, "count", 5)); err != nil {
+		t.Error(err)
+		return
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+		//} else if n := ay[0].([]byte); string(n) != "MDpkR1Z6ZEhOallXNDZOQT09Ow==" {
+	} else if n := ay[0].([]byte); string(n) != "MDpOUT09Ow==" {
+		t.Fatal(string(n))
+	} else {
+		cursor = string(n)
+		checkScanValues(t, ay[1], "9", "8", "7", "6", "5")
+	}
+
+	if ay, err := goredis.Values(c.Do("ADVREVSCAN", "default:testscan:"+cursor, tp, "count", 6)); err != nil {
+		t.Error(err)
+		return
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else if n := ay[0].([]byte); string(n) != "" {
+		t.Fatal(string(n))
+	} else {
+		checkScanValues(t, ay[1], "4", "3", "2", "1", "0")
+	}
+
+	// testscan:9 for base64 is MDpkR1Z6ZEhOallXNDZPUT09Ow=
+	if ay, err := goredis.Values(c.Do("ADVREVSCAN", "default:testscan:", tp, "count", 1)); err != nil {
+		t.Error(err)
+		return
 	} else if len(ay) != 2 {
 		t.Fatal(len(ay))
 	} else if n := ay[0].([]byte); string(n) != "" {
@@ -2555,11 +2613,15 @@ func TestScan(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
+	if testing.Verbose() {
+		changeLogLevel(t, 4, redisport+1)
+	}
 	testKVScan(t, c)
 	testHashKeyScan(t, c)
 	testListKeyScan(t, c)
 	testZSetKeyScan(t, c)
 	testSetKeyScan(t, c)
+	changeLogLevel(t, 2, redisport+1)
 }
 
 func testKVScan(t *testing.T, c *goredis.PoolConn) {
@@ -2569,6 +2631,7 @@ func testKVScan(t *testing.T, c *goredis.PoolConn) {
 		}
 	}
 	checkAdvanceScan(t, c, "KV")
+	checkAdvanceRevScan(t, c, "KV")
 }
 
 func testHashKeyScan(t *testing.T, c *goredis.PoolConn) {
@@ -2579,6 +2642,7 @@ func testHashKeyScan(t *testing.T, c *goredis.PoolConn) {
 	}
 
 	checkAdvanceScan(t, c, "HASH")
+	checkAdvanceRevScan(t, c, "HASH")
 }
 
 func testListKeyScan(t *testing.T, c *goredis.PoolConn) {
@@ -2589,6 +2653,7 @@ func testListKeyScan(t *testing.T, c *goredis.PoolConn) {
 	}
 
 	checkAdvanceScan(t, c, "LIST")
+	checkAdvanceRevScan(t, c, "HASH")
 }
 
 func testZSetKeyScan(t *testing.T, c *goredis.PoolConn) {
@@ -2599,6 +2664,7 @@ func testZSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	}
 
 	checkAdvanceScan(t, c, "ZSET")
+	checkAdvanceRevScan(t, c, "HASH")
 }
 
 func testSetKeyScan(t *testing.T, c *goredis.PoolConn) {
@@ -2609,6 +2675,7 @@ func testSetKeyScan(t *testing.T, c *goredis.PoolConn) {
 	}
 
 	checkAdvanceScan(t, c, "SET")
+	checkAdvanceRevScan(t, c, "HASH")
 }
 
 func TestHashScan(t *testing.T) {
@@ -2625,12 +2692,23 @@ func TestHashScan(t *testing.T) {
 	} else {
 		checkScanValues(t, ay[1], "a", 1, "b", 2)
 	}
+
+	if ay, err := goredis.Values(c.Do("HREVSCAN", key, "c")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "b", 2, "a", 1)
+	}
 }
 
 func TestSetScan(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
+	if testing.Verbose() {
+		changeLogLevel(t, 4, redisport+1)
+	}
 	key := "default:test:scan_set"
 	c.Do("SADD", key, "a", "b")
 
@@ -2641,6 +2719,15 @@ func TestSetScan(t *testing.T) {
 	} else {
 		checkScanValues(t, ay[1], "a", "b")
 	}
+
+	if ay, err := goredis.Values(c.Do("SREVSCAN", key, "c")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "b", "a")
+	}
+	changeLogLevel(t, 2, redisport+1)
 }
 
 func TestZSetScan(t *testing.T) {
@@ -2656,6 +2743,14 @@ func TestZSetScan(t *testing.T) {
 		t.Fatal(len(ay))
 	} else {
 		checkScanValues(t, ay[1], "a", 1, "b", 2)
+	}
+
+	if ay, err := goredis.Values(c.Do("ZREVSCAN", key, "c")); err != nil {
+		t.Fatal(err)
+	} else if len(ay) != 2 {
+		t.Fatal(len(ay))
+	} else {
+		checkScanValues(t, ay[1], "b", 2, "a", 1)
 	}
 }
 

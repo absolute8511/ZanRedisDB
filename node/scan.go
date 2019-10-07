@@ -54,6 +54,11 @@ func parseScanArgs(args [][]byte) (cursor []byte, match string, count int, err e
 
 // TODO: for scan we act like the prefix scan, if the prefix changed , we should stop scan
 func (nd *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
+	scanName := strings.ToLower(string(cmd.Args[0]))
+	reverse := false
+	if scanName == "revscan" {
+		reverse = true
+	}
 	args := cmd.Args[1:]
 	cursor, match, count, err := parseScanArgs(args)
 
@@ -66,7 +71,7 @@ func (nd *KVNode) scanCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, common.ErrInvalidScanCursor
 	}
 
-	ay, err := nd.store.Scan(common.KV, cursor, count, match)
+	ay, err := nd.store.Scan(common.KV, cursor, count, match, reverse)
 	if err != nil {
 		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
@@ -130,6 +135,11 @@ func (nd *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
+	scanName := strings.ToLower(string(cmd.Args[0]))
+	reverse := false
+	if scanName == "advrevscan" {
+		reverse = true
+	}
 	cmd.Args[1] = key
 	cmd.Args[1], cmd.Args[2] = cmd.Args[2], cmd.Args[1]
 
@@ -145,7 +155,7 @@ func (nd *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 
 	var ay [][]byte
 
-	ay, err = nd.store.Scan(dataType, cursor, count, match)
+	ay, err = nd.store.Scan(dataType, cursor, count, match, reverse)
 
 	if err != nil {
 		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
@@ -193,6 +203,11 @@ func (nd *KVNode) hscanCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	scanName := strings.ToLower(string(cmd.Args[0]))
+	reverse := false
+	if scanName == "hrevscan" {
+		reverse = true
+	}
 	args := cmd.Args[1:]
 	key := args[0]
 	cursor, match, count, err := parseScanArgs(args[1:])
@@ -204,7 +219,7 @@ func (nd *KVNode) hscanCommand(conn redcon.Conn, cmd redcon.Command) {
 
 	var ay []common.KVRecord
 
-	ay, err = nd.store.HScan(key, cursor, count, match)
+	ay, err = nd.store.HScan(key, cursor, count, match, reverse)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -234,6 +249,11 @@ func (nd *KVNode) sscanCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	scanName := strings.ToLower(string(cmd.Args[0]))
+	reverse := false
+	if scanName == "srevscan" {
+		reverse = true
+	}
 	args := cmd.Args[1:]
 	key := args[0]
 
@@ -245,7 +265,7 @@ func (nd *KVNode) sscanCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 
 	var ay [][]byte
-	ay, err = nd.store.SScan(key, cursor, count, match)
+	ay, err = nd.store.SScan(key, cursor, count, match, reverse)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -272,6 +292,11 @@ func (nd *KVNode) zscanCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
+	scanName := strings.ToLower(string(cmd.Args[0]))
+	reverse := false
+	if scanName == "zrevscan" {
+		reverse = true
+	}
 	args := cmd.Args[1:]
 	key := args[0]
 
@@ -284,7 +309,7 @@ func (nd *KVNode) zscanCommand(conn redcon.Conn, cmd redcon.Command) {
 
 	var ay []common.ScorePair
 
-	ay, err = nd.store.ZScan(key, cursor, count, match)
+	ay, err = nd.store.ZScan(key, cursor, count, match, reverse)
 
 	if err != nil {
 		conn.WriteError(err.Error())

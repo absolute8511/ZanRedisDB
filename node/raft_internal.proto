@@ -21,13 +21,13 @@ message RequestHeader {
 }
 
 message InternalRaftRequest {
-    RequestHeader header = 1;
+    RequestHeader header = 1 [(gogoproto.nullable) = false];
     bytes data = 2;
 }
 
 message BatchInternalRaftRequest {
     int32 req_num = 1 ;
-    repeated InternalRaftRequest reqs = 2;
+    repeated InternalRaftRequest reqs = 2 [(gogoproto.nullable) = false];
     int64 timestamp = 3;
     ReqSourceType type = 4;
     uint64 req_id = 5;

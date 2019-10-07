@@ -95,7 +95,39 @@ type nodeProgress struct {
 
 type internalReq struct {
 	reqData InternalRaftRequest
-	done    chan struct{}
+	ctx     context.Context
+	wr      wait.WaitResult
+}
+
+type RequestResultCode int
+
+const (
+	ReqComplete RequestResultCode = iota
+	ReqCancelled
+	ReqTimeouted
+)
+
+type waitReqHeaders struct {
+	headers   []RequestHeader
+	wr        wait.WaitResult
+	completer chan RequestResultCode
+	pool      *sync.Pool
+}
+
+func (wrh *waitReqHeaders) release() {
+	if wrh != nil {
+		wrh.wr = nil
+		wrh.headers = wrh.headers[:0]
+		wrh.pool.Put(wrh)
+	}
+}
+
+func (wrh *waitReqHeaders) notify(r RequestResultCode) {
+	select {
+	case wrh.completer <- r:
+	default:
+		panic("notify request result should not block")
+	}
 }
 
 type customProposeData struct {
@@ -110,7 +142,9 @@ type customProposeData struct {
 
 // a key-value node backed by raft
 type KVNode struct {
-	reqProposeC        chan *internalReq
+	reqProposeC        *entryQueue
+	readyC             chan struct{}
+	waitReqCh          chan *waitReqHeaders
 	rn                 *raftNode
 	store              *KVStore
 	sm                 StateMachine
@@ -172,7 +206,9 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:        make(chan *internalReq, proposeQueueLen),
+		reqProposeC:        newEntryQueue(proposeQueueLen, 1),
+		waitReqCh:          make(chan *waitReqHeaders, proposeQueueLen*2),
+		readyC:             make(chan struct{}, 1),
 		stopChan:           stopChan,
 		stopDone:           make(chan struct{}),
 		store:              nil,
@@ -246,6 +282,11 @@ func (nd *KVNode) Start(standalone bool) error {
 	nd.wg.Add(1)
 	go func() {
 		defer nd.wg.Done()
+		nd.handleProposeRsp()
+	}()
+	nd.wg.Add(1)
+	go func() {
+		defer nd.wg.Done()
 		nd.readIndexLoop()
 	}()
 
@@ -267,6 +308,7 @@ func (nd *KVNode) Stop() {
 	}
 	defer close(nd.stopDone)
 	close(nd.stopChan)
+	nd.reqProposeC.close()
 	nd.expireHandler.Stop()
 	nd.wg.Wait()
 	nd.rn.StopNode()
@@ -317,6 +359,7 @@ func (nd *KVNode) DeleteRange(drange DeleteTableRange) error {
 	if err != nil {
 		nd.rn.Infof("node %v delete table range %v failed: %v", nd.ns, drange, err)
 	}
+	nd.rn.Infof("node %v delete table range %v ", nd.ns, drange)
 	return err
 }
 
@@ -426,14 +469,54 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 	return nd.router.GetMergeCmdHandler(cmd)
 }
 
+func (nd *KVNode) handleProposeRsp() {
+	doWait := func(completer chan RequestResultCode, wr wait.WaitResult, headers []RequestHeader) {
+		select {
+		case code := <-completer:
+			if code != ReqComplete {
+				for _, h := range headers {
+					nd.w.Trigger(h.ID, ErrProposalCanceled)
+				}
+			}
+		case <-wr.WaitC():
+			// this batch has been processed
+		case <-nd.stopChan:
+			for _, h := range headers {
+				nd.w.Trigger(h.ID, common.ErrStopped)
+			}
+		}
+	}
+	for {
+		select {
+		case wh, ok := <-nd.waitReqCh:
+			if !ok {
+				nodeLog.Info("handle proposal response loop exit")
+				return
+			}
+			doWait(wh.completer, wh.wr, wh.headers)
+			wh.release()
+		}
+	}
+}
+
 func (nd *KVNode) handleProposeReq() {
 	var reqList BatchInternalRaftRequest
-	reqList.Reqs = make([]*InternalRaftRequest, 0, 100)
-	var lastReq *internalReq
+	reqList.Reqs = make([]InternalRaftRequest, 0, 100)
+	ireqs := make([]elemT, 0, 100)
+	var lastReq internalReq
 	// TODO: combine pipeline and batch to improve performance
 	// notice the maxPendingProposals config while using pipeline, avoid
 	// sending too much pipeline which overflow the proposal buffer.
 	//lastReqList := make([]*internalReq, 0, 1024)
+
+	waitReqPool := &sync.Pool{}
+	waitReqPool.New = func() interface{} {
+		obj := &waitReqHeaders{}
+		obj.headers = make([]RequestHeader, 0, proposeQueueLen*2)
+		obj.completer = make(chan RequestResultCode, 1)
+		obj.pool = waitReqPool
+		return obj
+	}
 
 	defer func() {
 		if e := recover(); e != nil {
@@ -446,113 +529,109 @@ func (nd *KVNode) handleProposeReq() {
 			nd.w.Trigger(r.Header.ID, common.ErrStopped)
 		}
 		nd.rn.Infof("handle propose loop exit")
-		for {
-			select {
-			case r := <-nd.reqProposeC:
-				nd.w.Trigger(r.reqData.Header.ID, common.ErrStopped)
-			default:
-				return
-			}
+		reqs := nd.reqProposeC.get(false)
+		for _, r := range reqs {
+			nd.w.Trigger(r.reqData.Header.ID, common.ErrStopped)
 		}
+		close(nd.waitReqCh)
 	}()
 	for {
-		pc := nd.reqProposeC
-		if len(reqList.Reqs) >= proposeQueueLen*2 {
-			pc = nil
-		}
 		select {
-		case r := <-pc:
-			reqList.Reqs = append(reqList.Reqs, &r.reqData)
-			lastReq = r
-		default:
-			if len(reqList.Reqs) == 0 {
-				select {
-				case r := <-nd.reqProposeC:
-					reqList.Reqs = append(reqList.Reqs, &r.reqData)
-					lastReq = r
-				case <-nd.stopChan:
-					return
-				}
+		case <-nd.readyC:
+			ireqs = nd.reqProposeC.get(false)
+			if len(ireqs) == 0 {
+				continue
 			}
-			reqList.ReqNum = int32(len(reqList.Reqs))
-			reqList.Timestamp = time.Now().UnixNano()
-			buffer, err := reqList.Marshal()
-			// buffer will be reused by raft?
-			// TODO:buffer, err := reqList.MarshalTo()
+			for _, r := range ireqs {
+				reqList.Reqs = append(reqList.Reqs, r.reqData)
+			}
+			lastReq = internalReq(ireqs[len(ireqs)-1])
+			ireqs = ireqs[:0]
+		case <-nd.stopChan:
+			return
+		}
+		reqList.ReqNum = int32(len(reqList.Reqs))
+		reqList.Timestamp = time.Now().UnixNano()
+		buffer, err := reqList.Marshal()
+		// buffer will be reused by raft?
+		// TODO:buffer, err := reqList.MarshalTo()
+		if err != nil {
+			nd.rn.Infof("failed to marshal request: %v", err)
+			for _, r := range reqList.Reqs {
+				nd.w.Trigger(r.Header.ID, err)
+			}
+			reqList.Reqs = reqList.Reqs[:0]
+			continue
+		}
+		//nd.rn.Infof("handle req %v", len(reqList.Reqs))
+		start := lastReq.reqData.Header.Timestamp
+		cost := reqList.Timestamp - start
+		raftCost := int64(0)
+		if cost >= int64(proposeTimeout.Nanoseconds())/2 {
+			nd.rn.Infof("ignore slow for begin propose too late: %v, cost %v", len(reqList.Reqs), cost)
+			for _, r := range reqList.Reqs {
+				nd.w.Trigger(r.Header.ID, common.ErrQueueTimeout)
+			}
+		} else {
+			var ctx context.Context
+			var cancel context.CancelFunc
+			var newCan context.CancelFunc
+			wh := waitReqPool.Get().(*waitReqHeaders)
+			if len(wh.completer) > 0 {
+				wh.completer = make(chan RequestResultCode, 1)
+			}
+			cancel = func() {
+				wh.notify(ReqCancelled)
+			}
+			if lastReq.ctx == nil {
+				leftProposeTimeout := proposeTimeout + time.Second - time.Duration(cost)
+				ctx, newCan = context.WithTimeout(context.Background(), leftProposeTimeout)
+			} else {
+				ctx = lastReq.ctx
+			}
+			err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
 			if err != nil {
-				nd.rn.Infof("failed to marshal request: %v", err)
+				nd.rn.Infof("propose failed: %v, err: %v", len(reqList.Reqs), err.Error())
 				for _, r := range reqList.Reqs {
 					nd.w.Trigger(r.Header.ID, err)
 				}
-				reqList.Reqs = reqList.Reqs[:0]
-				continue
-			}
-			lastReq.done = make(chan struct{})
-			//nd.rn.Infof("handle req %v, marshal buffer: %v, raw: %v, %v", len(reqList.Reqs),
-			//	realN, buffer, reqList.Reqs)
-			start := lastReq.reqData.Header.Timestamp
-			cost := reqList.Timestamp - start
-			raftCost := int64(0)
-			if cost >= int64(proposeTimeout.Nanoseconds())/2 {
-				nd.rn.Infof("ignore slow for begin propose too late: %v, cost %v", len(reqList.Reqs), cost)
-				for _, r := range reqList.Reqs {
-					nd.w.Trigger(r.Header.ID, common.ErrQueueTimeout)
-				}
+				wh.release()
 			} else {
-				leftProposeTimeout := proposeTimeout + time.Second - time.Duration(cost)
-
-				ctx, cancel := context.WithTimeout(context.Background(), leftProposeTimeout)
-				err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
-				if err != nil {
-					nd.rn.Infof("propose failed: %v, err: %v", len(reqList.Reqs), err.Error())
-					for _, r := range reqList.Reqs {
-						nd.w.Trigger(r.Header.ID, err)
-					}
-				} else {
-					//lastReqList = append(lastReqList, lastReq)
-					select {
-					case <-lastReq.done:
-					case <-ctx.Done():
-						err := ctx.Err()
-						waitLeader := false
-						if err == context.DeadlineExceeded {
-							waitLeader = true
-							nd.rn.Infof("propose timeout: %v, %v", err.Error(), len(reqList.Reqs))
-						}
-						if err == context.Canceled {
-							// proposal canceled can be caused by leader transfer or no leader
-							err = ErrProposalCanceled
-							waitLeader = true
-							nd.rn.Infof("propose canceled : %v", len(reqList.Reqs))
-						}
-						for _, r := range reqList.Reqs {
-							nd.w.Trigger(r.Header.ID, err)
-						}
-						if waitLeader {
-							time.Sleep(proposeTimeout/100 + time.Millisecond*100)
-						}
-					case <-nd.stopChan:
-						cancel()
-						return
-					}
+				proposalCost := time.Now().UnixNano() - reqList.Timestamp
+				if proposalCost >= int64(raftSlow.Nanoseconds()) {
+					nd.rn.Infof("raft slow for batch propose: %v, cost %v, wait len: %v", len(reqList.Reqs), proposalCost, len(nd.waitReqCh))
 				}
-				cancel()
-				tn := time.Now().UnixNano()
-				cost = tn - start
-				raftCost = tn - reqList.Timestamp
+				for _, r := range reqList.Reqs {
+					wh.headers = append(wh.headers, r.Header)
+				}
+				wh.wr = lastReq.wr
+
+				//lastReqList = append(lastReqList, lastReq)
+				select {
+				case nd.waitReqCh <- wh:
+				case <-nd.stopChan:
+					if newCan != nil {
+						newCan()
+					}
+					wh.release()
+					return
+				}
 			}
-			if raftCost >= int64(raftSlow.Nanoseconds()) {
-				nd.rn.Infof("raft slow for batch propose: %v, cost %v", len(reqList.Reqs), raftCost)
+			tn := time.Now().UnixNano()
+			cost = tn - start
+			raftCost = tn - reqList.Timestamp
+			if newCan != nil {
+				newCan()
 			}
-			if cost >= int64(time.Second.Nanoseconds())/2 {
-				nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
-			}
-			for i := range reqList.Reqs {
-				reqList.Reqs[i] = nil
-			}
-			reqList.Reqs = reqList.Reqs[:0]
-			lastReq = nil
 		}
+		if raftCost >= int64(raftSlow.Nanoseconds()) {
+			nd.rn.Infof("raft slow for batch propose: %v, cost %v, wait len: %v", len(reqList.Reqs), raftCost, len(nd.waitReqCh))
+		}
+		if cost >= int64(time.Second.Nanoseconds())/2 {
+			nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
+		}
+		lastReq.reqData.Data = nil
+		reqList.Reqs = reqList.Reqs[:0]
 	}
 }
 
@@ -610,7 +689,7 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 		}
 	}
 	start := time.Now()
-	ch := nd.w.Register(reqList.ReqId)
+	wr := nd.w.Register(reqList.ReqId)
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
@@ -623,7 +702,8 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	var ok bool
 	var rsp interface{}
 	select {
-	case rsp = <-ch:
+	case <-wr.WaitC():
+		rsp = wr.GetResult()
 		if err, ok = rsp.(error); ok {
 			rsp = nil
 		} else {
@@ -642,6 +722,7 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 			err = ErrProposalCanceled
 			nd.rn.Infof("propose canceled ")
 		}
+		nd.w.Trigger(reqList.ReqId, err)
 	}
 	cost := time.Since(start).Nanoseconds()
 	for _, req := range reqList.Reqs {
@@ -655,7 +736,7 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	return err
 }
 
-func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
+func (nd *KVNode) queueRequest(req InternalRaftRequest) (interface{}, error) {
 	if !nd.IsWriteReady() {
 		return nil, errRaftNotReadyForWrite
 	}
@@ -663,17 +744,23 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 		return nil, ErrNodeNoLeader
 	}
 	start := time.Now()
-	req.reqData.Header.Timestamp = start.UnixNano()
-	ch := nd.w.Register(req.reqData.Header.ID)
-	select {
-	case nd.reqProposeC <- req:
-	default:
+	req.Header.Timestamp = start.UnixNano()
+	wr := nd.w.Register(req.Header.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
+	ireq := internalReq{
+		reqData: req,
+		ctx:     ctx,
+		wr:      wr,
+	}
+	added, stopped := nd.reqProposeC.addWait(elemT(ireq), proposeTimeout/2)
+	if stopped {
+		nd.w.Trigger(req.Header.ID, common.ErrStopped)
+	} else if !added {
+		nd.w.Trigger(req.Header.ID, common.ErrQueueTimeout)
+	} else {
 		select {
-		case nd.reqProposeC <- req:
-		case <-nd.stopChan:
-			nd.w.Trigger(req.reqData.Header.ID, common.ErrStopped)
-		case <-time.After(proposeTimeout / 2):
-			nd.w.Trigger(req.reqData.Header.ID, common.ErrQueueTimeout)
+		case nd.readyC <- struct{}{}:
+		default:
 		}
 	}
 	//nd.rn.Infof("queue request: %v", req.reqData.String())
@@ -681,34 +768,44 @@ func (nd *KVNode) queueRequest(req *internalReq) (interface{}, error) {
 	var rsp interface{}
 	var ok bool
 	// will always return a response, timed out or get a error
-	rsp = <-ch
-	if req.done != nil {
-		close(req.done)
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+		if err == context.Canceled {
+			// proposal canceled can be caused by leader transfer or no leader
+			err = ErrProposalCanceled
+		}
+		nd.w.Trigger(req.Header.ID, err)
+	case <-wr.WaitC():
 	}
+	rsp = wr.GetResult()
+	cancel()
+
 	if err, ok = rsp.(error); ok {
 		rsp = nil
+		//nd.rn.Infof("request return error: %v, %v", req.String(), err.Error())
 	} else {
 		err = nil
 	}
 
-	if req.reqData.Header.DataType == int32(RedisReq) {
+	if req.Header.DataType == int32(RedisReq) {
 		cost := time.Since(start)
-		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.reqData.Data)), cost.Nanoseconds()/1000)
+		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), cost.Nanoseconds()/1000)
 		if err == nil && !nd.IsWriteReady() {
 			nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
-				req.reqData.String())
+				req.String())
 			return nil, errRaftNotReadyForWrite
 		}
 		if cost >= time.Second {
 			nd.rn.Infof("write request %v slow cost: %v",
-				req.reqData.String(), cost)
+				req.String(), cost)
 		}
 	}
 	return rsp, err
 }
 
 func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(RedisReq),
 	}
@@ -716,14 +813,11 @@ func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 		Header: h,
 		Data:   buf,
 	}
-	req := &internalReq{
-		reqData: raftReq,
-	}
-	return nd.queueRequest(req)
+	return nd.queueRequest(raftReq)
 }
 
 func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(CustomReq),
 	}
@@ -731,14 +825,11 @@ func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
 		Header: h,
 		Data:   buf,
 	}
-	req := &internalReq{
-		reqData: raftReq,
-	}
-	return nd.queueRequest(req)
+	return nd.queueRequest(raftReq)
 }
 
 func (nd *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error {
-	h := &RequestHeader{
+	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(SchemaChangeReq),
 	}
@@ -747,11 +838,8 @@ func (nd *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error
 		Header: h,
 		Data:   buf,
 	}
-	req := &internalReq{
-		reqData: raftReq,
-	}
 
-	_, err := nd.queueRequest(req)
+	_, err := nd.queueRequest(raftReq)
 	return err
 }
 
@@ -1058,7 +1146,7 @@ func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.Conf
 	return removeSelf, changed, err
 }
 
-func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
+func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOperator) bool {
 	forceBackup := false
 	if evnt.Data != nil {
 		// try redis command
@@ -1095,7 +1183,7 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool) bool {
 			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
 		}
 		var retErr error
-		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, reqList, evnt.Term, evnt.Index, nd.stopChan)
+		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, batch, reqList, evnt.Term, evnt.Index, nd.stopChan)
 		if reqList.Type == FromClusterSyncer {
 			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
 		}
@@ -1129,16 +1217,20 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 	var shouldStop bool
 	var confChanged bool
 	forceBackup := false
+	batch := nd.sm.GetBatchOperator()
 	for i := range ents {
 		evnt := ents[i]
 		isReplaying := evnt.Index <= nd.rn.lastIndex
 		switch evnt.Type {
 		case raftpb.EntryNormal:
-			needBackup := nd.applyEntry(evnt, isReplaying)
+			needBackup := nd.applyEntry(evnt, isReplaying, batch)
 			if needBackup {
 				forceBackup = true
 			}
 		case raftpb.EntryConfChange:
+			if batch != nil {
+				batch.CommitBatch()
+			}
 			removeSelf, changed, _ := nd.applyConfChangeEntry(evnt, &np.confState)
 			if changed {
 				confChanged = changed
@@ -1151,6 +1243,9 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 			nd.rn.Infof("replay finished at index: %v\n", evnt.Index)
 			nd.rn.MarkReplayFinished()
 		}
+	}
+	if batch != nil {
+		batch.CommitBatch()
 	}
 	if shouldStop {
 		nd.rn.Infof("I am removed from raft group: %v", nd.ns)
@@ -1170,7 +1265,12 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
 	nd.applySnapshot(np, applyEvent)
+	start := time.Now()
 	confChanged, forceBackup := nd.applyEntries(np, applyEvent)
+	cost := time.Since(start)
+	if cost > raftSlow {
+		nd.rn.Infof("raft apply slow cost: %v, number %v", cost, len(applyEvent.ents))
+	}
 
 	lastIndex := np.appliedi
 	if applyEvent.snapshot.Metadata.Index > lastIndex {
@@ -1239,14 +1339,16 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 	if np.appliedi-np.snapi <= 0 {
 		return
 	}
-	if np.appliedi <= nd.rn.lastIndex {
+	// we need force backup if too much logs since last snapshot
+	behandToomuch := np.appliedi-np.snapi > uint64(nd.rn.config.SnapCount*5)
+	if np.appliedi <= nd.rn.lastIndex && !behandToomuch {
 		// replaying local log
 		if forceBackup {
 			nd.rn.Infof("ignore backup while replaying [applied index: %d | last replay index: %d]", np.appliedi, nd.rn.lastIndex)
 		}
 		return
 	}
-	if nd.rn.Lead() == raft.None {
+	if nd.rn.Lead() == raft.None && !behandToomuch {
 		return
 	}
 

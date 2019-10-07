@@ -52,6 +52,7 @@ const (
 	releaseDelayAfterSnapshot = 30 * time.Second
 	maxSizePerMsg             = 1024 * 1024
 	maxInflightMsgs           = 256
+	commitBufferLen           = 5000
 )
 
 type Snapshot interface {
@@ -129,7 +130,7 @@ type raftNode struct {
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	join bool, ds DataStorage, rs raft.IExtRaftStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
 
-	commitC := make(chan applyInfo, 5000)
+	commitC := make(chan applyInfo, commitBufferLen)
 	if rconfig.SnapCount <= 0 {
 		rconfig.SnapCount = DefaultSnapCount
 	}
@@ -149,7 +150,7 @@ func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 		reqIDGen:      idutil.NewGenerator(uint16(rconfig.ID), time.Now()),
 		msgSnapC:      make(chan raftpb.Message, maxInFlightMsgSnap),
 		transport:     transport,
-		readStateC:    make(chan raft.ReadState, 1),
+		readStateC:    make(chan raft.ReadState, 3),
 		newLeaderChan: newLeaderChan,
 	}
 	snapDir := rc.config.SnapDir
@@ -238,7 +239,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 		return err
 	}
 
-	rc.Infof("wal meta: %v, restart with: %v", string(meta), st.String())
+	rc.Infof("wal meta: %v, restart with: %v, ents: %v", string(meta), st.String(), len(ents))
 	var m common.MemberInfo
 	err = json.Unmarshal(meta, &m)
 	if err != nil {
@@ -384,6 +385,7 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			err = rc.restartNode(c, snapshot)
 		}
 		if err != nil {
+			rc.Infof("restarting node failed: %v", err.Error())
 			return err
 		}
 	} else {
@@ -452,6 +454,7 @@ func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error
 	var err error
 	err = rc.replayWAL(snapshot, false)
 	if err != nil {
+		rc.Infof("restarting node failed to replay wal: %v", err.Error())
 		return err
 	}
 	rc.node = raft.RestartNode(c)
@@ -858,10 +861,16 @@ func (rc *raftNode) serveChannels() {
 			if len(rd.ReadStates) != 0 {
 				select {
 				case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
-				case <-time.After(time.Second):
-					nodeLog.Infof("timeout sending read state")
-				case <-rc.stopc:
-					return
+				default:
+					t := time.NewTimer(time.Millisecond * 10)
+					select {
+					case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
+					case <-t.C:
+						nodeLog.Infof("timeout sending read state")
+					case <-rc.stopc:
+						return
+					}
+					t.Stop()
 				}
 			}
 
@@ -895,7 +904,6 @@ func (rc *raftNode) serveChannels() {
 
 			// TODO: do we need publish entry if commitedentries and snapshot is empty?
 			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
-
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				// since the snapshot only has metadata, we need rsync the real snapshot data first.
 				// if the real snapshot failed to pull, we need stop raft and retry restart later.
@@ -916,6 +924,7 @@ func (rc *raftNode) serveChannels() {
 			if isMeNewLeader {
 				rc.transport.Send(rc.processMessages(rd.Messages))
 			}
+
 			// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
 			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
 				nodeLog.Errorf("raft save wal error: %v", err)
@@ -923,6 +932,7 @@ func (rc *raftNode) serveChannels() {
 				<-rc.stopc
 				return
 			}
+
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				err := rc.persistStorage.SaveSnap(rd.Snapshot)
 				if err != nil {
@@ -945,6 +955,7 @@ func (rc *raftNode) serveChannels() {
 				}
 			}
 			rc.raftStorage.Append(rd.Entries)
+
 			if !isMeNewLeader {
 				msgs := rc.processMessages(rd.Messages)
 				raftDone <- struct{}{}
