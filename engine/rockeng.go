@@ -61,7 +61,9 @@ func FillDefaultOptions(opts *RockOptions) {
 	if opts.BlockSize <= 0 {
 		// for hdd use 64KB and above
 		// for ssd use 32KB and below
-		opts.BlockSize = 1024 * 32
+		// for point lookup use small such as: 4KB~16KB
+		// for scan use large : 32KB
+		opts.BlockSize = 1024 * 16
 	}
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
