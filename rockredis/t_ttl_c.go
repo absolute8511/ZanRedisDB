@@ -20,16 +20,32 @@ func newConsistencyExpiration(db *RockDB) *consistencyExpiration {
 	return exp
 }
 
+func (exp *consistencyExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte {
+	return key
+}
+
+func (exp *consistencyExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte, int64, error) {
+	return key, 0, nil
+}
+
 func (exp *consistencyExpiration) encodeToRawValue(dataType byte, h *headerMetaValue, rawValue []byte) []byte {
 	return rawValue
 }
 
 func (exp *consistencyExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]byte, *headerMetaValue, error) {
 	var h headerMetaValue
+	h.UserData = rawValue
 	return rawValue, &h, nil
 }
 
-func (exp *consistencyExpiration) isExpired(dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
+func (exp *consistencyExpiration) getRawValueForHeader(ts int64, dataType byte, key []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (exp *consistencyExpiration) isExpired(ts int64, dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
+	if ts == 0 {
+		return false, nil
+	}
 	mk := expEncodeMetaKey(dataType, key)
 
 	var t int64
@@ -42,22 +58,22 @@ func (exp *consistencyExpiration) isExpired(dataType byte, key []byte, rawValue 
 	if err != nil || t == 0 {
 		return false, err
 	}
-	t -= time.Now().Unix()
+	t -= ts / int64(time.Second)
 	return t <= 0, nil
 }
 
-func (exp *consistencyExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) error {
+func (exp *consistencyExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) (int64, error) {
 	wb := exp.db.wb
 	wb.Clear()
 
 	_, err := exp.rawExpireAt(dataType, key, rawValue, when, wb)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
-		return err
+		return 0, err
 	}
-	return nil
+	return 1, nil
 }
 
 func (exp *consistencyExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
@@ -86,14 +102,14 @@ func (exp *consistencyExpiration) rawExpireAt(dataType byte, key []byte, rawValu
 	return rawValue, nil
 }
 
-func (exp *consistencyExpiration) ttl(dataType byte, key []byte, rawValue []byte) (int64, error) {
+func (exp *consistencyExpiration) ttl(ts int64, dataType byte, key []byte, rawValue []byte) (int64, error) {
 	mk := expEncodeMetaKey(dataType, key)
 	t, err := Int64(exp.db.eng.GetBytes(exp.db.defaultReadOpts, mk))
 
 	if err != nil || t == 0 {
 		t = -1
 	} else {
-		t -= time.Now().Unix()
+		t -= ts / int64(time.Second)
 		if t <= 0 {
 			t = -1
 		}

@@ -134,23 +134,23 @@ func (nd *KVNode) persistCommand(conn redcon.Conn, cmd redcon.Command, v interfa
 }
 
 func (kvsm *kvStoreSM) localPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.Persist(cmd.Args[1])
+	return kvsm.store.Persist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localHashPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.HPersist(cmd.Args[1])
+	return kvsm.store.HPersist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localListPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.LPersist(cmd.Args[1])
+	return kvsm.store.LPersist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.SPersist(cmd.Args[1])
+	return kvsm.store.SPersist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localZSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.ZPersist(cmd.Args[1])
+	return kvsm.store.ZPersist(ts, cmd.Args[1])
 }
 
 //read commands related to TTL

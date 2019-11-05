@@ -93,6 +93,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "hget", wrapReadCommandKSubkey(nd.hgetCommand))
 	nd.router.Register(false, "hgetall", wrapReadCommandK(nd.hgetallCommand))
 	nd.router.Register(false, "hkeys", wrapReadCommandK(nd.hkeysCommand))
+	nd.router.Register(false, "hvals", wrapReadCommandK(nd.hvalsCommand))
 	nd.router.Register(false, "hexists", wrapReadCommandKSubkey(nd.hexistsCommand))
 	nd.router.Register(false, "hmget", wrapReadCommandKSubkeySubkey(nd.hmgetCommand))
 	nd.router.Register(false, "hlen", wrapReadCommandK(nd.hlenCommand))

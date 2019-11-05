@@ -214,14 +214,6 @@ func TestHashGetAll(t *testing.T) {
 		t.Fatal(ok)
 	}
 
-	if v, err := goredis.MultiBulk(c.Do("hgetall", key)); err != nil {
-		t.Fatal(err)
-	} else {
-		if err := testHashArray(v, 1, 1, 2, 2, 3, 3); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	if v, err := goredis.MultiBulk(c.Do("hkeys", key)); err != nil {
 		t.Fatal(err)
 	} else {
@@ -230,13 +222,22 @@ func TestHashGetAll(t *testing.T) {
 		}
 	}
 
-	//if v, err := goredis.MultiBulk(c.Do("hvals", key)); err != nil {
-	//	t.Fatal(err)
-	//} else {
-	//	if err := testHashArray(v, 1, 2, 3); err != nil {
-	//		t.Fatal(err)
-	//	}
-	//}
+	if v, err := goredis.MultiBulk(c.Do("hvals", key)); err != nil {
+		t.Fatal(err)
+	} else {
+		if err := testHashArray(v, 1, 2, 3); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if v, err := goredis.MultiBulk(c.Do("hgetall", key)); err != nil {
+		t.Fatal(err)
+	} else {
+		t.Log(v)
+		if err := testHashArray(v, 1, 1, 2, 2, 3, 3); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	if n, err := goredis.Int(c.Do("hclear", key)); err != nil {
 		t.Fatal(err)

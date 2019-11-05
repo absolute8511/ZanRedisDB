@@ -98,12 +98,15 @@ type expiredMetaBuffer interface {
 }
 
 type expiration interface {
-	ExpireAt(dt byte, key []byte, rawValue []byte, when int64) error
+	getRawValueForHeader(ts int64, dt byte, key []byte) ([]byte, error)
+	ExpireAt(dt byte, key []byte, rawValue []byte, when int64) (int64, error)
 	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error)
 	// should be called only in read operation
-	ttl(dt byte, key []byte, rawValue []byte) (int64, error)
+	ttl(ts int64, dt byte, key []byte, rawValue []byte) (int64, error)
 	// if in raft write loop should avoid lock, otherwise lock should be used
-	isExpired(dt byte, key []byte, rawValue []byte, useLock bool) (bool, error)
+	isExpired(ts int64, dt byte, key []byte, rawValue []byte, useLock bool) (bool, error)
+	encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte
+	decodeFromVersionKey(dt byte, vk []byte) ([]byte, int64, error)
 	decodeRawValue(dt byte, rawValue []byte) ([]byte, *headerMetaValue, error)
 	encodeToRawValue(dt byte, h *headerMetaValue, realValue []byte) []byte
 	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error)
@@ -113,32 +116,60 @@ type expiration interface {
 	Destroy()
 }
 
-func (db *RockDB) expire(ts int64, dataType byte, key []byte, rawValue []byte, duration int64) error {
+func (db *RockDB) expire(ts int64, dataType byte, key []byte, rawValue []byte, duration int64) (int64, error) {
+	var err error
+	if rawValue == nil {
+		rawValue, err = db.expiration.getRawValueForHeader(ts, dataType, key)
+		if err != nil {
+			return 0, err
+		}
+	}
 	return db.expiration.ExpireAt(dataType, key, rawValue, ts/int64(time.Second)+duration)
 }
 
 func (db *RockDB) KVTtl(key []byte) (t int64, err error) {
-	_, _, v, _, err := db.getRawDBKVValue(key, true)
-	if err != nil || v == nil {
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, KVType, key)
+	if err != nil {
 		return -1, err
 	}
-	return db.ttl(KVType, key, v)
+	return db.ttl(tn, KVType, key, v)
 }
 
 func (db *RockDB) HashTtl(key []byte) (t int64, err error) {
-	return db.ttl(HashType, key, nil)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, HashType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, HashType, key, v)
 }
 
 func (db *RockDB) ListTtl(key []byte) (t int64, err error) {
-	return db.ttl(ListType, key, nil)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, ListType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, ListType, key, v)
 }
 
 func (db *RockDB) SetTtl(key []byte) (t int64, err error) {
-	return db.ttl(SetType, key, nil)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, SetType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, SetType, key, v)
 }
 
 func (db *RockDB) ZSetTtl(key []byte) (t int64, err error) {
-	return db.ttl(ZSetType, key, nil)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, ZSetType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, ZSetType, key, v)
 }
 
 type TTLChecker struct {

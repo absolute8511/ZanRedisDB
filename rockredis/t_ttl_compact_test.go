@@ -19,7 +19,7 @@ func TestKVTTL_Compact(t *testing.T) {
 	defer db.Close()
 
 	key1 := []byte("test:testdbTTL_kv_compact")
-	var ttl1 int64 = int64(rand.Int31())
+	var ttl1 int64 = int64(rand.Int31() - 10)
 	ttl2 := ttl1 + 10
 	tn := time.Now().UnixNano()
 	if v, err := db.Expire(tn, key1, ttl1); err != nil {
@@ -28,7 +28,7 @@ func TestKVTTL_Compact(t *testing.T) {
 		t.Fatal("return value from expire of not exist key != 0")
 	}
 
-	if v, err := db.Persist(key1); err != nil {
+	if v, err := db.Persist(tn, key1); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from persist of not exist key != 0")
@@ -51,11 +51,9 @@ func TestKVTTL_Compact(t *testing.T) {
 	}
 
 	// test change ttl
-	if v, err := db.Expire(tn, key1, ttl2); err != nil {
-		t.Fatal(err)
-	} else if v != 1 {
-		t.Fatal("return value from expire != 1")
-	}
+	v, err := db.Expire(tn, key1, ttl2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), v)
 
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
@@ -63,7 +61,7 @@ func TestKVTTL_Compact(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if v, err := db.Persist(key1); err != nil {
+	if v, err := db.Persist(tn, key1); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from persist != 1")
@@ -93,10 +91,10 @@ func TestKVTTL_Compact(t *testing.T) {
 		t.Fatalf("ttl != setex: %v vs %v", v, ttl1)
 	}
 
-	err := db.SetEx(tn, key1, ttl2, testValue)
+	err = db.SetEx(tn, key1, ttl2, testValue)
 	assert.Nil(t, err)
 
-	v, err := db.KVTtl(key1)
+	v, err = db.KVTtl(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, ttl2, v)
 	// set, setnx, mset should clean ttl
@@ -133,7 +131,8 @@ func TestKVTTL_Compact(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 	// set success should clean ttl
-	changed, err = db.SetNX(0, key1, testValue)
+	tn = time.Now().UnixNano()
+	changed, err = db.SetNX(tn, key1, testValue)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), changed)
 	v, err = db.KVTtl(key1)
@@ -261,6 +260,7 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	} else if v != -1 {
 		t.Fatalf("should expired: %v", v)
 	}
+	tn = time.Now().UnixNano()
 	exist, err := db.KVExists(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), exist)
@@ -270,7 +270,7 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	vlist, errs := db.MGet(key1)
 	assert.Nil(t, errs[0])
 	assert.Nil(t, vlist[0])
-	v, err = db.KVGetSet(0, key1, []byte("new"))
+	v, err = db.KVGetSet(tn, key1, []byte("new"))
 	assert.Nil(t, err)
 	assert.Nil(t, v)
 	if v, err := db.KVTtl(key1); err != nil {
@@ -316,12 +316,12 @@ func TestKVTTL_CompactOverflow(t *testing.T) {
 }
 
 func TestHashTTL_Compact(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
 	hashKey := []byte("test:testdbTTL_hash_c")
-	var hashTTL int64 = rand.Int63()
+	var hashTTL int64 = int64(rand.Int31()) - 10
 
 	if v, err := db.HashTtl(hashKey); err != nil {
 		t.Fatal(err)
@@ -336,7 +336,7 @@ func TestHashTTL_Compact(t *testing.T) {
 		t.Fatal("return value from expire of not exist hash key != 0")
 	}
 
-	if v, err := db.HPersist(hashKey); err != nil {
+	if v, err := db.HPersist(tn, hashKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from hpersist of not exist hash key != 0")
@@ -348,7 +348,7 @@ func TestHashTTL_Compact(t *testing.T) {
 		{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
-	if err := db.HMset(0, hashKey, hash_val...); err != nil {
+	if err := db.HMset(tn, hashKey, hash_val...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -358,13 +358,11 @@ func TestHashTTL_Compact(t *testing.T) {
 		t.Fatal("return value from hexpire != 1")
 	}
 
-	if v, err := db.HashTtl(hashKey); err != nil {
-		t.Fatal(err)
-	} else if v != hashTTL {
-		t.Fatal("ttl != expire")
-	}
+	v, err := db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTTL, v)
 
-	if v, err := db.HPersist(hashKey); err != nil {
+	if v, err := db.HPersist(tn, hashKey); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from hpersist is != 1")
@@ -375,6 +373,13 @@ func TestHashTTL_Compact(t *testing.T) {
 	} else if v != -1 {
 		t.Fatal("HashPersist do not clear the ttl")
 	}
+}
+
+func TestHashTTL_Compact_KeepTTL(t *testing.T) {
+	// TODO:
+}
+func TestHashTTL_Compact_TTLExpired(t *testing.T) {
+	// TODO:
 }
 
 func TestListTTL_Compact(t *testing.T) {
@@ -398,7 +403,7 @@ func TestListTTL_Compact(t *testing.T) {
 		t.Fatal("return value from expire of not exist list key != 0")
 	}
 
-	if v, err := db.LPersist(listKey); err != nil {
+	if v, err := db.LPersist(tn, listKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from lpersist of not exist list key != 0")
@@ -421,7 +426,7 @@ func TestListTTL_Compact(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if v, err := db.LPersist(listKey); err != nil {
+	if v, err := db.LPersist(tn, listKey); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from lpersist != 1")
@@ -455,7 +460,7 @@ func TestSetTTL_Compact(t *testing.T) {
 		t.Fatal("return value from expire of not exist set key != 0")
 	}
 
-	if v, err := db.SPersist(setKey); err != nil {
+	if v, err := db.SPersist(tn, setKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from spersist of not exist set key != 0")
@@ -478,7 +483,7 @@ func TestSetTTL_Compact(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if v, err := db.SPersist(setKey); err != nil {
+	if v, err := db.SPersist(tn, setKey); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from spersist!= 1")
@@ -512,7 +517,7 @@ func TestZSetTTL_Compact(t *testing.T) {
 		t.Fatal("return value from expire of not exist zset key != 0")
 	}
 
-	if v, err := db.ZPersist(zsetKey); err != nil {
+	if v, err := db.ZPersist(tn, zsetKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from zpersist of not exist zset key != 0")
@@ -541,7 +546,7 @@ func TestZSetTTL_Compact(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if v, err := db.ZPersist(zsetKey); err != nil {
+	if v, err := db.ZPersist(tn, zsetKey); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from zpersist != 1")
@@ -559,16 +564,14 @@ func TestDBCompactTTL(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	kTypeMap := make(map[string]byte)
 	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType}
 
 	for i := 0; i < 10000*3+rand.Intn(10000); i++ {
 		key := "test:ttl_checker_consistency:" + strconv.Itoa(i)
 		dataType := dataTypes[rand.Int()%len(dataTypes)]
-		kTypeMap[key] = dataType
 		tn := time.Now().UnixNano()
-		if err := db.expire(tn, dataType, []byte(key), nil, 2); err != nil {
-			t.Fatal(err)
+		if _, err := db.expire(tn, dataType, []byte(key), nil, 2); err != nil {
+			t.Fatalf("expire key %v , type %v, err: %v", key, dataType, err)
 		}
 	}
 

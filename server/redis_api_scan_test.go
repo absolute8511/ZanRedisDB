@@ -205,6 +205,8 @@ func TestHashScan(t *testing.T) {
 	} else {
 		checkScanValues(t, ay[1], "b", 2, "a", 1)
 	}
+	// TODO: test scan expired hash key
+	// TODO: test scan expired and new created hash key
 }
 
 func TestSetScan(t *testing.T) {

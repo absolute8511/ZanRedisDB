@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func TestHashCodec(t *testing.T) {
@@ -41,13 +41,19 @@ func TestDBHash(t *testing.T) {
 
 	key := []byte("test:testdb_hash_a")
 
-	if n, err := db.HSet(0, false, key, []byte("a"), []byte("hello world 1")); err != nil {
-		t.Fatal(err)
-	} else if n != 1 {
-		t.Fatal(n)
+	tn := time.Now().UnixNano()
+	r1 := common.KVRecord{
+		Key:   []byte("a"),
+		Value: []byte("hello world 1"),
 	}
+	r2 := common.KVRecord{
+		Key:   []byte("b"),
+		Value: []byte("hello world 2"),
+	}
+	err := db.HMset(tn, key, r1, r2)
+	assert.Nil(t, err)
 
-	if n, err := db.HSet(0, false, key, []byte("b"), []byte("hello world 2")); err != nil {
+	if n, err := db.HSet(tn, false, key, []byte("d"), []byte("hello world 2")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -71,18 +77,16 @@ func TestDBHash(t *testing.T) {
 		t.Error(ay[1])
 	}
 
-	len, err := db.HLen(key)
+	length, err := db.HLen(key)
 	if err != nil {
 		t.Error(err)
 	}
-	if len != 2 {
-		t.Errorf("length should be 2: %v", len)
+	if length != 3 {
+		t.Errorf("length should be 2: %v", length)
 	}
-	_, ch, _ := db.HGetAll(key)
-	results := make([]common.KVRecordRet, 0)
-	for r := range ch {
-		results = append(results, r)
-	}
+	n, results, _ := db.HGetAll(key)
+	time.Sleep(time.Second)
+	assert.Equal(t, int(n), len(results))
 	if string(results[0].Rec.Key) != "a" {
 		t.Error(results)
 	}
@@ -97,22 +101,16 @@ func TestDBHash(t *testing.T) {
 		t.Error(results)
 	}
 
-	_, ch, _ = db.HKeys(key)
-	results = make([]common.KVRecordRet, 0)
-	for r := range ch {
-		results = append(results, r)
-	}
+	n, results, _ = db.HKeys(key)
+	assert.Equal(t, int(n), len(results))
+
 	if string(results[0].Rec.Key) != "a" {
 		t.Error(results)
 	}
 	if string(results[1].Rec.Key) != "b" {
 		t.Error(results)
 	}
-	_, ch, _ = db.HValues(key)
-	results = make([]common.KVRecordRet, 0)
-	for r := range ch {
-		results = append(results, r)
-	}
+	n, results, _ = db.HValues(key)
 	if string(results[0].Rec.Value) != "hello world 1" {
 		t.Error(results)
 	}
@@ -120,7 +118,7 @@ func TestDBHash(t *testing.T) {
 		t.Error(results)
 	}
 
-	if n, err := db.HSet(0, true, key, []byte("b"), []byte("hello world changed nx")); err != nil {
+	if n, err := db.HSet(tn, true, key, []byte("b"), []byte("hello world changed nx")); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
@@ -130,7 +128,7 @@ func TestDBHash(t *testing.T) {
 		t.Error(v2)
 	}
 
-	if n, err := db.HSet(0, true, key, []byte("c"), []byte("hello world c")); err != nil {
+	if n, err := db.HSet(tn, true, key, []byte("c"), []byte("hello world c")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)

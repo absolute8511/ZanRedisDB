@@ -1157,27 +1157,18 @@ func (db *RockDB) ZKeyExists(key []byte) (int64, error) {
 func (db *RockDB) ZExpire(ts int64, key []byte, duration int64) (int64, error) {
 	if exists, err := db.ZKeyExists(key); err != nil || exists != 1 {
 		return 0, err
-	} else {
-		if err2 := db.ExpireAt(ZSetType, key, nil, duration+ts/int64(time.Second)); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
 	}
+	return db.ExpireAt(ZSetType, key, nil, duration+ts/int64(time.Second))
 }
 
-func (db *RockDB) ZPersist(key []byte) (int64, error) {
+func (db *RockDB) ZPersist(ts int64, key []byte) (int64, error) {
 	if exists, err := db.ZKeyExists(key); err != nil || exists != 1 {
 		return 0, err
 	}
 
-	if ttl, err := db.ttl(ZSetType, key, nil); err != nil || ttl < 0 {
+	if ttl, err := db.ttl(ts, ZSetType, key, nil); err != nil || ttl < 0 {
 		return 0, err
 	}
 
-	err := db.ExpireAt(ZSetType, key, nil, 0)
-	if err != nil {
-		return 0, err
-	}
-	return 1, nil
+	return db.ExpireAt(ZSetType, key, nil, 0)
 }

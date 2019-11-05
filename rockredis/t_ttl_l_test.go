@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 )
 
@@ -36,7 +37,7 @@ func TestKVTTL_L(t *testing.T) {
 		t.Fatal("return value from expire != 1")
 	}
 
-	if v, _ := db.Persist(key1); v != 0 {
+	if v, _ := db.Persist(tn, key1); v != 0 {
 		t.Fatal("return value from persist of LocalDeletion Policy != 0")
 	}
 
@@ -96,11 +97,9 @@ func TestHashTTL_L(t *testing.T) {
 		t.Fatal("return value from HashTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.HPersist(hashKey); err != nil {
-		t.Fatal(err)
-	} else if v != 0 {
-		t.Fatal("return value from HPersist of  LocalDeletion Policy != 0")
-	}
+	v, err := db.HPersist(tn, hashKey)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(0), v)
 }
 
 func TestListTTL_L(t *testing.T) {
@@ -135,7 +134,7 @@ func TestListTTL_L(t *testing.T) {
 		t.Fatal("return value from ListTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.LPersist(listKey); err != nil {
+	if v, err := db.LPersist(tn, listKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from LPersist of LocalDeletion Policy != 0")
@@ -174,7 +173,7 @@ func TestSetTTL_L(t *testing.T) {
 		t.Fatal("return value from SetTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.SPersist(setKey); err != nil {
+	if v, err := db.SPersist(tn, setKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from SPersist of LocalDeletion Policy != 0")
@@ -219,7 +218,7 @@ func TestZSetTTL_L(t *testing.T) {
 		t.Fatal("return value from ZSetTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.ZPersist(zsetKey); err != nil {
+	if v, err := db.ZPersist(tn, zsetKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from ZPersist of LocalDeletion Policy != 0")
@@ -283,7 +282,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 		}
 
 		tn := time.Now().UnixNano()
-		if err := db.expire(tn, dataType, []byte(key), nil, 8); err != nil {
+		if _, err := db.expire(tn, dataType, []byte(key), nil, 8); err != nil {
 			t.Fatal(err)
 		}
 	}

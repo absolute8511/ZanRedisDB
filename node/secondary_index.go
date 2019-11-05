@@ -173,12 +173,12 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 			}
 		case "hgetall":
 			for _, pk := range pkList {
-				_, valCh, err := nd.store.HGetAll(pk.PKey)
+				_, vals, err := nd.store.HGetAll(pk.PKey)
 				if err != nil {
 					continue
 				}
 				vv := [][]byte{}
-				for v := range valCh {
+				for _, v := range vals {
 					vv = append(vv, v.Rec.Key, v.Rec.Value)
 				}
 				rspV := common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv}

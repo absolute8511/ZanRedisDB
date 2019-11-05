@@ -17,22 +17,39 @@ func (nd *KVNode) hgetCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (nd *KVNode) hgetallCommand(conn redcon.Conn, cmd redcon.Command) {
-	n, valCh, err := nd.store.HGetAll(cmd.Args[1])
+	_, vals, err := nd.store.HGetAll(cmd.Args[1])
 	if err != nil {
 		conn.WriteError("ERR for " + string(cmd.Args[0]) + " command: " + err.Error())
+		return
 	}
-	conn.WriteArray(int(n) * 2)
-	for v := range valCh {
+	conn.WriteArray(len(vals) * 2)
+	for _, v := range vals {
 		conn.WriteBulk(v.Rec.Key)
 		conn.WriteBulk(v.Rec.Value)
 	}
 }
 
 func (nd *KVNode) hkeysCommand(conn redcon.Conn, cmd redcon.Command) {
-	n, valCh, _ := nd.store.HKeys(cmd.Args[1])
-	conn.WriteArray(int(n))
-	for v := range valCh {
+	_, vals, err := nd.store.HKeys(cmd.Args[1])
+	if err != nil {
+		conn.WriteError("ERR for " + string(cmd.Args[0]) + " command: " + err.Error())
+		return
+	}
+	conn.WriteArray(len(vals))
+	for _, v := range vals {
 		conn.WriteBulk(v.Rec.Key)
+	}
+}
+
+func (nd *KVNode) hvalsCommand(conn redcon.Conn, cmd redcon.Command) {
+	_, vals, err := nd.store.HValues(cmd.Args[1])
+	if err != nil {
+		conn.WriteError("ERR for " + string(cmd.Args[0]) + " command: " + err.Error())
+		return
+	}
+	conn.WriteArray(len(vals))
+	for _, v := range vals {
+		conn.WriteBulk(v.Rec.Value)
 	}
 }
 

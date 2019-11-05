@@ -43,33 +43,46 @@ func newLocalExpiration(db *RockDB) *localExpiration {
 	return exp
 }
 
+func (exp *localExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte {
+	return key
+}
+
+func (exp *localExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte, int64, error) {
+	return key, 0, nil
+}
+
 func (exp *localExpiration) encodeToRawValue(dataType byte, h *headerMetaValue, rawValue []byte) []byte {
 	return rawValue
 }
 
 func (exp *localExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]byte, *headerMetaValue, error) {
 	var h headerMetaValue
+	h.UserData = rawValue
 	return rawValue, &h, nil
 }
 
-func (exp *localExpiration) isExpired(dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
+func (exp *localExpiration) getRawValueForHeader(ts int64, dataType byte, key []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (exp *localExpiration) isExpired(ts int64, dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
 	return false, nil
 }
 
-func (exp *localExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) error {
+func (exp *localExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) (int64, error) {
 	if when == 0 {
-		return errChangeTTLNotSupported
+		return 0, errChangeTTLNotSupported
 	}
 	wb := exp.db.wb
 	wb.Clear()
 	_, err := exp.rawExpireAt(dataType, key, rawValue, when, wb)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
-		return err
+		return 0, err
 	}
-	return nil
+	return 1, nil
 }
 
 func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
@@ -80,7 +93,7 @@ func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, rawValue []by
 	return rawValue, nil
 }
 
-func (exp *localExpiration) ttl(byte, []byte, []byte) (int64, error) {
+func (exp *localExpiration) ttl(int64, byte, []byte, []byte) (int64, error) {
 	return -1, nil
 }
 

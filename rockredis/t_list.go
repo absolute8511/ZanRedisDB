@@ -834,28 +834,18 @@ func (db *RockDB) LKeyExists(key []byte) (int64, error) {
 func (db *RockDB) LExpire(ts int64, key []byte, duration int64) (int64, error) {
 	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
 		return 0, err
-	} else {
-		if err2 := db.ExpireAt(ListType, key, nil, duration+ts/int64(time.Second)); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
 	}
+	return db.ExpireAt(ListType, key, nil, duration+ts/int64(time.Second))
 }
 
-func (db *RockDB) LPersist(key []byte) (int64, error) {
+func (db *RockDB) LPersist(ts int64, key []byte) (int64, error) {
 	if exists, err := db.LKeyExists(key); err != nil || exists != 1 {
 		return 0, err
 	}
 
-	if ttl, err := db.ttl(ListType, key, nil); err != nil || ttl < 0 {
+	if ttl, err := db.ttl(0, ListType, key, nil); err != nil || ttl < 0 {
 		return 0, err
 	}
 
-	err := db.expiration.ExpireAt(ListType, key, nil, 0)
-	if err != nil {
-		return 0, err
-	}
-
-	return 1, nil
+	return db.expiration.ExpireAt(ListType, key, nil, 0)
 }
