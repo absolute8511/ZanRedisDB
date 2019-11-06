@@ -66,7 +66,11 @@ func (nd *KVNode) hmgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	vals, _ := nd.store.HMget(cmd.Args[1], cmd.Args[2:]...)
 	conn.WriteArray(len(vals))
 	for _, v := range vals {
-		conn.WriteBulk(v)
+		if v == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(v)
+		}
 	}
 }
 

@@ -163,6 +163,11 @@ func (nd *KVNode) registerHandler() {
 	nd.router.Register(false, "lttl", wrapReadCommandK(nd.lttlCommand))
 	nd.router.Register(false, "sttl", wrapReadCommandK(nd.sttlCommand))
 	nd.router.Register(false, "zttl", wrapReadCommandK(nd.zttlCommand))
+	// extended exist
+	nd.router.Register(false, "hkeyexist", wrapReadCommandK(nd.hKeyExistCommand))
+	nd.router.Register(false, "lkeyexist", wrapReadCommandK(nd.lKeyExistCommand))
+	nd.router.Register(false, "skeyexist", wrapReadCommandK(nd.sKeyExistCommand))
+	nd.router.Register(false, "zkeyexist", wrapReadCommandK(nd.zKeyExistCommand))
 
 	nd.router.Register(true, "setex", wrapWriteCommandKVV(nd, nd.setexCommand))
 	nd.router.Register(true, "expire", wrapWriteCommandKV(nd, nd.expireCommand))

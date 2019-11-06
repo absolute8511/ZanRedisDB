@@ -194,6 +194,38 @@ func (nd *KVNode) zttlCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (nd *KVNode) hKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.HKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) lKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.LKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) sKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.SKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) zKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.ZKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
 type ExpireHandler struct {
 	node            *KVNode
 	quitC           chan struct{}

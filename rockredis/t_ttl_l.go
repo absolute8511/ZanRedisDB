@@ -97,6 +97,12 @@ func (exp *localExpiration) ttl(int64, byte, []byte, []byte) (int64, error) {
 	return -1, nil
 }
 
+func (exp *localExpiration) renewOnExpired(ts int64, dataType byte, key []byte, oldh *headerMetaValue) {
+	// local expire should not renew on expired data, since it will be checked by expire handler
+	// and it will clean ttl and all the sub data
+	return
+}
+
 func (exp *localExpiration) delExpire(dt byte, key []byte, rawv []byte, keepV bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	return rawv, nil
 }

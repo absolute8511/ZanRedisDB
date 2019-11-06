@@ -36,6 +36,7 @@ func (h *headerMetaValue) hdlen() int {
 	return 0
 }
 
+// only useful for compact ttl policy
 func (h *headerMetaValue) ttl(ts int64) int64 {
 	if h.ExpireAt == 0 {
 		return -1
@@ -48,6 +49,7 @@ func (h *headerMetaValue) ttl(ts int64) int64 {
 	return ttl
 }
 
+// only useful for compact ttl policy
 func (h *headerMetaValue) isExpired(ts int64) bool {
 	if h.Ver != byte(common.ValueHeaderV1) {
 		return false
@@ -283,6 +285,20 @@ func (exp *compactExpiration) ttl(ts int64, dataType byte, key []byte, rawValue 
 		return h.ttl(ts), nil
 	default:
 		return exp.localExp.ttl(ts, dataType, key, rawValue)
+	}
+}
+
+func (exp *compactExpiration) renewOnExpired(ts int64, dataType byte, key []byte, oldh *headerMetaValue) {
+	if oldh == nil {
+		return
+	}
+	switch dataType {
+	case KVType, HashType:
+		oldh.ExpireAt = 0
+		oldh.UserData = nil
+		oldh.ValueVersion = ts
+	default:
+		exp.localExp.renewOnExpired(ts, dataType, key, oldh)
 	}
 }
 

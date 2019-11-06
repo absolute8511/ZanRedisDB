@@ -175,7 +175,7 @@ func TestKVExpire(t *testing.T) {
 	}
 	realTtl, err := goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, realTtl)
+	assertTTLNear(t, ttl, realTtl)
 	// check incr, append, setrange keep ttl
 	if cnt, err := goredis.Int(c.Do("append", key1, " world")); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestKVExpire(t *testing.T) {
 	}
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, realTtl)
+	assertTTLNear(t, ttl, realTtl)
 	if cnt, err := goredis.Int(c.Do("setrange", key1, 1, "range")); err != nil {
 		t.Fatal(err)
 	} else if cnt != len("hrangeworld") {
@@ -202,7 +202,7 @@ func TestKVExpire(t *testing.T) {
 	}
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, realTtl)
+	assertTTLNear(t, ttl, realTtl)
 
 	time.Sleep(time.Second * time.Duration(ttl+2))
 	if v, err := goredis.String(c.Do("get", key1)); err != goredis.ErrNil {
@@ -225,7 +225,7 @@ func TestKVExpire(t *testing.T) {
 	}
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, realTtl)
+	assertTTLNear(t, ttl, realTtl)
 	_, err = c.Do("incr", key1)
 	assert.Nil(t, err)
 	if v, err := goredis.String(c.Do("get", key1)); err != nil {
@@ -235,7 +235,7 @@ func TestKVExpire(t *testing.T) {
 	}
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, realTtl)
+	assertTTLNear(t, ttl, realTtl)
 	//persist
 	c.Do("persist", key1)
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
@@ -243,13 +243,13 @@ func TestKVExpire(t *testing.T) {
 	assert.Equal(t, -1, realTtl)
 
 	// change ttl
-	_, err = c.Do("expire", key1, ttl+2)
+	_, err = c.Do("expire", key1, ttl+4)
 	assert.Nil(t, err)
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
-	assert.Equal(t, ttl+2, realTtl)
+	assertTTLNear(t, ttl+4, realTtl)
 
-	time.Sleep(time.Second * time.Duration(ttl+4))
+	time.Sleep(time.Second * time.Duration(ttl+5))
 	// check expired kv should not get from any read command
 	if v, err := goredis.String(c.Do("get", key1)); err != goredis.ErrNil {
 		t.Fatalf("expired key should be expired: %v, %v", v, err)
@@ -279,7 +279,7 @@ func TestKVExpire(t *testing.T) {
 	}
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, realTtl)
+	assertTTLNear(t, ttl, realTtl)
 
 	_, err = c.Do("persist", key1)
 	assert.Nil(t, err)

@@ -360,6 +360,152 @@ func TestHashTTL_C(t *testing.T) {
 	assert.Equal(t, int64(-1), v)
 }
 
+func TestHashTTL_C_KeepTTL(t *testing.T) {
+	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	hashKey := []byte("test:testdbTTL_hash_c_keepttl")
+	var hashTTL int64 = int64(rand.Int31() - 10)
+	tn := time.Now().UnixNano()
+	hash_val := []common.KVRecord{
+		{Key: []byte("field0"), Value: []byte("0")},
+		{Key: []byte("field1"), Value: []byte("value1")},
+		{Key: []byte("field2"), Value: []byte("value2")},
+	}
+
+	err := db.HMset(tn, hashKey, hash_val...)
+	assert.Nil(t, err)
+	n, err := db.HExpire(tn, hashKey, hashTTL)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	// should keep ttl
+	n, err = db.HSet(tn, false, hashKey, hash_val[0].Key, hash_val[1].Value)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTTL, n)
+
+	// hmset
+	err = db.HMset(tn, hashKey, hash_val...)
+	assert.Nil(t, err)
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTTL, n)
+	// hdel
+	n, err = db.HDel(hashKey, hash_val[0].Key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTTL, n)
+	// hincrby
+	n, err = db.HIncrBy(tn, hashKey, hash_val[0].Key, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTTL, n)
+}
+
+func TestHashTTL_C_TTLExpired(t *testing.T) {
+	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	hashKey := []byte("test:testdbTTL_hash_c_expired")
+	var hashTTL int64 = int64(3)
+	tn := time.Now().UnixNano()
+	hash_val := []common.KVRecord{
+		{Key: []byte("field0"), Value: []byte("0")},
+		{Key: []byte("field1"), Value: []byte("value1")},
+		{Key: []byte("field2"), Value: []byte("value2")},
+	}
+
+	err := db.HMset(tn, hashKey, hash_val...)
+	assert.Nil(t, err)
+	n, err := db.HExpire(tn, hashKey, hashTTL)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTTL, n)
+
+	time.Sleep(time.Second * time.Duration(hashTTL+1))
+	dbLog.Infof("wait expired done")
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	tn = time.Now().UnixNano()
+	v, err := db.HGet(hashKey, hash_val[0].Key)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	n, err = db.HKeyExists(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err := db.HMget(hashKey, hash_val[0].Key, hash_val[1].Key)
+	assert.Nil(t, err)
+	assert.Nil(t, vlist[0])
+	assert.Nil(t, vlist[1])
+	n, recs, err := db.HGetAll(hashKey)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(recs))
+	n, recs, err = db.HKeys(hashKey)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(recs))
+	n, recs, err = db.HValues(hashKey)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(recs))
+	n, err = db.HLen(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	// renew hash
+	hash_val2 := []common.KVRecord{
+		{Key: []byte("field0"), Value: []byte("new")},
+		{Key: []byte("field1"), Value: []byte("value1_new")},
+	}
+	time.Sleep(time.Second)
+	tn = time.Now().UnixNano()
+	// consistence expire can not ensure we delete all while rewrite the expired data
+	// even we write new data, it will keep expired until the check processed expired data
+	err = db.HMset(tn, hashKey, hash_val2...)
+	assert.Nil(t, err)
+
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.HLen(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, recs, err = db.HGetAll(hashKey)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(recs))
+	// clean and rewrite
+	db.HClear(hashKey)
+
+	err = db.HMset(tn, hashKey, hash_val2...)
+	assert.Nil(t, err)
+
+	n, err = db.HashTtl(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.HLen(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(hash_val2)), n)
+
+	n, recs, err = db.HGetAll(hashKey)
+	assert.Equal(t, int64(len(hash_val2)), n)
+	assert.Equal(t, len(hash_val2), len(recs))
+}
+
 func TestListTTL_C(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)

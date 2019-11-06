@@ -132,6 +132,7 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 	if err != nil {
 		return 0, err
 	}
+
 	ek := hEncodeHashKey(table, rk, field)
 
 	tsBuf := PutInt64(ts)
@@ -149,6 +150,7 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 			db.IncrTableKeyCount(table, 1, wb)
 		}
 	}
+
 	wb.Put(ek, value)
 
 	if hindex != nil {
@@ -180,7 +182,8 @@ func (db *RockDB) hHeaderMeta(ts int64, hkey []byte, useLock bool) (*headerMetaV
 	if err != nil {
 		return h, rv, false, err
 	}
-	return h, rv, h.isExpired(ts), err
+	isExpired, err := db.expiration.isExpired(ts, HashType, hkey, v, useLock)
+	return h, rv, isExpired, err
 }
 
 func (db *RockDB) HLen(hkey []byte) (int64, error) {
@@ -543,8 +546,8 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	}
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(HashType, hkey, nil, false, wb)
 	}
+	db.delExpire(HashType, hkey, nil, false, wb)
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return hlen, err
@@ -707,10 +710,13 @@ func (db *RockDB) HKeys(key []byte) (int64, []common.KVRecordRet, error) {
 	doScan := func() {
 		defer it.Close()
 		for ; it.Valid(); it.Next() {
-			_, _, f, err := hDecodeHashKey(it.Key())
+			_, _, f, _ := hDecodeHashKey(it.Key())
+			if f == nil {
+				continue
+			}
 			vals = append(vals, common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: nil},
-				Err: err,
+				Err: nil,
 			})
 		}
 	}
@@ -751,6 +757,9 @@ func (db *RockDB) HValues(key []byte) (int64, []common.KVRecordRet, error) {
 	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		va := it.Value()
+		if va == nil {
+			continue
+		}
 		vals = append(vals, common.KVRecordRet{
 			Rec: common.KVRecord{Key: nil, Value: va},
 			Err: nil,
@@ -809,8 +818,9 @@ func (db *RockDB) prepareHashKeyForWrite(ts int64, key []byte, field []byte) (*h
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
 	if expired || metaV == nil {
-		oldh.ValueVersion = ts
+		db.expiration.renewOnExpired(ts, HashType, key, oldh)
 	}
 	verKey := db.expiration.encodeToVersionKey(HashType, oldh, rk)
 	return oldh, table, verKey, nil

@@ -448,10 +448,12 @@ func TestListLPushRPop(t *testing.T) {
 			r := rand.New(rand.NewSource(time.Now().UnixNano()))
 			for {
 				v, err := goredis.Bytes(connPopList[index].Do("rpop", klist[index]))
-				assert.Nil(t, err)
 				if len(v) > 0 {
+					assert.Nil(t, err)
 					assert.Equal(t, []byte("a"), v)
 					atomic.AddInt32(&poped[index], 1)
+				} else {
+					assert.Equal(t, goredis.ErrNil, err)
 				}
 				time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
 				if time.Since(start) > time.Second*10 {

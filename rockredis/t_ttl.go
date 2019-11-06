@@ -110,6 +110,7 @@ type expiration interface {
 	decodeRawValue(dt byte, rawValue []byte) ([]byte, *headerMetaValue, error)
 	encodeToRawValue(dt byte, h *headerMetaValue, realValue []byte) []byte
 	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error)
+	renewOnExpired(ts int64, dt byte, key []byte, oldh *headerMetaValue)
 	check(common.ExpiredDataBuffer, chan struct{}) error
 	Start()
 	Stop()
