@@ -3,8 +3,10 @@ package server
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/siddontang/goredis"
+	"github.com/stretchr/testify/assert"
 )
 
 func checkScanValues(t *testing.T, ay interface{}, values ...interface{}) {
@@ -205,8 +207,31 @@ func TestHashScan(t *testing.T) {
 	} else {
 		checkScanValues(t, ay[1], "b", 2, "a", 1)
 	}
-	// TODO: test scan expired hash key
-	// TODO: test scan expired and new created hash key
+	// test scan expired hash key
+	c.Do("hexpire", key, 1)
+	time.Sleep(time.Second * 2)
+	ay, err := goredis.Values(c.Do("HSCAN", key, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	ayv, err := goredis.Strings(ay[1], nil)
+	assert.Equal(t, 0, len(ayv))
+
+	ay, err = goredis.Values(c.Do("HREVSCAN", key, "c"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	ayv, err = goredis.Strings(ay[1], nil)
+	assert.Equal(t, 0, len(ayv))
+	// test scan expired and new created hash key
+	c.Do("HMSET", key, "a", 1, "b", 2)
+	ay, err = goredis.Values(c.Do("HSCAN", key, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	checkScanValues(t, ay[1], "a", 1, "b", 2)
+
+	ay, err = goredis.Values(c.Do("HREVSCAN", key, "c"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	checkScanValues(t, ay[1], "b", 2, "a", 1)
 }
 
 func TestSetScan(t *testing.T) {
