@@ -2,7 +2,7 @@ PREFIX=/usr/local
 DESTDIR=
 BINDIR=${PREFIX}/bin
 PROJECT?=github.com/youzan/ZanRedisDB
-VERBINARY?= 0.6.3
+VERBINARY?= 0.7.1
 COMMIT?=$(shell git rev-parse --short HEAD)
 BUILD_TIME?=$(shell date '+%Y-%m-%d_%H:%M:%S-%Z')
 GOFLAGS=-ldflags "-s -w -X ${PROJECT}/common.VerBinary=${VERBINARY} -X ${PROJECT}/common.Commit=${COMMIT} -X ${PROJECT}/common.BuildTime=${BUILD_TIME}"
@@ -32,7 +32,7 @@ $(BLDDIR)/%:
 	@mkdir -p $(dir $@)
 	@echo $(GOOS)
 	@echo $(CGO_LDFLAGS)
-	CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go build ${GOFLAGS} -o $@ ./apps/$*
+	CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} GO111MODULE=on go build ${GOFLAGS} -o $@ ./apps/$*
 
 $(APPS): %: $(BLDDIR)/%
 
