@@ -347,13 +347,18 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
-	table, rk, err := extractTableFromRedisKey(key)
+
+	v := make([][]byte, 0, count)
+	tn := time.Now().UnixNano()
+	expired, _, table, verKey, err := db.GetCollVersionKey(tn, SetType, key)
 	if err != nil {
 		return nil, err
 	}
-	v := make([][]byte, 0, count)
+	if expired {
+		return v, nil
+	}
 
-	it, err := db.buildSpecificDataScanIterator(SetType, table, rk, cursor, count, reverse)
+	it, err := db.buildSpecificDataScanIterator(SetType, table, verKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}

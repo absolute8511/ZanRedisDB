@@ -11,24 +11,9 @@ import (
 )
 
 var (
-	errSetKey        = errors.New("invalid set key")
-	errSSizeKey      = errors.New("invalid ssize key")
-	errSetMemberSize = errors.New("invalid set member size")
+	errSetKey   = errors.New("invalid set key")
+	errSSizeKey = errors.New("invalid ssize key")
 )
-
-const (
-	setStartSep byte = ':'
-	setStopSep  byte = setStartSep + 1
-)
-
-func checkSetKMSize(key []byte, member []byte) error {
-	if len(key) > MaxKeySize || len(key) == 0 {
-		return errKeySize
-	} else if len(member) > MaxSetMemberSize {
-		return errSetMemberSize
-	}
-	return nil
-}
 
 func sEncodeSizeKey(key []byte) []byte {
 	buf := make([]byte, len(key)+1+len(metaPrefix))
@@ -54,18 +39,6 @@ func sDecodeSizeKey(ek []byte) ([]byte, error) {
 	return ek[pos:], nil
 }
 
-func convertRedisKeyToDBSKey(key []byte, member []byte) ([]byte, error) {
-	table, rk, err := extractTableFromRedisKey(key)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkSetKMSize(rk, member); err != nil {
-		return nil, err
-	}
-	dbKey := sEncodeSetKey(table, rk, member)
-	return dbKey, nil
-}
-
 func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
 	buf := make([]byte, getDataTablePrefixBufLen(SetType, table)+len(key)+len(member)+1+2)
 
@@ -77,7 +50,7 @@ func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
 	copy(buf[pos:], key)
 	pos += len(key)
 
-	buf[pos] = setStartSep
+	buf[pos] = collStartSep
 	pos++
 	copy(buf[pos:], member)
 
@@ -105,7 +78,7 @@ func sDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
 	key := ek[pos : pos+keyLen]
 	pos += keyLen
 
-	if ek[pos] != hashStartSep {
+	if ek[pos] != collStartSep {
 		return table, nil, nil, errSetKey
 	}
 
@@ -120,9 +93,7 @@ func sEncodeStartKey(table []byte, key []byte) []byte {
 
 func sEncodeStopKey(table []byte, key []byte) []byte {
 	k := sEncodeSetKey(table, key, nil)
-
-	k[len(k)-1] = setStopSep
-
+	k[len(k)-1] = collStopSep
 	return k
 }
 
@@ -131,12 +102,18 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	if len(table) == 0 {
 		return 0
 	}
-
 	sk := sEncodeSizeKey(key)
+
+	oldh, _, _, err := db.collHeaderMeta(0, SetType, key, false)
+	if err != nil {
+		return 0
+	}
+	rk = db.expiration.encodeToVersionKey(SetType, oldh, rk)
+
 	start := sEncodeStartKey(table, rk)
 	stop := sEncodeStopKey(table, rk)
 
-	num, err := db.SCard(key)
+	num, err := db.sGetSize(key, false)
 	if err != nil {
 		return 0
 	}
@@ -159,22 +136,20 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	}
 	if num > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(SetType, key, nil, false, wb)
 	}
+	db.delExpire(SetType, key, nil, false, wb)
 
 	wb.Delete(sk)
 	return num
 }
 
 // size key include set size and set modify timestamp
-func (db *RockDB) sIncrSize(ts int64, key []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) sIncrSize(ts int64, key []byte, oldh *headerMetaValue, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	sk := sEncodeSizeKey(key)
+	meta := oldh.UserData
 
 	var size int64
-	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
-	if err != nil {
-		return 0, err
-	}
+	var err error
 	if len(meta) == 0 {
 		size = 0
 	} else if len(meta) < 8 {
@@ -192,22 +167,23 @@ func (db *RockDB) sIncrSize(ts int64, key []byte, delta int64, wb *gorocksdb.Wri
 		buf := make([]byte, 16)
 		binary.BigEndian.PutUint64(buf[0:8], uint64(size))
 		binary.BigEndian.PutUint64(buf[8:16], uint64(ts))
-		wb.Put(sk, buf)
+		oldh.UserData = buf
+		nv := oldh.encodeWithData()
+		wb.Put(sk, nv)
 	}
 
 	return size, nil
 }
 
-func (db *RockDB) sGetSize(key []byte) (int64, error) {
+func (db *RockDB) sGetSize(key []byte, useLock bool) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	sk := sEncodeSizeKey(key)
-	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
+	_, meta, expired, err := db.collHeaderMeta(time.Now().UnixNano(), SetType, key, useLock)
 	if err != nil {
 		return 0, err
 	}
-	if len(meta) == 0 {
+	if len(meta) == 0 || expired {
 		return 0, nil
 	}
 	if len(meta) < 8 {
@@ -220,8 +196,7 @@ func (db *RockDB) sGetVer(key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	sk := sEncodeSizeKey(key)
-	meta, err := db.eng.GetBytesNoLock(db.defaultReadOpts, sk)
+	_, meta, _, err := db.collHeaderMeta(time.Now().UnixNano(), SetType, key, true)
 	if err != nil {
 		return 0, err
 	}
@@ -239,17 +214,18 @@ func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.Wr
 	if err != nil {
 		return 0, err
 	}
-
-	ek, err := convertRedisKeyToDBSKey(key, member)
+	oldh, table, rk, err := db.prepareCollKeyForWrite(ts, SetType, key, member)
 	if err != nil {
 		return 0, err
 	}
+
+	ek := sEncodeSetKey(table, rk, member)
 
 	var n int64 = 1
 	if v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); v != nil {
 		n = 0
 	} else {
-		if newNum, err := db.sIncrSize(ts, key, 1, wb); err != nil {
+		if newNum, err := db.sIncrSize(ts, key, oldh, 1, wb); err != nil {
 			return 0, err
 		} else if newNum == 1 {
 			db.IncrTableKeyCount(table, 1, wb)
@@ -272,11 +248,16 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 	wb := db.wb
 	wb.Clear()
 
-	var err error
+	oldh, table, rk, err := db.prepareCollKeyForWrite(ts, SetType, key, nil)
+
+	if err != nil {
+		return 0, err
+	}
+
 	var ek []byte
 	var num int64 = 0
 	for i := 0; i < len(args); i++ {
-		if err := checkSetKMSize(key, args[i]); err != nil {
+		if err := checkCollKFSize(key, args[i]); err != nil {
 			return 0, err
 		}
 		ek = sEncodeSetKey(table, rk, args[i])
@@ -290,7 +271,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 		wb.Put(ek, nil)
 	}
 
-	if newNum, err := db.sIncrSize(ts, key, num, wb); err != nil {
+	if newNum, err := db.sIncrSize(ts, key, oldh, num, wb); err != nil {
 		return 0, err
 	} else if newNum > 0 && newNum == num {
 		db.IncrTableKeyCount(table, 1, wb)
@@ -298,7 +279,6 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
-
 }
 
 func (db *RockDB) SGetVer(key []byte) (int64, error) {
@@ -306,26 +286,44 @@ func (db *RockDB) SGetVer(key []byte) (int64, error) {
 }
 
 func (db *RockDB) SCard(key []byte) (int64, error) {
-	return db.sGetSize(key)
+	return db.sGetSize(key, true)
 }
 
 func (db *RockDB) SKeyExists(key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	sk := sEncodeSizeKey(key)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
-	if v != nil && err == nil {
-		return 1, nil
-	}
-	return 0, err
-}
-
-func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
-	ek, err := convertRedisKeyToDBSKey(key, member)
+	_, metaV, expired, err := db.collHeaderMeta(time.Now().UnixNano(), SetType, key, true)
 	if err != nil {
 		return 0, err
 	}
+	if expired {
+		return 0, nil
+	}
+	if metaV != nil {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
+	tn := time.Now().UnixNano()
+	oldh, _, expired, err := db.collHeaderMeta(tn, SetType, key, true)
+	if err != nil {
+		return 0, err
+	}
+	if expired {
+		return 0, nil
+	}
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+	if err := checkCollKFSize(rk, member); err != nil {
+		return 0, err
+	}
+	rk = db.expiration.encodeToVersionKey(SetType, oldh, rk)
+	ek := sEncodeSetKey(table, rk, member)
 
 	var n int64 = 1
 	if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
@@ -337,7 +335,7 @@ func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
 }
 
 func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
-	num, err := db.sGetSize(key)
+	num, err := db.sGetSize(key, true)
 	if err != nil {
 		return nil, err
 	}
@@ -349,14 +347,19 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 	if num > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
-	table, rk, err := extractTableFromRedisKey(key)
+
+	tn := time.Now().UnixNano()
+	expired, _, table, verKey, err := db.GetCollVersionKey(tn, SetType, key)
 	if err != nil {
 		return nil, err
 	}
-	start := sEncodeStartKey(table, rk)
-	stop := sEncodeStopKey(table, rk)
-
 	v := make([][]byte, 0, num)
+	if expired {
+		return v, nil
+	}
+
+	start := sEncodeStartKey(table, verKey)
+	stop := sEncodeStopKey(table, verKey)
 
 	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
@@ -394,14 +397,18 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 
 	wb := db.wb
 	wb.Clear()
+	oldh, _, _, err := db.collHeaderMeta(ts, SetType, key, false)
+	if err != nil {
+		return 0, err
+	}
+	rk = db.expiration.encodeToVersionKey(SetType, oldh, rk)
 
 	var ek []byte
 	var v []byte
-	var err error
 
 	var num int64 = 0
 	for i := 0; i < len(args); i++ {
-		if err := checkSetKMSize(key, args[i]); err != nil {
+		if err := checkCollKFSize(key, args[i]); err != nil {
 			return 0, err
 		}
 
@@ -415,10 +422,14 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}
 	}
 
-	if newNum, err := db.sIncrSize(ts, key, -num, wb); err != nil {
+	newNum, err := db.sIncrSize(ts, key, oldh, -num, wb)
+	if err != nil {
 		return 0, err
-	} else if num > 0 && newNum == 0 {
+	}
+	if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
+	}
+	if newNum == 0 {
 		db.delExpire(SetType, key, nil, false, wb)
 	}
 
@@ -469,20 +480,21 @@ func (db *RockDB) sMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) err
 }
 
 func (db *RockDB) SExpire(ts int64, key []byte, duration int64) (int64, error) {
-	if exists, err := db.SKeyExists(key); err != nil || exists != 1 {
+	oldh, metaV, expired, err := db.collHeaderMeta(ts, SetType, key, false)
+	if err != nil || expired || metaV == nil {
 		return 0, err
 	}
-	return db.ExpireAt(SetType, key, nil, duration+ts/int64(time.Second))
+
+	rawV := db.expiration.encodeToRawValue(SetType, oldh, metaV)
+	return db.ExpireAt(SetType, key, rawV, duration+ts/int64(time.Second))
 }
 
 func (db *RockDB) SPersist(ts int64, key []byte) (int64, error) {
-	if exists, err := db.SKeyExists(key); err != nil || exists != 1 {
+	oldh, metaV, expired, err := db.collHeaderMeta(ts, SetType, key, false)
+	if err != nil || expired || metaV == nil {
 		return 0, err
 	}
 
-	if ttl, err := db.ttl(0, SetType, key, nil); err != nil || ttl < 0 {
-		return 0, err
-	}
-
-	return db.ExpireAt(SetType, key, nil, 0)
+	rawV := db.expiration.encodeToRawValue(SetType, oldh, metaV)
+	return db.ExpireAt(SetType, key, rawV, 0)
 }

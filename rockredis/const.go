@@ -101,13 +101,13 @@ const (
 	MaxKeySize int = 10240
 
 	//max hash field size
-	MaxHashFieldSize int = 10240
+	MaxHashFieldSize int = MaxKeySize
 
 	//max zset member size
-	MaxZSetMemberSize int = 10240
+	MaxZSetMemberSize int = MaxHashFieldSize
 
 	//max set member size
-	MaxSetMemberSize int = 10240
+	MaxSetMemberSize int = MaxHashFieldSize
 
 	//max value size
 	MaxValueSize int = 1024 * 1024 * 8

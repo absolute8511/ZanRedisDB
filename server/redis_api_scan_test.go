@@ -222,16 +222,16 @@ func TestHashScan(t *testing.T) {
 	ayv, err = goredis.Strings(ay[1], nil)
 	assert.Equal(t, 0, len(ayv))
 	// test scan expired and new created hash key
-	c.Do("HMSET", key, "a", 1, "b", 2)
+	c.Do("HMSET", key, "a", 2, "b", 3, "c", 4)
 	ay, err = goredis.Values(c.Do("HSCAN", key, ""))
 	assert.Nil(t, err)
 	assert.Equal(t, 2, len(ay))
-	checkScanValues(t, ay[1], "a", 1, "b", 2)
+	checkScanValues(t, ay[1], "a", 2, "b", 3, "c", 4)
 
-	ay, err = goredis.Values(c.Do("HREVSCAN", key, "c"))
+	ay, err = goredis.Values(c.Do("HREVSCAN", key, "d"))
 	assert.Nil(t, err)
 	assert.Equal(t, 2, len(ay))
-	checkScanValues(t, ay[1], "b", 2, "a", 1)
+	checkScanValues(t, ay[1], "c", 4, "b", 3, "a", 2)
 }
 
 func TestSetScan(t *testing.T) {
@@ -259,6 +259,31 @@ func TestSetScan(t *testing.T) {
 	} else {
 		checkScanValues(t, ay[1], "b", "a")
 	}
+	// test scan expired key
+	c.Do("sexpire", key, 1)
+	time.Sleep(time.Second * 2)
+	ay, err := goredis.Values(c.Do("SSCAN", key, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	ayv, err := goredis.Strings(ay[1], nil)
+	assert.Equal(t, 0, len(ayv))
+
+	ay, err = goredis.Values(c.Do("SREVSCAN", key, "c"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	ayv, err = goredis.Strings(ay[1], nil)
+	assert.Equal(t, 0, len(ayv))
+	// test scan expired and new created key
+	c.Do("SADD", key, "c", "d")
+	ay, err = goredis.Values(c.Do("SSCAN", key, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	checkScanValues(t, ay[1], "c", "d")
+
+	ay, err = goredis.Values(c.Do("SREVSCAN", key, "e"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(ay))
+	checkScanValues(t, ay[1], "d", "c")
 	changeLogLevel(t, 2, redisport+1)
 }
 

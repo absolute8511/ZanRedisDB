@@ -173,11 +173,9 @@ func TestSetTTL_L(t *testing.T) {
 		t.Fatal("return value from SetTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.SPersist(tn, setKey); err != nil {
-		t.Fatal(err)
-	} else if v != 0 {
-		t.Fatal("return value from SPersist of LocalDeletion Policy != 0")
-	}
+	v, err := db.SPersist(tn, setKey)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(0), v)
 }
 
 func TestZSetTTL_L(t *testing.T) {

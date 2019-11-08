@@ -635,6 +635,170 @@ func TestSet(t *testing.T) {
 	}
 }
 
+func TestSetExpire(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key1 := "default:test:set_expa"
+	f1 := "f1"
+	f2 := "f2"
+	f3 := "f3"
+	f4 := "f4"
+	f5 := "f5"
+	ttl := 3
+
+	n, err := goredis.Int(c.Do("sadd", key1, f1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+
+	c.Do("sexpire", key1, ttl)
+	n, err = goredis.Int(c.Do("sismember", key1, f1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+	n, err = goredis.Int(c.Do("skeyexist", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+
+	realTtl, err := goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+
+	// check sadd,srem, spop keep ttl
+	_, err = goredis.Int(c.Do("sadd", key1, f2, f3))
+	assert.Nil(t, err)
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+
+	vlist, err := goredis.MultiBulk(c.Do("smembers", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 3, len(vlist))
+
+	n, err = goredis.Int(c.Do("srem", key1, f1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+
+	v, err := goredis.String(c.Do("spop", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, f2, v)
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+	// wait expire
+	time.Sleep(time.Second * time.Duration(ttl+2))
+
+	if v, err := goredis.String(c.Do("spop", key1)); err != goredis.ErrNil {
+		t.Fatalf("expired key should be expired: %v, %v", v, err)
+	}
+	n, err = goredis.Int(c.Do("skeyexist", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	n, err = goredis.Int(c.Do("sismember", key1, f3))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	vlist, err = goredis.MultiBulk(c.Do("smembers", key1))
+	assert.Nil(t, err)
+	t.Logf("smembers: %v", vlist)
+	assert.Equal(t, 0, len(vlist))
+
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+
+	//persist expired data should not success
+	_, err = c.Do("spersist", key1)
+	assert.Nil(t, err)
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+	n, err = goredis.Int(c.Do("sismember", key1, f3))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+
+	// renew hash
+	n, err = goredis.Int(c.Do("sadd", key1, f4, f5))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, n)
+	c.Do("sexpire", key1, ttl)
+
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+	n, err = goredis.Int(c.Do("sismember", key1, f1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	n, err = goredis.Int(c.Do("sismember", key1, f4))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+	vlist, err = goredis.MultiBulk(c.Do("smembers", key1))
+	assert.Nil(t, err)
+	t.Logf("smembers: %v", vlist)
+	assert.Equal(t, 2, len(vlist))
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, n)
+	n, err = goredis.Int(c.Do("skeyexist", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+
+	// persist
+	_, err = c.Do("spersist", key1)
+	assert.Nil(t, err)
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	// should not expired
+	n, err = goredis.Int(c.Do("sismember", key1, f5))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, n)
+	n, err = goredis.Int(c.Do("skeyexist", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, n)
+
+	// change ttl
+	_, err = c.Do("sexpire", key1, ttl+4)
+	assert.Nil(t, err)
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl+4, realTtl)
+
+	time.Sleep(time.Second * time.Duration(ttl+6))
+	// check expired kv should not get from any read command
+	if v, err := goredis.String(c.Do("spop", key1)); err != goredis.ErrNil {
+		t.Fatalf("expired key should be expired: %v, %v", v, err)
+	}
+	n, err = goredis.Int(c.Do("skeyexist", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	n, err = goredis.Int(c.Do("sismember", key1, f5))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	vlist, err = goredis.MultiBulk(c.Do("smembers", key1))
+	assert.Nil(t, err)
+	t.Logf("smembers: %v", vlist)
+	assert.Equal(t, 0, len(vlist))
+
+	realTtl, err = goredis.Int(c.Do("sttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+}
+
 func TestSetErrorParams(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
