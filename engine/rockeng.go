@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -328,6 +329,43 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		go db.compactLoop()
 	}
 	return db, nil
+}
+
+func (r *RockEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
+	/*
+			all options we can change is in MutableDBOptions
+		  struct MutableDBOptions {
+		  int max_background_jobs;
+		  int base_background_compactions;
+		  int max_background_compactions;
+		  bool avoid_flush_during_shutdown;
+		  size_t writable_file_max_buffer_size;
+		  uint64_t delayed_write_rate;
+		  uint64_t max_total_wal_size;
+		  uint64_t delete_obsolete_files_period_micros;
+		  unsigned int stats_dump_period_sec;
+		  int max_open_files;
+		  uint64_t bytes_per_sync;
+		  uint64_t wal_bytes_per_sync;
+		  size_t compaction_readahead_size;
+		};
+	*/
+	keys := []string{}
+	values := []string{}
+	if maxCompact > 0 {
+		r.dbOpts.SetMaxBackgroundCompactions(maxCompact)
+		keys = append(keys, "max_background_compactions")
+		values = append(values, strconv.Itoa(maxCompact))
+	}
+	if maxBackJobs > 0 {
+		r.dbOpts.SetMaxBackgroundFlushes(maxBackJobs)
+		keys = append(keys, "max_background_jobs")
+		values = append(values, strconv.Itoa(maxBackJobs))
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return r.eng.SetOptions(keys, values)
 }
 
 func (r *RockEng) compactLoop() {

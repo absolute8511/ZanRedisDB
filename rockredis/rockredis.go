@@ -279,6 +279,10 @@ func (r *RockDB) getIndexer() *IndexMgr {
 	return e
 }
 
+func (r *RockDB) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
+	return r.rockEng.SetMaxBackgroundOptions(maxCompact, maxBackJobs)
+}
+
 func (r *RockDB) CompactRange() {
 	var rg gorocksdb.Range
 	r.eng.CompactRange(rg)

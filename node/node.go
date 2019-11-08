@@ -429,6 +429,13 @@ func (nd *KVNode) GetDBInternalStats() string {
 	return ""
 }
 
+func (nd *KVNode) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
+	if nd.store != nil {
+		return nd.store.SetMaxBackgroundOptions(maxCompact, maxBackJobs)
+	}
+	return nil
+}
+
 func (nd *KVNode) GetWALDBInternalStats() map[string]interface{} {
 	if nd.rn == nil {
 		return nil

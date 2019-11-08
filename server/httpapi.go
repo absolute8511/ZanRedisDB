@@ -497,6 +497,24 @@ func (s *Server) doGetDynamicConf(w http.ResponseWriter, req *http.Request, ps h
 	return nil, nil
 }
 
+func (s *Server) doSetDBOptions(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	paramKey := reqParams.Get("key")
+	paramV := reqParams.Get("value")
+	if paramKey == "" || paramV == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG: option key empty"}
+	}
+	sLog.Infof("try set db option %v to : %v", paramKey, paramV)
+	err = s.nsMgr.SetDBOptions(paramKey, paramV)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	return nil, nil
+}
+
 func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	fromCluster := ps.ByName("clustername")
 	if fromCluster == "" {
@@ -793,6 +811,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APITableStats, common.Decorate(s.doTableStats, common.V1))
 	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
+	router.Handle("POST", "/db/options/set", common.Decorate(s.doSetDBOptions, log, common.V1))
 	router.Handle("GET", "/waldb/stats", common.Decorate(s.doWALDBStats, common.V1))
 	router.Handle("GET", "/db/perf", common.Decorate(s.doDBPerf, log, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))

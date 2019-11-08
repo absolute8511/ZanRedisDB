@@ -194,6 +194,60 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	return ns
 }
 
+func (nsm *NamespaceMgr) SetDBOptions(key string, value string) error {
+	key = strings.ToLower(key)
+	switch key {
+	case "rate_limiter_bytes_per_sec":
+		bytes, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return err
+		}
+		nsm.SetRateLimiterBytesPerSec(bytes)
+	case "max_background_compactions":
+		maxCompact, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		nsm.SetMaxBackgroundOptions(maxCompact, 0)
+	case "max_background_jobs":
+		maxBackJobs, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		nsm.SetMaxBackgroundOptions(0, maxBackJobs)
+	default:
+		return fmt.Errorf("db options %v not support", key)
+	}
+	return nil
+}
+
+func (nsm *NamespaceMgr) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
+	var err error
+	nsm.mutex.RLock()
+	defer nsm.mutex.RUnlock()
+	for _, n := range nsm.kvNodes {
+		if !n.IsReady() {
+			continue
+		}
+		err = n.Node.SetMaxBackgroundOptions(maxCompact, maxBackJobs)
+		if err != nil {
+			break
+		}
+	}
+	return err
+}
+
+func (nsm *NamespaceMgr) SetRateLimiterBytesPerSec(bytesPerSec int64) {
+	if nsm.machineConf.RocksDBSharedConfig == nil {
+		return
+	}
+	limiter := nsm.machineConf.RocksDBSharedConfig.SharedRateLimiter
+	if limiter == nil {
+		return
+	}
+	limiter.SetBytesPerSecond(bytesPerSec)
+}
+
 func (nsm *NamespaceMgr) SetIClusterInfo(clusterInfo common.IClusterInfo) {
 	nsm.clusterInfo = clusterInfo
 }
