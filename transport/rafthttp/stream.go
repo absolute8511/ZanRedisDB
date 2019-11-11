@@ -350,7 +350,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	case streamTypeMsgAppV2:
 		dec = newMsgAppV2Decoder(rc, cr.tr.ID, cr.peerID)
 	case streamTypeMessage:
-		dec = &messageDecoder{r: rc}
+		dec = newMessageDecoder(rc)
 	default:
 		plog.Panicf("unhandled stream type %s", t)
 	}

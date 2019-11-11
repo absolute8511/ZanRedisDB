@@ -16,6 +16,7 @@ package node
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -56,6 +57,7 @@ type entryQueue struct {
 	lazyFreeCycle uint64
 	mu            sync.Mutex
 	waitC         chan struct{}
+	waitCnt       int64
 }
 
 func newEntryQueue(size uint64, lazyFreeCycle uint64) *entryQueue {
@@ -93,18 +95,34 @@ func (q *entryQueue) addWait(ent elemT, to time.Duration) (bool, bool) {
 		added, stopped, _ := q.add(ent)
 		return added, stopped
 	}
-	t := time.NewTimer(to)
-	defer t.Stop()
+	var t *time.Timer
 	for {
 		added, stopped, w := q.add(ent)
 		if added || stopped {
+			if t != nil {
+				t.Stop()
+			}
 			return added, stopped
 		}
+		// too full
+		if atomic.LoadInt64(&q.waitCnt) > int64(q.size)*5 {
+			if t != nil {
+				t.Stop()
+			}
+			return false, stopped
+		}
+		if t == nil {
+			t = time.NewTimer(to)
+		}
+		atomic.AddInt64(&q.waitCnt, 1)
 		select {
 		case <-t.C:
+			atomic.AddInt64(&q.waitCnt, -1)
+			t.Stop()
 			return false, false
 		case <-w:
 		}
+		atomic.AddInt64(&q.waitCnt, -1)
 	}
 }
 

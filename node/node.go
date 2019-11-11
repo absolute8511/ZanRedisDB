@@ -52,7 +52,7 @@ const (
 	CustomReq       int8 = 1
 	SchemaChangeReq int8 = 2
 	proposeTimeout       = time.Second * 4
-	proposeQueueLen      = 500
+	proposeQueueLen      = 800
 	raftSlow             = time.Millisecond * 200
 )
 
@@ -549,6 +549,7 @@ func (nd *KVNode) handleProposeReq() {
 			if len(ireqs) == 0 {
 				continue
 			}
+			// entryQueue.get will be reused, make sure copy entrys before next get
 			for _, r := range ireqs {
 				reqList.Reqs = append(reqList.Reqs, r.reqData)
 			}

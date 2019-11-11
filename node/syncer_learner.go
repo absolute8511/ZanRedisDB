@@ -340,8 +340,10 @@ func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop ch
 			t := time.NewTimer(time.Second)
 			select {
 			case <-stop:
+				t.Stop()
 				return true, common.ErrStopped
 			case <-sm.sendStop:
+				t.Stop()
 				return true, common.ErrStopped
 			case <-t.C:
 				t.Stop()
