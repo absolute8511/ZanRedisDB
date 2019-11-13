@@ -367,7 +367,7 @@ func (r *RockEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error
 	if len(keys) == 0 {
 		return nil
 	}
-	return r.eng.SetOptions(keys, values)
+	return r.eng.SetDBOptions(keys, values)
 }
 
 func (r *RockEng) compactLoop() {

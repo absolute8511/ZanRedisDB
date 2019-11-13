@@ -208,13 +208,19 @@ func (nsm *NamespaceMgr) SetDBOptions(key string, value string) error {
 		if err != nil {
 			return err
 		}
-		nsm.SetMaxBackgroundOptions(maxCompact, 0)
+		err = nsm.SetMaxBackgroundOptions(maxCompact, 0)
+		if err != nil {
+			return err
+		}
 	case "max_background_jobs":
 		maxBackJobs, err := strconv.Atoi(value)
 		if err != nil {
 			return err
 		}
-		nsm.SetMaxBackgroundOptions(0, maxBackJobs)
+		err = nsm.SetMaxBackgroundOptions(0, maxBackJobs)
+		if err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("db options %v not support", key)
 	}
