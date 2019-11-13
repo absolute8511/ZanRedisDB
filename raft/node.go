@@ -17,6 +17,7 @@ package raft
 import (
 	"errors"
 	"runtime"
+	"time"
 
 	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
@@ -25,16 +26,20 @@ import (
 type SnapshotStatus int
 
 const (
-	SnapshotFinish  SnapshotStatus = 1
-	SnapshotFailure SnapshotStatus = 2
+	SnapshotFinish   SnapshotStatus = 1
+	SnapshotFailure  SnapshotStatus = 2
+	queueWaitTime                   = time.Millisecond * 10
+	recvQueueLen                    = 1024 * 8
+	proposalQueueLen                = 1024 * 4
 )
 
 var (
 	emptyState = pb.HardState{}
 
 	// ErrStopped is returned by methods on Nodes that have been stopped.
-	ErrStopped    = errors.New("raft: stopped")
-	errMsgDropped = errors.New("raft message dropped")
+	ErrStopped           = errors.New("raft: stopped")
+	errMsgDropped        = errors.New("raft message dropped")
+	errProposalAddFailed = errors.New("add proposal to queue failed")
 )
 
 // SoftState provides state that is useful for logging and debugging.
@@ -243,24 +248,25 @@ func RestartNode(c *Config) Node {
 
 // node is the canonical implementation of the Node interface
 type node struct {
-	propc      chan msgWithDrop
-	recvc      chan msgWithDrop
-	confc      chan pb.ConfChange
-	confstatec chan pb.ConfState
-	readyc     chan Ready
-	advancec   chan struct{}
-	tickc      chan struct{}
-	done       chan struct{}
-	stop       chan struct{}
-	status     chan chan Status
+	propQ         *ProposalQueue
+	msgQ          *MessageQueue
+	confc         chan pb.ConfChange
+	confstatec    chan pb.ConfState
+	readyc        chan Ready
+	advancec      chan struct{}
+	tickc         chan struct{}
+	done          chan struct{}
+	stop          chan struct{}
+	status        chan chan Status
+	eventNotifyCh chan struct{}
 
 	logger Logger
 }
 
 func newNode() node {
 	return node{
-		propc:      make(chan msgWithDrop, 10),
-		recvc:      make(chan msgWithDrop, 10),
+		propQ:      NewProposalQueue(proposalQueueLen, 1),
+		msgQ:       NewMessageQueue(recvQueueLen, false, 1),
 		confc:      make(chan pb.ConfChange),
 		confstatec: make(chan pb.ConfState),
 		readyc:     make(chan Ready),
@@ -268,10 +274,11 @@ func newNode() node {
 		// make tickc a buffered chan, so raft node can buffer some ticks when the node
 		// is busy processing raft messages. Raft node will resume process buffered
 		// ticks when it becomes idle.
-		tickc:  make(chan struct{}, 128),
-		done:   make(chan struct{}),
-		stop:   make(chan struct{}),
-		status: make(chan chan Status),
+		tickc:         make(chan struct{}, 128),
+		done:          make(chan struct{}),
+		stop:          make(chan struct{}),
+		status:        make(chan chan Status),
+		eventNotifyCh: make(chan struct{}, 1),
 	}
 }
 
@@ -288,13 +295,13 @@ func (n *node) Stop() {
 }
 
 func (n *node) run(r *raft) {
-	var propc chan msgWithDrop
 	var readyc chan Ready
 	var advancec chan struct{}
 	var prevLastUnstablei, prevLastUnstablet uint64
 	var havePrevLastUnstablei bool
 	var prevSnapi uint64
 	var rd Ready
+	needHandleProposal := true
 
 	lead := None
 	prevSoftSt := r.softState()
@@ -330,70 +337,25 @@ func (n *node) run(r *raft) {
 				} else {
 					r.logger.Infof("raft.node: %x changed leader from %x to %x at term %d", r.id, r.group.Name, lead, r.lead, r.Term)
 				}
-				propc = n.propc
+				needHandleProposal = true
 			} else {
 				r.logger.Infof("raft.node: %x(%v) lost leader %x at term %d", r.id, r.group.Name, lead, r.Term)
-				propc = nil
+				needHandleProposal = false
 			}
 			lead = r.lead
 		}
 
 		select {
-		// TODO: maybe buffer the config propose if there exists one (the way
-		// described in raft dissertation)
-		// Currently it is dropped in Step silently.
-		case mdrop := <-propc:
-			m := mdrop.m
-			m.From = r.id
-			m.FromGroup = r.group
-			err := r.Step(m)
-			if err == errMsgDropped && mdrop.dropCB != nil {
-				mdrop.dropCB()
+		case <-n.eventNotifyCh:
+			msgs := n.msgQ.Get()
+			for i, m := range msgs {
+				n.handleReceivedMessage(r, m)
+				msgs[i].Entries = nil
 			}
-		case mdrop := <-n.recvc:
-			m := mdrop.m
-			// filter out response message from unknown From.
-			from := r.getProgress(m.From)
-			if from != nil || !IsResponseMsg(m.Type) {
-				if m.Type == pb.MsgTransferLeader {
-					if m.FromGroup.NodeId == 0 {
-						if from == nil {
-							if m.From == r.id {
-								m.FromGroup = r.group
-							} else {
-								n.logger.Errorf("no replica found %v while processing : %v",
-									m.From, m.String())
-								continue
-							}
-						} else {
-							m.FromGroup = from.group
-						}
-					}
-					if m.ToGroup.NodeId == 0 {
-						pr := r.getProgress(m.To)
-						if pr == nil {
-							if m.To == r.id {
-								m.ToGroup = r.group
-							} else {
-								n.logger.Errorf("no replica found %v while processing : %v",
-									m.To, m.String())
-								continue
-							}
-						} else {
-							m.ToGroup = pr.group
-						}
-					}
-				} else {
-					// if we missing the peer node group info, try update it from
-					// raft message
-					if from != nil && from.group.NodeId == 0 && m.FromGroup.NodeId > 0 &&
-						m.FromGroup.GroupId == r.group.GroupId {
-						from.group = m.FromGroup
-					}
-				}
-				err := r.Step(m)
-				if err == errMsgDropped && mdrop.dropCB != nil {
-					mdrop.dropCB()
+			if needHandleProposal {
+				props := n.propQ.Get()
+				for _, p := range props {
+					n.handleProposal(r, p)
 				}
 			}
 		case cc := <-n.confc:
@@ -417,7 +379,7 @@ func (n *node) run(r *raft) {
 				// block incoming proposal when local node is
 				// removed
 				if cc.ReplicaID == r.id {
-					propc = nil
+					needHandleProposal = false
 				}
 				r.removeNode(cc.ReplicaID)
 			case pb.ConfChangeUpdateNode:
@@ -471,6 +433,106 @@ func (n *node) run(r *raft) {
 	}
 }
 
+func (n *node) addProposalToQueue(ctx context.Context, p msgWithDrop, to time.Duration, stopC chan struct{}) error {
+	if added, stopped, err := n.propQ.AddWait(ctx, p, to, stopC); !added || stopped {
+		if n.logger != nil {
+			n.logger.Warningf("dropped an incoming proposal: %v", p.m.String())
+		}
+		if err != nil {
+			return err
+		}
+		if stopped {
+			return ErrStopped
+		}
+		if !added {
+			return errProposalAddFailed
+		}
+	}
+	select {
+	case n.eventNotifyCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (n *node) addReqMessageToQueue(req pb.Message) {
+	if req.Type == pb.MsgSnap {
+		n.msgQ.AddSnapshot(req)
+	} else {
+		if added, stopped := n.msgQ.Add(req); !added || stopped {
+			if n.logger != nil {
+				n.logger.Warningf("dropped an incoming message: %v", req.String())
+			}
+			return
+		}
+	}
+	select {
+	case n.eventNotifyCh <- struct{}{}:
+	default:
+	}
+}
+
+func (n *node) handleReceivedMessage(r *raft, m pb.Message) {
+	from := r.getProgress(m.From)
+	// filter out response message from unknown From.
+	if from == nil && IsResponseMsg(m.Type) {
+		m.Entries = nil
+		return
+	}
+	if m.Type == pb.MsgTransferLeader {
+		if m.FromGroup.NodeId == 0 {
+			if from == nil {
+				if m.From == r.id {
+					m.FromGroup = r.group
+				} else {
+					if n.logger != nil {
+						n.logger.Errorf("no replica found %v while processing : %v",
+							m.From, m.String())
+					}
+					return
+				}
+			} else {
+				m.FromGroup = from.group
+			}
+		}
+		if m.ToGroup.NodeId == 0 {
+			pr := r.getProgress(m.To)
+			if pr == nil {
+				if m.To == r.id {
+					m.ToGroup = r.group
+				} else {
+					if n.logger != nil {
+						n.logger.Errorf("no replica found %v while processing : %v",
+							m.To, m.String())
+					}
+					return
+				}
+			} else {
+				m.ToGroup = pr.group
+			}
+		}
+	} else {
+		// if we missing the peer node group info, try update it from
+		// raft message
+		if from != nil && from.group.NodeId == 0 && m.FromGroup.NodeId > 0 &&
+			m.FromGroup.GroupId == r.group.GroupId {
+			from.group = m.FromGroup
+		}
+	}
+	r.Step(m)
+	m.Entries = nil
+}
+
+func (n *node) handleProposal(r *raft, mdrop msgWithDrop) {
+	m := mdrop.m
+	m.From = r.id
+	m.FromGroup = r.group
+	err := r.Step(m)
+	if err == errMsgDropped && mdrop.dropCB != nil {
+		mdrop.dropCB()
+	}
+}
+
 // Tick increments the internal logical clock for this Node. Election timeouts
 // and heartbeat timeouts are in units of ticks.
 func (n *node) Tick() {
@@ -478,7 +540,9 @@ func (n *node) Tick() {
 	case n.tickc <- struct{}{}:
 	case <-n.done:
 	default:
-		n.logger.Warningf("A tick missed to fire. Node blocks too long!")
+		if n.logger != nil {
+			n.logger.Warningf("A tick missed to fire. Node blocks too long!")
+		}
 	}
 }
 
@@ -510,19 +574,13 @@ func (n *node) ProposeConfChange(ctx context.Context, cc pb.ConfChange) error {
 }
 
 func (n *node) stepWithDrop(ctx context.Context, m pb.Message, cancel context.CancelFunc) error {
-	ch := n.recvc
-	if m.Type == pb.MsgProp {
-		ch = n.propc
+	if m.Type != pb.MsgProp {
+		n.addReqMessageToQueue(m)
+		return nil
 	}
 
-	select {
-	case ch <- msgWithDrop{m: m, dropCB: cancel}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-n.done:
-		return ErrStopped
-	}
+	err := n.addProposalToQueue(ctx, msgWithDrop{m: m, dropCB: cancel}, queueWaitTime, n.done)
+	return err
 }
 
 // Step advances the state machine using msgs. The ctx.Err() will be returned,
@@ -564,28 +622,17 @@ func (n *node) Status() Status {
 }
 
 func (n *node) ReportUnreachable(id uint64, group pb.Group) {
-	select {
-	case n.recvc <- msgWithDrop{m: pb.Message{Type: pb.MsgUnreachable, From: id, FromGroup: group}, dropCB: nil}:
-	case <-n.done:
-	}
+	n.addReqMessageToQueue(pb.Message{Type: pb.MsgUnreachable, From: id, FromGroup: group})
 }
 
 func (n *node) ReportSnapshot(id uint64, gp pb.Group, status SnapshotStatus) {
 	rej := status == SnapshotFailure
-
-	select {
-	case n.recvc <- msgWithDrop{m: pb.Message{Type: pb.MsgSnapStatus, From: id, FromGroup: gp, Reject: rej}, dropCB: nil}:
-	case <-n.done:
-	}
+	n.addReqMessageToQueue(pb.Message{Type: pb.MsgSnapStatus, From: id, FromGroup: gp, Reject: rej})
 }
 
 func (n *node) TransferLeadership(ctx context.Context, lead, transferee uint64) {
-	select {
 	// manually set 'from' and 'to', so that leader can voluntarily transfers its leadership
-	case n.recvc <- msgWithDrop{m: pb.Message{Type: pb.MsgTransferLeader, From: transferee, To: lead}, dropCB: nil}:
-	case <-n.done:
-	case <-ctx.Done():
-	}
+	n.addReqMessageToQueue(pb.Message{Type: pb.MsgTransferLeader, From: transferee, To: lead})
 }
 
 func (n *node) ReadIndex(ctx context.Context, rctx []byte) error {

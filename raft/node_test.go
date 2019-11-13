@@ -30,29 +30,26 @@ import (
 func TestNodeStep(t *testing.T) {
 	for i, msgn := range raftpb.MessageType_name {
 		n := &node{
-			propc: make(chan msgWithDrop, 1),
-			recvc: make(chan msgWithDrop, 1),
+			propQ: NewProposalQueue(1024, 1),
+			msgQ:  NewMessageQueue(1024, false, 1),
 		}
 		msgt := raftpb.MessageType(i)
 		n.Step(context.TODO(), raftpb.Message{Type: msgt})
 		// Proposal goes to proc chan. Others go to recvc chan.
 		if msgt == raftpb.MsgProp {
-			select {
-			case <-n.propc:
-			default:
+			props := n.propQ.Get()
+			if len(props) == 0 {
 				t.Errorf("%d: cannot receive %s on propc chan", msgt, msgn)
 			}
 		} else {
 			if IsLocalMsg(msgt) {
-				select {
-				case <-n.recvc:
+				msgs := n.msgQ.Get()
+				if len(msgs) != 0 {
 					t.Errorf("%d: step should ignore %s", msgt, msgn)
-				default:
 				}
 			} else {
-				select {
-				case <-n.recvc:
-				default:
+				msgs := n.msgQ.Get()
+				if len(msgs) == 0 {
 					t.Errorf("%d: cannot receive %s on recvc chan", msgt, msgn)
 				}
 			}
@@ -64,7 +61,7 @@ func TestNodeStep(t *testing.T) {
 func TestNodeStepUnblock(t *testing.T) {
 	// a node without buffer to block step
 	n := &node{
-		propc: make(chan msgWithDrop),
+		propQ: NewProposalQueue(1, 1),
 		done:  make(chan struct{}),
 	}
 
@@ -78,6 +75,9 @@ func TestNodeStepUnblock(t *testing.T) {
 		{stopFunc, ErrStopped},
 		{cancel, context.Canceled},
 	}
+
+	// fill one to make it full
+	n.Step(ctx, raftpb.Message{Type: raftpb.MsgProp})
 
 	for i, tt := range tests {
 		errc := make(chan error, 1)
