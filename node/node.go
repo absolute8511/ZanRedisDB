@@ -519,7 +519,7 @@ func (nd *KVNode) handleProposeReq() {
 	waitReqPool := &sync.Pool{}
 	waitReqPool.New = func() interface{} {
 		obj := &waitReqHeaders{}
-		obj.headers = make([]RequestHeader, 0, proposeQueueLen*2)
+		obj.headers = make([]RequestHeader, 0, 4)
 		obj.completer = make(chan RequestResultCode, 1)
 		obj.pool = waitReqPool
 		return obj
