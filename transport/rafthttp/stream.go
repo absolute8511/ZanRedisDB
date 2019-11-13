@@ -277,18 +277,32 @@ type streamReader struct {
 	tr     *Transport
 	picker *urlPicker
 	status *peerStatus
-	recvc  chan<- raftpb.Message
-	propc  chan<- raftpb.Message
 
 	errorc chan<- error
 
-	mu     sync.Mutex
-	paused bool
-	cancel func()
-	closer io.Closer
+	mu            sync.Mutex
+	paused        bool
+	cancel        func()
+	processCancel func()
+	closer        io.Closer
+	r             Raft
 
 	stopc chan struct{}
 	done  chan struct{}
+}
+
+func startStreamReader(peerID types.ID, typ streamType, tr *Transport,
+	picker *urlPicker, status *peerStatus, r Raft) *streamReader {
+	reader := &streamReader{
+		peerID: peerID,
+		typ:    typ,
+		tr:     tr,
+		picker: picker,
+		status: status,
+		r:      r,
+	}
+	reader.start()
+	return reader
 }
 
 func (r *streamReader) start() {
@@ -364,6 +378,8 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	default:
 		cr.closer = rc
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cr.processCancel = cancel
 	cr.mu.Unlock()
 
 	for {
@@ -396,20 +412,12 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			plog.Errorf("receive message not group: %v", m.String())
 		}
 
-		recvc := cr.recvc
-		if m.Type == raftpb.MsgProp {
-			recvc = cr.propc
+		err = cr.r.Process(ctx, m)
+		if cr.status.isActive() {
+			plog.MergeWarningf("dropped internal raft message from %s since receiving buffer is full (overloaded network)", types.ID(m.From))
 		}
-
-		select {
-		case recvc <- m:
-		default:
-			if cr.status.isActive() {
-				plog.MergeWarningf("dropped internal raft message from %s since receiving buffer is full (overloaded network)", types.ID(m.From))
-			}
-			plog.Debugf("dropped %s from %s since receiving buffer is full", m.Type, types.ID(m.From))
-			recvFailures.WithLabelValues(m.FromGroup.Name).Inc()
-		}
+		plog.Debugf("dropped %s from %s since receiving buffer is full", m.Type, types.ID(m.From))
+		recvFailures.WithLabelValues(m.FromGroup.Name).Inc()
 	}
 }
 
@@ -420,6 +428,9 @@ func (cr *streamReader) stop() {
 		cr.cancel()
 	}
 	cr.close()
+	if cr.processCancel != nil {
+		cr.processCancel()
+	}
 	cr.mu.Unlock()
 	<-cr.done
 }
