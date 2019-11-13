@@ -434,6 +434,7 @@ func (n *node) run(r *raft) {
 }
 
 func (n *node) addProposalToQueue(ctx context.Context, p msgWithDrop, to time.Duration, stopC chan struct{}) error {
+	start := time.Now()
 	if added, stopped, err := n.propQ.AddWait(ctx, p, to, stopC); !added || stopped {
 		if n.logger != nil {
 			n.logger.Warningf("dropped an incoming proposal: %v", p.m.String())
@@ -448,9 +449,16 @@ func (n *node) addProposalToQueue(ctx context.Context, p msgWithDrop, to time.Du
 			return errProposalAddFailed
 		}
 	}
+	cost1 := time.Since(start)
 	select {
 	case n.eventNotifyCh <- struct{}{}:
 	default:
+	}
+	cost2 := time.Since(start)
+	if cost2 > time.Millisecond*50 {
+		if n.logger != nil {
+			n.logger.Infof("add proposal queue slow: %v, %v", cost1, cost2)
+		}
 	}
 	return nil
 }

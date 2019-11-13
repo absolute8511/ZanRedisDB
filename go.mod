@@ -20,6 +20,7 @@ require (
 	github.com/coreos/go-semver v0.2.0
 	github.com/coreos/go-systemd v0.0.0-20180511133405-39ca1b05acc7 // indirect
 	github.com/coreos/pkg v0.0.0-20180108230652-97fdf19511ea
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgraph-io/badger v0.0.0-20190301165350-b669ca040b3d
 	github.com/dgryski/go-bits v0.0.0-20180113010104-bd8a69a71dc2 // indirect
 	github.com/dgryski/go-farm v0.0.0-20190104051053-3adb47b1fb0f // indirect
@@ -55,7 +56,7 @@ require (
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
 	github.com/youzan/go-zanredisdb v0.3.5
-	github.com/youzan/gorocksdb v0.0.0-20191108114329-4115131ea21f
+	github.com/youzan/gorocksdb v0.0.0-20191113104539-6ef5982178f0
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20180521201818-8e0cdda24ed4
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e // indirect
