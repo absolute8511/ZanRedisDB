@@ -86,6 +86,12 @@ func TestDBCompact(t *testing.T) {
 	v, err = db.KVGet(key)
 	assert.Nil(t, err)
 	assert.Equal(t, string(value), string(v))
+	err = db.SetMaxBackgroundOptions(10, 0)
+	assert.Nil(t, err)
+	err = db.SetMaxBackgroundOptions(0, 10)
+	assert.Nil(t, err)
+	err = db.SetMaxBackgroundOptions(10, 10)
+	assert.Nil(t, err)
 }
 
 func TestIsSameSST(t *testing.T) {
