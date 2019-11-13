@@ -588,6 +588,8 @@ func (nd *KVNode) handleProposeReq() {
 			if len(wh.completer) > 0 {
 				wh.completer = make(chan RequestResultCode, 1)
 			}
+			poolCost := time.Now().UnixNano() - reqList.Timestamp
+
 			cancel = func() {
 				wh.notify(ReqCancelled)
 			}
@@ -607,7 +609,8 @@ func (nd *KVNode) handleProposeReq() {
 			} else {
 				proposalCost := time.Now().UnixNano() - reqList.Timestamp
 				if proposalCost >= int64(raftSlow.Nanoseconds()) {
-					nd.rn.Infof("raft slow for batch propose: %v, cost %v, wait len: %v", len(reqList.Reqs), proposalCost, len(nd.waitReqCh))
+					nd.rn.Infof("raft slow for batch propose: %v, cost %v-%v, wait len: %v",
+						len(reqList.Reqs), poolCost, proposalCost, len(nd.waitReqCh))
 				}
 				for _, r := range reqList.Reqs {
 					wh.headers = append(wh.headers, r.Header)
