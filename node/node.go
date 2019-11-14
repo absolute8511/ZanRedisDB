@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	math "math"
 	"os"
 	"path"
 	"runtime"
@@ -54,6 +55,9 @@ const (
 	proposeTimeout       = time.Second * 4
 	proposeQueueLen      = 800
 	raftSlow             = time.Millisecond * 200
+	maxPoolIDLen         = 256
+	waitPoolSize         = 6
+	minPoolIDLen         = 8
 )
 
 const (
@@ -108,7 +112,7 @@ const (
 )
 
 type waitReqHeaders struct {
-	headers   []RequestHeader
+	ids       []uint64
 	wr        wait.WaitResult
 	completer chan RequestResultCode
 	pool      *sync.Pool
@@ -117,8 +121,10 @@ type waitReqHeaders struct {
 func (wrh *waitReqHeaders) release() {
 	if wrh != nil {
 		wrh.wr = nil
-		wrh.headers = wrh.headers[:0]
-		wrh.pool.Put(wrh)
+		if wrh.pool != nil {
+			wrh.ids = wrh.ids[:0]
+			wrh.pool.Put(wrh)
+		}
 	}
 }
 
@@ -128,6 +134,42 @@ func (wrh *waitReqHeaders) notify(r RequestResultCode) {
 	default:
 		panic("notify request result should not block")
 	}
+}
+
+type waitReqPoolArray []*sync.Pool
+
+func newWaitReqPoolArray() waitReqPoolArray {
+	wa := make(waitReqPoolArray, waitPoolSize)
+	for i := 0; i < len(wa); i++ {
+		waitReqPool := &sync.Pool{}
+		l := minPoolIDLen * int(math.Pow(float64(2), float64(i)))
+		waitReqPool.New = func() interface{} {
+			obj := &waitReqHeaders{}
+			obj.ids = make([]uint64, 0, l)
+			obj.completer = make(chan RequestResultCode, 1)
+			obj.pool = waitReqPool
+			return obj
+		}
+		wa[i] = waitReqPool
+	}
+	return wa
+}
+
+func (wa waitReqPoolArray) getWaitReq(idLen int) *waitReqHeaders {
+	if idLen > maxPoolIDLen {
+		obj := &waitReqHeaders{}
+		obj.ids = make([]uint64, 0, idLen)
+		obj.completer = make(chan RequestResultCode, 1)
+		return obj
+	}
+	index := 0
+	for i := 0; i < waitPoolSize; i++ {
+		index = i
+		if idLen <= minPoolIDLen*int(math.Pow(float64(2), float64(i))) {
+			break
+		}
+	}
+	return wa[index].Get().(*waitReqHeaders)
 }
 
 type customProposeData struct {
@@ -477,19 +519,19 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 }
 
 func (nd *KVNode) handleProposeRsp() {
-	doWait := func(completer chan RequestResultCode, wr wait.WaitResult, headers []RequestHeader) {
+	doWait := func(completer chan RequestResultCode, wr wait.WaitResult, ids []uint64) {
 		select {
 		case code := <-completer:
 			if code != ReqComplete {
-				for _, h := range headers {
-					nd.w.Trigger(h.ID, ErrProposalCanceled)
+				for _, id := range ids {
+					nd.w.Trigger(id, ErrProposalCanceled)
 				}
 			}
 		case <-wr.WaitC():
 			// this batch has been processed
 		case <-nd.stopChan:
-			for _, h := range headers {
-				nd.w.Trigger(h.ID, common.ErrStopped)
+			for _, id := range ids {
+				nd.w.Trigger(id, common.ErrStopped)
 			}
 		}
 	}
@@ -500,7 +542,7 @@ func (nd *KVNode) handleProposeRsp() {
 				nodeLog.Info("handle proposal response loop exit")
 				return
 			}
-			doWait(wh.completer, wh.wr, wh.headers)
+			doWait(wh.completer, wh.wr, wh.ids)
 			wh.release()
 		}
 	}
@@ -516,14 +558,7 @@ func (nd *KVNode) handleProposeReq() {
 	// sending too much pipeline which overflow the proposal buffer.
 	//lastReqList := make([]*internalReq, 0, 1024)
 
-	waitReqPool := &sync.Pool{}
-	waitReqPool.New = func() interface{} {
-		obj := &waitReqHeaders{}
-		obj.headers = make([]RequestHeader, 0, 4)
-		obj.completer = make(chan RequestResultCode, 1)
-		obj.pool = waitReqPool
-		return obj
-	}
+	wrPools := newWaitReqPoolArray()
 
 	defer func() {
 		if e := recover(); e != nil {
@@ -584,7 +619,7 @@ func (nd *KVNode) handleProposeReq() {
 			var ctx context.Context
 			var cancel context.CancelFunc
 			var newCan context.CancelFunc
-			wh := waitReqPool.Get().(*waitReqHeaders)
+			wh := wrPools.getWaitReq(len(reqList.Reqs))
 			if len(wh.completer) > 0 {
 				wh.completer = make(chan RequestResultCode, 1)
 			}
@@ -613,7 +648,7 @@ func (nd *KVNode) handleProposeReq() {
 						len(reqList.Reqs), poolCost, proposalCost, len(nd.waitReqCh))
 				}
 				for _, r := range reqList.Reqs {
-					wh.headers = append(wh.headers, r.Header)
+					wh.ids = append(wh.ids, r.Header.ID)
 				}
 				wh.wr = lastReq.wr
 
