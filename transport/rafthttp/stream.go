@@ -171,18 +171,30 @@ func (cw *streamWriter) run() {
 			heartbeatc, msgc = nil, nil
 
 		case m := <-msgc:
-			err := enc.encode(&m)
-			if err == nil {
+			var err error
+			for done := false; !done; {
+				err = enc.encode(&m)
 				unflushed += m.Size()
-
-				if len(msgc) == 0 || batched > streamBufSize/2 {
-					flusher.Flush()
-					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
-					unflushed = 0
-					batched = 0
-				} else {
-					batched++
+				batched++
+				m.Entries = nil
+				if err != nil {
+					break
 				}
+				if batched > streamBufSize/2 {
+					done = true
+					break
+				}
+				select {
+				case m = <-msgc:
+				default:
+					done = true
+				}
+			}
+			if err == nil {
+				flusher.Flush()
+				sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
+				unflushed = 0
+				batched = 0
 
 				continue
 			}

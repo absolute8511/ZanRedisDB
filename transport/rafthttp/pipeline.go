@@ -17,10 +17,11 @@ package rafthttp
 import (
 	"bytes"
 	"errors"
-	"golang.org/x/net/context"
 	"io/ioutil"
 	"sync"
 	"time"
+
+	"golang.org/x/net/context"
 
 	"github.com/youzan/ZanRedisDB/pkg/pbutil"
 	"github.com/youzan/ZanRedisDB/pkg/types"

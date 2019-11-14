@@ -373,6 +373,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	t.Logf("current leader commit: %v", leaderci)
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
 	_, remoteIndex, ts = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
+	t.Logf("remote synced: %v, %v (%v-%v)", remoteIndex, ts, writeTs, writeTs2)
 	assert.Equal(t, leaderci, remoteIndex)
 	assert.True(t, ts <= writeTs2)
 	assert.True(t, ts > writeTs)
@@ -432,6 +433,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 
 	waitSyncedWithCommit(t, time.Minute, leaderci, learnerNode, true)
 	_, remoteIndex, ts = remoteNode.Node.GetRemoteClusterSyncedRaft(clusterName)
+	t.Logf("remote synced: %v, %v (%v-%v)", remoteIndex, ts, writeTs2, writeTs3)
 	assert.Equal(t, leaderci, remoteIndex)
 	assert.True(t, ts <= writeTs3)
 	assert.True(t, ts > writeTs2)
