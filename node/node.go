@@ -57,7 +57,7 @@ const (
 	raftSlow             = time.Millisecond * 200
 	maxPoolIDLen         = 256
 	waitPoolSize         = 6
-	minPoolIDLen         = 8
+	minPoolIDLen         = 4
 )
 
 const (
@@ -606,7 +606,6 @@ func (nd *KVNode) handleProposeReq() {
 			reqList.Reqs = reqList.Reqs[:0]
 			continue
 		}
-		//nd.rn.Infof("handle req %v", len(reqList.Reqs))
 		start := lastReq.reqData.Header.Timestamp
 		cost := reqList.Timestamp - start
 		raftCost := int64(0)
@@ -643,9 +642,9 @@ func (nd *KVNode) handleProposeReq() {
 				wh.release()
 			} else {
 				proposalCost := time.Now().UnixNano() - reqList.Timestamp
-				if proposalCost >= int64(raftSlow.Nanoseconds()) {
-					nd.rn.Infof("raft slow for batch propose: %v, cost %v-%v, wait len: %v",
-						len(reqList.Reqs), poolCost, proposalCost, len(nd.waitReqCh))
+				if proposalCost >= int64(raftSlow.Nanoseconds()/2) {
+					nd.rn.Infof("raft slow for batch propose: %v-%v, cost %v-%v, wait len: %v",
+						len(reqList.Reqs), cap(wh.ids), poolCost, proposalCost, len(nd.waitReqCh))
 				}
 				for _, r := range reqList.Reqs {
 					wh.ids = append(wh.ids, r.Header.ID)

@@ -389,10 +389,10 @@ func (s *Server) serveRaft(stopCh <-chan struct{}) {
 // implement the Raft interface for transport
 func (s *Server) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgVoteResp {
-		sLog.Infof("got message from raft transport %v ", m.String())
+		sLog.Debugf("got vote resp message from raft transport %v ", m.String())
 	}
 
-	if len(m.Entries) > 0 {
+	if len(m.Entries) > 0 && m.Type == raftpb.MsgProp {
 		// we debug the slow raft log transfer
 		level := atomic.LoadInt32(&costStatsLevel)
 		evnt := m.Entries[0]
@@ -403,7 +403,7 @@ func (s *Server) Process(ctx context.Context, m raftpb.Message) error {
 				n := time.Now().UnixNano()
 				rt := n - reqList.Timestamp
 				if rt > int64(time.Millisecond*100) {
-					sLog.Infof("recieve raft request slow cost: %v, src: %v", rt, reqList.String())
+					sLog.Infof("recieve raft request slow cost: %v, src: %v", rt, reqList.ReqNum)
 					if len(m.Entries) > 1 || len(reqList.Reqs) > 1 {
 						oldest := reqList.Reqs[0].Header.Timestamp
 						newest := m.Entries[len(m.Entries)-1]
