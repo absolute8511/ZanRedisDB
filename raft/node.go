@@ -258,7 +258,7 @@ type node struct {
 	done          chan struct{}
 	stop          chan struct{}
 	status        chan chan Status
-	eventNotifyCh chan struct{}
+	eventNotifyCh chan bool
 
 	logger Logger
 }
@@ -278,7 +278,7 @@ func newNode() node {
 		done:          make(chan struct{}),
 		stop:          make(chan struct{}),
 		status:        make(chan chan Status),
-		eventNotifyCh: make(chan struct{}, 1),
+		eventNotifyCh: make(chan bool, 1),
 	}
 }
 
@@ -449,7 +449,7 @@ func (n *node) addProposalToQueue(ctx context.Context, p msgWithDrop, to time.Du
 		}
 	}
 	select {
-	case n.eventNotifyCh <- struct{}{}:
+	case n.eventNotifyCh <- true:
 	default:
 	}
 	return nil
@@ -467,7 +467,7 @@ func (n *node) addReqMessageToQueue(req pb.Message) {
 		}
 	}
 	select {
-	case n.eventNotifyCh <- struct{}{}:
+	case n.eventNotifyCh <- true:
 	default:
 	}
 }

@@ -841,6 +841,7 @@ func (rc *raftNode) serveChannels() {
 				rc.Errorf("raft loop stopped")
 				return
 			}
+
 			if rd.SoftState != nil {
 				isMeNewLeader = (rd.RaftState == raft.StateLeader)
 				oldLead := atomic.LoadUint64(&rc.lead)
@@ -858,6 +859,7 @@ func (rc *raftNode) serveChannels() {
 				}
 				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
 			}
+
 			if len(rd.ReadStates) != 0 {
 				select {
 				case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
@@ -922,23 +924,6 @@ func (rc *raftNode) serveChannels() {
 				rc.Infof("raft transfer incoming snapshot done : %v", rd.Snapshot.String())
 			}
 			if isMeNewLeader {
-				if len(rd.Messages) > 0 {
-					fm := rd.Messages[0]
-					if fm.Type == raftpb.MsgProp && len(fm.Entries) > 0 {
-						d := fm.Entries[0]
-						if d.Data != nil {
-							var reqList BatchInternalRaftRequest
-							reqList.Unmarshal(d.Data)
-							if reqList.Timestamp > 0 {
-								n := time.Now().UnixNano()
-								rt := n - reqList.Timestamp
-								if rt > int64(raftSlow/2) {
-									rc.Infof("recieve raft proposals in raft loop slow cost: %v, src: %v", rt, reqList.ReqNum)
-								}
-							}
-						}
-					}
-				}
 				rc.transport.Send(rc.processMessages(rd.Messages))
 			}
 

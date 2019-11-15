@@ -392,18 +392,18 @@ func (s *Server) Process(ctx context.Context, m raftpb.Message) error {
 		sLog.Debugf("got vote resp message from raft transport %v ", m.String())
 	}
 
-	if len(m.Entries) > 0 && m.Type == raftpb.MsgProp {
+	if len(m.Entries) > 0 {
 		// we debug the slow raft log transfer
 		level := atomic.LoadInt32(&costStatsLevel)
 		evnt := m.Entries[0]
 		if evnt.Data != nil && level > 2 {
 			var reqList node.BatchInternalRaftRequest
-			reqList.Unmarshal(evnt.Data)
-			if reqList.Timestamp > 0 {
+			err := reqList.Unmarshal(evnt.Data)
+			if err == nil && reqList.Timestamp > 0 {
 				n := time.Now().UnixNano()
 				rt := n - reqList.Timestamp
 				if rt > int64(time.Millisecond*100) {
-					sLog.Infof("recieve raft request slow cost: %v, src: %v", rt, reqList.ReqNum)
+					sLog.Warningf("receive raft request slow cost: %v, src: %v", rt, reqList.ReqNum)
 					if len(m.Entries) > 1 || len(reqList.Reqs) > 1 {
 						oldest := reqList.Reqs[0].Header.Timestamp
 						newest := m.Entries[len(m.Entries)-1]
