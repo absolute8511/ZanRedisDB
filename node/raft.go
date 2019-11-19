@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -816,6 +817,15 @@ func (rc *raftNode) serveChannels() {
 	raftReadyLoopC := make(chan struct{})
 	go rc.purgeFile(purgeDone, raftReadyLoopC)
 	defer func() {
+		if e := recover(); e != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			rc.Errorf("handle raft loop panic: %s:%v", buf, e)
+			go rc.ds.Stop()
+			<-rc.stopc
+		}
+
 		// wait purge stopped to avoid purge the files after wal closed
 		close(raftReadyLoopC)
 		<-purgeDone
@@ -830,154 +840,171 @@ func (rc *raftNode) serveChannels() {
 	}()
 
 	// event loop on raft state machine updates
-	isMeNewLeader := false
 	for {
 		select {
 		case <-rc.stopc:
 			return
-		// store raft entries to wal, then publish over commit channel
-		case rd, ok := <-rc.node.Ready():
-			if !ok {
-				rc.Errorf("raft loop stopped")
-				return
+		case <-rc.node.EventNotifyCh():
+			rd, hasUpdate := rc.node.StepNode()
+			if !hasUpdate {
+				continue
 			}
+			rc.processReady(rd)
+		}
+	}
+}
 
-			if rd.SoftState != nil {
-				isMeNewLeader = (rd.RaftState == raft.StateLeader)
-				oldLead := atomic.LoadUint64(&rc.lead)
-				isMeLosingLeader := (oldLead == uint64(rc.config.ID)) && !isMeNewLeader
-				if rd.SoftState.Lead != raft.None && oldLead != rd.SoftState.Lead {
-					rc.Infof("leader changed from %v to %v", oldLead, rd.SoftState)
-					atomic.StoreInt64(&rc.lastLeaderChangedTs, time.Now().UnixNano())
-				}
-				if rd.SoftState.Lead == raft.None && oldLead != raft.None {
-					// TODO: handle proposal drop if leader is lost
-					//rc.triggerLeaderLost()
-				}
-				if isMeNewLeader || isMeLosingLeader {
-					rc.triggerLeaderChanged()
-				}
-				atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
-			}
+func (rc *raftNode) processReady(rd raft.Ready) {
+	isMeNewLeader := false
+	if rd.SoftState != nil {
+		isMeNewLeader = (rd.RaftState == raft.StateLeader)
+		oldLead := atomic.LoadUint64(&rc.lead)
+		isMeLosingLeader := (oldLead == uint64(rc.config.ID)) && !isMeNewLeader
+		if rd.SoftState.Lead != raft.None && oldLead != rd.SoftState.Lead {
+			rc.Infof("leader changed from %v to %v", oldLead, rd.SoftState)
+			atomic.StoreInt64(&rc.lastLeaderChangedTs, time.Now().UnixNano())
+		}
+		if rd.SoftState.Lead == raft.None && oldLead != raft.None {
+			// TODO: handle proposal drop if leader is lost
+			//rc.triggerLeaderLost()
+		}
+		if isMeNewLeader || isMeLosingLeader {
+			rc.triggerLeaderChanged()
+		}
+		atomic.StoreUint64(&rc.lead, rd.SoftState.Lead)
+	}
 
-			if len(rd.ReadStates) != 0 {
-				select {
-				case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
-				default:
-					t := time.NewTimer(time.Millisecond * 10)
-					select {
-					case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
-					case <-t.C:
-						nodeLog.Infof("timeout sending read state")
-					case <-rc.stopc:
-						return
-					}
-					t.Stop()
-				}
-			}
+	rc.processReadStates(&rd)
 
-			raftDone := make(chan struct{}, 1)
-			var applyWaitDone chan struct{}
-			waitApply := false
-			if !isMeNewLeader {
-				// Candidate or follower needs to wait for all pending configuration
-				// changes to be applied before sending messages.
-				// Otherwise we might incorrectly count votes (e.g. votes from removed members).
-				// Also slow machine's follower raft-layer could proceed to become the leader
-				// on its own single-node cluster, before apply-layer applies the config change.
-				// We simply wait for ALL pending entries to be applied for now.
-				// We might improve this later on if it causes unnecessary long blocking issues.
-				for _, ent := range rd.CommittedEntries {
-					if ent.Type == raftpb.EntryConfChange {
-						waitApply = true
-						nodeLog.Infof("need wait apply for config changed: %v", ent.String())
-						break
-					}
-				}
-				if waitApply {
-					applyWaitDone = make(chan struct{})
-				}
+	raftDone := make(chan struct{}, 1)
+	var applyWaitDone chan struct{}
+	waitApply := false
+	if !isMeNewLeader {
+		// Candidate or follower needs to wait for all pending configuration
+		// changes to be applied before sending messages.
+		// Otherwise we might incorrectly count votes (e.g. votes from removed members).
+		// Also slow machine's follower raft-layer could proceed to become the leader
+		// on its own single-node cluster, before apply-layer applies the config change.
+		// We simply wait for ALL pending entries to be applied for now.
+		// We might improve this later on if it causes unnecessary long blocking issues.
+		for _, ent := range rd.CommittedEntries {
+			if ent.Type == raftpb.EntryConfChange {
+				waitApply = true
+				nodeLog.Infof("need wait apply for config changed: %v", ent.String())
+				break
 			}
+		}
+		if waitApply {
+			applyWaitDone = make(chan struct{})
+		}
+	}
 
-			var applySnapshotTransferResult chan error
-			if !raft.IsEmptySnap(rd.Snapshot) {
-				applySnapshotTransferResult = make(chan error, 1)
-			}
+	var applySnapshotTransferResult chan error
+	if !raft.IsEmptySnap(rd.Snapshot) {
+		applySnapshotTransferResult = make(chan error, 1)
+	}
 
-			// TODO: do we need publish entry if commitedentries and snapshot is empty?
-			rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
-			if !raft.IsEmptySnap(rd.Snapshot) {
-				// since the snapshot only has metadata, we need rsync the real snapshot data first.
-				// if the real snapshot failed to pull, we need stop raft and retry restart later.
-				rc.Infof("raft begin to transfer incoming snapshot : %v", rd.Snapshot.String())
-				select {
-				case applyErr := <-applySnapshotTransferResult:
-					if applyErr != nil {
-						rc.Errorf("wait transfer snapshot error: %v", applyErr)
-						go rc.ds.Stop()
-						<-rc.stopc
-						return
-					}
-				case <-rc.stopc:
-					return
-				}
-				rc.Infof("raft transfer incoming snapshot done : %v", rd.Snapshot.String())
-			}
-			if isMeNewLeader {
-				rc.transport.Send(rc.processMessages(rd.Messages))
-			}
-
-			// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
-			if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
-				nodeLog.Errorf("raft save wal error: %v", err)
+	// TODO: do we need publish entry if commitedentries and snapshot is empty?
+	rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
+	if !raft.IsEmptySnap(rd.Snapshot) {
+		// since the snapshot only has metadata, we need rsync the real snapshot data first.
+		// if the real snapshot failed to pull, we need stop raft and retry restart later.
+		rc.Infof("raft begin to transfer incoming snapshot : %v", rd.Snapshot.String())
+		select {
+		case applyErr := <-applySnapshotTransferResult:
+			if applyErr != nil {
+				rc.Errorf("wait transfer snapshot error: %v", applyErr)
 				go rc.ds.Stop()
 				<-rc.stopc
 				return
 			}
+		case <-rc.stopc:
+			return
+		}
+		rc.Infof("raft transfer incoming snapshot done : %v", rd.Snapshot.String())
+	}
+	if isMeNewLeader {
+		rc.transport.Send(rc.processMessages(rd.Messages))
+	}
 
-			if !raft.IsEmptySnap(rd.Snapshot) {
-				err := rc.persistStorage.SaveSnap(rd.Snapshot)
-				if err != nil {
-					rc.Errorf("raft save snap error: %v", err)
-					go rc.ds.Stop()
-					<-rc.stopc
-					return
-				}
-				rc.Infof("raft persist snapshot meta done : %v", rd.Snapshot.String())
-				// we need to notify to tell that the snapshot has been perisisted onto the disk
-				raftDone <- struct{}{}
+	// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
+	if err := rc.persistRaftState(&rd); err != nil {
+		nodeLog.Errorf("raft save states to disk error: %v", err)
+		go rc.ds.Stop()
+		<-rc.stopc
+		return
+	}
 
-				rc.raftStorage.ApplySnapshot(rd.Snapshot)
-				rc.Infof("raft applied incoming snapshot done: %v", rd.Snapshot.String())
-				if rd.Snapshot.Metadata.Index >= rc.lastIndex {
-					if !rc.IsReplayFinished() {
-						rc.Infof("replay finished at snapshot index: %v\n", rd.Snapshot.String())
-						rc.MarkReplayFinished()
-					}
-				}
+	if !raft.IsEmptySnap(rd.Snapshot) {
+		// we need to notify to tell that the snapshot has been perisisted onto the disk
+		raftDone <- struct{}{}
+		rc.raftStorage.ApplySnapshot(rd.Snapshot)
+		rc.Infof("raft applied incoming snapshot done: %v", rd.Snapshot.String())
+		if rd.Snapshot.Metadata.Index >= rc.lastIndex {
+			if !rc.IsReplayFinished() {
+				rc.Infof("replay finished at snapshot index: %v\n", rd.Snapshot.String())
+				rc.MarkReplayFinished()
 			}
-			rc.raftStorage.Append(rd.Entries)
+		}
+	}
+	rc.raftStorage.Append(rd.Entries)
 
-			if !isMeNewLeader {
-				msgs := rc.processMessages(rd.Messages)
-				raftDone <- struct{}{}
-				if waitApply {
-					s := time.Now()
-					select {
-					case <-applyWaitDone:
-					case <-rc.stopc:
-						return
-					}
-					cost := time.Since(s)
-					if cost > time.Second {
-						nodeLog.Infof("wait apply %v msgs done cost: %v", len(msgs), cost.String())
-					}
-				}
-				rc.transport.Send(msgs)
-			} else {
-				raftDone <- struct{}{}
+	if !isMeNewLeader {
+		msgs := rc.processMessages(rd.Messages)
+		raftDone <- struct{}{}
+		if waitApply {
+			s := time.Now()
+			// wait and handle pending config change
+			rc.node.HandleConfChangedUntil(applyWaitDone)
+			select {
+			case <-applyWaitDone:
+			case <-rc.stopc:
+				return
 			}
-			rc.node.Advance()
+			cost := time.Since(s)
+			if cost > time.Second {
+				nodeLog.Infof("wait apply %v msgs done cost: %v", len(msgs), cost.String())
+			}
+		}
+		rc.transport.Send(msgs)
+	} else {
+		raftDone <- struct{}{}
+	}
+	rc.node.Advance(rd)
+}
+
+//should  atomically saves the Raft states, log entries and snapshots
+func (rc *raftNode) persistRaftState(rd *raft.Ready) error {
+	if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
+		rc.Errorf("raft save wal error: %v", err)
+		return err
+	}
+
+	if !raft.IsEmptySnap(rd.Snapshot) {
+		err := rc.persistStorage.SaveSnap(rd.Snapshot)
+		if err != nil {
+			rc.Errorf("raft save snap error: %v", err)
+			return err
+		}
+		rc.Infof("raft persist snapshot meta done : %v", rd.Snapshot.String())
+	}
+	return nil
+}
+
+func (rc *raftNode) processReadStates(rd *raft.Ready) {
+	if len(rd.ReadStates) != 0 {
+		select {
+		case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
+		default:
+			t := time.NewTimer(time.Millisecond * 10)
+			defer t.Stop()
+			select {
+			case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
+			case <-t.C:
+				nodeLog.Infof("timeout sending read state")
+			case <-rc.stopc:
+				return
+			}
 		}
 	}
 }

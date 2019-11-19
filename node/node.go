@@ -1371,11 +1371,12 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 			case <-nd.stopChan:
 				return
 			}
-			nd.maybeTriggerSnapshot(&np, confChanged, forceBackup)
-			nd.rn.handleSendSnapshot(&np)
 			if ent.applyWaitDone != nil {
 				close(ent.applyWaitDone)
 			}
+			nd.rn.node.NotifyEventCh()
+			nd.maybeTriggerSnapshot(&np, confChanged, forceBackup)
+			nd.rn.handleSendSnapshot(&np)
 		}
 	}
 }

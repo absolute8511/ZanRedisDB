@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"runtime"
 	"time"
 
 	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
@@ -139,13 +138,19 @@ type Node interface {
 	// Step advances the state machine using the given message. ctx.Err() will be returned, if any.
 	Step(ctx context.Context, msg pb.Message) error
 
-	// Ready returns a channel that returns the current point-in-time state.
-	// Users of the Node must call Advance after retrieving the state returned by Ready.
+	// StepNode handle raft events and returns the current point-in-time state.
+	// Users of the Node must call Advance after retrieving the state returned by StepNode.
 	//
 	// NOTE: No committed entries from the next Ready may be applied until all committed entries
 	// and snapshots from the previous one have finished.
-	Ready() <-chan Ready
+	StepNode() (Ready, bool)
+	// EventNotifyCh is used to notify or receive the notify for the raft event
+	EventNotifyCh() chan bool
+	// NotifyEventCh will notify the raft loop event to check new event
+	NotifyEventCh()
 
+	// HandleConfChangedUntil will wait and handle all configure change events until stop is trigged
+	HandleConfChangedUntil(stopC chan struct{})
 	// Advance notifies the Node that the application has saved progress up to the last Ready.
 	// It prepares the node to return the next available Ready.
 	//
@@ -155,7 +160,7 @@ type Node interface {
 	// commands. For example. when the last Ready contains a snapshot, the application might take
 	// a long time to apply the snapshot data. To continue receiving Ready without blocking raft
 	// progress, it can call Advance before finishing applying the last ready.
-	Advance()
+	Advance(rd Ready)
 	// ApplyConfChange applies config change to the local node.
 	// Returns an opaque ConfState protobuf which must be recorded
 	// in snapshots. Will never return nil; it returns a pointer only
@@ -185,6 +190,24 @@ type Peer struct {
 	NodeID    uint64
 	ReplicaID uint64
 	Context   []byte
+}
+
+type prevState struct {
+	havePrevLastUnstablei bool
+	prevLastUnstablei     uint64
+	prevLastUnstablet     uint64
+	prevSnapi             uint64
+	prevSoftSt            *SoftState
+	prevHardSt            pb.HardState
+	prevLead              uint64
+}
+
+func newPrevState(r *raft) *prevState {
+	return &prevState{
+		prevSoftSt: r.softState(),
+		prevHardSt: emptyState,
+		prevLead:   None,
+	}
 }
 
 // StartNode returns a new Node given configuration and a list of raft peers.
@@ -229,7 +252,9 @@ func StartNode(c *Config, peers []Peer, isLearner bool) Node {
 
 	n := newNode()
 	n.logger = c.Logger
-	go n.run(r)
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
 	return &n
 }
 
@@ -242,7 +267,9 @@ func RestartNode(c *Config) Node {
 
 	n := newNode()
 	n.logger = c.Logger
-	go n.run(r)
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
 	return &n
 }
 
@@ -259,6 +286,10 @@ type node struct {
 	stop          chan struct{}
 	status        chan chan Status
 	eventNotifyCh chan bool
+	r             *raft
+	prevS         *prevState
+	newReadyFunc  func(*raft, *SoftState, pb.HardState) Ready
+	needAdvance   bool
 
 	logger Logger
 }
@@ -267,8 +298,8 @@ func newNode() node {
 	return node{
 		propQ:      NewProposalQueue(proposalQueueLen, 1),
 		msgQ:       NewMessageQueue(recvQueueLen, false, 1),
-		confc:      make(chan pb.ConfChange),
-		confstatec: make(chan pb.ConfState),
+		confc:      make(chan pb.ConfChange, 1),
+		confstatec: make(chan pb.ConfState, 1),
 		readyc:     make(chan Ready),
 		advancec:   make(chan struct{}),
 		// make tickc a buffered chan, so raft node can buffer some ticks when the node
@@ -279,157 +310,86 @@ func newNode() node {
 		stop:          make(chan struct{}),
 		status:        make(chan chan Status),
 		eventNotifyCh: make(chan bool, 1),
+		newReadyFunc:  newReady,
 	}
+}
+
+func (n *node) EventNotifyCh() chan bool {
+	return n.eventNotifyCh
 }
 
 func (n *node) Stop() {
 	select {
-	case n.stop <- struct{}{}:
-		// Not already stopped, so trigger it
 	case <-n.done:
-		// Node has already been stopped - no need to do anything
+		// already closed
 		return
+	default:
+		close(n.done)
 	}
-	// Block until the stop has been acknowledged by run()
-	<-n.done
 }
 
-func (n *node) run(r *raft) {
-	var readyc chan Ready
-	var advancec chan struct{}
-	var prevLastUnstablei, prevLastUnstablet uint64
-	var havePrevLastUnstablei bool
-	var prevSnapi uint64
-	var rd Ready
-	needHandleProposal := true
-
-	lead := None
-	prevSoftSt := r.softState()
-	prevHardSt := emptyState
-	defer func() {
-		if e := recover(); e != nil {
-			buf := make([]byte, 4096)
-			n := runtime.Stack(buf, false)
-			buf = buf[0:n]
-			r.logger.Infof("handle raft loop panic: %s:%v", buf, e)
+func (n *node) StepNode() (Ready, bool) {
+	if n.needAdvance {
+		return Ready{}, false
+	}
+	var hasEvent bool
+	msgs := n.msgQ.Get()
+	for i, m := range msgs {
+		hasEvent = true
+		n.handleReceivedMessage(n.r, m)
+		msgs[i].Entries = nil
+	}
+	if n.handleTicks(n.r) {
+		hasEvent = true
+	}
+	needHandleProposal := n.handleLeaderUpdate(n.r)
+	var ev bool
+	ev, needHandleProposal = n.handleConfChanged(n.r, needHandleProposal)
+	if ev {
+		hasEvent = ev
+	}
+	if needHandleProposal {
+		props := n.propQ.Get()
+		for _, p := range props {
+			hasEvent = true
+			n.handleProposal(n.r, p)
 		}
+	}
+	n.handleStatus(n.r)
+	_ = hasEvent
+	rd := n.newReadyFunc(n.r, n.prevS.prevSoftSt, n.prevS.prevHardSt)
+	if rd.containsUpdates() {
+		n.needAdvance = true
+		return rd, true
+	}
+	return Ready{}, false
+}
 
-		close(n.done)
-		close(n.readyc)
-	}()
-
-	for {
-		if advancec != nil {
-			readyc = nil
+func (n *node) handleLeaderUpdate(r *raft) bool {
+	lead := n.prevS.prevLead
+	needHandleProposal := lead != None
+	if lead != r.lead {
+		if r.hasLeader() {
+			if lead == None {
+				r.logger.Infof("raft.node: %x(%v) elected leader %x at term %d", r.id, r.group.Name, r.lead, r.Term)
+			} else {
+				r.logger.Infof("raft.node: %x changed leader from %x to %x at term %d", r.id, r.group.Name, lead, r.lead, r.Term)
+			}
+			needHandleProposal = true
 		} else {
-			rd = newReady(r, prevSoftSt, prevHardSt)
-			if rd.containsUpdates() {
-				readyc = n.readyc
-			} else {
-				readyc = nil
-			}
+			r.logger.Infof("raft.node: %x(%v) lost leader %x at term %d", r.id, r.group.Name, lead, r.Term)
+			needHandleProposal = false
 		}
+		lead = r.lead
+		n.prevS.prevLead = lead
+	}
+	return needHandleProposal
+}
 
-		if lead != r.lead {
-			if r.hasLeader() {
-				if lead == None {
-					r.logger.Infof("raft.node: %x(%v) elected leader %x at term %d", r.id, r.group.Name, r.lead, r.Term)
-				} else {
-					r.logger.Infof("raft.node: %x changed leader from %x to %x at term %d", r.id, r.group.Name, lead, r.lead, r.Term)
-				}
-				needHandleProposal = true
-			} else {
-				r.logger.Infof("raft.node: %x(%v) lost leader %x at term %d", r.id, r.group.Name, lead, r.Term)
-				needHandleProposal = false
-			}
-			lead = r.lead
-		}
-
-		select {
-		case <-n.eventNotifyCh:
-			msgs := n.msgQ.Get()
-			for i, m := range msgs {
-				n.handleReceivedMessage(r, m)
-				msgs[i].Entries = nil
-			}
-			if needHandleProposal {
-				props := n.propQ.Get()
-				for _, p := range props {
-					n.handleProposal(r, p)
-				}
-			}
-		case cc := <-n.confc:
-			if cc.ReplicaID == None {
-				r.resetPendingConf()
-				select {
-				case n.confstatec <- pb.ConfState{Nodes: r.nodes(),
-					Groups:        r.groups(),
-					Learners:      r.learnerNodes(),
-					LearnerGroups: r.learnerGroups()}:
-				case <-n.done:
-				}
-				break
-			}
-			switch cc.Type {
-			case pb.ConfChangeAddNode:
-				r.addNode(cc.ReplicaID, cc.NodeGroup)
-			case pb.ConfChangeAddLearnerNode:
-				r.addLearner(cc.ReplicaID, cc.NodeGroup)
-			case pb.ConfChangeRemoveNode:
-				// block incoming proposal when local node is
-				// removed
-				if cc.ReplicaID == r.id {
-					needHandleProposal = false
-				}
-				r.removeNode(cc.ReplicaID)
-			case pb.ConfChangeUpdateNode:
-				r.updateNode(cc.ReplicaID, cc.NodeGroup)
-			default:
-				panic("unexpected conf type")
-			}
-			select {
-			case n.confstatec <- pb.ConfState{Nodes: r.nodes(),
-				Groups:        r.groups(),
-				Learners:      r.learnerNodes(),
-				LearnerGroups: r.learnerGroups()}:
-			case <-n.done:
-			}
-		case <-n.tickc:
-			r.tick()
-		case readyc <- rd:
-			if rd.SoftState != nil {
-				prevSoftSt = rd.SoftState
-			}
-			if len(rd.Entries) > 0 {
-				prevLastUnstablei = rd.Entries[len(rd.Entries)-1].Index
-				prevLastUnstablet = rd.Entries[len(rd.Entries)-1].Term
-				havePrevLastUnstablei = true
-			}
-			if !IsEmptyHardState(rd.HardState) {
-				prevHardSt = rd.HardState
-			}
-			if !IsEmptySnap(rd.Snapshot) {
-				prevSnapi = rd.Snapshot.Metadata.Index
-			}
-
-			r.msgs = nil
-			r.readStates = nil
-			advancec = n.advancec
-		case <-advancec:
-			if prevHardSt.Commit != 0 {
-				r.raftLog.appliedTo(prevHardSt.Commit)
-			}
-			if havePrevLastUnstablei {
-				r.raftLog.stableTo(prevLastUnstablei, prevLastUnstablet)
-				havePrevLastUnstablei = false
-			}
-			r.raftLog.stableSnapTo(prevSnapi)
-			advancec = nil
-		case c := <-n.status:
-			c <- getStatus(r)
-		case <-n.stop:
-			return
-		}
+func (n *node) NotifyEventCh() {
+	select {
+	case n.eventNotifyCh <- true:
+	default:
 	}
 }
 
@@ -448,10 +408,7 @@ func (n *node) addProposalToQueue(ctx context.Context, p msgWithDrop, to time.Du
 			return errProposalAddFailed
 		}
 	}
-	select {
-	case n.eventNotifyCh <- true:
-	default:
-	}
+	n.NotifyEventCh()
 	return nil
 }
 
@@ -466,8 +423,124 @@ func (n *node) addReqMessageToQueue(req pb.Message) {
 			return
 		}
 	}
+
+	n.NotifyEventCh()
+}
+
+func (n *node) Advance(rd Ready) {
+	if rd.SoftState != nil {
+		n.prevS.prevSoftSt = rd.SoftState
+	}
+	if len(rd.Entries) > 0 {
+		n.prevS.prevLastUnstablei = rd.Entries[len(rd.Entries)-1].Index
+		n.prevS.prevLastUnstablet = rd.Entries[len(rd.Entries)-1].Term
+		n.prevS.havePrevLastUnstablei = true
+	}
+	if !IsEmptyHardState(rd.HardState) {
+		n.prevS.prevHardSt = rd.HardState
+	}
+	if !IsEmptySnap(rd.Snapshot) {
+		n.prevS.prevSnapi = rd.Snapshot.Metadata.Index
+	}
+
+	n.r.msgs = nil
+	n.r.readStates = nil
+
+	if n.prevS.prevHardSt.Commit != 0 {
+		n.r.raftLog.appliedTo(n.prevS.prevHardSt.Commit)
+	}
+	if n.prevS.havePrevLastUnstablei {
+		n.r.raftLog.stableTo(n.prevS.prevLastUnstablei, n.prevS.prevLastUnstablet)
+		n.prevS.havePrevLastUnstablei = false
+	}
+	n.r.raftLog.stableSnapTo(n.prevS.prevSnapi)
+	n.needAdvance = false
+}
+
+func (n *node) HandleConfChangedUntil(stopC chan struct{}) {
+	for {
+		select {
+		case cc := <-n.confc:
+			n.processConfChanged(n.r, cc, true)
+		case <-stopC:
+			return
+		case <-n.done:
+			return
+		}
+	}
+}
+
+func (n *node) handleConfChanged(r *raft, needHandleProposal bool) (bool, bool) {
+	if len(n.confc) == 0 {
+		return false, needHandleProposal
+	}
 	select {
-	case n.eventNotifyCh <- true:
+	case cc := <-n.confc:
+		needHandleProposal = n.processConfChanged(r, cc, needHandleProposal)
+		return true, needHandleProposal
+	default:
+		return false, needHandleProposal
+	}
+}
+
+func (n *node) processConfChanged(r *raft, cc pb.ConfChange, needHandleProposal bool) bool {
+	if cc.ReplicaID == None {
+		r.resetPendingConf()
+		select {
+		case n.confstatec <- pb.ConfState{Nodes: r.nodes(),
+			Groups:        r.groups(),
+			Learners:      r.learnerNodes(),
+			LearnerGroups: r.learnerGroups()}:
+		case <-n.done:
+		}
+		return needHandleProposal
+	}
+	switch cc.Type {
+	case pb.ConfChangeAddNode:
+		r.addNode(cc.ReplicaID, cc.NodeGroup)
+	case pb.ConfChangeAddLearnerNode:
+		r.addLearner(cc.ReplicaID, cc.NodeGroup)
+	case pb.ConfChangeRemoveNode:
+		// block incoming proposal when local node is
+		// removed
+		if cc.ReplicaID == r.id {
+			needHandleProposal = false
+		}
+		r.removeNode(cc.ReplicaID)
+	case pb.ConfChangeUpdateNode:
+		r.updateNode(cc.ReplicaID, cc.NodeGroup)
+	default:
+		panic("unexpected conf type")
+	}
+	select {
+	case n.confstatec <- pb.ConfState{Nodes: r.nodes(),
+		Groups:        r.groups(),
+		Learners:      r.learnerNodes(),
+		LearnerGroups: r.learnerGroups()}:
+	case <-n.done:
+	}
+	return needHandleProposal
+}
+
+func (n *node) handleTicks(r *raft) bool {
+	tdone := false
+	hasEvent := false
+	for !tdone {
+		select {
+		case <-n.tickc:
+			hasEvent = true
+			r.tick()
+		default:
+			tdone = true
+		}
+	}
+	return hasEvent
+}
+
+func (n *node) handleStatus(r *raft) {
+	select {
+	case c := <-n.status:
+		c <- getStatus(r)
 	default:
 	}
 }
@@ -538,6 +611,7 @@ func (n *node) handleProposal(r *raft, mdrop msgWithDrop) {
 func (n *node) Tick() {
 	select {
 	case n.tickc <- struct{}{}:
+		n.NotifyEventCh()
 	case <-n.done:
 	default:
 		if n.logger != nil {
@@ -589,21 +663,16 @@ func (n *node) step(ctx context.Context, m pb.Message) error {
 	return n.stepWithDrop(ctx, m, nil)
 }
 
-func (n *node) Ready() <-chan Ready { return n.readyc }
-
-func (n *node) Advance() {
-	select {
-	case n.advancec <- struct{}{}:
-	case <-n.done:
-	}
-}
-
 func (n *node) ApplyConfChange(cc pb.ConfChange) *pb.ConfState {
 	var cs pb.ConfState
 	select {
 	case n.confc <- cc:
 	case <-n.done:
+		return &cs
 	}
+	// notify event
+	n.NotifyEventCh()
+
 	select {
 	case cs = <-n.confstatec:
 	case <-n.done:
@@ -615,7 +684,13 @@ func (n *node) Status() Status {
 	c := make(chan Status)
 	select {
 	case n.status <- c:
-		return <-c
+	case <-n.done:
+		return Status{}
+	}
+	n.NotifyEventCh()
+	select {
+	case s := <-c:
+		return s
 	case <-n.done:
 		return Status{}
 	}
