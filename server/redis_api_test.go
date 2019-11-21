@@ -18,8 +18,8 @@ import (
 )
 
 var testOnce sync.Once
-var kvs *Server
-var redisport int
+var gkvs *Server
+var gredisport int
 var OK = "OK"
 var gtmpDir string
 
@@ -41,6 +41,7 @@ type testLogger struct {
 func newTestLogger(t *testing.T) *testLogger {
 	return &testLogger{t: t}
 }
+
 func (l *testLogger) Output(maxdepth int, s string) error {
 	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
 	return nil
@@ -64,8 +65,8 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	raftAddr := "http://127.0.0.1:" + strconv.Itoa(port)
-	redisport := port + 10000
+	redisport := port
+	raftAddr := "http://127.0.0.1:" + strconv.Itoa(port+2)
 	var replica node.ReplicaInfo
 	replica.NodeID = 1
 	replica.ReplicaID = 1
@@ -107,7 +108,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 func waitServerForLeader(t *testing.T, w time.Duration) {
 	start := time.Now()
 	for {
-		replicaNode := kvs.GetNamespaceFromFullName("default-0")
+		replicaNode := gkvs.GetNamespaceFromFullName("default-0")
 		assert.NotNil(t, replicaNode)
 		if replicaNode.Node.IsLead() {
 			return
@@ -122,11 +123,11 @@ func waitServerForLeader(t *testing.T, w time.Duration) {
 
 func getTestConn(t *testing.T) *goredis.PoolConn {
 	testOnce.Do(func() {
-		kvs, redisport, gtmpDir = startTestServer(t, 12345)
+		gkvs, gredisport, gtmpDir = startTestServer(t, 12345)
 		waitServerForLeader(t, time.Second*10)
 	},
 	)
-	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisport), "")
+	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(gredisport), "")
 	c.SetMaxIdleConns(4)
 	conn, err := c.Get()
 	if err != nil {

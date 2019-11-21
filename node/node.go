@@ -643,7 +643,7 @@ func (nd *KVNode) handleProposeReq() {
 			} else {
 				proposalCost := time.Now().UnixNano() - reqList.Timestamp
 				if proposalCost >= int64(raftSlow.Nanoseconds()/2) {
-					nd.rn.Infof("raft slow for batch propose: %v-%v, cost %v-%v, wait len: %v",
+					nd.rn.Errorf("raft slow for batch propose: %v-%v, cost %v-%v, wait len: %v",
 						len(reqList.Reqs), cap(wh.ids), poolCost, proposalCost, len(nd.waitReqCh))
 				}
 				for _, r := range reqList.Reqs {
@@ -1371,11 +1371,12 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 			case <-nd.stopChan:
 				return
 			}
-			nd.maybeTriggerSnapshot(&np, confChanged, forceBackup)
-			nd.rn.handleSendSnapshot(&np)
 			if ent.applyWaitDone != nil {
 				close(ent.applyWaitDone)
 			}
+			nd.rn.node.NotifyEventCh()
+			nd.maybeTriggerSnapshot(&np, confChanged, forceBackup)
+			nd.rn.handleSendSnapshot(&np)
 		}
 	}
 }

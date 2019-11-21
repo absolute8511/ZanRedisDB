@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -15,7 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 )
 
 var clusterName = "cluster-unittest-server"
@@ -49,7 +52,7 @@ var kvsCluster []testClusterInfo
 var learnerServers []*Server
 var gtmpClusterDir string
 var seedNodes []node.ReplicaInfo
-var remoteClusterBasePort = 51845
+var remoteClusterBasePort = 22345
 
 //
 var testSnap = 10
@@ -68,8 +71,8 @@ func TestMain(m *testing.M) {
 	}
 
 	ret := m.Run()
-	if kvs != nil {
-		kvs.Stop()
+	if gkvs != nil {
+		gkvs.Stop()
 	}
 	if kvsMerge != nil {
 		kvsMerge.Stop()
@@ -102,14 +105,25 @@ func TestMain(m *testing.M) {
 }
 
 func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string) {
-	rport := 52845
-	return startTestClusterWithBasePort(t, rport, replicaNum, syncLearnerNum)
+	rport := 24345
+	kvs, ns, servers, path, err := startTestClusterWithBasePort(rport, replicaNum, syncLearnerNum, false)
+	if err != nil {
+		t.Fatalf("init cluster failed: %v", err)
+	}
+	return kvs, ns, servers, path
 }
 
-func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, syncLearnerNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string) {
+func startTestClusterWithEmptySM(replicaNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string, error) {
+	rport := 23345
+	return startTestClusterWithBasePort(rport, replicaNum, 0, true)
+}
+
+func startTestClusterWithBasePort(portBase int, replicaNum int,
+	syncLearnerNum int, useEmptySM bool) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string, error) {
 	ctmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
-	assert.Nil(t, err)
-	t.Logf("dir:%v\n", ctmpDir)
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
 	kvsClusterTmp := make([]testClusterInfo, 0, replicaNum)
 	learnerServersTmp := make([]*Server, 0, syncLearnerNum)
 	rport := portBase
@@ -142,7 +156,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 			common.FILE_PERM)
 		raftAddr := "http://127.0.0.1:" + strconv.Itoa(raftPort+index)
 		redisport := rport + index
-		grpcPort := rport - 110 + index
+		grpcPort := rport - 310 + index
 		httpPort := rport - 210 + index
 		var replica node.ReplicaInfo
 		replica.NodeID = uint64(1 + index)
@@ -158,14 +172,17 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 			BroadcastAddr:  "127.0.0.1",
 			TickMs:         20,
 			ElectionTick:   20,
-			UseRocksWAL:    true,
+			UseRocksWAL:    false,
 			SharedRocksWAL: true,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer
 			// use test:// will ignore the remote cluster fail
-			kvOpts.RemoteSyncCluster = "test://127.0.0.1:" + strconv.Itoa(remoteClusterBasePort-110)
+			kvOpts.RemoteSyncCluster = "test://127.0.0.1:" + strconv.Itoa(remoteClusterBasePort-310)
+		}
+		if useEmptySM {
+			kvOpts.StateMachineType = "empty_sm"
 		}
 
 		nsConf := node.NewNSConfig()
@@ -182,7 +199,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 		kv := NewServer(kvOpts)
 		kv.nsMgr.SetIClusterInfo(fakeCI)
 		if _, err := kv.InitKVNamespace(replica.ReplicaID, nsConf, false); err != nil {
-			t.Fatalf("failed to init namespace: %v", err)
+			return kvsClusterTmp, tmpSeeds, learnerServersTmp, ctmpDir, err
 		}
 		kv.Start()
 		if index >= replicaNum {
@@ -194,7 +211,7 @@ func startTestClusterWithBasePort(t *testing.T, portBase int, replicaNum int, sy
 	}
 
 	time.Sleep(time.Second * 3)
-	return kvsClusterTmp, tmpSeeds, learnerServersTmp, ctmpDir
+	return kvsClusterTmp, tmpSeeds, learnerServersTmp, ctmpDir, nil
 }
 
 func getTestConnForPort(t *testing.T, port int) *goredis.PoolConn {
@@ -259,6 +276,24 @@ func waitForLeader(t *testing.T, w time.Duration) *node.NamespaceNode {
 	return nil
 }
 
+func waitForLeaderForClusters(w time.Duration, kvs []testClusterInfo) (*node.NamespaceNode, error) {
+	start := time.Now()
+	for {
+		for _, n := range kvs {
+			replicaNode := n.server.GetNamespaceFromFullName("default-0")
+			if replicaNode.Node.IsLead() {
+				leaderNode := replicaNode
+				return leaderNode, nil
+			}
+		}
+		if time.Since(start) > w {
+			return nil, fmt.Errorf("\033[31m timed out %v for wait leader \033[39m\n", time.Since(start))
+		}
+		time.Sleep(time.Second)
+	}
+	return nil, errors.New("no leader")
+}
+
 func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *node.NamespaceNode, logSyncer bool) {
 	start := time.Now()
 	for {
@@ -292,13 +327,14 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	remoteServers, _, _, remoteDir := startTestClusterWithBasePort(t, remoteClusterBasePort, 1, 0)
+	remoteServers, _, _, remoteDir, err := startTestClusterWithBasePort(remoteClusterBasePort, 1, 0, false)
 	defer func() {
 		for _, remote := range remoteServers {
 			remote.server.Stop()
 		}
 		os.RemoveAll(remoteDir)
 	}()
+	assert.Nil(t, err)
 	assert.Equal(t, 1, len(remoteServers))
 	remoteConn := getTestConnForPort(t, remoteServers[0].redisPort)
 	defer remoteConn.Close()
@@ -324,7 +360,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	assert.Equal(t, false, ok)
 
 	node.SetSyncerOnly(true)
-	err := leaderNode.Node.ProposeAddLearner(*m)
+	err = leaderNode.Node.ProposeAddLearner(*m)
 	assert.Nil(t, err)
 	time.Sleep(time.Second * 3)
 	assert.Equal(t, true, learnerNode.IsReady())
@@ -564,4 +600,68 @@ func TestCompactCancelAfterStopped(t *testing.T) {
 
 	leaderNode := waitForLeader(t, time.Minute)
 	assert.NotNil(t, leaderNode)
+}
+
+func BenchmarkWriteToClusterWithEmptySM(b *testing.B) {
+	costStatsLevel = 3
+	sLog.SetLevel(int32(common.LOG_WARN))
+	rockredis.SetLogger(int32(common.LOG_ERR), nil)
+	node.SetLogLevel(int(common.LOG_WARN))
+	raft.SetLogger(nil)
+	rafthttp.SetLogLevel(0)
+
+	kvs, _, _, dir, err := startTestClusterWithEmptySM(3)
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+	defer func() {
+		for _, v := range kvs {
+			v.server.Stop()
+		}
+	}()
+	_, err = waitForLeaderForClusters(time.Minute, kvs)
+	if err != nil {
+		panic(err)
+	}
+	rport := 0
+	for _, n := range kvs {
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
+		if replicaNode.Node.IsLead() {
+			rport = n.redisPort
+			break
+		}
+	}
+	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(rport), "")
+	c.SetMaxIdleConns(10)
+
+	b.ResetTimer()
+	b.Run("bench-set", func(b *testing.B) {
+		b.ReportAllocs()
+		start := time.Now()
+		var wg sync.WaitGroup
+		for i := 0; i < 30; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				conn, err := c.Get()
+				if err != nil {
+					panic(err)
+				}
+				defer conn.Close()
+				for i := 0; i < b.N; i++ {
+					key := "default:test-cluster:a"
+					_, err := goredis.String(conn.Do("set", key, "1234"))
+					if err != nil {
+						panic(err)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		cost := time.Since(start)
+		b.Logf("cost time: %v for %v", cost, b.N)
+	})
+
+	b.StopTimer()
 }

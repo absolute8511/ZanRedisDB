@@ -118,20 +118,31 @@ func TestNodePropose(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	go n.run(r)
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
 	n.Campaign(context.TODO())
 	for {
-		rd := <-n.Ready()
+		select {
+		case <-n.EventNotifyCh():
+		case <-n.done:
+			return
+		}
+		rd, hasEvent := n.StepNode()
+		if !hasEvent {
+			continue
+		}
 		s.Append(rd.Entries)
 		// change the step function to appendStep until this raft becomes leader
 		if rd.SoftState.Lead == r.id {
 			r.step = appendStep
-			n.Advance()
+			n.Advance(rd)
 			break
 		}
-		n.Advance()
+		n.Advance(rd)
 	}
 	n.Propose(context.TODO(), []byte("somedata"))
+	n.StepNode()
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -161,12 +172,21 @@ func TestNodeReadIndex(t *testing.T) {
 	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
 	r.readStates = wrs
+	n.r = r
+	n.prevS = newPrevState(r)
 
-	go n.run(r)
 	n.Campaign(context.TODO())
 	time.Sleep(time.Millisecond)
 	for {
-		rd := <-n.Ready()
+		select {
+		case <-n.EventNotifyCh():
+		case <-n.done:
+			return
+		}
+		rd, hasEvent := n.StepNode()
+		if !hasEvent {
+			continue
+		}
 		if !reflect.DeepEqual(rd.ReadStates, wrs) {
 			t.Errorf("ReadStates = %v, want %v", rd.ReadStates, wrs)
 		}
@@ -174,15 +194,16 @@ func TestNodeReadIndex(t *testing.T) {
 		s.Append(rd.Entries)
 
 		if rd.SoftState != nil && rd.SoftState.Lead == r.id {
-			n.Advance()
+			n.Advance(rd)
 			break
 		}
-		n.Advance()
+		n.Advance(rd)
 	}
 
 	r.step = appendStep
 	wrequestCtx := []byte("somedata2")
 	n.ReadIndex(context.TODO(), wrequestCtx)
+	n.StepNode()
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -308,18 +329,28 @@ func TestNodeProposeConfig(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	go n.run(r)
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
 	n.Campaign(context.TODO())
 	for {
-		rd := <-n.Ready()
+		select {
+		case <-n.EventNotifyCh():
+		case <-n.done:
+			return
+		}
+		rd, hasEvent := n.StepNode()
+		if !hasEvent {
+			continue
+		}
 		s.Append(rd.Entries)
 		// change the step function to appendStep until this raft becomes leader
 		if rd.SoftState.Lead == r.id {
 			r.step = appendStep
-			n.Advance()
+			n.Advance(rd)
 			break
 		}
-		n.Advance()
+		n.Advance(rd)
 	}
 	cc := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, ReplicaID: 1}
 	ccdata, err := cc.Marshal()
@@ -327,6 +358,7 @@ func TestNodeProposeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	n.ProposeConfChange(context.TODO(), cc)
+	n.StepNode()
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -348,7 +380,8 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	go n.run(r)
+	n.r = r
+	n.prevS = newPrevState(r)
 	n.Campaign(context.TODO())
 	rdyEntries := make([]raftpb.Entry, 0)
 	ticker := time.NewTicker(time.Millisecond * 100)
@@ -365,7 +398,11 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 				return
 			case <-ticker.C:
 				n.Tick()
-			case rd := <-n.Ready():
+			case <-n.EventNotifyCh():
+				rd, hasEvent := n.StepNode()
+				if !hasEvent {
+					continue
+				}
 				s.Append(rd.Entries)
 				for _, e := range rd.Entries {
 					rdyEntries = append(rdyEntries, e)
@@ -374,11 +411,13 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 					case raftpb.EntryConfChange:
 						var cc raftpb.ConfChange
 						cc.Unmarshal(e.Data)
-						n.ApplyConfChange(cc)
-						applyConfChan <- struct{}{}
+						go func() {
+							n.ApplyConfChange(cc)
+							applyConfChan <- struct{}{}
+						}()
 					}
 				}
-				n.Advance()
+				n.Advance(rd)
 			}
 		}
 	}()
@@ -419,8 +458,9 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 func TestBlockProposal(t *testing.T) {
 	n := newNode()
 	r := newTestRaft(1, []uint64{1}, 10, 1, NewMemoryStorage())
+	n.r = r
+	n.prevS = newPrevState(r)
 	defer closeAndFreeRaft(r)
-	go n.run(r)
 	defer n.Stop()
 
 	errc := make(chan error, 1)
@@ -454,11 +494,13 @@ func TestNodeTick(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	go n.run(r)
+	n.r = r
+	n.prevS = newPrevState(r)
 	elapsed := r.electionElapsed
 	n.Tick()
 	for len(n.tickc) != 0 {
 		time.Sleep(100 * time.Millisecond)
+		n.StepNode()
 	}
 	n.Stop()
 	if r.electionElapsed != elapsed+1 {
@@ -473,14 +515,27 @@ func TestNodeStop(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
 	donec := make(chan struct{})
 
 	go func() {
-		n.run(r)
+		for {
+			select {
+			case <-n.EventNotifyCh():
+				n.StepNode()
+			case <-n.done:
+				return
+			}
+		}
+	}()
+	go func() {
 		close(donec)
 	}()
 
 	status := n.Status()
+	n.StepNode()
 	n.Stop()
 
 	select {
@@ -572,30 +627,33 @@ func TestNodeStart(t *testing.T) {
 	}
 	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
-	g := <-n.Ready()
+	g, _ := n.StepNode()
 	if !reflect.DeepEqual(g, wants[0]) {
 		t.Fatalf("#%d: g = %+v,\n             w   %+v", 1, g, wants[0])
 	} else {
 		storage.Append(g.Entries)
-		n.Advance()
+		n.Advance(g)
 	}
 
 	n.Campaign(ctx)
-	rd := <-n.Ready()
+	rd, _ := n.StepNode()
 	storage.Append(rd.Entries)
-	n.Advance()
+	n.Advance(rd)
 
 	n.Propose(ctx, []byte("foo"))
-	if g2 := <-n.Ready(); !reflect.DeepEqual(g2, wants[1]) {
+	if g2, _ := n.StepNode(); !reflect.DeepEqual(g2, wants[1]) {
 		t.Errorf("#%d: g = %+v,\n             w   %+v", 2, g2, wants[1])
 	} else {
 		storage.Append(g2.Entries)
-		n.Advance()
+		n.Advance(g2)
 	}
 
 	select {
-	case rd := <-n.Ready():
-		t.Errorf("unexpected Ready: %+v", rd)
+	case <-n.EventNotifyCh():
+		rd, hasEvent := n.StepNode()
+		if hasEvent {
+			t.Errorf("unexpected Ready: %+v", rd)
+		}
 	case <-time.After(time.Millisecond):
 	}
 }
@@ -635,14 +693,19 @@ func TestNodeRestart(t *testing.T) {
 	}
 	n := RestartNode(c)
 	defer n.Stop()
-	if g := <-n.Ready(); !reflect.DeepEqual(g, want) {
+	<-n.EventNotifyCh()
+	g, _ := n.StepNode()
+	if !reflect.DeepEqual(g, want) {
 		t.Errorf("g = %+v,\n             w   %+v", g, want)
 	}
-	n.Advance()
+	n.Advance(g)
 
 	select {
-	case rd := <-n.Ready():
-		t.Errorf("unexpected Ready: %+v", rd)
+	case <-n.EventNotifyCh():
+		rd, hasEvent := n.StepNode()
+		if hasEvent {
+			t.Errorf("unexpected Ready: %+v", rd)
+		}
 	case <-time.After(time.Millisecond):
 	}
 }
@@ -699,15 +762,19 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 	}
 	n := RestartNode(c)
 	defer n.Stop()
-	if g := <-n.Ready(); !reflect.DeepEqual(g, want) {
+	g, _ := n.StepNode()
+	if !reflect.DeepEqual(g, want) {
 		t.Errorf("g = %+v,\n             w   %+v", g, want)
 	} else {
-		n.Advance()
+		n.Advance(g)
 	}
 
 	select {
-	case rd := <-n.Ready():
-		t.Errorf("unexpected Ready: %+v", rd)
+	case <-n.EventNotifyCh():
+		rd, hasEvent := n.StepNode()
+		if hasEvent {
+			t.Errorf("unexpected Ready: %+v", rd)
+		}
 	case <-time.After(time.Millisecond):
 	}
 }
@@ -735,25 +802,38 @@ func TestNodeAdvance(t *testing.T) {
 	}
 	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
-	rd := <-n.Ready()
+	<-n.EventNotifyCh()
+	rd, _ := n.StepNode()
 	storage.Append(rd.Entries)
-	n.Advance()
+	n.Advance(rd)
 
 	n.Campaign(ctx)
-	<-n.Ready()
+	<-n.EventNotifyCh()
+	n.StepNode()
 
 	n.Propose(ctx, []byte("foo"))
+	hasEvent := false
 	select {
-	case rd = <-n.Ready():
-		t.Fatalf("unexpected Ready before Advance: %+v", rd)
+	case <-n.EventNotifyCh():
+		rd, hasEvent = n.StepNode()
+		if hasEvent {
+			t.Fatalf("unexpected Ready before Advance: %+v", rd)
+		}
 	case <-time.After(time.Millisecond):
 	}
 	storage.Append(rd.Entries)
-	n.Advance()
+	n.Advance(rd)
 	select {
-	case <-n.Ready():
+	case <-n.EventNotifyCh():
+		rd, hasEvent = n.StepNode()
+		if !hasEvent {
+			t.Errorf("expect Ready after Advance, but there is no Ready available")
+		}
 	case <-time.After(100 * time.Millisecond):
-		t.Errorf("expect Ready after Advance, but there is no Ready available")
+		rd, hasEvent = n.StepNode()
+		if !hasEvent {
+			t.Errorf("expect Ready after Advance, but there is no Ready available")
+		}
 	}
 }
 
@@ -804,7 +884,8 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
 	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	go n.run(r)
+	n.r = r
+	n.prevS = newPrevState(r)
 	n.Campaign(context.TODO())
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -817,28 +898,34 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 				return
 			case <-ticker.C:
 				n.Tick()
-			case rd := <-n.Ready():
+			case <-n.EventNotifyCh():
+				rd, hasEvent := n.StepNode()
+				if !hasEvent {
+					continue
+				}
 				s.Append(rd.Entries)
 				t.Logf("raft: %v", rd.Entries)
 				for _, ent := range rd.Entries {
 					if ent.Type == raftpb.EntryConfChange {
 						var cc raftpb.ConfChange
 						cc.Unmarshal(ent.Data)
-						state := n.ApplyConfChange(cc)
-						if len(state.Learners) == 0 || state.Learners[0] != cc.ReplicaID {
-							t.Fatalf("apply conf change should return new added learner: %v", state.String())
-						}
-						if len(state.LearnerGroups) == 0 || state.LearnerGroups[0].String() != cc.NodeGroup.String() {
-							t.Fatalf("apply conf change should return new added learner group: %v", state.String())
-						}
-						if len(state.Nodes) != 1 {
-							t.Fatalf("add learner should not change the nodes: %v", state.String())
-						}
-						t.Logf("apply raft conf %v changed to: %v", cc, state.String())
-						applyConfChan <- struct{}{}
+						go func() {
+							state := n.ApplyConfChange(cc)
+							if len(state.Learners) == 0 || state.Learners[0] != cc.ReplicaID {
+								t.Fatalf("apply conf change should return new added learner: %v", state.String())
+							}
+							if len(state.LearnerGroups) == 0 || state.LearnerGroups[0].String() != cc.NodeGroup.String() {
+								t.Fatalf("apply conf change should return new added learner group: %v", state.String())
+							}
+							if len(state.Nodes) != 1 {
+								t.Fatalf("add learner should not change the nodes: %v", state.String())
+							}
+							t.Logf("apply raft conf %v changed to: %v", cc, state.String())
+							applyConfChan <- struct{}{}
+						}()
 					}
 				}
-				n.Advance()
+				n.Advance(rd)
 			}
 		}
 	}()

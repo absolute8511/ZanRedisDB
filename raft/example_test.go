@@ -34,7 +34,11 @@ func ExampleNode() {
 	var prev pb.HardState
 	for {
 		// Ready blocks until there is new state ready.
-		rd := <-n.Ready()
+		<-n.EventNotifyCh()
+		rd, hasEvent := n.StepNode()
+		if !hasEvent {
+			continue
+		}
 		if !isHardStateEqual(prev, rd.HardState) {
 			saveStateToDisk(rd.HardState)
 			prev = rd.HardState
