@@ -121,14 +121,14 @@ func TestScan(t *testing.T) {
 	defer c.Close()
 
 	if testing.Verbose() {
-		changeLogLevel(t, 4, redisport+1)
+		changeLogLevel(t, 4, gredisport+1)
 	}
 	testKVScan(t, c)
 	testHashKeyScan(t, c)
 	testListKeyScan(t, c)
 	testZSetKeyScan(t, c)
 	testSetKeyScan(t, c)
-	changeLogLevel(t, 2, redisport+1)
+	changeLogLevel(t, 2, gredisport+1)
 }
 
 func testKVScan(t *testing.T, c *goredis.PoolConn) {
@@ -239,7 +239,7 @@ func TestSetScan(t *testing.T) {
 	defer c.Close()
 
 	if testing.Verbose() {
-		changeLogLevel(t, 4, redisport+1)
+		changeLogLevel(t, 4, gredisport+1)
 	}
 	key := "default:test:scan_set"
 	c.Do("SADD", key, "a", "b")
@@ -284,7 +284,7 @@ func TestSetScan(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 2, len(ay))
 	checkScanValues(t, ay[1], "d", "c")
-	changeLogLevel(t, 2, redisport+1)
+	changeLogLevel(t, 2, gredisport+1)
 }
 
 func TestZSetScan(t *testing.T) {
