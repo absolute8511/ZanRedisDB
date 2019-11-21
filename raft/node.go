@@ -149,8 +149,9 @@ type Node interface {
 	// NotifyEventCh will notify the raft loop event to check new event
 	NotifyEventCh()
 
-	// HandleConfChangedUntil will wait and handle all configure change events until stop is trigged
-	HandleConfChangedUntil(stopC chan struct{})
+	ConfChangedCh() <-chan pb.ConfChange
+	// HandleConfChanged will  handle configure change event
+	HandleConfChanged(cc pb.ConfChange)
 	// Advance notifies the Node that the application has saved progress up to the last Ready.
 	// It prepares the node to return the next available Ready.
 	//
@@ -279,8 +280,6 @@ type node struct {
 	msgQ          *MessageQueue
 	confc         chan pb.ConfChange
 	confstatec    chan pb.ConfState
-	readyc        chan Ready
-	advancec      chan struct{}
 	tickc         chan struct{}
 	done          chan struct{}
 	stop          chan struct{}
@@ -300,15 +299,13 @@ func newNode() node {
 		msgQ:       NewMessageQueue(recvQueueLen, false, 1),
 		confc:      make(chan pb.ConfChange, 1),
 		confstatec: make(chan pb.ConfState, 1),
-		readyc:     make(chan Ready),
-		advancec:   make(chan struct{}),
 		// make tickc a buffered chan, so raft node can buffer some ticks when the node
 		// is busy processing raft messages. Raft node will resume process buffered
 		// ticks when it becomes idle.
 		tickc:         make(chan struct{}, 128),
 		done:          make(chan struct{}),
 		stop:          make(chan struct{}),
-		status:        make(chan chan Status),
+		status:        make(chan chan Status, 1),
 		eventNotifyCh: make(chan bool, 1),
 		newReadyFunc:  newReady,
 	}
@@ -457,17 +454,12 @@ func (n *node) Advance(rd Ready) {
 	n.needAdvance = false
 }
 
-func (n *node) HandleConfChangedUntil(stopC chan struct{}) {
-	for {
-		select {
-		case cc := <-n.confc:
-			n.processConfChanged(n.r, cc, true)
-		case <-stopC:
-			return
-		case <-n.done:
-			return
-		}
-	}
+func (n *node) ConfChangedCh() <-chan pb.ConfChange {
+	return n.confc
+}
+
+func (n *node) HandleConfChanged(cc pb.ConfChange) {
+	n.processConfChanged(n.r, cc, true)
 }
 
 func (n *node) handleConfChanged(r *raft, needHandleProposal bool) (bool, bool) {
@@ -681,7 +673,7 @@ func (n *node) ApplyConfChange(cc pb.ConfChange) *pb.ConfState {
 }
 
 func (n *node) Status() Status {
-	c := make(chan Status)
+	c := make(chan Status, 1)
 	select {
 	case n.status <- c:
 	case <-n.done:
