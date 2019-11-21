@@ -27,6 +27,7 @@ const (
 	pdHttpPort                = "18007"
 	pdRemoteHttpPort          = "18008"
 	pdLearnerHttpPort         = "18009"
+	baseRedisPort             = 62345
 )
 
 var testEtcdServers = "http://127.0.0.1:2379"
@@ -61,9 +62,9 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 	for i := 0; i < n; i++ {
 		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
 		os.MkdirAll(tmpDir, common.DIR_PERM)
-		raftAddr := "http://127.0.0.1:" + strconv.Itoa(15345+i*100)
-		redisPort := 25345 + i*100
-		httpPort := 35345 + i*100
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(baseRedisPort-100+i*10)
+		redisPort := baseRedisPort - 101 + i*10
+		httpPort := baseRedisPort - 102 + i*10
 		kvOpts := ds.ServerConfig{
 			ClusterID:            TestClusterName,
 			EtcdClusterAddresses: testEtcdServers,
@@ -87,15 +88,15 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 }
 
 func startRemoteSyncTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
-	return startTestCluster(t, true, TestRemoteSyncClusterName, pdRemoteHttpPort, n, 16345)
+	return startTestCluster(t, true, TestRemoteSyncClusterName, pdRemoteHttpPort, n, baseRedisPort+1000)
 }
 
 func startDefaultTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
-	return startTestCluster(t, false, TestClusterName, pdHttpPort, n, 17345)
+	return startTestCluster(t, false, TestClusterName, pdHttpPort, n, baseRedisPort+2000)
 }
 
 func addMoreTestDataNodeToCluster(t *testing.T, n int) ([]dataNodeWrapper, string) {
-	basePort := 18345
+	basePort := baseRedisPort + 3000
 	clusterName := TestClusterName
 	syncOnly := false
 	kvList := make([]dataNodeWrapper, 0, n)
@@ -106,10 +107,10 @@ func addMoreTestDataNodeToCluster(t *testing.T, n int) ([]dataNodeWrapper, strin
 	for i := 0; i < n; i++ {
 		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
 		os.MkdirAll(tmpDir, common.DIR_PERM)
-		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+i*100)
-		redisPort := basePort + 10000 + i*100
-		httpPort := basePort + 20000 + i*100
-		rpcPort := basePort + 22000 + i*100
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+100+i*10)
+		redisPort := basePort + 101 + i*10
+		httpPort := basePort + 102 + i*10
+		rpcPort := basePort + 103 + i*10
 		kvOpts := ds.ServerConfig{
 			ClusterID:            clusterName,
 			EtcdClusterAddresses: testEtcdServers,
@@ -167,10 +168,10 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 	for i := 0; i < n; i++ {
 		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
 		os.MkdirAll(tmpDir, common.DIR_PERM)
-		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+i*100)
-		redisPort := basePort + 10000 + i*100
-		httpPort := basePort + 20000 + i*100
-		rpcPort := basePort + 22000 + i*100
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+100+i*10)
+		redisPort := basePort + 101 + i*10
+		httpPort := basePort + 102 + i*10
+		rpcPort := basePort + 103 + i*10
 		kvOpts := ds.ServerConfig{
 			ClusterID:            clusterName,
 			EtcdClusterAddresses: testEtcdServers,
