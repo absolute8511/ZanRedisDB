@@ -1212,7 +1212,9 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 			if ent.applyWaitDone != nil {
 				close(ent.applyWaitDone)
 			}
-			nd.rn.node.NotifyEventCh()
+			if len(commitC) == 0 {
+				nd.rn.node.NotifyEventCh()
+			}
 			nd.maybeTriggerSnapshot(&np, confChanged, forceBackup)
 			nd.rn.handleSendSnapshot(&np)
 		}

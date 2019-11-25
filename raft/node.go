@@ -391,6 +391,7 @@ func (n *node) NotifyEventCh() {
 }
 
 func (n *node) addProposalToQueue(ctx context.Context, p msgWithDrop, to time.Duration, stopC chan struct{}) error {
+	s := time.Now()
 	if added, stopped, err := n.propQ.AddWait(ctx, p, to, stopC); !added || stopped {
 		if n.logger != nil {
 			n.logger.Warningf("dropped an incoming proposal: %v", p.m.String())
@@ -405,7 +406,15 @@ func (n *node) addProposalToQueue(ctx context.Context, p msgWithDrop, to time.Du
 			return errProposalAddFailed
 		}
 	}
+
+	cost := time.Since(s)
 	n.NotifyEventCh()
+	cost2 := time.Since(s)
+	if cost2 > to {
+		if n.logger != nil {
+			n.logger.Infof("slow propose to queue: %v, %v", cost, cost2)
+		}
+	}
 	return nil
 }
 

@@ -60,7 +60,7 @@ func (rd *resultData) WaitC() <-chan struct{} {
 }
 
 type list struct {
-	l sync.RWMutex
+	l sync.Mutex
 	m map[uint64]*resultData
 }
 
@@ -103,9 +103,9 @@ func (mw multList) Trigger(id uint64, x interface{}) {
 
 func (mw multList) IsRegistered(id uint64) bool {
 	w := mw[id%uint64(len(mw))]
-	w.l.RLock()
-	defer w.l.RUnlock()
+	w.l.Lock()
 	_, ok := w.m[id]
+	w.l.Unlock()
 	return ok
 }
 
