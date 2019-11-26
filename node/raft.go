@@ -955,12 +955,16 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		if waitApply {
 			s := time.Now()
 			// wait and handle pending config change
-			select {
-			case cc := <-rc.node.ConfChangedCh():
-				rc.node.HandleConfChanged(cc)
-			case <-applyWaitDone:
-			case <-rc.stopc:
-				return
+			confDone := false
+			for !confDone {
+				select {
+				case cc := <-rc.node.ConfChangedCh():
+					rc.node.HandleConfChanged(cc)
+				case <-applyWaitDone:
+					confDone = true
+				case <-rc.stopc:
+					return
+				}
 			}
 			cost := time.Since(s)
 			if cost > time.Second {
