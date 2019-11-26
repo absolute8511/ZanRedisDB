@@ -32,6 +32,7 @@ $(BLDDIR)/%:
 	@mkdir -p $(dir $@)
 	@echo $(GOOS)
 	@echo $(CGO_LDFLAGS)
+	CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} GO111MODULE=on go get -u github.com/youzan/gorocksdb
 	CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} GO111MODULE=on go build ${GOFLAGS} -o $@ ./apps/$*
 
 $(APPS): %: $(BLDDIR)/%

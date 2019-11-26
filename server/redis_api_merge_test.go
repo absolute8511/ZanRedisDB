@@ -33,13 +33,13 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	raftAddr := "http://127.0.0.1:32345"
-	redisportMerge := 42345
+	rport := 42345
+	raftAddr := fmt.Sprintf("http://127.0.0.1:%d", rport+2)
 	kvOpts := ServerConfig{
 		ClusterID:     "test",
 		DataDir:       tmpDir,
-		RedisAPIPort:  redisportMerge,
-		HttpAPIPort:   redisportMerge + 1,
+		RedisAPIPort:  rport,
+		HttpAPIPort:   rport + 1,
 		LocalRaftAddr: raftAddr,
 		BroadcastAddr: "127.0.0.1",
 		TickMs:        100,
@@ -71,7 +71,7 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 	kv.Start()
 	time.Sleep(time.Second)
 	t.Logf("start test server done at: %v", time.Now())
-	return kv, redisportMerge, tmpDir
+	return kv, rport, tmpDir
 }
 func waitMergeServerForLeader(t *testing.T, w time.Duration) {
 	start := time.Now()

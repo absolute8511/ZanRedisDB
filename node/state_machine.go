@@ -172,6 +172,14 @@ type emptySM struct {
 }
 
 func (esm *emptySM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+	ts := reqList.Timestamp
+	tn := time.Now()
+	if ts > 0 {
+		cost := tn.UnixNano() - ts
+		if cost > raftSlow.Nanoseconds()/2 {
+			nodeLog.Infof("receive raft requests in state machine slow cost: %v, %v, %v", reqList.ReqId, len(reqList.Reqs), cost)
+		}
+	}
 	for _, req := range reqList.Reqs {
 		reqID := req.Header.ID
 		if reqID == 0 {
@@ -584,6 +592,12 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 	if reqList.Type == FromClusterSyncer {
 		if nodeLog.Level() >= common.LOG_DETAIL {
 			kvsm.Debugf("recv write from cluster syncer at (%v-%v): %v", term, index, reqList.String())
+		}
+	}
+	if ts > 0 {
+		cost := start.UnixNano() - ts
+		if cost > raftSlow.Nanoseconds()/2 {
+			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
 		}
 	}
 	var retErr error

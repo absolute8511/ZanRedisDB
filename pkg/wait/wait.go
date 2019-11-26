@@ -36,18 +36,24 @@ type Wait interface {
 	// Trigger triggers the waiting chans with the given ID.
 	Trigger(id uint64, x interface{})
 	IsRegistered(id uint64) bool
+	RegisterWithC(id uint64, done chan struct{}) WaitResult
 }
 
-type multList [16]*list
+type multList [32]*list
 
 type resultData struct {
 	value interface{}
 	done  chan struct{}
 }
 
-func newResultData() *resultData {
+func newResultData(done chan struct{}) *resultData {
+	if done == nil {
+		return &resultData{
+			done: make(chan struct{}, 1),
+		}
+	}
 	return &resultData{
-		done: make(chan struct{}, 1),
+		done: done,
 	}
 }
 
@@ -60,7 +66,7 @@ func (rd *resultData) WaitC() <-chan struct{} {
 }
 
 type list struct {
-	l sync.RWMutex
+	l sync.Mutex
 	m map[uint64]*resultData
 }
 
@@ -75,13 +81,14 @@ func New() Wait {
 	return ml
 }
 
-func (mw multList) Register(id uint64) WaitResult {
+func (mw multList) RegisterWithC(id uint64, done chan struct{}) WaitResult {
 	w := mw[id%uint64(len(mw))]
+	e := newResultData(done)
 	w.l.Lock()
 	defer w.l.Unlock()
 	rd := w.m[id]
 	if rd == nil {
-		rd = newResultData()
+		rd = e
 		w.m[id] = rd
 	} else {
 		log.Panicf("dup id %x", id)
@@ -89,23 +96,32 @@ func (mw multList) Register(id uint64) WaitResult {
 	return rd
 }
 
+func (mw multList) Register(id uint64) WaitResult {
+	return mw.RegisterWithC(id, nil)
+}
+
 func (mw multList) Trigger(id uint64, x interface{}) {
 	w := mw[id%uint64(len(mw))]
 	w.l.Lock()
 	rd := w.m[id]
 	delete(w.m, id)
+	w.l.Unlock()
 	if rd != nil {
 		rd.value = x
-		close(rd.done)
+		//close(rd.done)
+		select {
+		case rd.done <- struct{}{}:
+		default:
+			log.Panicf("done chan is full: %v", id)
+		}
 	}
-	w.l.Unlock()
 }
 
 func (mw multList) IsRegistered(id uint64) bool {
 	w := mw[id%uint64(len(mw))]
-	w.l.RLock()
-	defer w.l.RUnlock()
+	w.l.Lock()
 	_, ok := w.m[id]
+	w.l.Unlock()
 	return ok
 }
 
@@ -114,7 +130,11 @@ type waitWithResponse struct {
 }
 
 func NewWithResponse(ch <-chan interface{}) Wait {
-	return &waitWithResponse{wr: newResultData()}
+	return &waitWithResponse{wr: newResultData(nil)}
+}
+
+func (w *waitWithResponse) RegisterWithC(id uint64, done chan struct{}) WaitResult {
+	return w.wr
 }
 
 func (w *waitWithResponse) Register(id uint64) WaitResult {

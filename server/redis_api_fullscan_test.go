@@ -32,8 +32,8 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	raftAddr := "http://127.0.0.1:52346"
-	redisportFullScan := 52345
+	rport := 52345
+	raftAddr := fmt.Sprintf("http://127.0.0.1:%d", rport+2)
 	var replica node.ReplicaInfo
 	replica.NodeID = 1
 	replica.ReplicaID = 1
@@ -41,7 +41,7 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 	kvOpts := ServerConfig{
 		ClusterID:      "test",
 		DataDir:        tmpDir,
-		RedisAPIPort:   redisportFullScan,
+		RedisAPIPort:   rport,
 		LocalRaftAddr:  raftAddr,
 		BroadcastAddr:  "127.0.0.1",
 		TickMs:         100,
@@ -91,7 +91,7 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 
 	kv.Start()
 	time.Sleep(time.Second)
-	return kv, redisportFullScan, tmpDir
+	return kv, rport, tmpDir
 }
 
 func waitScanServerForLeader(t *testing.T, w time.Duration) {

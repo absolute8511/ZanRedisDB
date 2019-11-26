@@ -59,11 +59,16 @@ func (n *nodeRecorder) Step(ctx context.Context, msg raftpb.Message) error {
 	n.Record(testutil.Action{Name: "Step"})
 	return nil
 }
+func (n *nodeRecorder) ConfChangedCh() <-chan raftpb.ConfChange                         { return nil }
+func (n *nodeRecorder) HandleConfChanged(cc raftpb.ConfChange)                          { return }
+func (n *nodeRecorder) EventNotifyCh() chan bool                                        { return nil }
+func (n *nodeRecorder) NotifyEventCh()                                                  { return }
+func (n *nodeRecorder) StepNode() (raft.Ready, bool)                                    { return raft.Ready{}, true }
 func (n *nodeRecorder) Status() raft.Status                                             { return raft.Status{} }
 func (n *nodeRecorder) Ready() <-chan raft.Ready                                        { return nil }
 func (n *nodeRecorder) TransferLeadership(ctx context.Context, lead, transferee uint64) {}
 func (n *nodeRecorder) ReadIndex(ctx context.Context, rctx []byte) error                { return nil }
-func (n *nodeRecorder) Advance()                                                        {}
+func (n *nodeRecorder) Advance(rd raft.Ready)                                           {}
 func (n *nodeRecorder) ApplyConfChange(conf raftpb.ConfChange) *raftpb.ConfState {
 	n.Record(testutil.Action{Name: "ApplyConfChange", Params: []interface{}{conf}})
 	return &raftpb.ConfState{}
@@ -85,18 +90,40 @@ func (n *nodeRecorder) Compact(index uint64, nodes []uint64, d []byte) {
 type readyNode struct {
 	nodeRecorder
 	readyc chan raft.Ready
+	c      chan bool
 }
 
 func newReadyNode() *readyNode {
 	return &readyNode{
-		nodeRecorder{testutil.NewRecorderStream()},
-		make(chan raft.Ready, 1)}
-}
-func newNopReadyNode() *readyNode {
-	return &readyNode{*newNodeRecorder(), make(chan raft.Ready, 1)}
+		nodeRecorder: nodeRecorder{testutil.NewRecorderStream()},
+		c:            make(chan bool, 1),
+		readyc:       make(chan raft.Ready, 1)}
 }
 
-func (n *readyNode) Ready() <-chan raft.Ready { return n.readyc }
+func newNopReadyNode() *readyNode {
+	return &readyNode{*newNodeRecorder(), make(chan raft.Ready, 1), make(chan bool, 1)}
+}
+
+func (n *readyNode) EventNotifyCh() chan bool { return n.c }
+
+func (n *readyNode) pushReady(rd raft.Ready) {
+	select {
+	case n.readyc <- rd:
+	}
+	select {
+	case n.c <- true:
+	default:
+	}
+}
+
+func (n *readyNode) StepNode() (raft.Ready, bool) {
+	select {
+	case rd := <-n.readyc:
+		return rd, true
+	default:
+	}
+	return raft.Ready{}, false
+}
 
 type storageRecorder struct {
 	testutil.Recorder
@@ -357,7 +384,7 @@ func TestStopRaftWhenWaitingForApplyDone(t *testing.T) {
 		r.serveChannels()
 		close(done)
 	}()
-	n.readyc <- raft.Ready{}
+	n.pushReady(raft.Ready{})
 	select {
 	case <-commitC:
 	case <-time.After(time.Second):
@@ -398,10 +425,10 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 	}()
 	defer close(r.stopc)
 
-	n.readyc <- raft.Ready{
+	n.pushReady(raft.Ready{
 		SoftState:        &raft.SoftState{RaftState: raft.StateFollower},
 		CommittedEntries: []raftpb.Entry{{Type: raftpb.EntryConfChange}},
-	}
+	})
 	blockingEnt := <-commitC
 	if blockingEnt.applyWaitDone == nil {
 		t.Fatalf("unexpected nil chan, should init wait channel for waiting apply conf change event")
@@ -409,7 +436,7 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 
 	continueC := make(chan struct{})
 	go func() {
-		n.readyc <- raft.Ready{}
+		n.pushReady(raft.Ready{})
 		<-commitC
 		close(continueC)
 	}()
