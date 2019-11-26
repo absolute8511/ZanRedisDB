@@ -185,10 +185,6 @@ func (esm *emptySM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, req
 		if reqID == 0 {
 			reqID = reqList.ReqId
 		}
-		cost := tn.UnixNano() - req.Header.Timestamp
-		if cost > raftSlow.Nanoseconds()/2 {
-			nodeLog.Infof("receive raft request in state machine slow cost: %v, %v", reqID, cost)
-		}
 		esm.w.Trigger(reqID, nil)
 	}
 	return false, nil

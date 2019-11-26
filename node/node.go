@@ -96,12 +96,6 @@ type nodeProgress struct {
 	appliedi  uint64
 }
 
-type internalReq struct {
-	reqData InternalRaftRequest
-	ctx     context.Context
-	wr      wait.WaitResult
-}
-
 type RequestResultCode int
 
 const (
@@ -112,6 +106,7 @@ const (
 
 type waitReqHeaders struct {
 	wr   wait.WaitResult
+	done chan struct{}
 	reqs BatchInternalRaftRequest
 	pool *sync.Pool
 }
@@ -137,6 +132,7 @@ func newWaitReqPoolArray() waitReqPoolArray {
 		waitReqPool.New = func() interface{} {
 			obj := &waitReqHeaders{}
 			obj.reqs.Reqs = make([]InternalRaftRequest, 0, 1)
+			obj.done = make(chan struct{}, 1)
 			obj.pool = waitReqPool
 			return obj
 		}
@@ -149,6 +145,7 @@ func (wa waitReqPoolArray) getWaitReq(idLen int) *waitReqHeaders {
 	if idLen > maxPoolIDLen {
 		obj := &waitReqHeaders{}
 		obj.reqs.Reqs = make([]InternalRaftRequest, 0, idLen)
+		obj.done = make(chan struct{}, 1)
 		return obj
 	}
 	index := 0
@@ -501,18 +498,21 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 
 func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, cancel context.CancelFunc) (*waitReqHeaders, error) {
 	wrh := nd.wrPools.getWaitReq(1)
-	poolCost := time.Now().UnixNano() - irr.Header.Timestamp
 	wrh.reqs.Reqs = append(wrh.reqs.Reqs, irr)
 	wrh.reqs.ReqNum = 1
 	wrh.reqs.Timestamp = irr.Header.Timestamp
+	if len(wrh.done) != 0 {
+		wrh.done = make(chan struct{}, 1)
+	}
 	buffer, err := wrh.reqs.Marshal()
+	poolCost := time.Now().UnixNano() - irr.Header.Timestamp
 	// buffer will be reused by raft?
 	// TODO:buffer, err := reqList.MarshalTo()
 	if err != nil {
 		wrh.release()
 		return nil, err
 	}
-	wrh.wr = nd.w.Register(irr.Header.ID)
+	wrh.wr = nd.w.RegisterWithC(irr.Header.ID, wrh.done)
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
 	if err != nil {
 		nd.rn.Infof("propose failed : %v", err.Error())
@@ -658,6 +658,7 @@ func (nd *KVNode) queueRequest(req InternalRaftRequest) (interface{}, error) {
 			err = ErrProposalCanceled
 		}
 		nd.w.Trigger(req.Header.ID, err)
+		<-wrh.wr.WaitC()
 	case <-wrh.wr.WaitC():
 	}
 	rsp = wrh.wr.GetResult()

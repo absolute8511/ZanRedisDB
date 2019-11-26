@@ -15,10 +15,19 @@
 package node
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/youzan/ZanRedisDB/pkg/wait"
 )
+
+type internalReq struct {
+	reqData InternalRaftRequest
+	ctx     context.Context
+	wr      wait.WaitResult
+}
 
 type elemT internalReq
 
