@@ -157,9 +157,9 @@ func (s *RemoteLogSender) getAllAddressesForPart() ([]string, error) {
 	return addrs, nil
 }
 
-func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
+func (s *RemoteLogSender) doSendOnce(in syncerpb.RaftReqs) error {
 	if s.remoteClusterAddr == "" {
-		nodeLog.Infof("sending log with no remote: %v", r)
+		nodeLog.Infof("sending log with no remote: %v", in.String())
 		return nil
 	}
 	c, addr, err := s.getClient()
@@ -167,26 +167,12 @@ func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 		nodeLog.Infof("sending(%v) log failed to get grpc client: %v", addr, err)
 		return errors.New("failed to get grpc client")
 	}
-	raftLogs := make([]*syncerpb.RaftLogData, len(r))
-	for i, e := range r {
-		var rld syncerpb.RaftLogData
-		raftLogs[i] = &rld
-		raftLogs[i].Type = syncerpb.EntryNormalRaw
-		raftLogs[i].Data, _ = e.Marshal()
-		raftLogs[i].Term = e.OrigTerm
-		raftLogs[i].Index = e.OrigIndex
-		raftLogs[i].RaftTimestamp = e.Timestamp
-		raftLogs[i].RaftGroupName = s.grpName
-		raftLogs[i].ClusterName = s.localCluster
-	}
-
-	in := &syncerpb.RaftReqs{RaftLog: raftLogs}
 	if nodeLog.Level() > common.LOG_DETAIL {
 		nodeLog.Debugf("sending(%v) log : %v", addr, in.String())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sendLogTimeout)
 	defer cancel()
-	rpcErr, err := c.ApplyRaftReqs(ctx, in, grpc.MaxCallSendMsgSize(256<<20))
+	rpcErr, err := c.ApplyRaftReqs(ctx, &in, grpc.MaxCallSendMsgSize(256<<20))
 	if err != nil {
 		nodeLog.Infof("sending(%v) log failed: %v", addr, err.Error())
 		return err
@@ -486,16 +472,16 @@ func (s *RemoteLogSender) getRemoteSyncedRaft(stop chan struct{}) (SyncedState, 
 	return state, err
 }
 
-func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
-	if len(r) == 0 {
+func (s *RemoteLogSender) sendRaftLog(r syncerpb.RaftReqs, stop chan struct{}) error {
+	if len(r.RaftLog) == 0 {
 		return nil
 	}
-	first := r[0]
+	first := r.RaftLog[0]
 	err := sendRpcAndRetry(func() error {
 		err := s.doSendOnce(r)
 		if err != nil {
 			nodeLog.Infof("failed to send raft log : %v, at %v-%v",
-				err.Error(), first.OrigTerm, first.OrigIndex)
+				err.Error(), first.Term, first.Index)
 		}
 		return err
 	}, "sendRaftLog", stop)
