@@ -600,6 +600,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
 		}
 	}
+	// TODO: maybe we can merge the same write with same key and value to avoid too much hot write on the same key-value
 	var retErr error
 	for _, req := range reqList.Reqs {
 		reqTs := ts

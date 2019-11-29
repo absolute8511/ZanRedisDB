@@ -42,7 +42,7 @@ func BenchmarkOneNode(b *testing.B) {
 
 	for {
 		<-n.EventNotifyCh()
-		rd, hasEvent := n.StepNode()
+		rd, hasEvent := n.StepNode(true)
 		if !hasEvent {
 			continue
 		}

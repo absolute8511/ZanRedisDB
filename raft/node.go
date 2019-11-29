@@ -124,7 +124,7 @@ type msgWithDrop struct {
 type Node interface {
 	// Tick increments the internal logical clock for the Node by a single tick. Election
 	// timeouts and heartbeat timeouts are in units of ticks.
-	Tick()
+	Tick() bool
 	// Campaign causes the Node to transition to candidate state and start campaigning to become leader.
 	Campaign(ctx context.Context) error
 	// Propose proposes that data be appended to the log.
@@ -143,7 +143,7 @@ type Node interface {
 	//
 	// NOTE: No committed entries from the next Ready may be applied until all committed entries
 	// and snapshots from the previous one have finished.
-	StepNode() (Ready, bool)
+	StepNode(bool) (Ready, bool)
 	// EventNotifyCh is used to notify or receive the notify for the raft event
 	EventNotifyCh() chan bool
 	// NotifyEventCh will notify the raft loop event to check new event
@@ -287,7 +287,7 @@ type node struct {
 	eventNotifyCh chan bool
 	r             *raft
 	prevS         *prevState
-	newReadyFunc  func(*raft, *SoftState, pb.HardState) Ready
+	newReadyFunc  func(*raft, *SoftState, pb.HardState, bool) Ready
 	needAdvance   bool
 
 	logger Logger
@@ -325,7 +325,7 @@ func (n *node) Stop() {
 	}
 }
 
-func (n *node) StepNode() (Ready, bool) {
+func (n *node) StepNode(moreEntriesToApply bool) (Ready, bool) {
 	if n.needAdvance {
 		return Ready{}, false
 	}
@@ -354,7 +354,7 @@ func (n *node) StepNode() (Ready, bool) {
 	}
 	n.handleStatus(n.r)
 	_ = hasEvent
-	rd := n.newReadyFunc(n.r, n.prevS.prevSoftSt, n.prevS.prevHardSt)
+	rd := n.newReadyFunc(n.r, n.prevS.prevSoftSt, n.prevS.prevHardSt, moreEntriesToApply)
 	if rd.containsUpdates() {
 		n.needAdvance = true
 		return rd, true
@@ -609,15 +609,18 @@ func (n *node) handleProposal(r *raft, mdrop msgWithDrop) {
 
 // Tick increments the internal logical clock for this Node. Election timeouts
 // and heartbeat timeouts are in units of ticks.
-func (n *node) Tick() {
+func (n *node) Tick() bool {
 	select {
 	case n.tickc <- struct{}{}:
 		n.NotifyEventCh()
+		return true
 	case <-n.done:
+		return true
 	default:
 		if n.logger != nil {
 			n.logger.Warningf("A tick missed to fire. Node blocks too long!")
 		}
+		return false
 	}
 }
 
@@ -715,11 +718,13 @@ func (n *node) ReadIndex(ctx context.Context, rctx []byte) error {
 	return n.step(ctx, pb.Message{Type: pb.MsgReadIndex, Entries: []pb.Entry{{Data: rctx}}})
 }
 
-func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
+func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState, moreEntriesToApply bool) Ready {
 	rd := Ready{
-		Entries:          r.raftLog.unstableEntries(),
-		CommittedEntries: r.raftLog.nextEnts(),
-		Messages:         r.msgs,
+		Entries:  r.raftLog.unstableEntries(),
+		Messages: r.msgs,
+	}
+	if moreEntriesToApply {
+		rd.CommittedEntries = r.raftLog.nextEnts()
 	}
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt

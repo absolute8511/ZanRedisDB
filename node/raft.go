@@ -694,8 +694,13 @@ func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftp
 func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot, snapResult chan error,
 	raftDone chan struct{}, applyWaitDone chan struct{}) {
 	select {
-	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot, applySnapshotResult: snapResult,
-		raftDone: raftDone, applyWaitDone: applyWaitDone}:
+	case rc.commitC <- applyInfo{
+		ents:                ents,
+		snapshot:            snapshot,
+		applySnapshotResult: snapResult,
+		raftDone:            raftDone,
+		applyWaitDone:       applyWaitDone,
+	}:
 	case <-rc.stopc:
 		return
 	}
@@ -845,7 +850,11 @@ func (rc *raftNode) serveChannels() {
 		case <-rc.stopc:
 			return
 		case <-rc.node.EventNotifyCh():
-			rd, hasUpdate := rc.node.StepNode()
+			moreEntriesToApply := cap(rc.commitC)-len(rc.commitC) > 3
+			if !moreEntriesToApply {
+				rc.Infof("entries channel is full: %v", len(rc.commitC))
+			}
+			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply)
 			if !hasUpdate {
 				continue
 			}
@@ -903,12 +912,17 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		applySnapshotTransferResult = make(chan error, 1)
 	}
-
-	// TODO: do we need publish entry if commitedentries and snapshot is empty?
-	rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
+	processedMsgs, hasRequestSnapMsg := rc.processMessages(rd.Messages)
+	if len(rd.CommittedEntries) > 0 || !raft.IsEmptySnap(rd.Snapshot) || hasRequestSnapMsg {
+		rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
+	}
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		// since the snapshot only has metadata, we need rsync the real snapshot data first.
 		// if the real snapshot failed to pull, we need stop raft and retry restart later.
+
+		// fixme: this is not the best way since it will block the raft loop, ideally we should
+		// have the full snap data while receiving the snapshot request and we save to raft. Then
+		// we can make it async while applying on local without blocking raft loop (just pause the entries apply)
 		rc.Infof("raft begin to transfer incoming snapshot : %v", rd.Snapshot.String())
 		select {
 		case applyErr := <-applySnapshotTransferResult:
@@ -924,7 +938,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		rc.Infof("raft transfer incoming snapshot done : %v", rd.Snapshot.String())
 	}
 	if isMeNewLeader {
-		rc.transport.Send(rc.processMessages(rd.Messages))
+		rc.transport.Send(processedMsgs)
 	}
 
 	// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
@@ -950,7 +964,6 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	rc.raftStorage.Append(rd.Entries)
 
 	if !isMeNewLeader {
-		msgs := rc.processMessages(rd.Messages)
 		raftDone <- struct{}{}
 		if waitApply {
 			s := time.Now()
@@ -968,10 +981,10 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 			}
 			cost := time.Since(s)
 			if cost > time.Second {
-				nodeLog.Infof("wait apply %v msgs done cost: %v", len(msgs), cost.String())
+				nodeLog.Infof("wait apply %v msgs done cost: %v", len(processedMsgs), cost.String())
 			}
 		}
-		rc.transport.Send(msgs)
+		rc.transport.Send(processedMsgs)
 	} else {
 		raftDone <- struct{}{}
 	}
@@ -1014,8 +1027,9 @@ func (rc *raftNode) processReadStates(rd *raft.Ready) {
 	}
 }
 
-func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
+func (rc *raftNode) processMessages(msgs []raftpb.Message) ([]raftpb.Message, bool) {
 	sentAppResp := false
+	hasSnapMsg := false
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Type == raftpb.MsgAppResp {
 			if sentAppResp {
@@ -1030,6 +1044,7 @@ func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 			rc.Infof("some node request snapshot: %v", msgs[i].String())
 			select {
 			case rc.msgSnapC <- msgs[i]:
+				hasSnapMsg = true
 			default:
 				// drop msgSnap if the inflight chan if full.
 			}
@@ -1040,7 +1055,7 @@ func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 			rc.Infof("process vote/prevote :%v ", msgs[i].String())
 		}
 	}
-	return msgs
+	return msgs, hasSnapMsg
 }
 
 func (rc *raftNode) Lead() uint64  { return atomic.LoadUint64(&rc.lead) }

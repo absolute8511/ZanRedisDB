@@ -37,7 +37,7 @@ type RawNode struct {
 }
 
 func (rn *RawNode) newReady() Ready {
-	return newReady(rn.raft, rn.prevSoftSt, rn.prevHardSt)
+	return newReady(rn.raft, rn.prevSoftSt, rn.prevHardSt, true)
 }
 
 func (rn *RawNode) commitReady(rd Ready) {

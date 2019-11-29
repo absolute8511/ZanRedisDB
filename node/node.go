@@ -817,7 +817,11 @@ func (nd *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
 }
 
 func (nd *KVNode) Tick() {
-	nd.rn.node.Tick()
+	succ := nd.rn.node.Tick()
+	if !succ {
+		nd.rn.Infof("miss tick, current commit channel: %v", len(nd.commitC))
+		nd.rn.node.NotifyEventCh()
+	}
 }
 
 func (nd *KVNode) GetAppliedIndex() uint64 {
@@ -1182,6 +1186,13 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 		appliedi:  snap.Metadata.Index,
 	}
 	nd.rn.Infof("starting state: %v\n", np)
+	// init applied index
+	lastIndex := np.appliedi
+	if lastIndex > nd.GetAppliedIndex() {
+		nd.SetAppliedIndex(lastIndex)
+	}
+	nd.applyWait.Trigger(lastIndex)
+
 	for {
 		select {
 		case <-nd.stopChan:

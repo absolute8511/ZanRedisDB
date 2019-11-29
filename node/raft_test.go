@@ -36,7 +36,10 @@ func newNodeRecorder() *nodeRecorder       { return &nodeRecorder{&testutil.Reco
 func newNodeRecorderStream() *nodeRecorder { return &nodeRecorder{testutil.NewRecorderStream()} }
 func newNodeNop() raft.Node                { return newNodeRecorder() }
 
-func (n *nodeRecorder) Tick() { n.Record(testutil.Action{Name: "Tick"}) }
+func (n *nodeRecorder) Tick() bool {
+	n.Record(testutil.Action{Name: "Tick"})
+	return true
+}
 func (n *nodeRecorder) Campaign(ctx context.Context) error {
 	n.Record(testutil.Action{Name: "Campaign"})
 	return nil
@@ -63,7 +66,7 @@ func (n *nodeRecorder) ConfChangedCh() <-chan raftpb.ConfChange                 
 func (n *nodeRecorder) HandleConfChanged(cc raftpb.ConfChange)                          { return }
 func (n *nodeRecorder) EventNotifyCh() chan bool                                        { return nil }
 func (n *nodeRecorder) NotifyEventCh()                                                  { return }
-func (n *nodeRecorder) StepNode() (raft.Ready, bool)                                    { return raft.Ready{}, true }
+func (n *nodeRecorder) StepNode(bool) (raft.Ready, bool)                                { return raft.Ready{}, true }
 func (n *nodeRecorder) Status() raft.Status                                             { return raft.Status{} }
 func (n *nodeRecorder) Ready() <-chan raft.Ready                                        { return nil }
 func (n *nodeRecorder) TransferLeadership(ctx context.Context, lead, transferee uint64) {}
@@ -116,7 +119,7 @@ func (n *readyNode) pushReady(rd raft.Ready) {
 	}
 }
 
-func (n *readyNode) StepNode() (raft.Ready, bool) {
+func (n *readyNode) StepNode(bool) (raft.Ready, bool) {
 	select {
 	case rd := <-n.readyc:
 		return rd, true
@@ -384,7 +387,14 @@ func TestStopRaftWhenWaitingForApplyDone(t *testing.T) {
 		r.serveChannels()
 		close(done)
 	}()
-	n.pushReady(raft.Ready{})
+	n.pushReady(raft.Ready{
+		Snapshot: raftpb.Snapshot{
+			Metadata: raftpb.SnapshotMetadata{
+				Term:  1,
+				Index: 1,
+			},
+		},
+	})
 	select {
 	case <-commitC:
 	case <-time.After(time.Second):
@@ -436,7 +446,14 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 
 	continueC := make(chan struct{})
 	go func() {
-		n.pushReady(raft.Ready{})
+		n.pushReady(raft.Ready{
+			Snapshot: raftpb.Snapshot{
+				Metadata: raftpb.SnapshotMetadata{
+					Term:  1,
+					Index: 2,
+				},
+			},
+		})
 		<-commitC
 		close(continueC)
 	}()
