@@ -35,7 +35,7 @@ func ExampleNode() {
 	for {
 		// Ready blocks until there is new state ready.
 		<-n.EventNotifyCh()
-		rd, hasEvent := n.StepNode(true)
+		rd, hasEvent := n.StepNode(true, false)
 		if !hasEvent {
 			continue
 		}

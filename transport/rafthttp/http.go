@@ -23,6 +23,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/etcd/version"
 	pioutil "github.com/youzan/ZanRedisDB/pkg/ioutil"
@@ -208,6 +209,7 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	plog.Infof("receiving database snapshot [index:%d, from %s] ...", m.Snapshot.Metadata.Index, types.ID(m.From))
 	if !h.insertSnapshotState(m) {
 		http.Error(w, "already running another snapshot", http.StatusBadRequest)
+		// fixme: old version may send multi snapshot, so we need ignore for low version
 		return
 	}
 
@@ -221,7 +223,6 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(n))
-
 	go func() {
 		defer h.removeSnapshotState(m)
 		if err := h.r.Process(context.TODO(), m); err != nil {
@@ -230,6 +231,11 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		plog.Infof("received and saved database snapshot [index: %d, from: %s] successfully", m.Snapshot.Metadata.Index, types.ID(m.From))
 	}()
+	// in old version, the sender will report snapshot finish when we response ok.
+	// Here we wait snapshot transfer state changed, so we will not
+	// send msgapp resp to leader to avoid send another snapshot from sender
+	time.Sleep(time.Second)
+
 	// Write StatusNoContent header after the message has been processed by
 	// raft, which facilitates the client to report MsgSnap status.
 	w.WriteHeader(http.StatusNoContent)

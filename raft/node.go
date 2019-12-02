@@ -143,7 +143,7 @@ type Node interface {
 	//
 	// NOTE: No committed entries from the next Ready may be applied until all committed entries
 	// and snapshots from the previous one have finished.
-	StepNode(bool) (Ready, bool)
+	StepNode(moreApplyEntries bool, busySnap bool) (Ready, bool)
 	// EventNotifyCh is used to notify or receive the notify for the raft event
 	EventNotifyCh() chan bool
 	// NotifyEventCh will notify the raft loop event to check new event
@@ -325,7 +325,7 @@ func (n *node) Stop() {
 	}
 }
 
-func (n *node) StepNode(moreEntriesToApply bool) (Ready, bool) {
+func (n *node) StepNode(moreEntriesToApply bool, busySnap bool) (Ready, bool) {
 	if n.needAdvance {
 		return Ready{}, false
 	}
@@ -333,7 +333,11 @@ func (n *node) StepNode(moreEntriesToApply bool) (Ready, bool) {
 	msgs := n.msgQ.Get()
 	for i, m := range msgs {
 		hasEvent = true
-		n.handleReceivedMessage(n.r, m)
+		if busySnap && m.Type == pb.MsgApp {
+			// ignore msg app while busy snapshot
+		} else {
+			n.handleReceivedMessage(n.r, m)
+		}
 		msgs[i].Entries = nil
 	}
 	if n.handleTicks(n.r) {

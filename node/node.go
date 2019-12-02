@@ -1349,6 +1349,8 @@ func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgSnap && !raft.IsEmptySnap(m.Snapshot) {
 		// we prepare the snapshot data here before we send install snapshot message to raft
 		// to avoid block raft loop while transfer the snapshot data
+		nd.rn.SetPrepareSnapshot(true)
+		defer nd.rn.SetPrepareSnapshot(false)
 		nd.rn.Infof("prepare transfer snapshot : %v\n", m.Snapshot.String())
 		defer nd.rn.Infof("transfer snapshot done : %v\n", m.Snapshot.String())
 		err := nd.sm.PrepareSnapshot(m.Snapshot, nd.stopChan)

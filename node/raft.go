@@ -121,6 +121,7 @@ type raftNode struct {
 	lastLeaderChangedTs int64
 	stopping            int32
 	replayRunning       int32
+	busySnapshot        int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -854,7 +855,7 @@ func (rc *raftNode) serveChannels() {
 			if !moreEntriesToApply {
 				rc.Infof("entries channel is full: %v", len(rc.commitC))
 			}
-			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply)
+			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, rc.IsBusySnapshot())
 			if !hasUpdate {
 				continue
 			}
@@ -1208,6 +1209,18 @@ func (rc *raftNode) triggerLeaderChanged() {
 	case rc.newLeaderChan <- rc.config.GroupName:
 	case <-rc.stopc:
 	}
+}
+
+func (rc *raftNode) SetPrepareSnapshot(busy bool) {
+	if busy {
+		atomic.StoreInt32(&rc.busySnapshot, 1)
+	} else {
+		atomic.StoreInt32(&rc.busySnapshot, 0)
+	}
+}
+
+func (rc *raftNode) IsBusySnapshot() bool {
+	return atomic.LoadInt32(&rc.busySnapshot) == 1
 }
 
 func (rc *raftNode) ReportUnreachable(id uint64, group raftpb.Group) {

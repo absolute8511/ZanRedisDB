@@ -128,7 +128,7 @@ func TestNodePropose(t *testing.T) {
 		case <-n.done:
 			return
 		}
-		rd, hasEvent := n.StepNode(true)
+		rd, hasEvent := n.StepNode(true, false)
 		if !hasEvent {
 			continue
 		}
@@ -142,7 +142,7 @@ func TestNodePropose(t *testing.T) {
 		n.Advance(rd)
 	}
 	n.Propose(context.TODO(), []byte("somedata"))
-	n.StepNode(true)
+	n.StepNode(true, false)
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -183,7 +183,7 @@ func TestNodeReadIndex(t *testing.T) {
 		case <-n.done:
 			return
 		}
-		rd, hasEvent := n.StepNode(true)
+		rd, hasEvent := n.StepNode(true, false)
 		if !hasEvent {
 			continue
 		}
@@ -203,7 +203,7 @@ func TestNodeReadIndex(t *testing.T) {
 	r.step = appendStep
 	wrequestCtx := []byte("somedata2")
 	n.ReadIndex(context.TODO(), wrequestCtx)
-	n.StepNode(true)
+	n.StepNode(true, false)
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -339,7 +339,7 @@ func TestNodeProposeConfig(t *testing.T) {
 		case <-n.done:
 			return
 		}
-		rd, hasEvent := n.StepNode(true)
+		rd, hasEvent := n.StepNode(true, false)
 		if !hasEvent {
 			continue
 		}
@@ -358,7 +358,7 @@ func TestNodeProposeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	n.ProposeConfChange(context.TODO(), cc)
-	n.StepNode(true)
+	n.StepNode(true, false)
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -399,7 +399,7 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 			case <-ticker.C:
 				n.Tick()
 			case <-n.EventNotifyCh():
-				rd, hasEvent := n.StepNode(true)
+				rd, hasEvent := n.StepNode(true, false)
 				if !hasEvent {
 					continue
 				}
@@ -500,7 +500,7 @@ func TestNodeTick(t *testing.T) {
 	n.Tick()
 	for len(n.tickc) != 0 {
 		time.Sleep(100 * time.Millisecond)
-		n.StepNode(true)
+		n.StepNode(true, false)
 	}
 	n.Stop()
 	if r.electionElapsed != elapsed+1 {
@@ -524,7 +524,7 @@ func TestNodeStop(t *testing.T) {
 		for {
 			select {
 			case <-n.EventNotifyCh():
-				n.StepNode(true)
+				n.StepNode(true, false)
 			case <-n.done:
 				return
 			}
@@ -535,7 +535,7 @@ func TestNodeStop(t *testing.T) {
 	}()
 
 	status := n.Status()
-	n.StepNode(true)
+	n.StepNode(true, false)
 	n.Stop()
 
 	select {
@@ -627,7 +627,7 @@ func TestNodeStart(t *testing.T) {
 	}
 	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
-	g, _ := n.StepNode(true)
+	g, _ := n.StepNode(true, false)
 	if !reflect.DeepEqual(g, wants[0]) {
 		t.Fatalf("#%d: g = %+v,\n             w   %+v", 1, g, wants[0])
 	} else {
@@ -636,12 +636,12 @@ func TestNodeStart(t *testing.T) {
 	}
 
 	n.Campaign(ctx)
-	rd, _ := n.StepNode(true)
+	rd, _ := n.StepNode(true, false)
 	storage.Append(rd.Entries)
 	n.Advance(rd)
 
 	n.Propose(ctx, []byte("foo"))
-	if g2, _ := n.StepNode(true); !reflect.DeepEqual(g2, wants[1]) {
+	if g2, _ := n.StepNode(true, false); !reflect.DeepEqual(g2, wants[1]) {
 		t.Errorf("#%d: g = %+v,\n             w   %+v", 2, g2, wants[1])
 	} else {
 		storage.Append(g2.Entries)
@@ -650,7 +650,7 @@ func TestNodeStart(t *testing.T) {
 
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent := n.StepNode(true)
+		rd, hasEvent := n.StepNode(true, false)
 		if hasEvent {
 			t.Errorf("unexpected Ready: %+v", rd)
 		}
@@ -694,7 +694,7 @@ func TestNodeRestart(t *testing.T) {
 	n := RestartNode(c)
 	defer n.Stop()
 	<-n.EventNotifyCh()
-	g, _ := n.StepNode(true)
+	g, _ := n.StepNode(true, false)
 	if !reflect.DeepEqual(g, want) {
 		t.Errorf("g = %+v,\n             w   %+v", g, want)
 	}
@@ -702,7 +702,7 @@ func TestNodeRestart(t *testing.T) {
 
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent := n.StepNode(true)
+		rd, hasEvent := n.StepNode(true, false)
 		if hasEvent {
 			t.Errorf("unexpected Ready: %+v", rd)
 		}
@@ -762,7 +762,7 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 	}
 	n := RestartNode(c)
 	defer n.Stop()
-	g, _ := n.StepNode(true)
+	g, _ := n.StepNode(true, false)
 	if !reflect.DeepEqual(g, want) {
 		t.Errorf("g = %+v,\n             w   %+v", g, want)
 	} else {
@@ -771,7 +771,7 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent := n.StepNode(true)
+		rd, hasEvent := n.StepNode(true, false)
 		if hasEvent {
 			t.Errorf("unexpected Ready: %+v", rd)
 		}
@@ -803,19 +803,19 @@ func TestNodeAdvance(t *testing.T) {
 	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
 	<-n.EventNotifyCh()
-	rd, _ := n.StepNode(true)
+	rd, _ := n.StepNode(true, false)
 	storage.Append(rd.Entries)
 	n.Advance(rd)
 
 	n.Campaign(ctx)
 	<-n.EventNotifyCh()
-	n.StepNode(true)
+	n.StepNode(true, false)
 
 	n.Propose(ctx, []byte("foo"))
 	hasEvent := false
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent = n.StepNode(true)
+		rd, hasEvent = n.StepNode(true, false)
 		if hasEvent {
 			t.Fatalf("unexpected Ready before Advance: %+v", rd)
 		}
@@ -825,12 +825,12 @@ func TestNodeAdvance(t *testing.T) {
 	n.Advance(rd)
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent = n.StepNode(true)
+		rd, hasEvent = n.StepNode(true, false)
 		if !hasEvent {
 			t.Errorf("expect Ready after Advance, but there is no Ready available")
 		}
 	case <-time.After(100 * time.Millisecond):
-		rd, hasEvent = n.StepNode(true)
+		rd, hasEvent = n.StepNode(true, false)
 		if !hasEvent {
 			t.Errorf("expect Ready after Advance, but there is no Ready available")
 		}
@@ -899,7 +899,7 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 			case <-ticker.C:
 				n.Tick()
 			case <-n.EventNotifyCh():
-				rd, hasEvent := n.StepNode(true)
+				rd, hasEvent := n.StepNode(true, false)
 				if !hasEvent {
 					continue
 				}

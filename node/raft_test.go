@@ -66,7 +66,7 @@ func (n *nodeRecorder) ConfChangedCh() <-chan raftpb.ConfChange                 
 func (n *nodeRecorder) HandleConfChanged(cc raftpb.ConfChange)                          { return }
 func (n *nodeRecorder) EventNotifyCh() chan bool                                        { return nil }
 func (n *nodeRecorder) NotifyEventCh()                                                  { return }
-func (n *nodeRecorder) StepNode(bool) (raft.Ready, bool)                                { return raft.Ready{}, true }
+func (n *nodeRecorder) StepNode(bool, bool) (raft.Ready, bool)                          { return raft.Ready{}, true }
 func (n *nodeRecorder) Status() raft.Status                                             { return raft.Status{} }
 func (n *nodeRecorder) Ready() <-chan raft.Ready                                        { return nil }
 func (n *nodeRecorder) TransferLeadership(ctx context.Context, lead, transferee uint64) {}
@@ -119,7 +119,7 @@ func (n *readyNode) pushReady(rd raft.Ready) {
 	}
 }
 
-func (n *readyNode) StepNode(bool) (raft.Ready, bool) {
+func (n *readyNode) StepNode(bool, bool) (raft.Ready, bool) {
 	select {
 	case rd := <-n.readyc:
 		return rd, true
