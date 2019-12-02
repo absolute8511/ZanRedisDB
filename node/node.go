@@ -1346,6 +1346,20 @@ func (nd *KVNode) OnRaftLeaderChanged() {
 }
 
 func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
+	if m.Type == raftpb.MsgSnap && !raft.IsEmptySnap(m.Snapshot) {
+		// we prepare the snapshot data here before we send install snapshot message to raft
+		// to avoid block raft loop while transfer the snapshot data
+		nd.rn.Infof("prepare transfer snapshot : %v\n", m.Snapshot.String())
+		defer nd.rn.Infof("transfer snapshot done : %v\n", m.Snapshot.String())
+		err := nd.sm.PrepareSnapshot(m.Snapshot, nd.stopChan)
+		if enableSnapTransferTest {
+			return errors.New("auto test failed in snapshot transfer")
+		}
+		if err != nil {
+			// we ignore here to allow retry in the raft loop
+			nd.rn.Infof("transfer snapshot failed: %v, %v", m.Snapshot.String(), err.Error())
+		}
+	}
 	return nd.rn.Process(ctx, m)
 }
 

@@ -114,7 +114,7 @@ func testSnapshotSend(t *testing.T, sm *snap.Message) (bool, []os.FileInfo) {
 
 	sent := false
 	select {
-	case <-time.After(time.Second):
+	case <-time.After(snapTransferCheckInterval * 2):
 		t.Fatalf("timed out sending snapshot")
 	case sent = <-sm.CloseNotify():
 	}

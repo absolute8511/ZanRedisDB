@@ -473,3 +473,11 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 		t.Fatalf("unexpected blocking on execution")
 	}
 }
+
+func TestSnapshotApplyingShouldNotBlock(t *testing.T) {
+	// TODO: apply slow snapshot should not block raft loop for ticker and other messaages
+}
+
+func TestSnapshotPreTransferRetryOnFail(t *testing.T) {
+	// TODO: a failed snapshot receive should retry after report failed
+}

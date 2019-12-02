@@ -363,11 +363,6 @@ func (kvsm *kvStoreSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, erro
 }
 
 func checkLocalBackup(store *KVStore, rs raftpb.Snapshot) (bool, error) {
-	var si KVSnapInfo
-	err := json.Unmarshal(rs.Data, &si)
-	if err != nil {
-		return false, err
-	}
 	return store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
 }
 
