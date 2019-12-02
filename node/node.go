@@ -817,7 +817,11 @@ func (nd *KVNode) proposeConfChange(cc raftpb.ConfChange) error {
 }
 
 func (nd *KVNode) Tick() {
-	nd.rn.node.Tick()
+	succ := nd.rn.node.Tick()
+	if !succ {
+		nd.rn.Infof("miss tick, current commit channel: %v", len(nd.commitC))
+		nd.rn.node.NotifyEventCh()
+	}
 }
 
 func (nd *KVNode) GetAppliedIndex() uint64 {
@@ -1182,6 +1186,13 @@ func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 		appliedi:  snap.Metadata.Index,
 	}
 	nd.rn.Infof("starting state: %v\n", np)
+	// init applied index
+	lastIndex := np.appliedi
+	if lastIndex > nd.GetAppliedIndex() {
+		nd.SetAppliedIndex(lastIndex)
+	}
+	nd.applyWait.Trigger(lastIndex)
+
 	for {
 		select {
 		case <-nd.stopChan:
@@ -1335,6 +1346,23 @@ func (nd *KVNode) OnRaftLeaderChanged() {
 }
 
 func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
+	if m.Type == raftpb.MsgSnap && !raft.IsEmptySnap(m.Snapshot) {
+		// we prepare the snapshot data here before we send install snapshot message to raft
+		// to avoid block raft loop while transfer the snapshot data
+		nd.rn.SetPrepareSnapshot(true)
+		defer nd.rn.SetPrepareSnapshot(false)
+		nd.rn.Infof("prepare transfer snapshot : %v\n", m.Snapshot.String())
+		defer nd.rn.Infof("transfer snapshot done : %v\n", m.Snapshot.String())
+		if enableSnapTransferTest {
+			go nd.Stop()
+			return errors.New("auto test failed in snapshot transfer")
+		}
+		err := nd.sm.PrepareSnapshot(m.Snapshot, nd.stopChan)
+		if err != nil {
+			// we ignore here to allow retry in the raft loop
+			nd.rn.Infof("transfer snapshot failed: %v, %v", m.Snapshot.String(), err.Error())
+		}
+	}
 	return nd.rn.Process(ctx, m)
 }
 

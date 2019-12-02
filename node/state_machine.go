@@ -363,11 +363,6 @@ func (kvsm *kvStoreSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, erro
 }
 
 func checkLocalBackup(store *KVStore, rs raftpb.Snapshot) (bool, error) {
-	var si KVSnapInfo
-	err := json.Unmarshal(rs.Data, &si)
-	if err != nil {
-		return false, err
-	}
 	return store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
 }
 
@@ -600,6 +595,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
 		}
 	}
+	// TODO: maybe we can merge the same write with same key and value to avoid too much hot write on the same key-value
 	var retErr error
 	for _, req := range reqList.Reqs {
 		reqTs := ts

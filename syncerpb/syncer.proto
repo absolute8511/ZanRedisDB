@@ -57,7 +57,7 @@ message RaftLogData {
 }
 
 message RaftReqs {
-    repeated RaftLogData raft_log = 1;
+    repeated RaftLogData raft_log = 1 [(gogoproto.nullable) = false];
 }
 
 enum RaftApplySnapType {

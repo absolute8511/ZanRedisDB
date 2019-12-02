@@ -12,6 +12,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/pkg/wait"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/syncerpb"
 )
 
 var enableTest = false
@@ -45,7 +46,7 @@ type logSyncerSM struct {
 	syncedState    SyncedState
 	lgSender       *RemoteLogSender
 	stopping       int32
-	sendCh         chan *BatchInternalRaftRequest
+	sendCh         chan BatchInternalRaftRequest
 	sendStop       chan struct{}
 	wg             sync.WaitGroup
 	waitSendLogChs chan chan struct{}
@@ -62,7 +63,7 @@ func NewLogSyncerSM(opts *KVOptions, machineConfig MachineConfig, localID uint64
 		machineConfig:  machineConfig,
 		ID:             localID,
 		clusterInfo:    clusterInfo,
-		sendCh:         make(chan *BatchInternalRaftRequest, logSendBufferLen),
+		sendCh:         make(chan BatchInternalRaftRequest, logSendBufferLen),
 		sendStop:       make(chan struct{}),
 		waitSendLogChs: make(chan chan struct{}, 1),
 		//dataDir:       path.Join(opts.DataDir, "logsyncer"),
@@ -207,12 +208,15 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 		syncedTerm, syncedIndex, syncedTs := sm.getSyncedState()
 		sm.Infof("raft log syncer send loop exit at synced: %v-%v-%v", syncedTerm, syncedIndex, syncedTs)
 	}()
-	raftLogs := make([]*BatchInternalRaftRequest, 0, logSendBufferLen)
-	var last *BatchInternalRaftRequest
+	raftLogs := make([]BatchInternalRaftRequest, 0, logSendBufferLen)
+	var last BatchInternalRaftRequest
 	state, err := sm.lgSender.getRemoteSyncedRaft(sm.sendStop)
 	if err != nil {
 		sm.Errorf("failed to get the synced state from remote: %v", err)
 	}
+	in := syncerpb.RaftReqs{}
+	logListBuf := make([]syncerpb.RaftLogData, logSendBufferLen*2)
+	marshalBufs := make([][]byte, logSendBufferLen*2)
 	for {
 		handled := false
 		var err error
@@ -261,7 +265,34 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			if state.IsNewer2(last.OrigTerm, last.OrigIndex) {
 				// remote is already replayed this raft log
 			} else {
-				err = sm.lgSender.sendRaftLog(raftLogs, sm.sendStop)
+				if len(logListBuf) < len(raftLogs) {
+					logListBuf = append(logListBuf, make([]syncerpb.RaftLogData, len(raftLogs)-len(logListBuf))...)
+				}
+				if len(marshalBufs) < len(raftLogs) {
+					marshalBufs = append(marshalBufs, make([][]byte, len(raftLogs)-len(marshalBufs))...)
+				}
+				in.RaftLog = logListBuf[:len(raftLogs)]
+				for i, e := range raftLogs {
+					logs := in.RaftLog
+					logs[i].Type = syncerpb.EntryNormalRaw
+					dbuf := marshalBufs[i]
+					if len(dbuf) < e.Size() {
+						dbuf = make([]byte, e.Size())
+						marshalBufs[i] = dbuf
+					}
+					used, err := e.MarshalTo(dbuf)
+					if err != nil {
+						sm.Errorf("failed to marshal %v: %v", e.String(), err)
+						panic(err)
+					}
+					logs[i].Data = dbuf[:used]
+					logs[i].Term = e.OrigTerm
+					logs[i].Index = e.OrigIndex
+					logs[i].RaftTimestamp = e.Timestamp
+					logs[i].RaftGroupName = sm.lgSender.grpName
+					logs[i].ClusterName = sm.lgSender.localCluster
+				}
+				err = sm.lgSender.sendRaftLog(in, sm.sendStop)
 			}
 		}
 		if err != nil {
@@ -279,8 +310,9 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 			atomic.AddInt64(&sm.syncedCnt, int64(len(raftLogs)))
 			sm.setSyncedState(last.OrigTerm, last.OrigIndex, last.Timestamp)
 			t := time.Now().UnixNano()
-			for _, rl := range raftLogs {
+			for i, rl := range raftLogs {
 				syncLearnerDoneStats.UpdateLatencyStats((t - rl.Timestamp) / time.Microsecond.Nanoseconds())
+				raftLogs[i].Reqs = nil
 			}
 			raftLogs = raftLogs[:0]
 		}
@@ -584,7 +616,7 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		}
 	}
 	select {
-	case sm.sendCh <- &reqList:
+	case sm.sendCh <- reqList:
 	case <-stop:
 		return false, nil
 	case <-sm.sendStop:
