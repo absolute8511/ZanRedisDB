@@ -1353,10 +1353,11 @@ func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
 		defer nd.rn.SetPrepareSnapshot(false)
 		nd.rn.Infof("prepare transfer snapshot : %v\n", m.Snapshot.String())
 		defer nd.rn.Infof("transfer snapshot done : %v\n", m.Snapshot.String())
-		err := nd.sm.PrepareSnapshot(m.Snapshot, nd.stopChan)
 		if enableSnapTransferTest {
+			go nd.Stop()
 			return errors.New("auto test failed in snapshot transfer")
 		}
+		err := nd.sm.PrepareSnapshot(m.Snapshot, nd.stopChan)
 		if err != nil {
 			// we ignore here to allow retry in the raft loop
 			nd.rn.Infof("transfer snapshot failed: %v, %v", m.Snapshot.String(), err.Error())
