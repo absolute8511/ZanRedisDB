@@ -747,17 +747,18 @@ func copyFile(src, dst string, override bool) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		cerr := out.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 	_, err = io.Copy(out, in)
 	if err != nil {
-		out.Close()
 		return err
 	}
 	err = out.Sync()
-	if err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return err
 }
 
 func (r *RockDB) RestoreFromRemoteBackup(term uint64, index uint64) error {

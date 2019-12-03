@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -387,9 +388,13 @@ func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, ind
 	if latest != "" && latest != newPath {
 		nodeLog.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
 		reused = latest
-		err := os.Rename(latest, newPath)
-		if err != nil {
-			nodeLog.Infof("transfer reuse old path failed to rename: %v", err.Error())
+		// we use hard link to avoid change the old stable checkpoint files which should keep unchanged in case of
+		// crashed during new checkpoint transferring
+		files, _ := filepath.Glob(path.Join(latest, "*.sst"))
+		for _, fn := range files {
+			nfn := path.Join(newPath, filepath.Base(fn))
+			nodeLog.Infof("hard link for: %v, %v", fn, nfn)
+			CopyFileForHardLink(fn, nfn)
 		}
 	}
 	return reused, newPath

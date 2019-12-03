@@ -2,6 +2,9 @@ package node
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -444,4 +447,71 @@ func newNotifier() *notifier {
 func (nc *notifier) notify(err error) {
 	nc.err = err
 	close(nc.c)
+}
+
+func CopyFileForHardLink(src, dst string) error {
+	// open source file
+	sfi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !sfi.Mode().IsRegular() {
+		return fmt.Errorf("non-regular source file %s (%q)", sfi.Name(), sfi.Mode().String())
+	}
+
+	// open dest file
+	dfi, err := os.Stat(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		// file doesn't exist
+		err := os.MkdirAll(filepath.Dir(dst), common.DIR_PERM)
+		if err != nil {
+			return err
+		}
+	} else {
+		if !(dfi.Mode().IsRegular()) {
+			return fmt.Errorf("non-regular destination file %s (%q)", dfi.Name(), dfi.Mode().String())
+		}
+		if os.SameFile(sfi, dfi) {
+			return nil
+		}
+	}
+	if err = os.Link(src, dst); err == nil {
+		return nil
+	}
+	err = copyFileContents(src, dst)
+	if err != nil {
+		return err
+	}
+	os.Chmod(dst, sfi.Mode())
+	return nil
+}
+
+// copyFileContents copies the contents.
+// all contents will be replaced by the source .
+func copyFileContents(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		cerr := dstFile.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+	err = dstFile.Sync()
+	return err
 }
