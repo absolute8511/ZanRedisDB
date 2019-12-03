@@ -1346,7 +1346,8 @@ func (nd *KVNode) OnRaftLeaderChanged() {
 }
 
 func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
-	if m.Type == raftpb.MsgSnap && !raft.IsEmptySnap(m.Snapshot) {
+	// avoid prepare snapshot while the node is starting
+	if m.Type == raftpb.MsgSnap && !raft.IsEmptySnap(m.Snapshot) && nd.rn.isServerRunning() {
 		// we prepare the snapshot data here before we send install snapshot message to raft
 		// to avoid block raft loop while transfer the snapshot data
 		nd.rn.SetPrepareSnapshot(true)

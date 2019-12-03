@@ -122,6 +122,7 @@ type raftNode struct {
 	stopping            int32
 	replayRunning       int32
 	busySnapshot        int32
+	loopServering       int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -818,10 +819,16 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 	return false, confChanged, nil
 }
 
+func (rc *raftNode) isServerRunning() bool {
+	return atomic.LoadInt32(&rc.loopServering) == 1
+}
+
 func (rc *raftNode) serveChannels() {
 	purgeDone := make(chan struct{})
 	raftReadyLoopC := make(chan struct{})
 	go rc.purgeFile(purgeDone, raftReadyLoopC)
+	atomic.StoreInt32(&rc.loopServering, 1)
+	defer atomic.StoreInt32(&rc.loopServering, 0)
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -852,9 +859,6 @@ func (rc *raftNode) serveChannels() {
 			return
 		case <-rc.node.EventNotifyCh():
 			moreEntriesToApply := cap(rc.commitC)-len(rc.commitC) > 3
-			if !moreEntriesToApply {
-				rc.Infof("entries channel is full: %v", len(rc.commitC))
-			}
 			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, rc.IsBusySnapshot())
 			if !hasUpdate {
 				continue
