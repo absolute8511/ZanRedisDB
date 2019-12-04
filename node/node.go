@@ -1367,6 +1367,12 @@ func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
 	return nd.rn.Process(ctx, m)
 }
 
+func (nd *KVNode) UpdateSnapshotState(term uint64, index uint64) {
+	if nd.sm != nil {
+		nd.sm.UpdateSnapshotState(term, index)
+	}
+}
+
 func (nd *KVNode) ReportUnreachable(id uint64, group raftpb.Group) {
 	nd.rn.ReportUnreachable(id, group)
 }

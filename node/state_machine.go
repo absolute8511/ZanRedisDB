@@ -43,6 +43,7 @@ type StateMachine interface {
 	ApplyRaftRequest(isReplaying bool, b IBatchOperator, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
+	UpdateSnapshotState(term uint64, index uint64)
 	PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
@@ -200,6 +201,9 @@ func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) 
 	return &s, nil
 }
 
+func (esm *emptySM) UpdateSnapshotState(term uint64, index uint64) {
+}
+
 func (esm *emptySM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	return nil
 }
@@ -350,6 +354,12 @@ func (kvsm *kvStoreSM) Destroy() {
 
 func (kvsm *kvStoreSM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
 	return kvsm.store.CheckExpiredData(buffer, stop)
+}
+
+func (kvsm *kvStoreSM) UpdateSnapshotState(term uint64, index uint64) {
+	if kvsm.store != nil {
+		kvsm.store.SetLatestSnapIndex(index)
+	}
 }
 
 func (kvsm *kvStoreSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
