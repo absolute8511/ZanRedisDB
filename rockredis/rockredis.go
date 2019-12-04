@@ -762,6 +762,13 @@ func copyFile(src, dst string, override bool) error {
 		return err
 	}
 	defer in.Close()
+	// we remove dst to avoid override the hard link file content which may affect the origin linked file
+	err = os.Remove(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
