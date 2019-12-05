@@ -76,6 +76,7 @@ type DataStorage interface {
 	RestoreFromSnapshot(raftpb.Snapshot) error
 	PrepareSnapshot(raftpb.Snapshot) error
 	GetSnapshot(term uint64, index uint64) (Snapshot, error)
+	UpdateSnapshotState(term uint64, index uint64)
 	Stop()
 }
 
@@ -122,6 +123,7 @@ type raftNode struct {
 	stopping            int32
 	replayRunning       int32
 	busySnapshot        int32
+	loopServering       int32
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -364,6 +366,8 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			rc.Infof("loading snapshot at term %d and index %d, snap: %v",
 				snapshot.Metadata.Term,
 				snapshot.Metadata.Index, snapshot.Metadata.ConfState)
+			// update the latest snapshot index for statemachine
+			rc.ds.UpdateSnapshotState(snapshot.Metadata.Term, snapshot.Metadata.Index)
 			err := rc.ds.PrepareSnapshot(*snapshot)
 			if err == nil {
 				if err := rc.ds.RestoreFromSnapshot(*snapshot); err != nil {
@@ -673,6 +677,9 @@ func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftp
 			return
 		}
 
+		// update the latest snapshot index for statemachine
+		rc.ds.UpdateSnapshotState(snap.Metadata.Term, snap.Metadata.Index)
+
 		compactIndex := uint64(1)
 		if snapi > uint64(rc.config.SnapCatchup) {
 			compactIndex = snapi - uint64(rc.config.SnapCatchup)
@@ -818,10 +825,16 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 	return false, confChanged, nil
 }
 
+func (rc *raftNode) isServerRunning() bool {
+	return atomic.LoadInt32(&rc.loopServering) == 1
+}
+
 func (rc *raftNode) serveChannels() {
 	purgeDone := make(chan struct{})
 	raftReadyLoopC := make(chan struct{})
 	go rc.purgeFile(purgeDone, raftReadyLoopC)
+	atomic.StoreInt32(&rc.loopServering, 1)
+	defer atomic.StoreInt32(&rc.loopServering, 0)
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -852,9 +865,6 @@ func (rc *raftNode) serveChannels() {
 			return
 		case <-rc.node.EventNotifyCh():
 			moreEntriesToApply := cap(rc.commitC)-len(rc.commitC) > 3
-			if !moreEntriesToApply {
-				rc.Infof("entries channel is full: %v", len(rc.commitC))
-			}
 			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, rc.IsBusySnapshot())
 			if !hasUpdate {
 				continue
@@ -1006,6 +1016,8 @@ func (rc *raftNode) persistRaftState(rd *raft.Ready) error {
 			return err
 		}
 		rc.Infof("raft persist snapshot meta done : %v", rd.Snapshot.String())
+		// update the latest snapshot index for statemachine
+		rc.ds.UpdateSnapshotState(rd.Snapshot.Metadata.Term, rd.Snapshot.Metadata.Index)
 	}
 	return nil
 }

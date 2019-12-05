@@ -1346,6 +1346,7 @@ func (nd *KVNode) OnRaftLeaderChanged() {
 }
 
 func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
+	// avoid prepare snapshot while the node is starting
 	if m.Type == raftpb.MsgSnap && !raft.IsEmptySnap(m.Snapshot) {
 		// we prepare the snapshot data here before we send install snapshot message to raft
 		// to avoid block raft loop while transfer the snapshot data
@@ -1364,6 +1365,12 @@ func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {
 		}
 	}
 	return nd.rn.Process(ctx, m)
+}
+
+func (nd *KVNode) UpdateSnapshotState(term uint64, index uint64) {
+	if nd.sm != nil {
+		nd.sm.UpdateSnapshotState(term, index)
+	}
 }
 
 func (nd *KVNode) ReportUnreachable(id uint64, group raftpb.Group) {

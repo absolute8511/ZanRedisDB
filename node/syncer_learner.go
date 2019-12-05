@@ -352,6 +352,9 @@ func (sm *logSyncerSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, erro
 	return &si, err
 }
 
+func (sm *logSyncerSM) UpdateSnapshotState(term uint64, index uint64) {
+}
+
 func (sm *logSyncerSM) waitIgnoreUntilChanged(term uint64, index uint64, stop chan struct{}) (bool, error) {
 	for {
 		if atomic.LoadInt32(&sm.ignoreSend) == 1 {

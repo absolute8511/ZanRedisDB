@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -42,6 +43,7 @@ type StateMachine interface {
 	ApplyRaftRequest(isReplaying bool, b IBatchOperator, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
+	UpdateSnapshotState(term uint64, index uint64)
 	PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
@@ -199,6 +201,9 @@ func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) 
 	return &s, nil
 }
 
+func (esm *emptySM) UpdateSnapshotState(term uint64, index uint64) {
+}
+
 func (esm *emptySM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	return nil
 }
@@ -351,6 +356,12 @@ func (kvsm *kvStoreSM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop ch
 	return kvsm.store.CheckExpiredData(buffer, stop)
 }
 
+func (kvsm *kvStoreSM) UpdateSnapshotState(term uint64, index uint64) {
+	if kvsm.store != nil {
+		kvsm.store.SetLatestSnapIndex(index)
+	}
+}
+
 func (kvsm *kvStoreSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
 	var si KVSnapInfo
 	// use the rocksdb backup/checkpoint interface to backup data
@@ -387,9 +398,13 @@ func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, ind
 	if latest != "" && latest != newPath {
 		nodeLog.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
 		reused = latest
-		err := os.Rename(latest, newPath)
-		if err != nil {
-			nodeLog.Infof("transfer reuse old path failed to rename: %v", err.Error())
+		// we use hard link to avoid change the old stable checkpoint files which should keep unchanged in case of
+		// crashed during new checkpoint transferring
+		files, _ := filepath.Glob(path.Join(latest, "*.sst"))
+		for _, fn := range files {
+			nfn := path.Join(newPath, filepath.Base(fn))
+			nodeLog.Infof("hard link for: %v, %v", fn, nfn)
+			CopyFileForHardLink(fn, nfn)
 		}
 	}
 	return reused, newPath

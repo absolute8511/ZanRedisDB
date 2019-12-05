@@ -3,6 +3,7 @@ package common
 import (
 	"errors"
 	"time"
+
 	//"github.com/Redundancy/go-sync"
 	"fmt"
 	"log"
@@ -31,6 +32,9 @@ func SetRsyncLimit(limit int64) {
 	atomic.StoreInt64(&rsyncLimit, limit)
 }
 
+// make sure the file sync will not overwrite hard link file inplace. (Because the hard link file content which may be
+// used in rocksdb should not be changed )
+// So with hard link sync, we make sure we do unlink on the file before we update it. (rsync just do it)
 func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan struct{}) error {
 	// TODO: retrict the running number of rsync may cause transfer snapshot again and again.
 	// Because there are many partitions waiting transfer, 1->2->3->4.
