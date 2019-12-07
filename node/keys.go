@@ -21,11 +21,18 @@ func (nd *KVNode) Lookup(key []byte) ([]byte, error) {
 }
 
 func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, err := nd.store.KVGet(cmd.Args[1])
-	if err != nil || val == nil {
-		conn.WriteNull()
-	} else {
-		conn.WriteBulk(val)
+	err := nd.store.GetValueWithOp(cmd.Args[1], func(val []byte) error {
+		if val == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(val)
+			// since val will be freed, we need flush before return
+			conn.Flush()
+		}
+		return nil
+	})
+	if err != nil {
+		conn.WriteError(err.Error())
 	}
 }
 
@@ -123,13 +130,13 @@ func (nd *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
 		return
 	}
-	val, err := nd.store.KVGet(cmd.Args[1])
-	if err != nil || val == nil {
-	} else {
+	ex, _ := nd.store.KVExists(cmd.Args[1])
+	if ex == 1 {
 		// already exist
 		conn.WriteInt64(0)
 		return
 	}
+
 	cmd, rsp, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
 	if !ok {
 		return

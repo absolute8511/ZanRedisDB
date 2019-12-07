@@ -823,8 +823,8 @@ func (db *RockDB) LKeyExists(key []byte) (int64, error) {
 		return 0, err
 	}
 	sk := lEncodeMetaKey(key)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
-	if v != nil && err == nil {
+	vok, err := db.eng.Exist(db.defaultReadOpts, sk)
+	if vok && err == nil {
 		return 1, nil
 	}
 	return 0, err

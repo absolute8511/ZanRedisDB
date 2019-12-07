@@ -445,14 +445,16 @@ func (db *RockDB) ZScore(key []byte, member []byte) (float64, error) {
 	if err != nil {
 		return score, err
 	}
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, k); err != nil {
+	refv, err := db.eng.Get(db.defaultReadOpts, k)
+	if err != nil {
 		return score, err
-	} else if v == nil {
+	}
+	defer refv.Free()
+	if refv.Data() == nil {
 		return score, errScoreMiss
-	} else {
-		if score, err = Float64(v, nil); err != nil {
-			return score, err
-		}
+	}
+	if score, err = Float64(refv.Data(), nil); err != nil {
+		return score, err
 	}
 	return score, nil
 }
@@ -606,7 +608,7 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 			var n int64 = 0
 
 			for ; rit.Valid(); rit.Next() {
-				rawk := rit.RefKey()
+				rawk := rit.Key()
 				n++
 				lastKey = lastKey[0:0]
 				lastKey = append(lastKey, rawk...)
@@ -1146,8 +1148,8 @@ func (db *RockDB) ZKeyExists(key []byte) (int64, error) {
 		return 0, err
 	}
 	sk := zEncodeSizeKey(key)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
-	if v != nil && err == nil {
+	vok, err := db.eng.Exist(db.defaultReadOpts, sk)
+	if vok && err == nil {
 		return 1, nil
 	}
 	return 0, err

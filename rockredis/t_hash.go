@@ -317,6 +317,23 @@ func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
 	return int64(ts), err
 }
 
+func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) error {
+	if err := checkHashKFSize(key, field); err != nil {
+		return err
+	}
+
+	dbKey, err := convertRedisKeyToDBHKey(key, field)
+	if err != nil {
+		return err
+	}
+	return db.rockEng.GetValueWithOp(db.defaultReadOpts, dbKey, func(v []byte) error {
+		if len(v) >= tsLen {
+			v = v[:len(v)-tsLen]
+		}
+		return op(v)
+	})
+}
+
 func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 	if err := checkHashKFSize(key, field); err != nil {
 		return nil, err
@@ -333,13 +350,26 @@ func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 	return v, err
 }
 
+func (db *RockDB) HExist(key []byte, field []byte) (bool, error) {
+	if err := checkHashKFSize(key, field); err != nil {
+		return false, err
+	}
+
+	dbKey, err := convertRedisKeyToDBHKey(key, field)
+	if err != nil {
+		return false, err
+	}
+	vok, err := db.eng.Exist(db.defaultReadOpts, dbKey)
+	return vok, err
+}
+
 func (db *RockDB) HKeyExists(key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
 	sk := hEncodeSizeKey(key)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
-	if v != nil && err == nil {
+	vok, err := db.eng.Exist(db.defaultReadOpts, sk)
+	if vok && err == nil {
 		return 1, nil
 	}
 	return 0, err
@@ -441,7 +471,7 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 		defer it.Close()
 
 		for ; it.Valid(); it.Next() {
-			rawk := it.RefKey()
+			rawk := it.Key()
 			if hlen <= RangeDeleteNum {
 				wb.Delete(rawk)
 			}
