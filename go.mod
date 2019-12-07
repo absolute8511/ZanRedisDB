@@ -11,7 +11,7 @@ require (
 	github.com/absolute8511/go-hll v0.0.0-20190228064837-043118556d83
 	github.com/absolute8511/hyperloglog v0.0.0-20171127080255-5259284545fc
 	github.com/absolute8511/hyperloglog2 v0.1.1
-	github.com/absolute8511/redcon v0.8.0
+	github.com/absolute8511/redcon v0.9.1
 	github.com/absolute8511/redigo v1.3.2
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible // indirect
@@ -56,7 +56,7 @@ require (
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
 	github.com/youzan/go-zanredisdb v0.3.5
-	github.com/youzan/gorocksdb v0.0.0-20191113104539-6ef5982178f0
+	github.com/youzan/gorocksdb v0.0.0-20191207142500-4d91e53d90d3
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20180521201818-8e0cdda24ed4
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e // indirect
