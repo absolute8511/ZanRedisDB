@@ -90,6 +90,10 @@ placedriver API
 
 /datanodes
 获取存活的数据节点(zankv)信息, 存活节点数量有变更需要warning级别报警
+
+POST /cluster/node/remove?remove_node=xxx
+下线不用的节点, xxx信息使用获取节点数信息返回的node_id串替换, 下线节点会触发数据迁移, 等待迁移完成后, 观察log输出再停掉下线的节点.
+
 ```
 
 zankv API

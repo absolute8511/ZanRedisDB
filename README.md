@@ -21,12 +21,12 @@ apt-get install libsnappy1 libsnappy-dev (for Debian/Ubuntu)
 brew install snappy (for Mac)
 </pre>
 
-Build the rocksdb 
+Build the rocksdb with jemalloc
 <pre>
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
 git checkout v5.18-patched
-make static_lib
+WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 </pre>
 
 Install the dependency:

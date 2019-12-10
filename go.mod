@@ -56,7 +56,7 @@ require (
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
 	github.com/youzan/go-zanredisdb v0.3.5
-	github.com/youzan/gorocksdb v0.0.0-20191207142500-4d91e53d90d3
+	github.com/youzan/gorocksdb v0.0.0-20191210121858-b343d6118ab3
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20180521201818-8e0cdda24ed4
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e // indirect
