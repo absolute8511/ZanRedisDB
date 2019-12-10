@@ -637,10 +637,10 @@ func TestClusterRemoveNode(t *testing.T) {
 	removedNodeID := newDataNodes[0].s.GetCoord().GetMyID()
 	gpdServer.pdCoord.MarkNodeAsRemoving(removedNodeID)
 	// wait balance
+	start := time.Now()
 	for i := 0; i < partNum; i++ {
-		start := time.Now()
 		for {
-			if time.Since(start) > time.Minute*2 {
+			if time.Since(start) > time.Minute*time.Duration(partNum) {
 				t.Errorf("timeout wait removing partition %v on removed node", i)
 				break
 			}
