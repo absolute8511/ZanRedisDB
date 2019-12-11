@@ -56,6 +56,8 @@ const (
 	commitBufferLen           = 5000
 )
 
+var errWALMetaMismatch = errors.New("wal meta mismatch config (maybe reused old deleted data)")
+
 type Snapshot interface {
 	GetData() ([]byte, error)
 }
@@ -255,7 +257,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 		m.GroupID != rc.config.GroupID {
 		w.Close()
 		nodeLog.Errorf("meta starting mismatch config: %v, %v", m, rc.config)
-		return err
+		return errWALMetaMismatch
 	}
 	if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
 		rs.WAL = w
@@ -457,8 +459,7 @@ func (rc *raftNode) initForTransport() {
 }
 
 func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error {
-	var err error
-	err = rc.replayWAL(snapshot, false)
+	err := rc.replayWAL(snapshot, false)
 	if err != nil {
 		rc.Infof("restarting node failed to replay wal: %v", err.Error())
 		return err
@@ -469,8 +470,7 @@ func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error
 }
 
 func (rc *raftNode) restartAsStandaloneNode(cfg *raft.Config, snapshot *raftpb.Snapshot) error {
-	var err error
-	err = rc.replayWAL(snapshot, true)
+	err := rc.replayWAL(snapshot, true)
 	if err != nil {
 		return err
 	}
