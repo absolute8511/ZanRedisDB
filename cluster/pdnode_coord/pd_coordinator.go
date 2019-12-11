@@ -565,23 +565,23 @@ func (pdCoord *PDCoordinator) processRemovingNodes(monitorChan chan struct{}, re
 				cluster.CoordLog().Infof("namespace %v data on node %v removing", namespaceInfo.GetDesp(), nid)
 				pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 			}
-			if !anyPending {
-				anyStateChanged = true
-				cluster.CoordLog().Infof("node %v data has been transferred, it can be removed from cluster: state: %v", nid, removingNodes[nid])
-				if removingNodes[nid] != "data_transferred" && removingNodes[nid] != "done" {
-					removingNodes[nid] = "data_transferred"
-				} else {
-					if removingNodes[nid] == "data_transferred" {
-						removingNodes[nid] = "done"
-					} else if removingNodes[nid] == "done" {
-						pdCoord.nodesMutex.Lock()
-						_, ok := pdCoord.dataNodes[nid]
-						if !ok {
-							delete(removingNodes, nid)
-							cluster.CoordLog().Infof("the node %v is removed finally since not alive in cluster", nid)
-						}
-						pdCoord.nodesMutex.Unlock()
+		}
+		if !anyPending {
+			anyStateChanged = true
+			cluster.CoordLog().Infof("node %v data has been transferred, it can be removed from cluster: state: %v", nid, removingNodes[nid])
+			if removingNodes[nid] != "data_transferred" && removingNodes[nid] != "done" {
+				removingNodes[nid] = "data_transferred"
+			} else {
+				if removingNodes[nid] == "data_transferred" {
+					removingNodes[nid] = "done"
+				} else if removingNodes[nid] == "done" {
+					pdCoord.nodesMutex.Lock()
+					_, ok := pdCoord.dataNodes[nid]
+					if !ok {
+						delete(removingNodes, nid)
+						cluster.CoordLog().Infof("the node %v is removed finally since not alive in cluster", nid)
 					}
+					pdCoord.nodesMutex.Unlock()
 				}
 			}
 		}
