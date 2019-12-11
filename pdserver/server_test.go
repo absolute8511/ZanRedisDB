@@ -591,12 +591,15 @@ func TestClusterBalanceAcrossMultiDC(t *testing.T) {
 	// TODO:
 }
 
-func TestClusterRemoveNode(t *testing.T) {
+func TestClusterRemoveNodeNotLast(t *testing.T) {
+	testClusterRemoveNode(t, 4, "test_cluster_remove_node_by_api")
+}
+
+func testClusterRemoveNode(t *testing.T, leftNodeN int, ns string) {
 	// remove a node from api and wait all data balanced to others
-	ensureClusterReady(t, 4)
+	ensureClusterReady(t, leftNodeN)
 
 	time.Sleep(time.Second)
-	ns := "test_cluster_remove_node_by_api"
 	partNum := 4
 
 	pduri := "http://127.0.0.1:" + pdHttpPort
@@ -693,6 +696,10 @@ func TestClusterRemoveNode(t *testing.T) {
 		nsNode := newDataNodes[0].s.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(i))
 		assert.Nil(t, nsNode)
 	}
+}
+
+func TestClusterRemoveNodeForLast(t *testing.T) {
+	testClusterRemoveNode(t, 3, "test_cluster_remove_lastnode_by_api")
 }
 
 func TestClusterNodeFailedTooLongBalance(t *testing.T) {

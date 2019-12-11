@@ -550,7 +550,8 @@ func (pdCoord *PDCoordinator) processRemovingNodes(monitorChan chan struct{}, re
 					newInfo, err := pdCoord.dpm.addNodeToNamespaceAndWaitReady(monitorChan, &namespaceInfo,
 						nodeNameList)
 					if err != nil {
-						cluster.CoordLog().Infof("namespace %v data on node %v transferred failed, waiting next time", namespaceInfo.GetDesp(), nid)
+						cluster.CoordLog().Infof("namespace %v data on node %v transferred failed, waiting next time: %v, %v",
+							namespaceInfo.GetDesp(), nid, err.Error(), namespaceInfo)
 						break
 					} else if newInfo != nil {
 						namespaceInfo = *newInfo

@@ -234,16 +234,16 @@ func (dp *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{
 	currentSelect := 0
 	namespaceName := namespaceInfo.Name
 	partitionID := namespaceInfo.Partition
-	// since we need add new catchup, we make the replica as replica+1
 	partitionNodes, coordErr := getRebalancedPartitionsFromNameList(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
-		namespaceInfo.Replica+1, nodeNameList)
+		namespaceInfo.Replica, nodeNameList)
 	if coordErr != nil {
 		return namespaceInfo, coordErr.ToErrorType()
 	}
 	fullName := namespaceInfo.GetDesp()
 	selectedCatchup := make([]string, 0)
+	// we need add new catchup, choose from the the diff between the new isr and old isr
 	for _, nid := range partitionNodes[namespaceInfo.Partition] {
 		if cluster.FindSlice(namespaceInfo.RaftNodes, nid) != -1 {
 			// already isr, ignore add catchup
