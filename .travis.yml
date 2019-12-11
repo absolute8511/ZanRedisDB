@@ -17,7 +17,7 @@ addons:
     - g++-4.9
 install:
   - export CXX="g++-4.9" CC="gcc-4.9"
-  - sudo apt-get install libsnappy1v5 libsnappy-dev libjemalloc2
+  - sudo apt-get install libsnappy1v5 libsnappy-dev libjemalloc1
   - git clone https://github.com/absolute8511/rocksdb.git /tmp/rocksdb
   - pushd /tmp/rocksdb && git checkout v5.18-patched && USE_SSE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib && popd
 script:
