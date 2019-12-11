@@ -315,7 +315,11 @@ func (w *WAL) ReadAll() (metadata []byte, state raftpb.HardState, ents []raftpb.
 		case entryType:
 			e := mustUnmarshalEntry(rec.Data)
 			if e.Index > w.start.Index {
-				ents = append(ents[:e.Index-w.start.Index-1], e)
+				aindex := e.Index - w.start.Index - 1
+				if aindex > uint64(len(ents)) {
+					return nil, state, nil, fmt.Errorf("index out of range, corrupt data: %v-%v", aindex, len(ents))
+				}
+				ents = append(ents[:aindex], e)
 			}
 			w.enti = e.Index
 		case stateType:
