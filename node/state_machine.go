@@ -441,7 +441,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	srcPath := path.Join(rockredis.GetBackupDir(syncDir),
 		rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index))
 
-	// TODO: since most backup on local is not transferred by others,
+	// since most backup on local is not transferred by others,
 	// if we need reuse we need check all backups that has source node info,
 	// and skip the latest snap file in snap dir.
 	_, newPath := handleReuseOldCheckpoint(srcInfo, localPath,

@@ -74,8 +74,6 @@ func (exp *consistencyExpiration) ttl(dataType byte, key []byte) (int64, error) 
 		if t <= 0 {
 			t = -1
 		}
-		//TODO, if the key has expired, remove it right now
-		// if t == -1 : to remove ????
 	}
 	return t, err
 }

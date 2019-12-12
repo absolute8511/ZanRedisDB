@@ -9,7 +9,7 @@ import (
 	"github.com/youzan/gorocksdb"
 )
 
-// TODO: we can use ring buffer to allow the list pop and push many times
+// we can use ring buffer to allow the list pop and push many times
 // when the tail reach the end we roll to the start and check if full.
 // Note: to clean the huge list, we can set some meta for each list,
 // such as max elements or the max keep time, while insert we auto clean
@@ -561,7 +561,6 @@ func (db *RockDB) lGetMeta(ek []byte) (headSeq int64, tailSeq int64, size int64,
 func (db *RockDB) lSetMeta(ek []byte, headSeq int64, tailSeq int64, ts int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	size := tailSeq - headSeq + 1
 	if size < 0 {
-		//	todo : log error + panic
 		dbLog.Warningf("list %v invalid meta sequence range [%d, %d]", string(ek), headSeq, tailSeq)
 		return 0, errListSeq
 	} else if size == 0 {

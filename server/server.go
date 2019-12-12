@@ -352,7 +352,7 @@ func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (bool, common.Co
 	if n.Node.IsStopping() {
 		return false, nil, cmd, common.ErrStopped
 	}
-	// TODO: for multi primary keys such as mset, mget, we need make sure they are all in the same partition
+	// for multi primary keys such as mset, mget, we need make sure they are all in the same partition
 	h, isWrite, ok := n.Node.GetHandler(cmdName)
 	if !ok {
 		return isWrite, nil, cmd, common.ErrInvalidCommand

@@ -820,6 +820,78 @@ func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {
 	// should only transfer leader when replica has almost the newest raft logs
 }
 
+func TestClusterRestartNodeCatchup(t *testing.T) {
+	// test restarted node catchup while writing
+	ensureClusterReady(t, 3)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_restart_catchup"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	gkvList[0].s.Stop()
+	done := make(chan bool, 0)
+	go func() {
+		for {
+			nsNode.Node.OptimizeDB("")
+			time.Sleep(time.Millisecond)
+			select {
+			case <-done:
+				return
+			default:
+			}
+		}
+	}()
+
+	time.Sleep(time.Second * 3)
+
+	gkvList[0].s.Start()
+
+	waitEnoughReplica(t, ns, 0)
+	waitForAllFullReady(t, ns, 0)
+	close(done)
+	waitBalancedAndExpectedLeader(t, ns, 0, leader.GetCoord().GetMyID())
+
+	c := getTestRedisConn(t, gkvList[0].redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "restart_catchup:k1")
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+	time.Sleep(time.Second)
+
+	for i := 0; i < len(gkvList); i++ {
+		addr := fmt.Sprintf("http://127.0.0.1:%v", gkvList[i].httpPort)
+		enableStaleRead(t, addr, true)
+		followerConn := getTestRedisConn(t, gkvList[i].redisPort)
+		for i := 0; i < 10; i++ {
+			getV, err := goredis.String(followerConn.Do("get", key))
+			assert.Nil(t, err)
+			t.Logf("read follower : %v", getV)
+			assert.True(t, getV == "1234")
+		}
+		enableStaleRead(t, addr, false)
+		followerConn.Close()
+	}
+
+	newNs := getNsInfo(t, ns, 0)
+	test.Equal(t, oldNs.GetISR(), newNs.GetISR())
+	test.Equal(t, oldNs.GetRealLeader(), newNs.GetRealLeader())
+}
+
 func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 	// should not mark as remove while there is not enough for replica (more than half is dead)
 	ensureClusterReady(t, 4)
