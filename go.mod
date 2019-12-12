@@ -30,7 +30,7 @@ require (
 	github.com/gobwas/glob v0.2.3
 	github.com/gogo/protobuf v1.2.1
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b // indirect
-	github.com/golang/protobuf v1.2.0
+	github.com/golang/protobuf v1.2.0 // indirect
 	github.com/golang/snappy v0.0.1
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/hashicorp/golang-lru v0.0.0-20180201235237-0fb14efe8c47
@@ -56,7 +56,7 @@ require (
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
 	github.com/youzan/go-zanredisdb v0.3.5
-	github.com/youzan/gorocksdb v0.0.0-20191210121858-b343d6118ab3
+	github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20180521201818-8e0cdda24ed4
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e // indirect
