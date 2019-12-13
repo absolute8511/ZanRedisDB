@@ -48,7 +48,7 @@ func buildCommand(args [][]byte) redcon.Command {
 
 func rebuildFirstKeyAndPropose(kvn *KVNode, conn redcon.Conn, cmd redcon.Command) (redcon.Command,
 	interface{}, bool) {
-	_, key, err := common.ExtractNamesapce(cmd.Args[1])
+	key, err := common.CutNamesapce(cmd.Args[1])
 	if err != nil {
 		conn.WriteError(err.Error())
 		return cmd, nil, false
@@ -72,7 +72,7 @@ func wrapReadCommandK(f common.CommandFunc) common.CommandFunc {
 			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 			return
 		}
-		_, key, err := common.ExtractNamesapce(cmd.Args[1])
+		key, err := common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			conn.WriteError(err.Error())
 			return
@@ -88,7 +88,7 @@ func wrapReadCommandKSubkey(f common.CommandFunc) common.CommandFunc {
 			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 			return
 		}
-		_, key, err := common.ExtractNamesapce(cmd.Args[1])
+		key, err := common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			conn.WriteError(err.Error())
 			return
@@ -104,7 +104,7 @@ func wrapReadCommandKSubkeySubkey(f common.CommandFunc) common.CommandFunc {
 			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 			return
 		}
-		_, key, err := common.ExtractNamesapce(cmd.Args[1])
+		key, err := common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			conn.WriteError(err.Error())
 			return
@@ -124,7 +124,7 @@ func wrapReadCommandKAnySubkeyN(f common.CommandFunc, minSubLen int) common.Comm
 			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 			return
 		}
-		_, key, err := common.ExtractNamesapce(cmd.Args[1])
+		key, err := common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			conn.WriteError(err.Error())
 			return
@@ -145,7 +145,7 @@ func wrapReadCommandKK(f common.CommandFunc) common.CommandFunc {
 			return
 		}
 		for i := 1; i < len(cmd.Args); i++ {
-			_, key, err := common.ExtractNamesapce(cmd.Args[i])
+			key, err := common.CutNamesapce(cmd.Args[i])
 			if err != nil {
 				conn.WriteError(err.Error())
 				return
@@ -182,7 +182,7 @@ func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc
 			return
 		}
 		for i, v := range args {
-			_, key, err := common.ExtractNamesapce(v)
+			key, err := common.CutNamesapce(v)
 			if err != nil {
 				conn.WriteError(err.Error())
 				return
@@ -289,7 +289,7 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.CommandFu
 			if i%2 != 0 {
 				continue
 			}
-			_, key, err := common.ExtractNamesapce(v)
+			key, err := common.CutNamesapce(v)
 			if err != nil {
 				conn.WriteError(err.Error())
 				return
@@ -344,7 +344,7 @@ func wrapWriteCommandKSubkeyVSubkeyV(kvn *KVNode, f common.CommandRspFunc) commo
 
 func wrapMergeCommand(f common.MergeCommandFunc) common.MergeCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
-		_, key, err := common.ExtractNamesapce(cmd.Args[1])
+		key, err := common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			return nil, err
 		}
@@ -363,7 +363,7 @@ func wrapMergeCommandKK(f common.MergeCommandFunc) common.MergeCommandFunc {
 			return nil, errTooMuchBatchSize
 		}
 		for i := 1; i < len(cmd.Args); i++ {
-			_, key, err := common.ExtractNamesapce(cmd.Args[i])
+			key, err := common.CutNamesapce(cmd.Args[i])
 			if err != nil {
 				return nil, err
 			}
@@ -383,7 +383,7 @@ func wrapWriteMergeCommandKK(kvn *KVNode, f common.MergeWriteCommandFunc) common
 			return nil, errTooMuchBatchSize
 		}
 		for i, v := range args {
-			_, key, err := common.ExtractNamesapce(v)
+			key, err := common.CutNamesapce(v)
 			if err != nil {
 				return nil, err
 			}
@@ -415,7 +415,7 @@ func wrapWriteMergeCommandKVKV(kvn *KVNode, f common.MergeWriteCommandFunc) comm
 			if i%2 != 0 {
 				continue
 			}
-			_, key, err := common.ExtractNamesapce(v)
+			key, err := common.CutNamesapce(v)
 			if err != nil {
 				return nil, err
 			}

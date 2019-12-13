@@ -11,7 +11,7 @@ import (
 )
 
 func (nd *KVNode) Lookup(key []byte) ([]byte, error) {
-	_, key, err := common.ExtractNamesapce(key)
+	key, err := common.CutNamesapce(key)
 	if err != nil {
 		return nil, err
 	}

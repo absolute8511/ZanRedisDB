@@ -750,6 +750,7 @@ func (db *RockDB) zRangeBytes(preCheckCnt bool, key []byte, minKey []byte, maxKe
 		nv = MAX_BATCH_NUM
 	}
 
+	// TODO: use buf pool
 	v := make([]common.ScorePair, 0, nv)
 
 	var err error

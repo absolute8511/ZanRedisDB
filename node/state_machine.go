@@ -647,7 +647,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 				}
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
-				_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
+				pk, _ := common.CutNamesapce(cmd.Args[1])
 				if batch.IsBatchable(cmdName, string(pk)) {
 					if !batch.IsBatched() {
 						err := batch.BeginBatch()
