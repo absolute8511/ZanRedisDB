@@ -74,6 +74,7 @@ func (nd *KVNode) registerHandler() {
 	}
 	// for kv
 	nd.router.Register(false, "get", wrapReadCommandK(nd.getCommand))
+	nd.router.Register(false, "getnolock", wrapReadCommandK(nd.getNoLockCommand))
 	nd.router.Register(false, "getbit", wrapReadCommandKAnySubkeyN(nd.getbitCommand, 1))
 	nd.router.Register(false, "bitcount", wrapReadCommandKAnySubkey(nd.bitcountCommand))
 	nd.router.Register(false, "mget", wrapReadCommandKK(nd.mgetCommand))
