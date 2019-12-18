@@ -52,7 +52,7 @@ func (nd *KVNode) jsonmkGetCommand(conn redcon.Conn, cmd redcon.Command) {
 	keys := cmd.Args[1 : len(cmd.Args)-1]
 	path := cmd.Args[len(cmd.Args)-1]
 	for i := 0; i < len(keys); i++ {
-		_, key, err := common.ExtractNamesapce(keys[i])
+		key, err := common.CutNamesapce(keys[i])
 		if err != nil {
 			conn.WriteError(err.Error())
 			return

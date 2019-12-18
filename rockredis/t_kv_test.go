@@ -26,14 +26,24 @@ func TestDBKV(t *testing.T) {
 	defer db.Close()
 
 	key1 := []byte("test:testdb_kv_a")
-
-	err := db.KVSet(0, key1, []byte("hello world 1"))
-	assert.Nil(t, err)
-
 	key2 := []byte("test:testdb_kv_b")
+	n, err := db.KVExists(key1, key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	err = db.KVSet(0, key1, []byte("hello world 1"))
+	assert.Nil(t, err)
+	n, err = db.KVExists(key1, key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
 
 	err = db.KVSet(0, key2, []byte("hello world 2"))
 	assert.Nil(t, err)
+
+	n, err = db.KVExists(key1, key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
 	v1, _ := db.KVGet(key1)
 	assert.Equal(t, "hello world 1", string(v1))
 	v2, _ := db.KVGet(key2)
@@ -52,7 +62,7 @@ func TestDBKV(t *testing.T) {
 
 	key3 := []byte("test:testdb_kv_range")
 
-	n, err := db.Append(0, key3, []byte("Hello"))
+	n, err = db.Append(0, key3, []byte("Hello"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(5), n)
 
@@ -89,7 +99,8 @@ func TestDBKV(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(11), n)
 
-	r, _ := db.KVExists(key3)
+	r, err := db.KVExists(key3)
+	assert.Nil(t, err)
 	assert.NotEqual(t, int64(0), r)
 	r, err = db.SetNX(0, key3, []byte(""))
 	assert.Nil(t, err)

@@ -195,6 +195,7 @@ func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int
 	if err != nil {
 		return nil, err
 	}
+	defer it.Close()
 
 	var v [][]byte
 	if inputBuffer != nil {
@@ -213,7 +214,6 @@ func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int
 			i++
 		}
 	}
-	it.Close()
 	return v, nil
 
 }
@@ -392,7 +392,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 			continue
 		}
 
-		score, err := Float64(it.Value(), nil)
+		score, err := Float64(it.RefValue(), nil)
 		if err != nil {
 			return nil, err
 		}

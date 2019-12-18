@@ -51,7 +51,7 @@ required = [
   name = "github.com/absolute8511/hyperloglog2"
 
 [[constraint]]
-  version = "0.8.0"
+  version = "0.9.1"
   name = "github.com/absolute8511/redcon"
 
 [[constraint]]

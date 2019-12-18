@@ -58,12 +58,12 @@
   version = "v0.1.1"
 
 [[projects]]
-  digest = "1:b5cc037a300f39b1bf24d682304fabead140413bf7f7c8e8386d52d7d7b6b0e1"
+  digest = "1:ec75d8578bd091cfe4dbe39549cb1ddedbe4d42bb23e5be1120c456765ba9fe4"
   name = "github.com/absolute8511/redcon"
   packages = ["."]
   pruneopts = "UT"
-  revision = "8afd629b936ec06f454d233713029f9db326e56d"
-  version = "v0.8.0"
+  revision = "4fd4d25c0b1c5ae06aa70ec7566517bd2afbb3a2"
+  version = "v0.9.1"
 
 [[projects]]
   digest = "1:5ced5e29b089c54190dae59246df1bd96d38fb89a92b4d51fd3fc22facded871"
@@ -724,7 +724,7 @@
     "github.com/dgraph-io/badger/options",
     "github.com/gobwas/glob",
     "github.com/gogo/protobuf/gogoproto",
-    "github.com/golang/protobuf/proto",
+    "github.com/gogo/protobuf/proto",
     "github.com/golang/snappy",
     "github.com/hashicorp/golang-lru",
     "github.com/judwhite/go-svc/svc",

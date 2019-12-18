@@ -112,7 +112,11 @@ func (c *fakeRedisConn) WriteError(msg string) { c.err = errors.New(msg) }
 func (c *fakeRedisConn) WriteString(str string) { c.rsp = append(c.rsp, str) }
 
 // WriteBulk writes bulk bytes to the client.
-func (c *fakeRedisConn) WriteBulk(bulk []byte) { c.rsp = append(c.rsp, bulk) }
+func (c *fakeRedisConn) WriteBulk(bulk []byte) {
+	tmp := make([]byte, len(bulk))
+	copy(tmp, bulk)
+	c.rsp = append(c.rsp, tmp)
+}
 
 // WriteBulkString writes a bulk string to the client.
 func (c *fakeRedisConn) WriteBulkString(bulk string) { c.rsp = append(c.rsp, bulk) }
@@ -129,7 +133,11 @@ func (c *fakeRedisConn) WriteArray(count int) { c.rsp = append(c.rsp, count) }
 func (c *fakeRedisConn) WriteNull() { c.rsp = append(c.rsp, nil) }
 
 // WriteRaw writes raw data to the client.
-func (c *fakeRedisConn) WriteRaw(data []byte) { c.rsp = append(c.rsp, data) }
+func (c *fakeRedisConn) WriteRaw(data []byte) {
+	tmp := make([]byte, len(data))
+	copy(tmp, data)
+	c.rsp = append(c.rsp, tmp)
+}
 
 // Context returns a user-defined context
 func (c *fakeRedisConn) Context() interface{} { return nil }
@@ -146,6 +154,7 @@ func (c *fakeRedisConn) ReadPipeline() []redcon.Command { return nil }
 
 func (c *fakeRedisConn) PeekPipeline() []redcon.Command { return nil }
 func (c *fakeRedisConn) NetConn() net.Conn              { return nil }
+func (c *fakeRedisConn) Flush() error                   { return nil }
 
 func TestKVNode_kvCommand(t *testing.T) {
 	nd, dataDir, stopC := getTestKVNode(t)
@@ -183,6 +192,8 @@ func TestKVNode_kvCommand(t *testing.T) {
 	defer nd.Stop()
 	defer close(stopC)
 	c := &fakeRedisConn{}
+	defer c.Close()
+	defer c.Reset()
 	for _, cmd := range tests {
 		c.Reset()
 		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
@@ -209,6 +220,8 @@ func TestKVNode_kvbatchCommand(t *testing.T) {
 		go func(index int) {
 			defer wg.Done()
 			fc := &fakeRedisConn{}
+			defer fc.Close()
+			defer fc.Reset()
 			for k := 0; k < 100; k++ {
 				fc.Reset()
 				setHandler, _, _ := nd.router.GetCmdHandler("set")
@@ -221,6 +234,8 @@ func TestKVNode_kvbatchCommand(t *testing.T) {
 	}
 	wg.Wait()
 	fc := &fakeRedisConn{}
+	defer fc.Close()
+	defer fc.Reset()
 	for i := 0; i < 50; i++ {
 		for k := 0; k < 100; k++ {
 			fc.Reset()
@@ -244,6 +259,8 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 		go func(index int) {
 			defer wg.Done()
 			fc := &fakeRedisConn{}
+			defer fc.Close()
+			defer fc.Reset()
 			for k := 0; k < 100; k++ {
 				fc.Reset()
 				setHandler, _, _ := nd.router.GetCmdHandler("set")
@@ -256,6 +273,8 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 		go func(index int) {
 			defer wg.Done()
 			fc := &fakeRedisConn{}
+			defer fc.Close()
+			defer fc.Reset()
 			for k := 0; k < 100; k++ {
 				fc.Reset()
 				setHandler, _, _ := nd.router.GetCmdHandler("incr")
@@ -267,6 +286,8 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 	}
 	wg.Wait()
 	fc := &fakeRedisConn{}
+	defer fc.Close()
+	defer fc.Reset()
 	for i := 0; i < 50; i++ {
 		for k := 0; k < 100; k++ {
 			fc.Reset()

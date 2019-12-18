@@ -131,7 +131,7 @@ func (nd *KVNode) advanceScanCommand(cmd redcon.Command) (interface{}, error) {
 	default:
 		return &common.ScanResult{Keys: nil, NextCursor: nil, Error: common.ErrInvalidScanType}, common.ErrInvalidScanType
 	}
-	_, key, err := common.ExtractNamesapce(cmd.Args[1])
+	key, err := common.CutNamesapce(cmd.Args[1])
 	if err != nil {
 		return &common.ScanResult{Keys: nil, NextCursor: nil, PartionId: "", Error: err}, err
 	}
@@ -363,7 +363,7 @@ func (nd *KVNode) fullScanCommand(cmd redcon.Command) (interface{}, error) {
 	default:
 		return nil, common.ErrInvalidScanType
 	}
-	_, key, err := common.ExtractNamesapce(cmd.Args[1])
+	key, err := common.CutNamesapce(cmd.Args[1])
 	if err != nil {
 		return nil, err
 	}

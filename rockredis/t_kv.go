@@ -73,7 +73,9 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+	refV, err := db.eng.GetNoLock(db.defaultReadOpts, key)
+	defer refV.Free()
+	v := refV.Data()
 	created := false
 	n := int64(0)
 	if v == nil {
@@ -113,8 +115,8 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	delCnt := int64(1)
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
-			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
-			if v != nil {
+			vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, key)
+			if vok {
 				db.IncrTableKeyCount(table, -1, db.wb)
 			} else {
 				delCnt = int64(0)
@@ -141,8 +143,8 @@ func (db *RockDB) KVDelWithBatch(key []byte, wb *gorocksdb.WriteBatch) error {
 	}
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
-			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
-			if v != nil {
+			vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, key)
+			if vok {
 				db.IncrTableKeyCount(table, -1, wb)
 			}
 		} else {
@@ -185,6 +187,20 @@ func (db *RockDB) DelKeys(keys ...[]byte) (int64, error) {
 }
 
 func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
+	if len(keys) == 1 {
+		_, kk, err := convertRedisKeyToDBKVKey(keys[0])
+		if err != nil {
+			return 0, err
+		}
+		vok, err := db.eng.Exist(db.defaultReadOpts, kk)
+		if err != nil {
+			return 0, err
+		}
+		if vok {
+			return 1, nil
+		}
+		return 0, nil
+	}
 	keyList := make([][]byte, len(keys))
 	errs := make([]error, len(keys))
 	for i, k := range keys {
@@ -196,14 +212,8 @@ func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
 			keyList[i] = kk
 		}
 	}
-	cnt := int64(0)
-	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, keyList, errs)
-	for i, v := range keyList {
-		if errs[i] == nil && v != nil {
-			cnt++
-		}
-	}
-	return cnt, nil
+	cnt, err := db.eng.ExistCnt(db.defaultReadOpts, keyList)
+	return cnt, err
 }
 
 func (db *RockDB) KVGetVer(key []byte) (int64, error) {
@@ -217,6 +227,20 @@ func (db *RockDB) KVGetVer(key []byte) (int64, error) {
 		ts, err = Uint64(v[len(v)-tsLen:], err)
 	}
 	return int64(ts), err
+}
+
+func (db *RockDB) GetValueWithOp(key []byte,
+	op func([]byte) error) error {
+	_, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return err
+	}
+	return db.rockEng.GetValueWithOp(db.defaultReadOpts, key, func(v []byte) error {
+		if len(v) >= tsLen {
+			v = v[:len(v)-tsLen]
+		}
+		return op(v)
+	})
 }
 
 func (db *RockDB) KVGet(key []byte) ([]byte, error) {
@@ -289,11 +313,11 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		value = value[:0]
 		value = append(value, args[i].Value...)
 		if db.cfg.EnableTableCounter {
-			var v []byte
+			vok := false
 			if !db.cfg.EstimateTableCounter {
-				v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+				vok, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
 			}
-			if v == nil {
+			if !vok {
 				n := tableCnt[string(table)]
 				n++
 				tableCnt[string(table)] = n
@@ -321,11 +345,11 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		var v []byte
+		found := false
 		if !db.cfg.EstimateTableCounter {
-			v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			found, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
 		}
-		if v == nil {
+		if !found {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
 	}
@@ -374,11 +398,11 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		var v []byte
+		vok := false
 		if !db.cfg.EstimateTableCounter {
-			v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			vok, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
 		}
-		if v == nil {
+		if !vok {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
 	}
@@ -404,12 +428,12 @@ func (db *RockDB) SetNX(ts int64, key []byte, value []byte) (int64, error) {
 		return 0, err
 	}
 
-	var v []byte
+	vok := false
 	var n int64 = 1
 
-	if v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, key); err != nil {
+	if vok, err = db.eng.ExistNoLock(db.defaultReadOpts, key); err != nil {
 		return 0, err
-	} else if v != nil {
+	} else if vok {
 		n = 0
 	} else {
 		db.wb.Clear()

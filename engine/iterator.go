@@ -99,6 +99,7 @@ func NewDBIterator(db *gorocksdb.DB, withSnap bool, prefixSame bool, lowbound []
 	return dbit, nil
 }
 
+// the bytes returned will be freed after next
 func (it *DBIterator) RefKey() []byte {
 	return it.Iterator.Key().Data()
 }
@@ -107,6 +108,7 @@ func (it *DBIterator) Key() []byte {
 	return it.Iterator.Key().Bytes()
 }
 
+// the bytes returned will be freed after next
 func (it *DBIterator) RefValue() []byte {
 	v := it.Iterator.Value().Data()
 	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {

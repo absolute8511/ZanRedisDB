@@ -72,7 +72,7 @@ func (nd *KVNode) geoaddCommand(conn redcon.Conn, cmd redcon.Command) {
 
 	if ifGeoHashUnitTest {
 		/* The code used for unit test. */
-		_, key, err := common.ExtractNamesapce(cmd.Args[1])
+		key, err := common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			conn.WriteError(err.Error())
 			return

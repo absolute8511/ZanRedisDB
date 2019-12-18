@@ -47,7 +47,7 @@ func (s *Server) doScanCommon(cmd redcon.Command) ([]interface{}, []byte, error)
 		var err error
 		rawKey := cmd.Args[1]
 
-		_, rk, err := common.ExtractNamesapce(rawKey)
+		rk, err := common.CutNamesapce(rawKey)
 		if err != nil {
 			return nil, nil, err
 		}

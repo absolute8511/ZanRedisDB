@@ -494,3 +494,23 @@ func (r *RockEng) GetInternalStatus() map[string]interface{} {
 func (r *RockEng) GetInternalPropertyStatus(p string) string {
 	return r.eng.GetProperty(p)
 }
+
+func (r *RockEng) GetValueWithOp(opts *gorocksdb.ReadOptions, key []byte,
+	op func([]byte) error) error {
+	val, err := r.eng.Get(opts, key)
+	if err != nil {
+		return err
+	}
+	defer val.Free()
+	return op(val.Data())
+}
+
+func (r *RockEng) GetValueWithOpNoLock(opts *gorocksdb.ReadOptions, key []byte,
+	op func([]byte) error) error {
+	val, err := r.eng.GetNoLock(opts, key)
+	if err != nil {
+		return err
+	}
+	defer val.Free()
+	return op(val.Data())
+}
