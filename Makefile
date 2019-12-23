@@ -5,7 +5,7 @@ PROJECT?=github.com/youzan/ZanRedisDB
 VERBINARY?= 0.7.1
 COMMIT?=$(shell git rev-parse --short HEAD)
 BUILD_TIME?=$(shell date '+%Y-%m-%d_%H:%M:%S-%Z')
-GOFLAGS=-ldflags "-s -w -X ${PROJECT}/common.VerBinary=${VERBINARY} -X ${PROJECT}/common.Commit=${COMMIT} -X ${PROJECT}/common.BuildTime=${BUILD_TIME}"
+GOFLAGS=-ldflags "-X ${PROJECT}/common.VerBinary=${VERBINARY} -X ${PROJECT}/common.Commit=${COMMIT} -X ${PROJECT}/common.BuildTime=${BUILD_TIME}"
 
 CGO_CFLAGS="-I${ROCKSDB}/include"
 CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -ljemalloc"
