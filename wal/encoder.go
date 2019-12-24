@@ -29,7 +29,7 @@ import (
 // walPageBytes is the alignment for flushing records to the backing Writer.
 // It should be a multiple of the minimum sector size so that WAL can safely
 // distinguish between torn writes and ordinary data corruption.
-const walPageBytes = 8 * minSectorSize
+const walPageBytes = 64 * minSectorSize
 
 type encoder struct {
 	mu sync.Mutex
