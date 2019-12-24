@@ -172,7 +172,6 @@ type customProposeData struct {
 type KVNode struct {
 	reqProposeC        *entryQueue
 	readyC             chan struct{}
-	waitReqCh          chan *waitReqHeaders
 	rn                 *raftNode
 	store              *KVStore
 	sm                 StateMachine
@@ -236,7 +235,6 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	}
 	s := &KVNode{
 		reqProposeC:        newEntryQueue(proposeQueueLen, 1),
-		waitReqCh:          make(chan *waitReqHeaders, proposeQueueLen*2),
 		readyC:             make(chan struct{}, 1),
 		stopChan:           stopChan,
 		stopDone:           make(chan struct{}),
@@ -496,7 +494,7 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 	return nd.router.GetMergeCmdHandler(cmd)
 }
 
-func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, cancel context.CancelFunc) (*waitReqHeaders, error) {
+func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, cancel context.CancelFunc, start time.Time) (*waitReqHeaders, error) {
 	wrh := nd.wrPools.getWaitReq(1)
 	wrh.reqs.Reqs = append(wrh.reqs.Reqs, irr)
 	wrh.reqs.ReqNum = 1
@@ -504,8 +502,9 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 	if len(wrh.done) != 0 {
 		wrh.done = make(chan struct{}, 1)
 	}
+	poolCost := time.Since(start)
 	buffer, err := wrh.reqs.Marshal()
-	poolCost := time.Now().UnixNano() - irr.Header.Timestamp
+	marshalCost := time.Since(start)
 	// buffer will be reused by raft?
 	// TODO:buffer, err := reqList.MarshalTo()
 	if err != nil {
@@ -520,10 +519,10 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 		wrh.release()
 		return nil, err
 	}
-	proposalCost := time.Now().UnixNano() - irr.Header.Timestamp
-	if proposalCost >= int64(raftSlow.Nanoseconds()/2) {
-		nd.rn.Infof("raft slow for batch propose: %v, cost %v-%v, wait len: %v",
-			len(wrh.reqs.Reqs), poolCost, proposalCost, len(nd.waitReqCh))
+	proposalCost := time.Since(start)
+	if proposalCost >= raftSlow/2 {
+		nd.rn.Infof("raft slow for propose buf: %v, cost %v-%v-%v",
+			len(buffer), poolCost, marshalCost, proposalCost)
 	}
 	return wrh, nil
 }
@@ -642,7 +641,7 @@ func (nd *KVNode) queueRequest(req InternalRaftRequest) (interface{}, error) {
 	start := time.Now()
 	req.Header.Timestamp = start.UnixNano()
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
-	wrh, err := nd.ProposeInternal(ctx, req, cancel)
+	wrh, err := nd.ProposeInternal(ctx, req, cancel, start)
 	if err != nil {
 		return nil, err
 	}
