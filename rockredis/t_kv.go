@@ -229,6 +229,20 @@ func (db *RockDB) KVGetVer(key []byte) (int64, error) {
 	return int64(ts), err
 }
 
+func (db *RockDB) GetValueWithOpNoLock(key []byte,
+	op func([]byte) error) error {
+	_, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return err
+	}
+	return db.rockEng.GetValueWithOpNoLock(db.defaultReadOpts, key, func(v []byte) error {
+		if len(v) >= tsLen {
+			v = v[:len(v)-tsLen]
+		}
+		return op(v)
+	})
+}
+
 func (db *RockDB) GetValueWithOp(key []byte,
 	op func([]byte) error) error {
 	_, key, err := convertRedisKeyToDBKVKey(key)

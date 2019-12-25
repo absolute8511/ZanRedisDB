@@ -176,9 +176,9 @@ type emptySM struct {
 func (esm *emptySM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
 	ts := reqList.Timestamp
 	tn := time.Now()
-	if ts > 0 {
+	if ts > 0 && !isReplaying {
 		cost := tn.UnixNano() - ts
-		if cost > raftSlow.Nanoseconds()/2 {
+		if cost > raftSlow.Nanoseconds()*2 {
 			nodeLog.Infof("receive raft requests in state machine slow cost: %v, %v, %v", reqList.ReqId, len(reqList.Reqs), cost)
 		}
 	}

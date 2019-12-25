@@ -20,6 +20,22 @@ func (nd *KVNode) Lookup(key []byte) ([]byte, error) {
 	return v, err
 }
 
+func (nd *KVNode) getNoLockCommand(conn redcon.Conn, cmd redcon.Command) {
+	err := nd.store.GetValueWithOpNoLock(cmd.Args[1], func(val []byte) error {
+		if val == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(val)
+			// since val will be freed, we need flush before return
+			conn.Flush()
+		}
+		return nil
+	})
+	if err != nil {
+		conn.WriteError(err.Error())
+	}
+}
+
 func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	err := nd.store.GetValueWithOp(cmd.Args[1], func(val []byte) error {
 		if val == nil {

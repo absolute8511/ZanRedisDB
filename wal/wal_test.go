@@ -802,3 +802,26 @@ func TestOpenOnTornWrite(t *testing.T) {
 		t.Fatalf("expected len(ents) = %d, got %d", wEntries, len(ents))
 	}
 }
+
+func BenchmarkSaveEntries(b *testing.B) {
+	p, _ := ioutil.TempDir(os.TempDir(), "walbench")
+	defer os.RemoveAll(p)
+
+	w, _ := Create(p, []byte("metadata"), true)
+	defer w.Close()
+
+	state := raftpb.HardState{Term: 1}
+	w.Save(state, nil)
+	bigData := make([]byte, 100)
+	strdata := "Hello World!!"
+	copy(bigData, strdata)
+	// set a lower value for SegmentSizeBytes, else the test takes too long to complete
+	ents := make([]raftpb.Entry, 0, 100)
+	for i := 1; i < 100; i++ {
+		ents = append(ents, raftpb.Entry{Index: uint64(i), Term: 1, Data: bigData})
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w.Save(state, ents)
+	}
+}

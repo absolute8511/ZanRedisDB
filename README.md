@@ -63,6 +63,7 @@ ROCKSDB=/path/to/rocksdb ./dist.sh
  * Setting `vm.min_free_kbytes` to at least 1GB (8GB on larger memory system)
  * Disable NUMA zone reclaim with `vm.zone_reclaim_mode=0`
  * Disable THP(transparent huge pages)
+ * Avoid the tcp delay ack by `echo 4 > /proc/sys/net/ipv4/tcp_delack_min` (for old OS only)
 
 
 ## API
