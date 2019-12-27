@@ -593,7 +593,7 @@ func (db *RockDB) BitSet(ts int64, key []byte, offset int64, on int) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	if offset > MaxBitOffset {
+	if offset > MaxBitOffset || offset < 0 {
 		return 0, ErrBitOverflow
 	}
 

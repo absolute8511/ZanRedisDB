@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -63,6 +64,7 @@ func TestMain(m *testing.M) {
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	node.EnableForTest()
+	flag.Parse()
 
 	if testing.Verbose() {
 		rockredis.SetLogLevel(int32(common.LOG_DETAIL))

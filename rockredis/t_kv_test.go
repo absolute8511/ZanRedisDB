@@ -198,6 +198,9 @@ func TestDBKVBit(t *testing.T) {
 	n, err = db.BitCount(key, 1, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(6), n)
+
+	_, err = db.BitSet(0, key, -5, 0)
+	assert.NotNil(t, err)
 }
 
 func TestDBKVWithNoTable(t *testing.T) {
