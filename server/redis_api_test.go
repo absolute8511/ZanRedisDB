@@ -362,7 +362,7 @@ func TestKVStringOp(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key := "default:test:kv_bitop"
+	key := "default:test:kv_stringop"
 	if n, err := goredis.Int64(c.Do("strlen", key)); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
