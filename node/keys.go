@@ -52,6 +52,15 @@ func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (nd *KVNode) strlenCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, err := nd.store.StrLen(cmd.Args[1])
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteInt64(val)
+}
+
 func (nd *KVNode) existsCommand(cmd redcon.Command) (interface{}, error) {
 	val, err := nd.store.KVExists(cmd.Args[1:]...)
 	return val, err
@@ -180,7 +189,7 @@ func (nd *KVNode) setbitCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError(err.Error())
 		return
 	}
-	if offset > rockredis.MaxBitOffset {
+	if offset > rockredis.MaxBitOffset || offset < 0 {
 		conn.WriteError(rockredis.ErrBitOverflow.Error())
 		return
 	}
