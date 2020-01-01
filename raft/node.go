@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
@@ -255,6 +256,8 @@ func StartNode(c *Config, peers []Peer, isLearner bool) Node {
 	n.logger = c.Logger
 	n.r = r
 	n.prevS = newPrevState(r)
+	off := max(r.raftLog.applied+1, r.raftLog.firstIndex())
+	n.lastSteppedIndex = off
 	n.NotifyEventCh()
 	return &n
 }
@@ -270,25 +273,28 @@ func RestartNode(c *Config) Node {
 	n.logger = c.Logger
 	n.r = r
 	n.prevS = newPrevState(r)
+	off := max(r.raftLog.applied+1, r.raftLog.firstIndex())
+	n.lastSteppedIndex = off
 	n.NotifyEventCh()
 	return &n
 }
 
 // node is the canonical implementation of the Node interface
 type node struct {
-	propQ         *ProposalQueue
-	msgQ          *MessageQueue
-	confc         chan pb.ConfChange
-	confstatec    chan pb.ConfState
-	tickc         chan struct{}
-	done          chan struct{}
-	stop          chan struct{}
-	status        chan chan Status
-	eventNotifyCh chan bool
-	r             *raft
-	prevS         *prevState
-	newReadyFunc  func(*raft, *SoftState, pb.HardState, bool) Ready
-	needAdvance   bool
+	propQ            *ProposalQueue
+	msgQ             *MessageQueue
+	confc            chan pb.ConfChange
+	confstatec       chan pb.ConfState
+	tickc            chan struct{}
+	done             chan struct{}
+	stop             chan struct{}
+	status           chan chan Status
+	eventNotifyCh    chan bool
+	r                *raft
+	prevS            *prevState
+	newReadyFunc     func(*raft, *SoftState, pb.HardState, bool) Ready
+	needAdvance      bool
+	lastSteppedIndex uint64
 
 	logger Logger
 }
@@ -361,6 +367,24 @@ func (n *node) StepNode(moreEntriesToApply bool, busySnap bool) (Ready, bool) {
 	rd := n.newReadyFunc(n.r, n.prevS.prevSoftSt, n.prevS.prevHardSt, moreEntriesToApply)
 	if rd.containsUpdates() {
 		n.needAdvance = true
+		var stepIndex uint64
+		if !IsEmptySnap(rd.Snapshot) {
+			stepIndex = rd.Snapshot.Metadata.Index
+		}
+		if len(rd.CommittedEntries) > 0 {
+			fi := rd.CommittedEntries[0].Index
+			if n.lastSteppedIndex != 0 && fi > n.lastSteppedIndex+1 {
+				ents := n.r.raftLog.allEntries()
+				e := fmt.Sprintf("raft.node: %x(%v) index not continued: %v, %v, prev: %v, logs: %v, %v ",
+					n.r.id, n.r.group, fi, n.lastSteppedIndex, n.prevS, len(ents),
+					n.r.raftLog.String())
+				n.logger.Error(e)
+				n.logger.Errorf("all entries: %v", ents)
+				panic(e)
+			}
+			stepIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+		}
+		n.lastSteppedIndex = stepIndex
 		return rd, true
 	}
 	return Ready{}, false
