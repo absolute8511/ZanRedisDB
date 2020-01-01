@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package node
+package server
 
 import (
 	"context"
@@ -21,10 +21,11 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/pkg/wait"
+	"github.com/youzan/ZanRedisDB/node"
 )
 
 type internalReq struct {
-	reqData InternalRaftRequest
+	reqData node.InternalRaftRequest
 	ctx     context.Context
 	wr      wait.WaitResult
 }

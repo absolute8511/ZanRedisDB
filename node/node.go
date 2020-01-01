@@ -170,7 +170,6 @@ type customProposeData struct {
 
 // a key-value node backed by raft
 type KVNode struct {
-	reqProposeC        *entryQueue
 	readyC             chan struct{}
 	rn                 *raftNode
 	store              *KVStore
@@ -234,7 +233,6 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		return nil, err
 	}
 	s := &KVNode{
-		reqProposeC:        newEntryQueue(proposeQueueLen, 1),
 		readyC:             make(chan struct{}, 1),
 		stopChan:           stopChan,
 		stopDone:           make(chan struct{}),
@@ -326,7 +324,6 @@ func (nd *KVNode) Stop() {
 	}
 	defer close(nd.stopDone)
 	close(nd.stopChan)
-	nd.reqProposeC.close()
 	nd.expireHandler.Stop()
 	nd.wg.Wait()
 	nd.rn.StopNode()

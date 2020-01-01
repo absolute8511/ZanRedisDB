@@ -14,7 +14,7 @@
 
 // +build !dragonboat_slowtest,!dragonboat_errorinjectiontest
 
-package node
+package server
 
 import (
 	"sync"

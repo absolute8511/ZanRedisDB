@@ -31,6 +31,10 @@ type ServerConfig struct {
 	KeepWAL              int               `json:"keep_wal"`
 	UseRocksWAL          bool              `json:"use_rocks_wal"`
 	SharedRocksWAL       bool              `json:"shared_rocks_wal"`
+	// raft proposal queue length for client queue loop (1024*4 for default, suggest use default)
+	ProposalQueueLen int `json:"proposal_queue_len"`
+	// how many queues used for proposal, suggest use CPU nums
+	ProposalQueueNum int `json:"proposal_queue_num"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`

@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
 
 	"github.com/absolute8511/redcon"
@@ -42,6 +44,20 @@ func SLogger() *common.LevelLogger {
 	return sLog
 }
 
+type writeQ struct {
+	q      *entryQueue
+	stopC  chan struct{}
+	readyC chan struct{}
+}
+
+func newWriteQ(len uint64) *writeQ {
+	return &writeQ{
+		q:      newEntryQueue(len, 0),
+		stopC:  make(chan struct{}),
+		readyC: make(chan struct{}, 1),
+	}
+}
+
 type Server struct {
 	mutex         sync.Mutex
 	conf          ServerConfig
@@ -54,6 +70,7 @@ type Server struct {
 	startTime     time.Time
 	maxScanJob    int32
 	scanStats     common.ScanStats
+	writeQs       []*writeQ
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -78,6 +95,16 @@ func NewServer(conf ServerConfig) *Server {
 	}
 	if conf.DefaultSnapCatchup > 0 {
 		common.DefaultSnapCatchup = conf.DefaultSnapCatchup
+	}
+	if conf.ProposalQueueNum <= 0 {
+		conf.ProposalQueueNum = runtime.NumCPU()
+	}
+	if conf.ProposalQueueLen <= 0 {
+		conf.ProposalQueueLen = 1024 * 4
+	}
+	writeQs := make([]*writeQ, conf.ProposalQueueNum)
+	for i := 0; i < conf.ProposalQueueNum; i++ {
+		writeQs[i] = newWriteQ(uint64(conf.ProposalQueueLen))
 	}
 
 	if conf.SyncerWriteOnly {
@@ -132,6 +159,7 @@ func NewServer(conf ServerConfig) *Server {
 		conf:       conf,
 		startTime:  time.Now(),
 		maxScanJob: conf.MaxScanJob,
+		writeQs:    writeQs,
 	}
 
 	ts := &stats.TransportStats{}
@@ -211,6 +239,9 @@ func (s *Server) Stop() {
 	default:
 	}
 	close(s.stopC)
+	for _, wq := range s.writeQs {
+		close(wq.stopC)
+	}
 	s.raftTransport.Stop()
 	s.wg.Wait()
 	sLog.Infof("server stopped")
@@ -304,6 +335,11 @@ func (s *Server) Start() {
 		s.serveRaft(s.stopC)
 	}()
 	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.handleRedisWriteLoop()
+	}()
+	s.wg.Add(1)
 	// redis api enable first, because there are many partitions, some partitions may recover first
 	// and become leader. In this way we need redis api enabled to allow r/w these partitions.
 	go func() {
@@ -332,20 +368,27 @@ func (s *Server) Start() {
 	}()
 }
 
-func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (bool, common.CommandFunc, redcon.Command, error) {
+func (s *Server) GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []byte, int, error) {
 	if len(cmd.Args) < 2 {
-		return false, nil, cmd, common.ErrInvalidArgs
+		return "", nil, 0, common.ErrInvalidArgs
 	}
 	rawKey := cmd.Args[1]
 
 	namespace, pk, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
-		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return false, nil, cmd, err
+		return namespace, nil, 0, err
+	}
+	pkSum := int(murmur3.Sum32(pk))
+	return namespace, pk, pkSum, nil
+}
+
+func (s *Server) GetHandler(ns string, pk []byte, pkSum int, cmdName string, cmd redcon.Command) (bool, common.CommandFunc, redcon.Command, error) {
+	if len(cmd.Args) < 2 {
+		return false, nil, cmd, common.ErrInvalidArgs
 	}
 	// we need decide the partition id from the primary key
 	// if the command need cross multi partitions, we need handle separate
-	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
+	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKeySum(ns, pk, pkSum)
 	if err != nil {
 		return false, nil, cmd, err
 	}
@@ -474,4 +517,32 @@ func (s *Server) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 
 func (s *Server) GetNsMgr() *node.NamespaceMgr {
 	return s.nsMgr
+}
+
+func (s *Server) handleRedisWrite(pkSum int, h common.CommandFunc, conn redcon.Conn, cmd redcon.Command) {
+	// queue and wait
+	wq := s.writeQs[pkSum%len(s.writeQs)]
+	wq.q.add(elemT{})
+	// wait
+}
+
+func (s *Server) handleRedisWriteLoop(stop chan struct{}) {
+	var wg sync.WaitGroup
+	for i := 0; i < len(s.writeQs); i++ {
+		wg.Add(1)
+		go func(wq *writeQ) {
+			defer wg.Done()
+			for {
+				select {
+				case <-wq.readyC:
+					elems := wq.q.get(false)
+					_ = elems
+					// do write handler
+				case <-wq.stopC:
+					return
+				}
+			}
+		}(s.writeQs[i])
+	}
+	wg.Wait()
 }

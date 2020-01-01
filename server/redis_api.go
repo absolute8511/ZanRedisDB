@@ -65,8 +65,13 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			if level > 0 {
 				start = time.Now()
 			}
-			isWrite, h, cmd, err := s.GetHandler(cmdName, cmd)
 			cmdStr := string(cmd.Args[0])
+			ns, pk, pkSum, err := s.GetPKAndHashSum(cmdName, cmd)
+			if err != nil {
+				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
+				break
+			}
+			isWrite, h, cmd, err := s.GetHandler(ns, pk, pkSum, cmdName, cmd)
 			if len(cmd.Args) > 1 {
 				cmdStr += ", " + string(cmd.Args[1])
 				if level > 4 && len(cmd.Args) > 2 {
@@ -79,7 +84,11 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 				if isWrite && node.IsSyncerOnly() {
 					conn.WriteError("The cluster is only allowing syncer write : ERR handle command " + cmdStr)
 				} else {
-					h(conn, cmd)
+					if isWrite {
+						s.handleRedisWrite(pkSum, h, conn, cmd)
+					} else {
+						h(conn, cmd)
+					}
 				}
 			} else {
 				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
