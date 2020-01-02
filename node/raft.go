@@ -940,7 +940,6 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 					rc.Descrp(), firsti, rc.lastPublished, rd.Snapshot.Metadata.String())
 				rc.Errorf("%s", e)
 				rc.Errorf("raft node status: %v", rc.node.DebugString())
-				panic(e)
 			}
 			newPublished = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 		}
