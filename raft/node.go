@@ -117,6 +117,19 @@ func (rd Ready) containsUpdates() bool {
 		len(rd.CommittedEntries) > 0 || len(rd.Messages) > 0 || len(rd.ReadStates) != 0
 }
 
+// appliedCursor extracts from the Ready the highest index the client has
+// applied (once the Ready is confirmed via Advance). If no information is
+// contained in the Ready, returns zero.
+func (rd Ready) appliedCursor() uint64 {
+	if n := len(rd.CommittedEntries); n > 0 {
+		return rd.CommittedEntries[n-1].Index
+	}
+	if index := rd.Snapshot.Metadata.Index; index > 0 {
+		return index
+	}
+	return 0
+}
+
 type msgWithDrop struct {
 	m      pb.Message
 	dropCB context.CancelFunc
@@ -492,8 +505,11 @@ func (n *node) Advance(rd Ready) {
 	n.r.msgs = nil
 	n.r.readStates = nil
 
-	if n.prevS.prevHardSt.Commit != 0 {
-		n.r.raftLog.appliedTo(n.prevS.prevHardSt.Commit)
+	appliedI := rd.appliedCursor()
+	if appliedI != 0 {
+		// since the committed entries may less than the hard commit index due to the
+		// limit for buffer len, we should not use the hard state commit index.
+		n.r.raftLog.appliedTo(appliedI)
 	}
 	if n.prevS.havePrevLastUnstablei {
 		n.r.raftLog.stableTo(n.prevS.prevLastUnstablei, n.prevS.prevLastUnstablet)
