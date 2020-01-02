@@ -385,6 +385,16 @@ func (n *node) StepNode(moreEntriesToApply bool, busySnap bool) (Ready, bool) {
 				panic(e)
 			}
 			stepIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+			if rd.HardState.Commit != stepIndex {
+				ents := n.r.raftLog.allEntries()
+				e := fmt.Sprintf("raft.node: %x(%v) index not continued: %v, %v, %v, snap:%v, prev: %v, logs: %v, %v ",
+					n.r.id, n.r.group, fi, n.lastSteppedIndex, stepIndex, rd.Snapshot.Metadata.String(), n.prevS, len(ents),
+					n.r.raftLog.String())
+				n.logger.Error(e)
+				n.logger.Errorf("all entries: %v", ents)
+				n.logger.Errorf("unmatched commit index: %v, %v, snap: %v", rd.HardState, stepIndex, rd.Snapshot.Metadata)
+				panic("unmatched hard state and committed entries")
+			}
 		}
 		n.lastSteppedIndex = stepIndex
 		return rd, true
