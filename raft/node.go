@@ -84,7 +84,8 @@ type Ready struct {
 	// store/state-machine. These have previously been committed to stable
 	// store.
 	CommittedEntries []pb.Entry
-
+	// Whether there are more committed entries ready to be applied.
+	MoreCommittedEntries bool
 	// Messages specifies outbound messages to be sent AFTER Entries are
 	// committed to stable storage.
 	// If it contains a MsgSnap message, the application MUST report back to raft
@@ -186,6 +187,7 @@ type Node interface {
 	ReportSnapshot(id uint64, group pb.Group, status SnapshotStatus)
 	// Stop performs any necessary termination of the Node.
 	Stop()
+	DebugString() string
 }
 
 type Peer struct {
@@ -375,8 +377,8 @@ func (n *node) StepNode(moreEntriesToApply bool, busySnap bool) (Ready, bool) {
 			fi := rd.CommittedEntries[0].Index
 			if n.lastSteppedIndex != 0 && fi > n.lastSteppedIndex+1 {
 				ents := n.r.raftLog.allEntries()
-				e := fmt.Sprintf("raft.node: %x(%v) index not continued: %v, %v, prev: %v, logs: %v, %v ",
-					n.r.id, n.r.group, fi, n.lastSteppedIndex, n.prevS, len(ents),
+				e := fmt.Sprintf("raft.node: %x(%v) index not continued: %v, %v, %v, snap:%v, prev: %v, logs: %v, %v ",
+					n.r.id, n.r.group, fi, n.lastSteppedIndex, stepIndex, rd.Snapshot.Metadata.String(), n.prevS, len(ents),
 					n.r.raftLog.String())
 				n.logger.Error(e)
 				n.logger.Errorf("all entries: %v", ents)
@@ -388,6 +390,14 @@ func (n *node) StepNode(moreEntriesToApply bool, busySnap bool) (Ready, bool) {
 		return rd, true
 	}
 	return Ready{}, false
+}
+
+func (n *node) DebugString() string {
+	ents := n.r.raftLog.allEntries()
+	e := fmt.Sprintf("raft.node: %x(%v) index not continued: %v, prev: %v, logs: %v, %v ",
+		n.r.id, n.r.group, n.lastSteppedIndex, n.prevS, len(ents),
+		n.r.raftLog.String())
+	return e
 }
 
 func (n *node) handleLeaderUpdate(r *raft) bool {
@@ -745,6 +755,10 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState, moreEntri
 	}
 	if moreEntriesToApply {
 		rd.CommittedEntries = r.raftLog.nextEnts()
+	}
+	if len(rd.CommittedEntries) > 0 {
+		lastIndex := rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+		rd.MoreCommittedEntries = r.raftLog.hasMoreNextEnts(lastIndex)
 	}
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt

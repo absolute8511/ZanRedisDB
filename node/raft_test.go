@@ -80,6 +80,7 @@ func (n *nodeRecorder) ApplyConfChange(conf raftpb.ConfChange) *raftpb.ConfState
 func (n *nodeRecorder) Stop() {
 	n.Record(testutil.Action{Name: "Stop"})
 }
+func (n *nodeRecorder) DebugString() string { return "" }
 
 func (n *nodeRecorder) ReportUnreachable(id uint64, g raftpb.Group) {}
 

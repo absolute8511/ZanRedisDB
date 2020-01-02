@@ -871,6 +871,9 @@ func (rc *raftNode) serveChannels() {
 				continue
 			}
 			rc.processReady(rd)
+			if rd.MoreCommittedEntries {
+				rc.node.NotifyEventCh()
+			}
 		}
 	}
 }
@@ -931,13 +934,15 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 			newPublished = rd.Snapshot.Metadata.Index
 		}
 		if len(rd.CommittedEntries) > 0 {
-			newPublished = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 			firsti := rd.CommittedEntries[0].Index
 			if rc.lastPublished != 0 && firsti > rc.lastPublished+1 {
-				e := fmt.Sprintf("%v first index of committed entry[%d] should <= last published[%d] + 1", rc.Descrp(), firsti, rc.lastPublished)
+				e := fmt.Sprintf("%v first index of committed entry[%d] should <= last published[%d] + 1, snap: %v",
+					rc.Descrp(), firsti, rc.lastPublished, rd.Snapshot.Metadata.String())
 				rc.Errorf("%s", e)
+				rc.Errorf("raft node status: %v", rc.node.DebugString())
 				panic(e)
 			}
+			newPublished = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 		}
 		rc.lastPublished = newPublished
 		rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
