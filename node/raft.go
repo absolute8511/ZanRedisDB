@@ -126,6 +126,7 @@ type raftNode struct {
 	replayRunning       int32
 	busySnapshot        int32
 	loopServering       int32
+	lastPublished       uint64
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -870,6 +871,9 @@ func (rc *raftNode) serveChannels() {
 				continue
 			}
 			rc.processReady(rd)
+			if rd.MoreCommittedEntries {
+				rc.node.NotifyEventCh()
+			}
 		}
 	}
 }
@@ -925,6 +929,21 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	}
 	processedMsgs, hasRequestSnapMsg := rc.processMessages(rd.Messages)
 	if len(rd.CommittedEntries) > 0 || !raft.IsEmptySnap(rd.Snapshot) || hasRequestSnapMsg {
+		var newPublished uint64
+		if !raft.IsEmptySnap(rd.Snapshot) {
+			newPublished = rd.Snapshot.Metadata.Index
+		}
+		if len(rd.CommittedEntries) > 0 {
+			firsti := rd.CommittedEntries[0].Index
+			if rc.lastPublished != 0 && firsti > rc.lastPublished+1 {
+				e := fmt.Sprintf("%v first index of committed entry[%d] should <= last published[%d] + 1, snap: %v",
+					rc.Descrp(), firsti, rc.lastPublished, rd.Snapshot.Metadata.String())
+				rc.Errorf("%s", e)
+				rc.Errorf("raft node status: %v", rc.node.DebugString())
+			}
+			newPublished = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+		}
+		rc.lastPublished = newPublished
 		rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
 	}
 	if !raft.IsEmptySnap(rd.Snapshot) {

@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
@@ -83,7 +84,8 @@ type Ready struct {
 	// store/state-machine. These have previously been committed to stable
 	// store.
 	CommittedEntries []pb.Entry
-
+	// Whether there are more committed entries ready to be applied.
+	MoreCommittedEntries bool
 	// Messages specifies outbound messages to be sent AFTER Entries are
 	// committed to stable storage.
 	// If it contains a MsgSnap message, the application MUST report back to raft
@@ -113,6 +115,19 @@ func (rd Ready) containsUpdates() bool {
 	return rd.SoftState != nil || !IsEmptyHardState(rd.HardState) ||
 		!IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
 		len(rd.CommittedEntries) > 0 || len(rd.Messages) > 0 || len(rd.ReadStates) != 0
+}
+
+// appliedCursor extracts from the Ready the highest index the client has
+// applied (once the Ready is confirmed via Advance). If no information is
+// contained in the Ready, returns zero.
+func (rd Ready) appliedCursor() uint64 {
+	if n := len(rd.CommittedEntries); n > 0 {
+		return rd.CommittedEntries[n-1].Index
+	}
+	if index := rd.Snapshot.Metadata.Index; index > 0 {
+		return index
+	}
+	return 0
 }
 
 type msgWithDrop struct {
@@ -185,6 +200,7 @@ type Node interface {
 	ReportSnapshot(id uint64, group pb.Group, status SnapshotStatus)
 	// Stop performs any necessary termination of the Node.
 	Stop()
+	DebugString() string
 }
 
 type Peer struct {
@@ -255,6 +271,8 @@ func StartNode(c *Config, peers []Peer, isLearner bool) Node {
 	n.logger = c.Logger
 	n.r = r
 	n.prevS = newPrevState(r)
+	off := max(r.raftLog.applied+1, r.raftLog.firstIndex())
+	n.lastSteppedIndex = off
 	n.NotifyEventCh()
 	return &n
 }
@@ -270,25 +288,28 @@ func RestartNode(c *Config) Node {
 	n.logger = c.Logger
 	n.r = r
 	n.prevS = newPrevState(r)
+	off := max(r.raftLog.applied+1, r.raftLog.firstIndex())
+	n.lastSteppedIndex = off
 	n.NotifyEventCh()
 	return &n
 }
 
 // node is the canonical implementation of the Node interface
 type node struct {
-	propQ         *ProposalQueue
-	msgQ          *MessageQueue
-	confc         chan pb.ConfChange
-	confstatec    chan pb.ConfState
-	tickc         chan struct{}
-	done          chan struct{}
-	stop          chan struct{}
-	status        chan chan Status
-	eventNotifyCh chan bool
-	r             *raft
-	prevS         *prevState
-	newReadyFunc  func(*raft, *SoftState, pb.HardState, bool) Ready
-	needAdvance   bool
+	propQ            *ProposalQueue
+	msgQ             *MessageQueue
+	confc            chan pb.ConfChange
+	confstatec       chan pb.ConfState
+	tickc            chan struct{}
+	done             chan struct{}
+	stop             chan struct{}
+	status           chan chan Status
+	eventNotifyCh    chan bool
+	r                *raft
+	prevS            *prevState
+	newReadyFunc     func(*raft, *SoftState, pb.HardState, bool) Ready
+	needAdvance      bool
+	lastSteppedIndex uint64
 
 	logger Logger
 }
@@ -361,9 +382,32 @@ func (n *node) StepNode(moreEntriesToApply bool, busySnap bool) (Ready, bool) {
 	rd := n.newReadyFunc(n.r, n.prevS.prevSoftSt, n.prevS.prevHardSt, moreEntriesToApply)
 	if rd.containsUpdates() {
 		n.needAdvance = true
+		var stepIndex uint64
+		if !IsEmptySnap(rd.Snapshot) {
+			stepIndex = rd.Snapshot.Metadata.Index
+		}
+		if len(rd.CommittedEntries) > 0 {
+			fi := rd.CommittedEntries[0].Index
+			if n.lastSteppedIndex != 0 && fi > n.lastSteppedIndex+1 {
+				e := fmt.Sprintf("raft.node: %x(%v) index not continued: %v, %v, %v, snap:%v, prev: %v, logs: %v ",
+					n.r.id, n.r.group, fi, n.lastSteppedIndex, stepIndex, rd.Snapshot.Metadata.String(), n.prevS,
+					n.r.raftLog.String())
+				n.logger.Error(e)
+			}
+			stepIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+		}
+		n.lastSteppedIndex = stepIndex
 		return rd, true
 	}
 	return Ready{}, false
+}
+
+func (n *node) DebugString() string {
+	ents := n.r.raftLog.allEntries()
+	e := fmt.Sprintf("raft.node: %x(%v) index not continued: %v, prev: %v, logs: %v, %v ",
+		n.r.id, n.r.group, n.lastSteppedIndex, n.prevS, len(ents),
+		n.r.raftLog.String())
+	return e
 }
 
 func (n *node) handleLeaderUpdate(r *raft) bool {
@@ -448,8 +492,11 @@ func (n *node) Advance(rd Ready) {
 	n.r.msgs = nil
 	n.r.readStates = nil
 
-	if n.prevS.prevHardSt.Commit != 0 {
-		n.r.raftLog.appliedTo(n.prevS.prevHardSt.Commit)
+	appliedI := rd.appliedCursor()
+	if appliedI != 0 {
+		// since the committed entries may less than the hard commit index due to the
+		// limit for buffer len, we should not use the hard state commit index.
+		n.r.raftLog.appliedTo(appliedI)
 	}
 	if n.prevS.havePrevLastUnstablei {
 		n.r.raftLog.stableTo(n.prevS.prevLastUnstablei, n.prevS.prevLastUnstablet)
@@ -721,6 +768,10 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState, moreEntri
 	}
 	if moreEntriesToApply {
 		rd.CommittedEntries = r.raftLog.nextEnts()
+	}
+	if len(rd.CommittedEntries) > 0 {
+		lastIndex := rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+		rd.MoreCommittedEntries = r.raftLog.hasMoreNextEnts(lastIndex)
 	}
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt

@@ -155,6 +155,10 @@ func (l *raftLog) hasNextEnts() bool {
 	return l.committed+1 > off
 }
 
+func (l *raftLog) hasMoreNextEnts(appliedTo uint64) bool {
+	return l.committed > appliedTo
+}
+
 func (l *raftLog) snapshot() (pb.Snapshot, error) {
 	if l.unstable.snapshot != nil {
 		return *l.unstable.snapshot, nil
