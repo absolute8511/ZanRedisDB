@@ -34,6 +34,7 @@ import (
 	"github.com/youzan/ZanRedisDB/pkg/types"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/settings"
 	"github.com/youzan/ZanRedisDB/snap"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"github.com/youzan/ZanRedisDB/wal"
@@ -41,19 +42,21 @@ import (
 	"golang.org/x/net/context"
 )
 
-const (
-	DefaultSnapCount = 160000
+var (
+	// DefaultSnapCount is the count for trigger snapshot
+	DefaultSnapCount = int(settings.Soft.DefaultSnapCount)
 
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
-	HealthInterval = 5 * time.Second
+	HealthInterval = time.Duration(settings.Soft.HealthIntervalSec) * time.Second
 
 	// max number of in-flight snapshot messages allows to have
-	maxInFlightMsgSnap        = 16
+	maxInFlightMsgSnap = int(settings.Soft.MaxInFlightMsgSnap)
+	maxInflightMsgs    = settings.Soft.MaxInflightMsgs
+)
+
+const (
 	releaseDelayAfterSnapshot = 30 * time.Second
-	maxSizePerMsg             = 1024 * 1024
-	maxInflightMsgs           = 256
-	commitBufferLen           = 5000
 )
 
 var errWALMetaMismatch = errors.New("wal meta mismatch config (maybe reused old deleted data)")
@@ -137,7 +140,7 @@ type raftNode struct {
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	join bool, ds DataStorage, rs raft.IExtRaftStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
 
-	commitC := make(chan applyInfo, commitBufferLen)
+	commitC := make(chan applyInfo, settings.Soft.CommitBufferLen)
 	if rconfig.SnapCount <= 0 {
 		rconfig.SnapCount = DefaultSnapCount
 	}
@@ -342,15 +345,16 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 		elecTick = 10
 	}
 	c := &raft.Config{
-		ID:              uint64(rc.config.ID),
-		ElectionTick:    elecTick,
-		HeartbeatTick:   elecTick / 10,
-		Storage:         rc.raftStorage,
-		MaxSizePerMsg:   maxSizePerMsg,
-		MaxInflightMsgs: maxInflightMsgs,
-		CheckQuorum:     true,
-		PreVote:         true,
-		Logger:          nodeLog,
+		ID:                       uint64(rc.config.ID),
+		ElectionTick:             elecTick,
+		HeartbeatTick:            elecTick / 10,
+		Storage:                  rc.raftStorage,
+		MaxSizePerMsg:            settings.Soft.MaxSizePerMsg,
+		MaxInflightMsgs:          int(maxInflightMsgs),
+		MaxCommittedSizePerReady: settings.Soft.MaxCommittedSizePerReady,
+		CheckQuorum:              true,
+		PreVote:                  true,
+		Logger:                   nodeLog,
 		Group: raftpb.Group{NodeId: rc.config.nodeConfig.NodeID,
 			Name: rc.config.GroupName, GroupId: rc.config.GroupID,
 			RaftReplicaId: uint64(rc.config.ID)},
