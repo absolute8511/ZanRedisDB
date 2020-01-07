@@ -1,22 +1,28 @@
 package settings
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestOverwriteSettings(t *testing.T) {
-	tmpDir := os.TempDir()
+	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("settings-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
 	t.Logf("tmp: %v", tmpDir)
 	os.MkdirAll(tmpDir, 0777)
 	RootSettingDir = tmpDir
 	defer os.RemoveAll(tmpDir)
 	testSettings := `{"TestInt":1, "TestStr":"str", "TestBool":true}`
-	err := ioutil.WriteFile(path.Join(tmpDir, "soft-settings.json"), []byte(testSettings), 0777)
+	err = ioutil.WriteFile(path.Join(tmpDir, "soft-settings.json"), []byte(testSettings), 0777)
 	assert.Nil(t, err)
 	err = ioutil.WriteFile(path.Join(tmpDir, "static-settings.json"), []byte(testSettings), 0777)
 	assert.Nil(t, err)
