@@ -261,6 +261,7 @@ type raft struct {
 	maxMsgSize  uint64
 	prs         map[uint64]*Progress
 	learnerPrs  map[uint64]*Progress
+	matchBuf    uint64Slice
 
 	state StateType
 	//isLearner is true if the local raft node is a learner.
@@ -635,13 +636,19 @@ func (r *raft) bcastHeartbeatWithCtx(ctx []byte) {
 // the commit index changed (in which case the caller should call
 // r.bcastAppend).
 func (r *raft) maybeCommit() bool {
-	// TODO(bmizerany): optimize.. Currently naive
-	mis := make(uint64Slice, 0, len(r.prs))
-	for _, p := range r.prs {
-		mis = append(mis, p.Match)
+	// Preserving matchBuf across calls is an optimization
+	// used to avoid allocating a new slice on each call.
+	if cap(r.matchBuf) < len(r.prs) {
+		r.matchBuf = make(uint64Slice, len(r.prs))
 	}
-	sort.Sort(sort.Reverse(mis))
-	mci := mis[r.quorum()-1]
+	r.matchBuf = r.matchBuf[:len(r.prs)]
+	idx := 0
+	for _, p := range r.prs {
+		r.matchBuf[idx] = p.Match
+		idx++
+	}
+	sort.Sort(&r.matchBuf)
+	mci := r.matchBuf[len(r.matchBuf)-r.quorum()]
 	return r.raftLog.maybeCommit(mci, r.Term)
 }
 
@@ -1017,10 +1024,12 @@ func stepLeader(r *raft, m pb.Message) bool {
 			return true
 		}
 
-		for i, e := range m.Entries {
+		for i := range m.Entries {
+			e := &m.Entries[i]
 			if e.Type == pb.EntryConfChange {
 				if r.pendingConf {
-					r.logger.Infof("propose conf %s ignored since pending unapplied configuration", e.String())
+					r.logger.Infof("propose conf %s ignored since pending unapplied configuration [applied: %d]",
+						e, r.raftLog.applied)
 					m.Entries[i] = pb.Entry{Type: pb.EntryNormal}
 				} else {
 					r.logger.Infof("propose conf change %s ", e.String())
@@ -1055,7 +1064,13 @@ func stepLeader(r *raft, m pb.Message) bool {
 				}
 			}
 		} else {
-			r.readStates = append(r.readStates, ReadState{Index: r.raftLog.committed, RequestCtx: m.Entries[0].Data})
+			// there is only one voting member (the leader) in the cluster
+			if m.From == None || m.From == r.id { // from leader itself
+				r.readStates = append(r.readStates, ReadState{Index: r.raftLog.committed, RequestCtx: m.Entries[0].Data})
+			} else { // from learner member
+				// see https://github.com/etcd-io/etcd/pull/10590
+				r.send(pb.Message{To: m.From, ToGroup: m.FromGroup, Type: pb.MsgReadIndexResp, Index: r.raftLog.committed, Entries: m.Entries})
+			}
 		}
 
 		return false
