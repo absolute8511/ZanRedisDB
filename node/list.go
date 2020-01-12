@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/absolute8511/redcon"
@@ -56,100 +57,41 @@ func (nd *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) lfixkeyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.([]byte)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
-	}
-	// wait response
-	conn.WriteBulk(rsp)
-}
-
-func (nd *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
-	}
-	// wait response
-	conn.WriteInt64(rsp)
-}
-
-func (nd *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) lsetCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 	_, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid index: " + err.Error())
-		return
+		return nil, err
 	}
-	_, _, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	_, _, err = rebuildFirstKeyAndPropose(nd, cmd, nil)
+	if err != nil {
+		return nil, err
 	}
-	// wait response
-	conn.WriteString("OK")
+	return "OK", nil
 }
 
-func (nd *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 	_, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid start index: " + err.Error())
-		return
+		return nil, err
 	}
 	_, err = strconv.ParseInt(string(cmd.Args[3]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid end index: " + err.Error())
-		return
+		return nil, err
 	}
 
-	_, _, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	_, _, err = rebuildFirstKeyAndPropose(nd, cmd, nil)
+	if err != nil {
+		return nil, err
 	}
-	// wait response
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.([]byte)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
-	}
-	// wait response
-	conn.WriteBulk(rsp)
-}
-
-func (nd *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
-	}
-	// wait response
-	conn.WriteInt64(rsp)
-}
-
-func (nd *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
-	}
-	// wait response
-	conn.WriteInt64(rsp)
+	return "OK", nil
 }
 
 // local write command execute only on follower or on the local commit of leader

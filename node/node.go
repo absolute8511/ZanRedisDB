@@ -483,8 +483,11 @@ func (nd *KVNode) CleanData() error {
 	return nd.sm.CleanData()
 }
 
-func (nd *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
+func (nd *KVNode) GetHandler(cmd string) (common.CommandFunc, bool) {
 	return nd.router.GetCmdHandler(cmd)
+}
+func (nd *KVNode) GetWriteHandler(cmd string) (common.WriteCommandFunc, bool) {
+	return nd.router.GetWCmdHandler(cmd)
 }
 
 func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bool) {

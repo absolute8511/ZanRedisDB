@@ -5,6 +5,7 @@ package node
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,10 +37,10 @@ const (
 /* usage:
 GEOADD key lon0 lat0 elem0 lon1 lat1 elem1
 */
-func (nd *KVNode) geoaddCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) geoaddCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 5 || (len(cmd.Args)-2)%3 != 0 {
-		conn.WriteError("ERR wrong number of arguments for 'geoadd' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 
 	var zaddCmd redcon.Command
@@ -51,19 +52,16 @@ func (nd *KVNode) geoaddCommand(conn redcon.Conn, cmd redcon.Command) {
 	for i := 0; i < (len(cmd.Args)-2)/3; i++ {
 		lon, err := strconv.ParseFloat(string(cmd.Args[i*3+2]), 64)
 		if err != nil {
-			conn.WriteError("ERR value is not a valid float")
-			return
+			return nil, errors.New("ERR value is not a valid float")
 		}
 		lat, err := strconv.ParseFloat(string(cmd.Args[i*3+3]), 64)
 		if err != nil {
-			conn.WriteError("ERR value is not a valid float")
-			return
+			return nil, errors.New("ERR value is not a valid float")
 		}
 
 		hash, err := geohash.EncodeWGS84(lon, lat)
 		if err != nil {
-			conn.WriteError("Err " + err.Error())
-			return
+			return nil, errors.New("Err " + err.Error())
 		}
 
 		zaddCmd.Args[i*2+2] = strconv.AppendUint(zaddCmd.Args[i*2+2], hash, 10)
@@ -74,23 +72,21 @@ func (nd *KVNode) geoaddCommand(conn redcon.Conn, cmd redcon.Command) {
 		/* The code used for unit test. */
 		key, err := common.CutNamesapce(cmd.Args[1])
 		if err != nil {
-			conn.WriteError(err.Error())
-			return
+			return nil, err
 		}
 		zaddCmd.Args[1] = key
 		sm, ok := nd.sm.(*kvStoreSM)
 		if !ok {
-			conn.WriteError("Err not supported state machine")
-			return
+			return nil, errors.New("Err not supported state machine")
 		}
 		if _, err := sm.localZaddCommand(buildCommand(zaddCmd.Args), -1); err != nil {
-			conn.WriteError("Err " + err.Error())
+			return nil, errors.New("Err " + err.Error())
 		}
-
 	} else {
 		/* The code actually execute. */
-		nd.zaddCommand(conn, buildCommand(zaddCmd.Args))
+		return nd.zaddCommand(buildCommand(zaddCmd.Args))
 	}
+	return 0, nil
 }
 
 /* usage:

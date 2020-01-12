@@ -196,13 +196,21 @@ func TestKVNode_kvCommand(t *testing.T) {
 	defer c.Reset()
 	for _, cmd := range tests {
 		c.Reset()
-		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
+		handler, _ := nd.router.GetCmdHandler(cmd.name)
 		if handler != nil {
 			handler(c, cmd.args)
 		} else {
-			handler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
-			_, err := handler(cmd.args)
-			assert.Nil(t, err)
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			if whandler != nil {
+				rsp, err := whandler(cmd.args)
+				assert.Nil(t, err)
+				_, ok := rsp.(error)
+				assert.True(t, !ok)
+			} else {
+				handler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
+				_, err := handler(cmd.args)
+				assert.Nil(t, err)
+			}
 		}
 		t.Logf("handler response: %v", c.rsp)
 		assert.Nil(t, c.GetError())
@@ -224,11 +232,11 @@ func TestKVNode_kvbatchCommand(t *testing.T) {
 			defer fc.Reset()
 			for k := 0; k < 100; k++ {
 				fc.Reset()
-				setHandler, _, _ := nd.router.GetCmdHandler("set")
+				setHandler, _ := nd.router.GetWCmdHandler("set")
 				testKey := []byte(fmt.Sprintf("default:test:batch_%v_%v", index, k))
-				setHandler(fc, buildCommand([][]byte{[]byte("set"), testKey, testKey}))
-				assert.Nil(t, fc.GetError())
-				assert.Equal(t, "OK", fc.rsp[0])
+				rsp, err := setHandler(buildCommand([][]byte{[]byte("set"), testKey, testKey}))
+				assert.Nil(t, err)
+				assert.Equal(t, "OK", rsp)
 			}
 		}(i)
 	}
@@ -239,7 +247,7 @@ func TestKVNode_kvbatchCommand(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		for k := 0; k < 100; k++ {
 			fc.Reset()
-			getHandler, _, _ := nd.router.GetCmdHandler("get")
+			getHandler, _ := nd.router.GetCmdHandler("get")
 			testKey := []byte(fmt.Sprintf("default:test:batch_%v_%v", i, k))
 			getHandler(fc, buildCommand([][]byte{[]byte("get"), testKey}))
 			assert.Nil(t, fc.GetError())
@@ -263,11 +271,11 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 			defer fc.Reset()
 			for k := 0; k < 100; k++ {
 				fc.Reset()
-				setHandler, _, _ := nd.router.GetCmdHandler("set")
+				setHandler, _ := nd.router.GetWCmdHandler("set")
 				testKey := []byte(fmt.Sprintf("default:test:batchset_%v_%v", index, k))
-				setHandler(fc, buildCommand([][]byte{[]byte("set"), testKey, testKey}))
-				assert.Nil(t, fc.GetError())
-				assert.Equal(t, "OK", fc.rsp[0])
+				rsp, err := setHandler(buildCommand([][]byte{[]byte("set"), testKey, testKey}))
+				assert.Nil(t, err)
+				assert.Equal(t, "OK", rsp)
 			}
 		}(i)
 		go func(index int) {
@@ -277,10 +285,12 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 			defer fc.Reset()
 			for k := 0; k < 100; k++ {
 				fc.Reset()
-				setHandler, _, _ := nd.router.GetCmdHandler("incr")
+				setHandler, _ := nd.router.GetWCmdHandler("incr")
 				testKey := []byte(fmt.Sprintf("default:test:nonbatch_%v_%v", index, k))
-				setHandler(fc, buildCommand([][]byte{[]byte("incr"), testKey}))
-				assert.Nil(t, fc.GetError())
+				rsp, err := setHandler(buildCommand([][]byte{[]byte("incr"), testKey}))
+				assert.Nil(t, err)
+				_, ok := rsp.(error)
+				assert.True(t, !ok)
 			}
 		}(i)
 	}
@@ -291,7 +301,7 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		for k := 0; k < 100; k++ {
 			fc.Reset()
-			getHandler, _, _ := nd.router.GetCmdHandler("get")
+			getHandler, _ := nd.router.GetCmdHandler("get")
 			testKey := []byte(fmt.Sprintf("default:test:batchset_%v_%v", i, k))
 			getHandler(fc, buildCommand([][]byte{[]byte("get"), testKey}))
 			assert.Nil(t, fc.GetError())
@@ -301,7 +311,7 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		for k := 0; k < 100; k++ {
 			fc.Reset()
-			getHandler, _, _ := nd.router.GetCmdHandler("get")
+			getHandler, _ := nd.router.GetCmdHandler("get")
 			testKey := []byte(fmt.Sprintf("default:test:nonbatch_%v_%v", i, k))
 			getHandler(fc, buildCommand([][]byte{[]byte("get"), testKey}))
 			assert.Nil(t, fc.GetError())

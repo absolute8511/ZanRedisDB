@@ -1,6 +1,8 @@
 package node
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/absolute8511/redcon"
@@ -38,84 +40,41 @@ func (nd *KVNode) smembersCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) saddCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) spopCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 2 && len(cmd.Args) != 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 	hasCount := len(cmd.Args) == 3
 	if hasCount {
 		cnt, err := strconv.Atoi(string(cmd.Args[2]))
 		if err != nil {
-			conn.WriteError(err.Error())
-			return
+			return nil, err
 		}
 		if cnt < 1 {
-			conn.WriteError("Invalid count")
-			return
+			return nil, errors.New("Invalid count")
 		}
 	}
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	// without the count argument, it is bulk string
 	if !hasCount {
 		if v == nil {
-			conn.WriteNull()
-			return
+			return nil, nil
 		}
 		if rsp, ok := v.(string); ok {
-			conn.WriteBulkString(rsp)
-			return
+			return rsp, nil
 		}
-		if !ok {
-			conn.WriteError("Invalid response type")
-			return
-		}
+		return nil, errInvalidResponse
 	} else {
 		rsp, ok := v.([][]byte)
 		if !ok {
-			conn.WriteError("Invalid response type")
-			return
+			return nil, errInvalidResponse
 		}
-		conn.WriteArray(len(rsp))
-		for _, d := range rsp {
-			conn.WriteBulk(d)
-		}
-	}
-}
-
-func (nd *KVNode) sremCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) sclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
+		return rsp, nil
 	}
 }
 

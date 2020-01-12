@@ -42,16 +42,37 @@ func IsSyncerOnly() bool {
 	return atomic.LoadInt32(&syncerOnly) == 1
 }
 
+func checkOKRsp(cmd redcon.Command, v interface{}) (interface{}, error) {
+	return "OK", nil
+}
+
+func checkAndRewriteIntRsp(cmd redcon.Command, v interface{}) (interface{}, error) {
+	if rsp, ok := v.(int64); ok {
+		return rsp, nil
+	}
+	return nil, errInvalidResponse
+}
+
+func checkAndRewriteBulkRsp(cmd redcon.Command, v interface{}) (interface{}, error) {
+	if v == nil {
+		return nil, nil
+	}
+	rsp, ok := v.([]byte)
+	if ok {
+		return rsp, nil
+	}
+	return nil, errInvalidResponse
+}
+
 func buildCommand(args [][]byte) redcon.Command {
 	return common.BuildCommand(args)
 }
 
-func rebuildFirstKeyAndPropose(kvn *KVNode, conn redcon.Conn, cmd redcon.Command) (redcon.Command,
-	interface{}, bool) {
+func rebuildFirstKeyAndPropose(kvn *KVNode, cmd redcon.Command, f common.CommandRspFunc) (redcon.Command,
+	interface{}, error) {
 	key, err := common.CutNamesapce(cmd.Args[1])
 	if err != nil {
-		conn.WriteError(err.Error())
-		return cmd, nil, false
+		return cmd, nil, err
 	}
 
 	cmd.Args[1] = key
@@ -60,10 +81,12 @@ func rebuildFirstKeyAndPropose(kvn *KVNode, conn redcon.Conn, cmd redcon.Command
 	cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 	rsp, err := kvn.Propose(cmd.Raw)
 	if err != nil {
-		conn.WriteError(err.Error())
-		return cmd, nil, false
+		return cmd, nil, err
 	}
-	return cmd, rsp, true
+	if f != nil {
+		rsp, err = f(cmd, rsp)
+	}
+	return cmd, rsp, err
 }
 
 func wrapReadCommandK(f common.CommandFunc) common.CommandFunc {
@@ -156,36 +179,31 @@ func wrapReadCommandKK(f common.CommandFunc) common.CommandFunc {
 	}
 }
 
-func wrapWriteCommandK(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandK(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) != 2 {
-			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		_, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 
-func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 2 {
-			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
 		args := cmd.Args[1:]
 		if len(args) > common.MAX_BATCH_NUM {
-			conn.WriteError(errTooMuchBatchSize.Error())
-			return
+			return nil, errTooMuchBatchSize
 		}
 		for i, v := range args {
 			key, err := common.CutNamesapce(v)
 			if err != nil {
-				conn.WriteError(err.Error())
-				return
+				return nil, err
 			}
 
 			args[i] = key
@@ -196,93 +214,75 @@ func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc
 
 		rsp, err := kvn.Propose(cmd.Raw)
 		if err != nil {
-			conn.WriteError(err.Error())
-			return
+			return nil, err
 		}
-
-		f(conn, cmd, rsp)
+		return rsp, nil
 	}
 }
 
-func wrapWriteCommandKSubkey(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKSubkey(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) != 3 {
-			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		_, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 
-func wrapWriteCommandKSubkeySubkey(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKSubkeySubkey(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 3 {
-			conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		_, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 
-func wrapWriteCommandKAnySubkey(kvn *KVNode, f common.CommandRspFunc, minSubKeyLen int) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKAnySubkey(kvn *KVNode, f common.CommandRspFunc, minSubKeyLen int) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 2+minSubKeyLen {
-			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		_, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 
-func wrapWriteCommandKV(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) != 3 {
-			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		_, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 
-func wrapWriteCommandKVV(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKVV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 3 {
-			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		cmd, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 
-func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 3 || len(cmd.Args[1:])%2 != 0 {
-			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
 		if len(cmd.Args[1:])/2 > common.MAX_BATCH_NUM {
-			conn.WriteError(errTooMuchBatchSize.Error())
-			return
+			return nil, errTooMuchBatchSize
 		}
 		args := cmd.Args[1:]
 		for i, v := range args {
@@ -291,8 +291,7 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.CommandFu
 			}
 			key, err := common.CutNamesapce(v)
 			if err != nil {
-				conn.WriteError(err.Error())
-				return
+				return nil, err
 			}
 
 			args[i] = key
@@ -303,42 +302,34 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.CommandFu
 
 		rsp, err := kvn.Propose(cmd.Raw)
 		if err != nil {
-			conn.WriteError(err.Error())
-			return
+			return nil, err
 		}
-		f(conn, cmd, rsp)
+		return rsp, nil
 	}
 }
 
-func wrapWriteCommandKSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) != 4 {
-			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		_, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 
-func wrapWriteCommandKSubkeyVSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.CommandFunc {
-	return func(conn redcon.Conn, cmd redcon.Command) {
+func wrapWriteCommandKSubkeyVSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 4 || len(cmd.Args[2:])%2 != 0 {
-			conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
-			return
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
 		}
 		if len(cmd.Args[2:])/2 > common.MAX_BATCH_NUM {
-			conn.WriteError(errTooMuchBatchSize.Error())
-			return
+			return nil, errTooMuchBatchSize
 		}
-		cmd, rsp, ok := rebuildFirstKeyAndPropose(kvn, conn, cmd)
-		if !ok {
-			return
-		}
-		f(conn, cmd, rsp)
+		_, rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
 	}
 }
 

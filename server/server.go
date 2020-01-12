@@ -382,33 +382,45 @@ func (s *Server) GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []
 	return namespace, pk, pkSum, nil
 }
 
-func (s *Server) GetHandler(ns string, pk []byte, pkSum int, cmdName string, cmd redcon.Command) (bool, common.CommandFunc, redcon.Command, error) {
+func (s *Server) GetHandleNode(ns string, pk []byte, pkSum int, cmdName string,
+	cmd redcon.Command) (*node.KVNode, error) {
 	if len(cmd.Args) < 2 {
-		return false, nil, cmd, common.ErrInvalidArgs
+		return nil, common.ErrInvalidArgs
 	}
 	// we need decide the partition id from the primary key
 	// if the command need cross multi partitions, we need handle separate
 	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKeySum(ns, pk, pkSum)
 	if err != nil {
-		return false, nil, cmd, err
+		return nil, err
 	}
 	if n.Node.IsStopping() {
-		return false, nil, cmd, common.ErrStopped
+		return nil, common.ErrStopped
 	}
+	return n.Node, nil
+}
+
+func (s *Server) GetHandler(cmdName string,
+	cmd redcon.Command, kvn *node.KVNode) (common.CommandFunc, redcon.Command, error) {
 	// for multi primary keys such as mset, mget, we need make sure they are all in the same partition
-	h, isWrite, ok := n.Node.GetHandler(cmdName)
+	h, ok := kvn.GetHandler(cmdName)
 	if !ok {
-		return isWrite, nil, cmd, common.ErrInvalidCommand
+		return nil, cmd, common.ErrInvalidCommand
 	}
-	if sLog.Level() >= common.LOG_DETAIL {
-		sLog.Debugf("hash to namespace :%v, %v, %v, for pk:%v", isWrite, n.FullName(), n.Node.IsLead(), string(pk))
-	}
-	if !isWrite && !n.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
+	if !kvn.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 		// read only to leader to avoid stale read
 		// TODO: also read command can request the raft read index if not leader
-		return isWrite, nil, cmd, node.ErrNamespaceNotLeader
+		return nil, cmd, node.ErrNamespaceNotLeader
 	}
-	return isWrite, h, cmd, nil
+	return h, cmd, nil
+}
+
+func (s *Server) GetWriteHandler(cmdName string,
+	cmd redcon.Command, kvn *node.KVNode) (common.WriteCommandFunc, redcon.Command, error) {
+	h, ok := kvn.GetWriteHandler(cmdName)
+	if !ok {
+		return nil, cmd, common.ErrInvalidCommand
+	}
+	return h, cmd, nil
 }
 
 func (s *Server) serveRaft(stopCh <-chan struct{}) {
@@ -519,14 +531,62 @@ func (s *Server) GetNsMgr() *node.NamespaceMgr {
 	return s.nsMgr
 }
 
-func (s *Server) handleRedisWrite(pkSum int, h common.CommandFunc, conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, kvn *node.KVNode, conn redcon.Conn, cmd redcon.Command) {
 	// queue and wait
 	wq := s.writeQs[pkSum%len(s.writeQs)]
-	wq.q.add(elemT{})
+	e := elemT{}
+	ret := make(chan interface{}, 1)
+	e.f = func() {
+		rsp, err := h(cmd)
+		if err != nil {
+			ret <- err
+			return
+		}
+		ret <- rsp
+	}
+	wq.q.add(e)
+	select {
+	case wq.readyC <- struct{}{}:
+	default:
+	}
 	// wait
+	v := <-ret
+	//futureW, ok := v.(futureRspWait)
+	//if ok {
+	//	frsp, err := futureW.WaitRsp()
+	//	if err != nil {
+	//		v = err
+	//	} else {
+	//		if futureW.rspHandle != nil {
+	//			v = futureW.rspHandle(frsp)
+	//		}
+	//	}
+	//}
+	switch rv := v.(type) {
+	case error:
+		conn.WriteError(rv.Error())
+	case string:
+		conn.WriteString(rv)
+	case int64:
+		conn.WriteInt64(rv)
+	case int:
+		conn.WriteInt64(int64(rv))
+	case nil:
+		conn.WriteNull()
+	case []byte:
+		conn.WriteBulk(rv)
+	case [][]byte:
+		conn.WriteArray(len(rv))
+		for _, d := range rv {
+			conn.WriteBulk(d)
+		}
+	default:
+		// Do we have any other resp arrays for write command which is not [][]byte?
+		conn.WriteError("Invalid response type")
+	}
 }
 
-func (s *Server) handleRedisWriteLoop(stop chan struct{}) {
+func (s *Server) handleRedisWriteLoop() {
 	var wg sync.WaitGroup
 	for i := 0; i < len(s.writeQs); i++ {
 		wg.Add(1)
@@ -536,8 +596,9 @@ func (s *Server) handleRedisWriteLoop(stop chan struct{}) {
 				select {
 				case <-wq.readyC:
 					elems := wq.q.get(false)
-					_ = elems
-					// do write handler
+					for _, e := range elems {
+						e.Func()()
+					}
 				case <-wq.stopC:
 					return
 				}

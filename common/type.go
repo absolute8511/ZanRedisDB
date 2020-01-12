@@ -183,14 +183,15 @@ type ScorePair struct {
 	Member []byte
 }
 
+type WriteCommandFunc func(redcon.Command) (interface{}, error)
 type CommandFunc func(redcon.Conn, redcon.Command)
-type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
+type CommandRspFunc func(redcon.Command, interface{}) (interface{}, error)
 type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
 type MergeCommandFunc func(redcon.Command) (interface{}, error)
 type MergeWriteCommandFunc func(redcon.Command, interface{}) (interface{}, error)
 
 type CmdRouter struct {
-	wcmds          map[string]CommandFunc
+	wcmds          map[string]WriteCommandFunc
 	rcmds          map[string]CommandFunc
 	mergeCmds      map[string]MergeCommandFunc
 	mergeWriteCmds map[string]MergeCommandFunc
@@ -198,18 +199,23 @@ type CmdRouter struct {
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
-		wcmds:          make(map[string]CommandFunc),
+		wcmds:          make(map[string]WriteCommandFunc),
 		rcmds:          make(map[string]CommandFunc),
 		mergeCmds:      make(map[string]MergeCommandFunc),
 		mergeWriteCmds: make(map[string]MergeCommandFunc),
 	}
 }
 
-func (r *CmdRouter) Register(isWrite bool, name string, f CommandFunc) bool {
-	cmds := r.wcmds
-	if !isWrite {
-		cmds = r.rcmds
+func (r *CmdRouter) RegisterWrite(name string, f WriteCommandFunc) bool {
+	if _, ok := r.wcmds[strings.ToLower(name)]; ok {
+		return false
 	}
+	r.wcmds[name] = f
+	return true
+}
+
+func (r *CmdRouter) RegisterRead(name string, f CommandFunc) bool {
+	cmds := r.rcmds
 	if _, ok := cmds[strings.ToLower(name)]; ok {
 		return false
 	}
@@ -217,13 +223,14 @@ func (r *CmdRouter) Register(isWrite bool, name string, f CommandFunc) bool {
 	return true
 }
 
-func (r *CmdRouter) GetCmdHandler(name string) (CommandFunc, bool, bool) {
+func (r *CmdRouter) GetWCmdHandler(name string) (WriteCommandFunc, bool) {
+	v, ok := r.wcmds[strings.ToLower(name)]
+	return v, ok
+}
+
+func (r *CmdRouter) GetCmdHandler(name string) (CommandFunc, bool) {
 	v, ok := r.rcmds[strings.ToLower(name)]
-	if ok {
-		return v, false, ok
-	}
-	v, ok = r.wcmds[strings.ToLower(name)]
-	return v, true, ok
+	return v, ok
 }
 
 func (r *CmdRouter) RegisterMerge(name string, f MergeCommandFunc) bool {
