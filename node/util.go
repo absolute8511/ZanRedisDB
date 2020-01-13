@@ -79,12 +79,14 @@ func rebuildFirstKeyAndPropose(kvn *KVNode, cmd redcon.Command, f common.Command
 	ncmd := buildCommand(cmd.Args)
 	copy(cmd.Raw[0:], ncmd.Raw[:])
 	cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
-	rsp, err := kvn.Propose(cmd.Raw)
+	rsp, err := kvn.ProposeAsync(cmd.Raw)
 	if err != nil {
 		return cmd, nil, err
 	}
 	if f != nil {
-		rsp, err = f(cmd, rsp)
+		rsp.rspHandle = func(r interface{}) (interface{}, error) {
+			return f(cmd, r)
+		}
 	}
 	return cmd, rsp, err
 }
@@ -212,9 +214,14 @@ func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.WriteComman
 		copy(cmd.Raw[0:], ncmd.Raw[:])
 		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
-		rsp, err := kvn.Propose(cmd.Raw)
+		rsp, err := kvn.ProposeAsync(cmd.Raw)
 		if err != nil {
 			return nil, err
+		}
+		if f != nil {
+			rsp.rspHandle = func(r interface{}) (interface{}, error) {
+				return f(cmd, r)
+			}
 		}
 		return rsp, nil
 	}
@@ -300,9 +307,14 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.WriteComm
 		copy(cmd.Raw[0:], ncmd.Raw[:])
 		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
-		rsp, err := kvn.Propose(cmd.Raw)
+		rsp, err := kvn.ProposeAsync(cmd.Raw)
 		if err != nil {
 			return nil, err
+		}
+		if f != nil {
+			rsp.rspHandle = func(r interface{}) (interface{}, error) {
+				return f(cmd, r)
+			}
 		}
 		return rsp, nil
 	}
@@ -388,8 +400,10 @@ func wrapWriteMergeCommandKK(kvn *KVNode, f common.MergeWriteCommandFunc) common
 		if err != nil {
 			return nil, err
 		}
-
-		return f(cmd, rsp)
+		if f != nil {
+			return f(cmd, rsp)
+		}
+		return rsp, nil
 	}
 }
 
@@ -420,7 +434,10 @@ func wrapWriteMergeCommandKVKV(kvn *KVNode, f common.MergeWriteCommandFunc) comm
 		if err != nil {
 			return nil, err
 		}
-		return f(cmd, rsp)
+		if f != nil {
+			return f(cmd, rsp)
+		}
+		return rsp, nil
 	}
 }
 

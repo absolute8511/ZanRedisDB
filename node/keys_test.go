@@ -236,6 +236,8 @@ func TestKVNode_kvbatchCommand(t *testing.T) {
 				testKey := []byte(fmt.Sprintf("default:test:batch_%v_%v", index, k))
 				rsp, err := setHandler(buildCommand([][]byte{[]byte("set"), testKey, testKey}))
 				assert.Nil(t, err)
+				rsp, err = rsp.(*FutureRsp).WaitRsp()
+				assert.Nil(t, err)
 				assert.Equal(t, "OK", rsp)
 			}
 		}(i)
@@ -275,6 +277,8 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 				testKey := []byte(fmt.Sprintf("default:test:batchset_%v_%v", index, k))
 				rsp, err := setHandler(buildCommand([][]byte{[]byte("set"), testKey, testKey}))
 				assert.Nil(t, err)
+				rsp, err = rsp.(*FutureRsp).WaitRsp()
+				assert.Nil(t, err)
 				assert.Equal(t, "OK", rsp)
 			}
 		}(i)
@@ -288,6 +292,8 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 				setHandler, _ := nd.router.GetWCmdHandler("incr")
 				testKey := []byte(fmt.Sprintf("default:test:nonbatch_%v_%v", index, k))
 				rsp, err := setHandler(buildCommand([][]byte{[]byte("incr"), testKey}))
+				assert.Nil(t, err)
+				rsp, err = rsp.(*FutureRsp).WaitRsp()
 				assert.Nil(t, err)
 				_, ok := rsp.(error)
 				assert.True(t, !ok)

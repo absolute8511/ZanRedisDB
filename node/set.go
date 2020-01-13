@@ -55,27 +55,28 @@ func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 			return nil, errors.New("Invalid count")
 		}
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+		// without the count argument, it is bulk string
+		if !hasCount {
+			if r == nil {
+				return nil, nil
+			}
+			if rsp, ok := r.(string); ok {
+				return rsp, nil
+			}
+			return nil, errInvalidResponse
+		} else {
+			rsp, ok := r.([][]byte)
+			if !ok {
+				return nil, errInvalidResponse
+			}
+			return rsp, nil
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// without the count argument, it is bulk string
-	if !hasCount {
-		if v == nil {
-			return nil, nil
-		}
-		if rsp, ok := v.(string); ok {
-			return rsp, nil
-		}
-		return nil, errInvalidResponse
-	} else {
-		rsp, ok := v.([][]byte)
-		if !ok {
-			return nil, errInvalidResponse
-		}
-		return rsp, nil
-	}
+	return v, nil
 }
 
 func (kvsm *kvStoreSM) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {

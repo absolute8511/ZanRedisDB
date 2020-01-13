@@ -66,11 +66,11 @@ func (nd *KVNode) lsetCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, _, err = rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
 	if err != nil {
 		return nil, err
 	}
-	return "OK", nil
+	return rsp, nil
 }
 
 func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
@@ -87,11 +87,11 @@ func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, _, err = rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
 	if err != nil {
 		return nil, err
 	}
-	return "OK", nil
+	return rsp, nil
 }
 
 // local write command execute only on follower or on the local commit of leader

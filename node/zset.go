@@ -362,15 +362,11 @@ func (nd *KVNode) zaddCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
-	_, ok := v.(int64)
-	if ok {
-		return v, nil
-	}
-	return nil, errInvalidResponse
+	return v, nil
 }
 
 func (nd *KVNode) zincrbyCommand(cmd redcon.Command) (interface{}, error) {
@@ -383,15 +379,17 @@ func (nd *KVNode) zincrbyCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+		rsp, ok := r.(float64)
+		if ok {
+			return []byte(strconv.FormatFloat(rsp, 'g', -1, 64)), nil
+		}
+		return nil, errInvalidResponse
+	})
 	if err != nil {
 		return nil, err
 	}
-	rsp, ok := v.(float64)
-	if ok {
-		return []byte(strconv.FormatFloat(rsp, 'g', -1, 64)), nil
-	}
-	return nil, errInvalidResponse
+	return v, nil
 }
 
 func (nd *KVNode) zremrangebyrankCommand(cmd redcon.Command) (interface{}, error) {
@@ -408,15 +406,11 @@ func (nd *KVNode) zremrangebyrankCommand(cmd redcon.Command) (interface{}, error
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
-	_, ok := v.(int64)
-	if ok {
-		return v, nil
-	}
-	return nil, errInvalidResponse
+	return v, nil
 }
 
 func (nd *KVNode) zremrangebyscoreCommand(cmd redcon.Command) (interface{}, error) {
@@ -429,16 +423,11 @@ func (nd *KVNode) zremrangebyscoreCommand(cmd redcon.Command) (interface{}, erro
 	if err != nil {
 		return nil, err
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
-	_, ok := v.(int64)
-	if ok {
-		return v, nil
-	}
-	return nil, errInvalidResponse
-
+	return v, nil
 }
 
 func (nd *KVNode) zremrangebylexCommand(cmd redcon.Command) (interface{}, error) {
@@ -451,15 +440,11 @@ func (nd *KVNode) zremrangebylexCommand(cmd redcon.Command) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
-	_, ok := v.(int64)
-	if ok {
-		return v, nil
-	}
-	return nil, errInvalidResponse
+	return v, nil
 }
 
 func getScorePairs(args [][]byte) ([]common.ScorePair, error) {

@@ -551,17 +551,15 @@ func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, kvn *nod
 	}
 	// wait
 	v := <-ret
-	//futureW, ok := v.(futureRspWait)
-	//if ok {
-	//	frsp, err := futureW.WaitRsp()
-	//	if err != nil {
-	//		v = err
-	//	} else {
-	//		if futureW.rspHandle != nil {
-	//			v = futureW.rspHandle(frsp)
-	//		}
-	//	}
-	//}
+	futureRsp, ok := v.(*node.FutureRsp)
+	if ok {
+		frsp, err := futureRsp.WaitRsp()
+		if err != nil {
+			v = err
+		} else {
+			v = frsp
+		}
+	}
 	switch rv := v.(type) {
 	case error:
 		conn.WriteError(rv.Error())
