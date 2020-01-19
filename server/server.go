@@ -101,10 +101,6 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.DefaultSnapCatchup > 0 {
 		common.DefaultSnapCatchup = conf.DefaultSnapCatchup
 	}
-	writeQs := make([]*writeQ, settings.Soft.ProposalQueueNum)
-	for i := 0; i < int(settings.Soft.ProposalQueueNum); i++ {
-		writeQs[i] = newWriteQ(settings.Soft.ProposalQueueLen)
-	}
 
 	if conf.SyncerWriteOnly {
 		node.SetSyncerOnly(true)
@@ -158,7 +154,6 @@ func NewServer(conf ServerConfig) *Server {
 		conf:       conf,
 		startTime:  time.Now(),
 		maxScanJob: conf.MaxScanJob,
-		writeQs:    writeQs,
 	}
 
 	ts := &stats.TransportStats{}
@@ -328,6 +323,13 @@ func (s *Server) RestartAsStandalone(fullNamespace string) error {
 func (s *Server) Start() {
 	s.raftTransport.Start()
 	s.stopC = make(chan struct{})
+
+	writeQs := make([]*writeQ, settings.Soft.ProposalQueueNum)
+	for i := 0; i < int(settings.Soft.ProposalQueueNum); i++ {
+		writeQs[i] = newWriteQ(settings.Soft.ProposalQueueLen)
+	}
+	s.writeQs = writeQs
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
