@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -945,6 +946,94 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 	<-done
 }
 
+func TestAppendPagination(t *testing.T) {
+	const maxSizePerMsg = 2048
+	n := newNetworkWithConfig(func(c *Config) {
+		c.MaxSizePerMsg = maxSizePerMsg
+	}, nil, nil, nil)
+
+	seenFullMessage := false
+	// Inspect all messages to see that we never exceed the limit, but
+	// we do see messages of larger than half the limit.
+	n.msgHook = func(m raftpb.Message) bool {
+		if m.Type == raftpb.MsgApp {
+			size := 0
+			for _, e := range m.Entries {
+				size += len(e.Data)
+			}
+			if size > maxSizePerMsg {
+				t.Errorf("sent MsgApp that is too large: %d bytes", size)
+			}
+			if size > maxSizePerMsg/2 {
+				seenFullMessage = true
+			}
+		}
+		return true
+	}
+
+	n.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgHup})
+
+	// Partition the network while we make our proposals. This forces
+	// the entries to be batched into larger messages.
+	n.isolate(1)
+	blob := []byte(strings.Repeat("a", 1000))
+	for i := 0; i < 5; i++ {
+		n.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgProp, Entries: []raftpb.Entry{{Data: blob}}})
+	}
+	n.recover()
+
+	// After the partition recovers, tick the clock to wake everything
+	// back up and send the messages.
+	n.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgBeat})
+	if !seenFullMessage {
+		t.Error("didn't see any messages more than half the max size; something is wrong with this test")
+	}
+}
+
+func TestCommitPagination(t *testing.T) {
+	s := NewMemoryStorage()
+	cfg := newTestConfig(1, []uint64{1}, 10, 1, s)
+	cfg.MaxSizePerMsg = 2048
+	r := newRaft(cfg)
+	n := newNode()
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
+	n.Campaign(context.TODO())
+
+	rd, _ := n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 (empty) entry, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+
+	blob := []byte(strings.Repeat("a", 1000))
+	for i := 0; i < 3; i++ {
+		if err := n.Propose(context.TODO(), blob); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The 3 proposals will commit in two batches.
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 2 {
+		t.Fatalf("expected 2 entries in first batch, got %d", len(rd.CommittedEntries))
+	}
+	lastIndex := rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 entry in second batch, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	if rd.CommittedEntries[0].Index != lastIndex+1 {
+		t.Fatalf("expected 1 entry in second batch will be continued, got %d after %v", rd.CommittedEntries[0].Index, lastIndex)
+	}
+}
+
 // TestNodeCommitPaginationAfterRestart regression tests a scenario in which the
 // Storage's Entries size limitation is slightly more permissive than Raft's
 // internal one. The original bug was the following:
@@ -1012,5 +1101,60 @@ func TestNodeCommitPaginationAfterRestart(t *testing.T) {
 
 // TestNodeCommitEntriesTooMuch check the commit index will be continued even
 // if the apply commit channel is full
-func TestNodeCommitEntriesTooMuch(t *testing.T) {
+func TestNodeCommitEntriesWhileNoMoreApply(t *testing.T) {
+	s := NewMemoryStorage()
+	cfg := newTestConfig(1, []uint64{1}, 10, 1, s)
+	cfg.MaxSizePerMsg = 2048
+	r := newRaft(cfg)
+	n := newNode()
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
+	n.Campaign(context.TODO())
+
+	rd, _ := n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 (empty) entry, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	lastIndex := rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+
+	blob := []byte(strings.Repeat("a", 1000))
+	for i := 0; i < 3; i++ {
+		if err := n.Propose(context.TODO(), blob); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// step node with no more commit entries
+	rd, _ = n.StepNode(false, false)
+	if len(rd.CommittedEntries) != 0 {
+		t.Fatalf("expected 0 entries if no more need, got %d", len(rd.CommittedEntries))
+	}
+	if rd.HardState.Commit <= lastIndex {
+		t.Fatalf("hard commit should inc even no more commit entries: %v, %v", rd.HardState, lastIndex)
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+
+	// The 3 proposals will commit in two batches.
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 2 {
+		t.Fatalf("expected 2 entries in first batch, got %d", len(rd.CommittedEntries))
+	}
+	if rd.CommittedEntries[0].Index != lastIndex+1 {
+		t.Fatalf("expected 1 entry in second batch will be continued, got %d after %v", rd.CommittedEntries[0].Index, lastIndex)
+	}
+	lastIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 entry in second batch, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	if rd.CommittedEntries[0].Index != lastIndex+1 {
+		t.Fatalf("expected 1 entry in second batch will be continued, got %d after %v", rd.CommittedEntries[0].Index, lastIndex)
+	}
 }

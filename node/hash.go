@@ -70,50 +70,6 @@ func (nd *KVNode) hlenCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) hsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hsetnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hmsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) hdelCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hincrbyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.

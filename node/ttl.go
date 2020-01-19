@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var (
@@ -33,48 +33,8 @@ func init() {
 	expireCmds[common.ZSET] = []byte("zmclear")
 }
 
-func (nd *KVNode) setexCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) expireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) listExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hashExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) setExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) zsetExpireCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
+func (nd *KVNode) setexCommand(cmd redcon.Command, v interface{}) (interface{}, error) {
+	return "OK", nil
 }
 
 func (kvsm *kvStoreSM) localSetexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -122,14 +82,6 @@ func (kvsm *kvStoreSM) localZSetExpireCommand(cmd redcon.Command, ts int64) (int
 		return int64(0), err
 	} else {
 		return kvsm.store.ZExpire(cmd.Args[1], int64(duration))
-	}
-}
-
-func (nd *KVNode) persistCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
 	}
 }
 

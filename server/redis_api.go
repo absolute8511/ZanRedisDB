@@ -9,7 +9,6 @@ import (
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/ZanRedisDB/node"
 )
 
 var (
@@ -65,8 +64,12 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			if level > 0 {
 				start = time.Now()
 			}
-			isWrite, h, cmd, err := s.GetHandler(cmdName, cmd)
 			cmdStr := string(cmd.Args[0])
+			ns, pk, pkSum, err := s.GetPKAndHashSum(cmdName, cmd)
+			if err != nil {
+				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
+				break
+			}
 			if len(cmd.Args) > 1 {
 				cmdStr += ", " + string(cmd.Args[1])
 				if level > 4 && len(cmd.Args) > 2 {
@@ -75,13 +78,11 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 					}
 				}
 			}
+			kvn, err := s.GetHandleNode(ns, pk, pkSum, cmdName, cmd)
 			if err == nil {
-				if isWrite && node.IsSyncerOnly() {
-					conn.WriteError("The cluster is only allowing syncer write : ERR handle command " + cmdStr)
-				} else {
-					h(conn, cmd)
-				}
-			} else {
+				err = s.handleRedisSingleCmd(cmdName, pkSum, kvn, conn, cmd)
+			}
+			if err != nil {
 				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
 			}
 			if level > 0 && err == nil {

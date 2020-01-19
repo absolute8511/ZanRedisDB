@@ -60,8 +60,16 @@ func TestKVNode_zsetCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	for _, cmd := range tests {
 		c.Reset()
-		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
-		handler(c, cmd.args)
-		assert.Nil(t, c.GetError(), cmd.name)
+		handler, ok := nd.router.GetCmdHandler(cmd.name)
+		if ok {
+			handler(c, cmd.args)
+			assert.Nil(t, c.GetError(), cmd.name)
+		} else {
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			rsp, err := whandler(cmd.args)
+			assert.Nil(t, err)
+			_, ok := rsp.(error)
+			assert.True(t, !ok)
+		}
 	}
 }

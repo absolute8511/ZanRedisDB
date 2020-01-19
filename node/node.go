@@ -483,8 +483,11 @@ func (nd *KVNode) CleanData() error {
 	return nd.sm.CleanData()
 }
 
-func (nd *KVNode) GetHandler(cmd string) (common.CommandFunc, bool, bool) {
+func (nd *KVNode) GetHandler(cmd string) (common.CommandFunc, bool) {
 	return nd.router.GetCmdHandler(cmd)
+}
+func (nd *KVNode) GetWriteHandler(cmd string) (common.WriteCommandFunc, bool) {
+	return nd.router.GetWCmdHandler(cmd)
 }
 
 func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bool) {
@@ -628,60 +631,79 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	return err
 }
 
-func (nd *KVNode) queueRequest(req InternalRaftRequest) (interface{}, error) {
+type FutureRsp struct {
+	waitFunc  func() (interface{}, error)
+	rspHandle func(interface{}) (interface{}, error)
+}
+
+func (fr *FutureRsp) WaitRsp() (interface{}, error) {
+	rsp, err := fr.waitFunc()
+	if err != nil {
+		return nil, err
+	}
+	if fr.rspHandle != nil {
+		return fr.rspHandle(rsp)
+	}
+	return rsp, nil
+}
+
+// make sure call the WaitRsp on FutureRsp to release the resource in the future.
+func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*FutureRsp, error) {
 	if !nd.IsWriteReady() {
 		return nil, errRaftNotReadyForWrite
 	}
 	if !nd.rn.HasLead() {
 		return nil, ErrNodeNoLeader
 	}
-	start := time.Now()
 	req.Header.Timestamp = start.UnixNano()
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
 	wrh, err := nd.ProposeInternal(ctx, req, cancel, start)
 	if err != nil {
 		return nil, err
 	}
-	//nd.rn.Infof("queue request: %v", req.reqData.String())
-	var rsp interface{}
-	var ok bool
-	// will always return a response, timed out or get a error
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-		if err == context.Canceled {
-			// proposal canceled can be caused by leader transfer or no leader
-			err = ErrProposalCanceled
+	var futureRsp FutureRsp
+	futureRsp.waitFunc = func() (interface{}, error) {
+		//nd.rn.Infof("queue request: %v", req.reqData.String())
+		var rsp interface{}
+		var ok bool
+		// will always return a response, timed out or get a error
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			if err == context.Canceled {
+				// proposal canceled can be caused by leader transfer or no leader
+				err = ErrProposalCanceled
+			}
+			nd.w.Trigger(req.Header.ID, err)
+			<-wrh.wr.WaitC()
+		case <-wrh.wr.WaitC():
 		}
-		nd.w.Trigger(req.Header.ID, err)
-		<-wrh.wr.WaitC()
-	case <-wrh.wr.WaitC():
-	}
-	rsp = wrh.wr.GetResult()
-	cancel()
-	wrh.release()
+		rsp = wrh.wr.GetResult()
+		cancel()
+		wrh.release()
 
-	if err, ok = rsp.(error); ok {
-		rsp = nil
-		//nd.rn.Infof("request return error: %v, %v", req.String(), err.Error())
-	} else {
-		err = nil
+		if err, ok = rsp.(error); ok {
+			rsp = nil
+			//nd.rn.Infof("request return error: %v, %v", req.String(), err.Error())
+		} else {
+			err = nil
+		}
+		return rsp, err
 	}
+	return &futureRsp, nil
+}
 
-	if req.Header.DataType == int32(RedisReq) {
-		cost := time.Since(start)
-		nd.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), cost.Nanoseconds()/1000)
-		if err == nil && !nd.IsWriteReady() {
-			nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
-				req.String())
-			return nil, errRaftNotReadyForWrite
-		}
-		if cost >= time.Second {
-			nd.rn.Infof("write request %v slow cost: %v",
-				req.String(), cost)
-		}
+func (nd *KVNode) ProposeAsync(buf []byte) (*FutureRsp, error) {
+	h := RequestHeader{
+		ID:       nd.rn.reqIDGen.Next(),
+		DataType: int32(RedisReq),
 	}
-	return rsp, err
+	raftReq := InternalRaftRequest{
+		Header: h,
+		Data:   buf,
+	}
+	start := time.Now()
+	return nd.queueRequest(start, raftReq)
 }
 
 func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
@@ -693,7 +715,24 @@ func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 		Header: h,
 		Data:   buf,
 	}
-	return nd.queueRequest(raftReq)
+	start := time.Now()
+	fr, err := nd.queueRequest(start, raftReq)
+	if err != nil {
+		return nil, err
+	}
+	rsp, err := fr.WaitRsp()
+	cost := time.Since(start)
+	nd.clusterWriteStats.UpdateWriteStats(int64(len(raftReq.Data)), cost.Nanoseconds()/1000)
+	if err == nil && !nd.IsWriteReady() {
+		nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
+			raftReq.String())
+		return nil, errRaftNotReadyForWrite
+	}
+	if cost >= time.Second {
+		nd.rn.Infof("write request %v slow cost: %v",
+			raftReq.String(), cost)
+	}
+	return rsp, err
 }
 
 func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
@@ -705,7 +744,12 @@ func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
 		Header: h,
 		Data:   buf,
 	}
-	return nd.queueRequest(raftReq)
+	start := time.Now()
+	fr, err := nd.queueRequest(start, raftReq)
+	if err != nil {
+		return nil, err
+	}
+	return fr.WaitRsp()
 }
 
 func (nd *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error {
@@ -719,7 +763,12 @@ func (nd *KVNode) ProposeChangeTableSchema(table string, sc *SchemaChange) error
 		Data:   buf,
 	}
 
-	_, err := nd.queueRequest(raftReq)
+	start := time.Now()
+	fr, err := nd.queueRequest(start, raftReq)
+	if err != nil {
+		return err
+	}
+	_, err = fr.WaitRsp()
 	return err
 }
 

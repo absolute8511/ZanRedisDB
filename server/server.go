@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,7 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/settings"
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/cluster"
@@ -31,6 +34,10 @@ var (
 	errRaftGroupNotReady = errors.New("raft group not ready")
 )
 
+const (
+	slowLogTime = time.Millisecond * 100
+)
+
 var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("server"))
 
 func SetLogger(level int32, logger common.Logger) {
@@ -40,6 +47,20 @@ func SetLogger(level int32, logger common.Logger) {
 
 func SLogger() *common.LevelLogger {
 	return sLog
+}
+
+type writeQ struct {
+	q      *entryQueue
+	stopC  chan struct{}
+	readyC chan struct{}
+}
+
+func newWriteQ(len uint64) *writeQ {
+	return &writeQ{
+		q:      newEntryQueue(len, 0),
+		stopC:  make(chan struct{}),
+		readyC: make(chan struct{}, 1),
+	}
 }
 
 type Server struct {
@@ -54,6 +75,7 @@ type Server struct {
 	startTime     time.Time
 	maxScanJob    int32
 	scanStats     common.ScanStats
+	writeQs       []*writeQ
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -211,6 +233,9 @@ func (s *Server) Stop() {
 	default:
 	}
 	close(s.stopC)
+	for _, wq := range s.writeQs {
+		close(wq.stopC)
+	}
 	s.raftTransport.Stop()
 	s.wg.Wait()
 	sLog.Infof("server stopped")
@@ -298,10 +323,22 @@ func (s *Server) RestartAsStandalone(fullNamespace string) error {
 func (s *Server) Start() {
 	s.raftTransport.Start()
 	s.stopC = make(chan struct{})
+
+	writeQs := make([]*writeQ, settings.Soft.ProposalQueueNum)
+	for i := 0; i < int(settings.Soft.ProposalQueueNum); i++ {
+		writeQs[i] = newWriteQ(settings.Soft.ProposalQueueLen)
+	}
+	s.writeQs = writeQs
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.serveRaft(s.stopC)
+	}()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.handleRedisWriteLoop()
 	}()
 	s.wg.Add(1)
 	// redis api enable first, because there are many partitions, some partitions may recover first
@@ -332,40 +369,59 @@ func (s *Server) Start() {
 	}()
 }
 
-func (s *Server) GetHandler(cmdName string, cmd redcon.Command) (bool, common.CommandFunc, redcon.Command, error) {
+func (s *Server) GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []byte, int, error) {
 	if len(cmd.Args) < 2 {
-		return false, nil, cmd, common.ErrInvalidArgs
+		return "", nil, 0, common.ErrInvalidArgs
 	}
 	rawKey := cmd.Args[1]
 
 	namespace, pk, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
-		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return false, nil, cmd, err
+		return namespace, nil, 0, err
+	}
+	pkSum := int(murmur3.Sum32(pk))
+	return namespace, pk, pkSum, nil
+}
+
+func (s *Server) GetHandleNode(ns string, pk []byte, pkSum int, cmdName string,
+	cmd redcon.Command) (*node.KVNode, error) {
+	if len(cmd.Args) < 2 {
+		return nil, common.ErrInvalidArgs
 	}
 	// we need decide the partition id from the primary key
 	// if the command need cross multi partitions, we need handle separate
-	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKey(namespace, pk)
+	n, err := s.nsMgr.GetNamespaceNodeWithPrimaryKeySum(ns, pk, pkSum)
 	if err != nil {
-		return false, nil, cmd, err
+		return nil, err
 	}
 	if n.Node.IsStopping() {
-		return false, nil, cmd, common.ErrStopped
+		return nil, common.ErrStopped
 	}
+	return n.Node, nil
+}
+
+func (s *Server) GetHandler(cmdName string,
+	cmd redcon.Command, kvn *node.KVNode) (common.CommandFunc, redcon.Command, error) {
 	// for multi primary keys such as mset, mget, we need make sure they are all in the same partition
-	h, isWrite, ok := n.Node.GetHandler(cmdName)
+	h, ok := kvn.GetHandler(cmdName)
 	if !ok {
-		return isWrite, nil, cmd, common.ErrInvalidCommand
+		return nil, cmd, common.ErrInvalidCommand
 	}
-	if sLog.Level() >= common.LOG_DETAIL {
-		sLog.Debugf("hash to namespace :%v, %v, %v, for pk:%v", isWrite, n.FullName(), n.Node.IsLead(), string(pk))
-	}
-	if !isWrite && !n.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
+	if !kvn.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 		// read only to leader to avoid stale read
 		// TODO: also read command can request the raft read index if not leader
-		return isWrite, nil, cmd, node.ErrNamespaceNotLeader
+		return nil, cmd, node.ErrNamespaceNotLeader
 	}
-	return isWrite, h, cmd, nil
+	return h, cmd, nil
+}
+
+func (s *Server) GetWriteHandler(cmdName string,
+	cmd redcon.Command, kvn *node.KVNode) (common.WriteCommandFunc, redcon.Command, error) {
+	h, ok := kvn.GetWriteHandler(cmdName)
+	if !ok {
+		return nil, cmd, common.ErrInvalidCommand
+	}
+	return h, cmd, nil
 }
 
 func (s *Server) serveRaft(stopCh <-chan struct{}) {
@@ -474,4 +530,115 @@ func (s *Server) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 
 func (s *Server) GetNsMgr() *node.NamespaceMgr {
 	return s.nsMgr
+}
+
+func (s *Server) handleRedisSingleCmd(cmdName string, pkSum int, kvn *node.KVNode, conn redcon.Conn, cmd redcon.Command) error {
+	isWrite := false
+	var h common.CommandFunc
+	var wh common.WriteCommandFunc
+	h, cmd, err := s.GetHandler(cmdName, cmd, kvn)
+	if err == common.ErrInvalidCommand {
+		wh, cmd, err = s.GetWriteHandler(cmdName, cmd, kvn)
+		isWrite = (err == nil)
+	}
+	if err != nil {
+		return fmt.Errorf("%s : Err handle command %s", err.Error(), cmdName)
+	}
+
+	if isWrite && node.IsSyncerOnly() {
+		return fmt.Errorf("The cluster is only allowing syncer write : ERR handle command %s ", cmdName)
+	}
+	if isWrite {
+		s.handleRedisWrite(pkSum, wh, conn, cmd)
+	} else {
+		h(conn, cmd)
+	}
+	return nil
+}
+
+func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, conn redcon.Conn, cmd redcon.Command) {
+	// queue and wait
+	//wq := s.writeQs[pkSum%len(s.writeQs)]
+	//e := elemT{}
+	//ret := make(chan interface{}, 1)
+	//e.f = func() {
+	//	rsp, err := h(cmd)
+	//	if err != nil {
+	//		ret <- err
+	//		return
+	//	}
+	//	ret <- rsp
+	//}
+	//wq.q.add(e)
+	//select {
+	//case wq.readyC <- struct{}{}:
+	//default:
+	//}
+	start := time.Now()
+	// wait
+	//v := <-ret
+	rsp, err := h(cmd)
+	cost1 := time.Since(start)
+	var v interface{}
+	if err != nil {
+		v = err
+	} else {
+		futureRsp, ok := rsp.(*node.FutureRsp)
+		if ok {
+			frsp, err := futureRsp.WaitRsp()
+			if err != nil {
+				v = err
+			} else {
+				v = frsp
+			}
+		}
+	}
+	cost2 := time.Since(start)
+	if cost2 >= slowLogTime {
+		sLog.Infof("write request slow cost: %v, %v, cmd %s", cost1, cost2, cmd.Args[0])
+	}
+	switch rv := v.(type) {
+	case error:
+		conn.WriteError(rv.Error())
+	case string:
+		conn.WriteString(rv)
+	case int64:
+		conn.WriteInt64(rv)
+	case int:
+		conn.WriteInt64(int64(rv))
+	case nil:
+		conn.WriteNull()
+	case []byte:
+		conn.WriteBulk(rv)
+	case [][]byte:
+		conn.WriteArray(len(rv))
+		for _, d := range rv {
+			conn.WriteBulk(d)
+		}
+	default:
+		// Do we have any other resp arrays for write command which is not [][]byte?
+		conn.WriteError("Invalid response type")
+	}
+}
+
+func (s *Server) handleRedisWriteLoop() {
+	var wg sync.WaitGroup
+	for i := 0; i < len(s.writeQs); i++ {
+		wg.Add(1)
+		go func(wq *writeQ) {
+			defer wg.Done()
+			for {
+				select {
+				case <-wq.readyC:
+					elems := wq.q.get(false)
+					for _, e := range elems {
+						e.Func()()
+					}
+				case <-wq.stopC:
+					return
+				}
+			}
+		}(s.writeQs[i])
+	}
+	wg.Wait()
 }

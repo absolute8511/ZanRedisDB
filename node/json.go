@@ -129,35 +129,6 @@ func (nd *KVNode) jsonObjKeysCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) jsonSetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) jsonDelCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) jsonArrayAppendCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) jsonArrayPopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(string)
-	if !ok {
-		conn.WriteError(errInvalidResponse.Error())
-		return
-	}
-	conn.WriteBulkString(rsp)
-}
-
 func (kvsm *kvStoreSM) localJSONSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	v, err := kvsm.store.JSet(ts, cmd.Args[1], cmd.Args[2], cmd.Args[3])
 	return v, err
@@ -189,5 +160,5 @@ func (kvsm *kvStoreSM) localJSONArrayPopCommand(cmd redcon.Command, ts int64) (i
 	if err != nil {
 		return nil, err
 	}
-	return elem, nil
+	return []byte(elem), nil
 }

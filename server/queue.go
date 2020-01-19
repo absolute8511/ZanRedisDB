@@ -12,45 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package node
+package server
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/youzan/ZanRedisDB/pkg/wait"
 )
 
 type internalReq struct {
-	reqData InternalRaftRequest
-	ctx     context.Context
-	wr      wait.WaitResult
+	d  []byte
+	f  func()
+	id uint64
 }
 
 type elemT internalReq
 
 func newElemWithData(d []byte) elemT {
 	e := elemT{}
-	e.reqData.Data = d
+	e.d = d
 	return e
 }
 
 func (e elemT) GetID() uint64 {
-	return e.reqData.Header.ID
+	return e.id
+}
+
+func (e elemT) Func() func() {
+	return e.f
 }
 
 func (e elemT) GetData() []byte {
-	return e.reqData.Data
+	return e.d
 }
 
 func (e *elemT) ResetData() {
-	e.reqData.Data = nil
+	e.d = nil
 }
 
 func (e *elemT) SetID(index uint64) {
-	e.reqData.Header.ID = index
+	e.id = index
 }
 
 type entryQueue struct {
@@ -158,11 +159,11 @@ func (q *entryQueue) gc() {
 		oldq := q.targetQueue()
 		if q.lazyFreeCycle == 1 {
 			for i := uint64(0); i < q.oldIdx; i++ {
-				oldq[i].reqData.Data = nil
+				oldq[i].ResetData()
 			}
 		} else if q.cycle%q.lazyFreeCycle == 0 {
 			for i := uint64(0); i < q.size; i++ {
-				oldq[i].reqData.Data = nil
+				oldq[i].ResetData()
 			}
 		}
 	}
