@@ -87,7 +87,7 @@ type IBatchOperator interface {
 	BeginBatch() error
 	AddBatchKey(string)
 	AddBatchRsp(uint64, interface{})
-	IsBatchable(string, string) bool
+	IsBatchable(string, string, [][]byte) bool
 	CommitBatch()
 }
 
@@ -129,7 +129,11 @@ func (bo *kvbatchOperator) AddBatchRsp(reqID uint64, v interface{}) {
 	bo.batchReqRspList = append(bo.batchReqRspList, v)
 }
 
-func (bo *kvbatchOperator) IsBatchable(cmdName string, pk string) bool {
+func (bo *kvbatchOperator) IsBatchable(cmdName string, pk string, args [][]byte) bool {
+	if cmdName == "del" && len(args) > 2 {
+		// del for multi keys, no batch
+		return false
+	}
 	_, ok := bo.dupCheckMap[string(pk)]
 	if rockredis.IsBatchableWrite(cmdName) &&
 		len(bo.batchReqIDList) < maxDBBatchCmdNum &&
@@ -648,7 +652,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
 				pk, _ := common.CutNamesapce(cmd.Args[1])
-				if batch.IsBatchable(cmdName, string(pk)) {
+				if batch.IsBatchable(cmdName, string(pk), cmd.Args) {
 					if !batch.IsBatched() {
 						err := batch.BeginBatch()
 						if err != nil {
