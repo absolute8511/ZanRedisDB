@@ -1,5 +1,7 @@
 package settings
 
+import "runtime"
+
 // Soft settings are some configurations than can be safely changed and
 // the app need to be restarted to apply such configuration changes.
 var Soft = getSoftSettings()
@@ -23,6 +25,13 @@ type soft struct {
 
 	// statemachine
 	CommitBufferLen uint64 `json:"commit_buffer_len"`
+
+	// server
+
+	// raft proposal queue length for client queue loop (1024*4 for default, suggest use default)
+	ProposalQueueLen uint64 `json:"proposal_queue_len"`
+	// how many queues used for proposal, suggest use CPU nums
+	ProposalQueueNum uint64 `json:"proposal_queue_num"`
 }
 
 func getSoftSettings() soft {
@@ -41,5 +50,7 @@ func defaultSoftSettings() soft {
 		MaxSizePerMsg:      1024 * 1024,
 		MaxInflightMsgs:    256,
 		CommitBufferLen:    5000,
+		ProposalQueueLen:   1024 * 4,
+		ProposalQueueNum:   uint64(runtime.NumCPU()),
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/settings"
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/cluster"
@@ -101,15 +101,9 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.DefaultSnapCatchup > 0 {
 		common.DefaultSnapCatchup = conf.DefaultSnapCatchup
 	}
-	if conf.ProposalQueueNum <= 0 {
-		conf.ProposalQueueNum = runtime.NumCPU()
-	}
-	if conf.ProposalQueueLen <= 0 {
-		conf.ProposalQueueLen = 1024 * 4
-	}
-	writeQs := make([]*writeQ, conf.ProposalQueueNum)
-	for i := 0; i < conf.ProposalQueueNum; i++ {
-		writeQs[i] = newWriteQ(uint64(conf.ProposalQueueLen))
+	writeQs := make([]*writeQ, settings.Soft.ProposalQueueNum)
+	for i := 0; i < int(settings.Soft.ProposalQueueNum); i++ {
+		writeQs[i] = newWriteQ(settings.Soft.ProposalQueueLen)
 	}
 
 	if conf.SyncerWriteOnly {
