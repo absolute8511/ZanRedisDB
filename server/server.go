@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -31,6 +32,10 @@ import (
 
 var (
 	errRaftGroupNotReady = errors.New("raft group not ready")
+)
+
+const (
+	slowLogTime = time.Millisecond * 100
 )
 
 var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("server"))
@@ -531,34 +536,70 @@ func (s *Server) GetNsMgr() *node.NamespaceMgr {
 	return s.nsMgr
 }
 
-func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, kvn *node.KVNode, conn redcon.Conn, cmd redcon.Command) {
+func (s *Server) handleRedisSingleCmd(cmdName string, pkSum int, kvn *node.KVNode, conn redcon.Conn, cmd redcon.Command) error {
+	isWrite := false
+	var h common.CommandFunc
+	var wh common.WriteCommandFunc
+	h, cmd, err := s.GetHandler(cmdName, cmd, kvn)
+	if err == common.ErrInvalidCommand {
+		wh, cmd, err = s.GetWriteHandler(cmdName, cmd, kvn)
+		isWrite = (err == nil)
+	}
+	if err != nil {
+		return fmt.Errorf("%s : Err handle command %s", err.Error(), cmdName)
+	}
+
+	if isWrite && node.IsSyncerOnly() {
+		return fmt.Errorf("The cluster is only allowing syncer write : ERR handle command %s ", cmdName)
+	}
+	if isWrite {
+		s.handleRedisWrite(pkSum, wh, conn, cmd)
+	} else {
+		h(conn, cmd)
+	}
+	return nil
+}
+
+func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, conn redcon.Conn, cmd redcon.Command) {
 	// queue and wait
-	wq := s.writeQs[pkSum%len(s.writeQs)]
-	e := elemT{}
-	ret := make(chan interface{}, 1)
-	e.f = func() {
-		rsp, err := h(cmd)
-		if err != nil {
-			ret <- err
-			return
-		}
-		ret <- rsp
-	}
-	wq.q.add(e)
-	select {
-	case wq.readyC <- struct{}{}:
-	default:
-	}
+	//wq := s.writeQs[pkSum%len(s.writeQs)]
+	//e := elemT{}
+	//ret := make(chan interface{}, 1)
+	//e.f = func() {
+	//	rsp, err := h(cmd)
+	//	if err != nil {
+	//		ret <- err
+	//		return
+	//	}
+	//	ret <- rsp
+	//}
+	//wq.q.add(e)
+	//select {
+	//case wq.readyC <- struct{}{}:
+	//default:
+	//}
+	start := time.Now()
 	// wait
-	v := <-ret
-	futureRsp, ok := v.(*node.FutureRsp)
-	if ok {
-		frsp, err := futureRsp.WaitRsp()
-		if err != nil {
-			v = err
-		} else {
-			v = frsp
+	//v := <-ret
+	rsp, err := h(cmd)
+	cost1 := time.Since(start)
+	var v interface{}
+	if err != nil {
+		v = err
+	} else {
+		futureRsp, ok := rsp.(*node.FutureRsp)
+		if ok {
+			frsp, err := futureRsp.WaitRsp()
+			if err != nil {
+				v = err
+			} else {
+				v = frsp
+			}
 		}
+	}
+	cost2 := time.Since(start)
+	if cost2 >= slowLogTime {
+		sLog.Infof("write request slow cost: %v, %v, cmd %s", cost1, cost2, cmd.Args[0])
 	}
 	switch rv := v.(type) {
 	case error:
