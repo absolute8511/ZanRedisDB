@@ -588,7 +588,9 @@ func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 	return int64(len(oldValue) - tsLen), nil
 }
 
-func (db *RockDB) BitSet(ts int64, key []byte, offset int64, on int) (int64, error) {
+// BitSet set the bitmap data with format as below:
+// key -> 0(first bit) 0 0 0 0 0 0 0 (last bit) | (second byte with 8 bits) | .... | (last byte with 8bits) at most MaxBitOffset/8 bytes for each bitmap
+func (db *RockDB) BitSetOld(ts int64, key []byte, offset int64, on int) (int64, error) {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
 		return 0, err
@@ -663,7 +665,7 @@ func popcountBytes(s []byte) (count int64) {
 	return
 }
 
-func (db *RockDB) BitGet(key []byte, offset int64) (int64, error) {
+func (db *RockDB) bitGetOld(key []byte, offset int64) (int64, error) {
 	v, err := db.KVGet(key)
 	if err != nil {
 		return 0, err
@@ -683,7 +685,7 @@ func (db *RockDB) BitGet(key []byte, offset int64) (int64, error) {
 	return 0, nil
 }
 
-func (db *RockDB) BitCount(key []byte, start, end int) (int64, error) {
+func (db *RockDB) bitCountOld(key []byte, start, end int) (int64, error) {
 	v, err := db.KVGet(key)
 	if err != nil {
 		return 0, err

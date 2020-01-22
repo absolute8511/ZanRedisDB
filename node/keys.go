@@ -76,7 +76,7 @@ func (nd *KVNode) getbitCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError(err.Error())
 		return
 	}
-	val, err := nd.store.BitGet(cmd.Args[1], offset)
+	val, err := nd.store.BitGetV2(cmd.Args[1], offset)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -103,7 +103,7 @@ func (nd *KVNode) bitcountCommand(conn redcon.Conn, cmd redcon.Command) {
 			return
 		}
 	}
-	val, err := nd.store.BitCount(cmd.Args[1], int(start), int(end))
+	val, err := nd.store.BitCountV2(cmd.Args[1], int(start), int(end))
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -260,5 +260,5 @@ func (kvsm *kvStoreSM) localBitSetCommand(cmd redcon.Command, ts int64) (interfa
 	if err != nil {
 		return 0, err
 	}
-	return kvsm.store.BitSet(ts, cmd.Args[1], offset, int(on))
+	return kvsm.store.BitSetOld(ts, cmd.Args[1], offset, int(on))
 }
