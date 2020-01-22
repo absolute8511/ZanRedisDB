@@ -975,12 +975,17 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		rc.transport.Send(processedMsgs)
 	}
 
+	start := time.Now()
 	// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
 	if err := rc.persistRaftState(&rd); err != nil {
 		nodeLog.Errorf("raft save states to disk error: %v", err)
 		go rc.ds.Stop()
 		<-rc.stopc
 		return
+	}
+	cost := time.Since(start)
+	if cost >= raftSlow {
+		rc.Infof("raft persist state slow: %v, cost: %v", len(rd.Entries), cost)
 	}
 
 	if !raft.IsEmptySnap(rd.Snapshot) {
