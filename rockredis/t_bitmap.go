@@ -245,7 +245,7 @@ func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 		return 0, err
 	}
 	if !ok {
-		return db.BitGet(key, offset)
+		return db.bitGetOld(key, offset)
 	}
 
 	index := (offset / bitmapSegBits) * bitmapSegBytes
@@ -280,7 +280,7 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 		return 0, err
 	}
 	if !ok {
-		return db.BitCount(key, start, end)
+		return db.bitCountOld(key, start, end)
 	}
 
 	start, end = getRange(start, end, int(bmSize))

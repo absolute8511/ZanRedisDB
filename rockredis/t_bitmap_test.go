@@ -212,13 +212,13 @@ func TestBitmapV2FromOld(t *testing.T) {
 	defer db.Close()
 
 	key := []byte("test:testdb_kv_bit_convert")
-	n, err := db.BitSet(0, key, 5, 1)
+	n, err := db.bitSetOld(0, key, 5, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 	n, err = db.BitGetV2(key, int64(5))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
-	n, err = db.BitCount(key, 0, -1)
+	n, err = db.bitCountOld(key, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
@@ -243,7 +243,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(2), n)
 	// old data should be deleted
-	n, err = db.BitGet(key, int64(5))
+	n, err = db.bitGetOld(key, int64(5))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
@@ -285,10 +285,10 @@ func TestBitmapV2FromOld(t *testing.T) {
 	bitsForOne[bitmapSegBits*2+bitmapSegBytes+1] = true
 
 	for bpos := range bitsForOne {
-		n, err = db.BitSet(0, key, int64(bpos), 1)
+		n, err = db.bitSetOld(0, key, int64(bpos), 1)
 		assert.Nil(t, err)
 		assert.Equal(t, int64(0), n)
-		n, err = db.BitGet(key, int64(bpos))
+		n, err = db.bitGetOld(key, int64(bpos))
 		assert.Nil(t, err)
 		assert.Equal(t, int64(1), n)
 		// new v2 should read old
@@ -298,7 +298,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 	}
 
 	for i := 10; i < bitmapSegBits*3; i++ {
-		n, err = db.BitGet(key, int64(i))
+		n, err = db.bitGetOld(key, int64(i))
 		assert.Nil(t, err)
 		if _, ok := bitsForOne[i]; ok {
 			assert.Equal(t, int64(1), n)
@@ -306,7 +306,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 			assert.Equal(t, int64(0), n)
 		}
 	}
-	n, err = db.BitCount(key, 0, -1)
+	n, err = db.bitCountOld(key, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(bitsForOne)), n)
 	// new v2 should read old
