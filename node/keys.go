@@ -260,5 +260,5 @@ func (kvsm *kvStoreSM) localBitSetCommand(cmd redcon.Command, ts int64) (interfa
 	if err != nil {
 		return 0, err
 	}
-	return kvsm.store.BitSetV2(ts, cmd.Args[1], offset, int(on))
+	return kvsm.store.BitSetOld(ts, cmd.Args[1], offset, int(on))
 }
