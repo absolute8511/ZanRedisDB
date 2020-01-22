@@ -36,7 +36,9 @@ const (
 	SetType    byte = 29
 	SSizeType  byte = 30
 
-	JSONType byte = 31
+	JSONType       byte = 31
+	BitmapType     byte = 32
+	BitmapMetaType byte = 33
 
 	ColumnType byte = 38 // used for column store for OLAP
 
@@ -84,6 +86,7 @@ const (
 
 var (
 	errKeySize          = errors.New("invalid key size")
+	errSubKeySize       = errors.New("invalid sub key size")
 	errValueSize        = errors.New("invalid value size")
 	errZSetMemberSize   = errors.New("invalid zset member size")
 	errTooMuchBatchSize = errors.New("the batch size exceed the limit")
@@ -100,18 +103,21 @@ const (
 	//max key size
 	MaxKeySize int = 10240
 
-	//max hash field size
-	MaxHashFieldSize int = 10240
-
-	//max zset member size
-	MaxZSetMemberSize int = 10240
-
-	//max set member size
-	MaxSetMemberSize int = 10240
+	// subkey length for hash/set/zset
+	MaxSubKeyLen int = 10240
 
 	//max value size
 	MaxValueSize int = 1024 * 1024 * 8
 )
+
+func checkKeySubKey(key []byte, field []byte) error {
+	if len(key) > MaxKeySize || len(key) == 0 {
+		return errKeySize
+	} else if len(field) > MaxSubKeyLen {
+		return errSubKeySize
+	}
+	return nil
+}
 
 var (
 	ErrZScoreMiss   = errors.New("zset score miss")

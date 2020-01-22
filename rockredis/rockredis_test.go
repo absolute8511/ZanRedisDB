@@ -39,6 +39,22 @@ func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
 	return testDB
 }
 
+func getTestDBForBench() *RockDB {
+	cfg := NewRockRedisDBConfig()
+	cfg.EnableTableCounter = true
+	cfg.EnablePartitionedIndexFilter = true
+	var err error
+	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	if err != nil {
+		panic(err)
+	}
+	testDB, err := OpenRockDB(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return testDB
+}
+
 func getTestDB(t *testing.T) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true

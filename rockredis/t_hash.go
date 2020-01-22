@@ -27,20 +27,11 @@ func convertRedisKeyToDBHKey(key []byte, field []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	if err := checkHashKFSize(rk, field); err != nil {
+	if err := checkKeySubKey(rk, field); err != nil {
 		return nil, err
 	}
 	key = hEncodeHashKey(table, key[len(table)+1:], field)
 	return key, nil
-}
-
-func checkHashKFSize(key []byte, field []byte) error {
-	if len(key) > MaxKeySize || len(key) == 0 {
-		return errKeySize
-	} else if len(field) > MaxHashFieldSize {
-		return errHashFieldSize
-	}
-	return nil
 }
 
 func hEncodeSizeKey(key []byte) []byte {
@@ -132,7 +123,7 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 	if err != nil {
 		return 0, err
 	}
-	if err := checkHashKFSize(rk, field); err != nil {
+	if err := checkKeySubKey(rk, field); err != nil {
 		return 0, err
 	}
 	ek := hEncodeHashKey(table, rk, field)
@@ -254,7 +245,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	var value []byte
 	tsBuf := PutInt64(ts)
 	for i := 0; i < len(args); i++ {
-		if err = checkHashKFSize(rk, args[i].Key); err != nil {
+		if err = checkKeySubKey(rk, args[i].Key); err != nil {
 			return err
 		} else if err = checkValueSize(args[i].Value); err != nil {
 			return err
@@ -301,7 +292,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 }
 
 func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
-	if err := checkHashKFSize(key, field); err != nil {
+	if err := checkKeySubKey(key, field); err != nil {
 		return 0, err
 	}
 
@@ -318,7 +309,7 @@ func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
 }
 
 func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) error {
-	if err := checkHashKFSize(key, field); err != nil {
+	if err := checkKeySubKey(key, field); err != nil {
 		return err
 	}
 
@@ -335,7 +326,7 @@ func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) er
 }
 
 func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
-	if err := checkHashKFSize(key, field); err != nil {
+	if err := checkKeySubKey(key, field); err != nil {
 		return nil, err
 	}
 
@@ -351,7 +342,7 @@ func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 }
 
 func (db *RockDB) HExist(key []byte, field []byte) (bool, error) {
-	if err := checkHashKFSize(key, field); err != nil {
+	if err := checkKeySubKey(key, field); err != nil {
 		return false, err
 	}
 
@@ -416,7 +407,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	var num int64 = 0
 	var newNum int64 = -1
 	for i := 0; i < len(args); i++ {
-		if err := checkHashKFSize(rk, args[i]); err != nil {
+		if err := checkKeySubKey(rk, args[i]); err != nil {
 			return 0, err
 		}
 
@@ -567,7 +558,7 @@ func (db *RockDB) HMclear(keys ...[]byte) {
 }
 
 func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int64, error) {
-	if err := checkHashKFSize(key, field); err != nil {
+	if err := checkKeySubKey(key, field); err != nil {
 		return 0, err
 	}
 	table, _, err := extractTableFromRedisKey(key)

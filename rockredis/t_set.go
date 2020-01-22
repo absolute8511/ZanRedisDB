@@ -20,15 +20,6 @@ const (
 	setStopSep  byte = setStartSep + 1
 )
 
-func checkSetKMSize(key []byte, member []byte) error {
-	if len(key) > MaxKeySize || len(key) == 0 {
-		return errKeySize
-	} else if len(member) > MaxSetMemberSize {
-		return errSetMemberSize
-	}
-	return nil
-}
-
 func sEncodeSizeKey(key []byte) []byte {
 	buf := make([]byte, len(key)+1+len(metaPrefix))
 
@@ -58,7 +49,7 @@ func convertRedisKeyToDBSKey(key []byte, member []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkSetKMSize(rk, member); err != nil {
+	if err := checkKeySubKey(rk, member); err != nil {
 		return nil, err
 	}
 	dbKey := sEncodeSetKey(table, rk, member)
@@ -275,7 +266,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 	var ek []byte
 	var num int64 = 0
 	for i := 0; i < len(args); i++ {
-		if err := checkSetKMSize(key, args[i]); err != nil {
+		if err := checkKeySubKey(key, args[i]); err != nil {
 			return 0, err
 		}
 		ek = sEncodeSetKey(table, rk, args[i])
@@ -398,7 +389,7 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 
 	var num int64 = 0
 	for i := 0; i < len(args); i++ {
-		if err := checkSetKMSize(key, args[i]); err != nil {
+		if err := checkKeySubKey(key, args[i]); err != nil {
 			return 0, err
 		}
 

@@ -588,6 +588,8 @@ func (db *RockDB) Append(ts int64, key []byte, value []byte) (int64, error) {
 	return int64(len(oldValue) - tsLen), nil
 }
 
+// BitSet set the bitmap data with format as below:
+// key -> 0(first bit) 0 0 0 0 0 0 0 (last bit) | (second byte with 8 bits) | .... | (last byte with 8bits) at most MaxBitOffset/8 bytes for each bitmap
 func (db *RockDB) BitSet(ts int64, key []byte, offset int64, on int) (int64, error) {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
