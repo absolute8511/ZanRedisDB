@@ -323,41 +323,49 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 		total += popcountBytes(bmv[byteStart:byteEnd])
 	}
 	return total, nil
-	//for i := int64(startI); i <= int64(stopI); i++ {
-	//	index := i * bitmapSegBytes
-	//	bmk, _ := encodeBitmapKey(table, rk, int64(index))
-	//	bmv, err := db.eng.GetBytes(db.defaultReadOpts, bmk)
-	//	if err != nil {
-	//		return 0, err
-	//	}
-	//	if bmv == nil {
-	//		continue
-	//	}
-	//	byteStart := 0
-	//	byteEnd := len(bmv)
-	//	if i == int64(startI) {
-	//		byteStart = start % bitmapSegBytes
-	//	}
-	//	if i == int64(stopI) {
-	//		byteEnd = end%bitmapSegBytes + 1
-	//		if byteEnd > len(bmv) {
-	//			byteEnd = len(bmv)
-	//		}
-	//	}
-	//	total += popcountBytes(bmv[byteStart:byteEnd])
-	//}
-
-	//return total, nil
 }
 
-func (db *RockDB) BitClear(key []byte, start, end int) (int64, error) {
-	return 0, nil
+func (db *RockDB) BitClear(key []byte) (int64, error) {
+	bmSize, ok, err := db.getBitmapMeta(key, false)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, nil
+	}
+
+	db.MaybeClearBatch()
+	wb := db.wb
+	table, rk, _ := extractTableFromRedisKey(key)
+	iterStart, _ := encodeBitmapStartKey(table, rk, 0)
+	iterStop, _ := encodeBitmapStopKey(table, rk)
+	if bmSize/bitmapSegBytes > RangeDeleteNum {
+		wb.DeleteRange(iterStart, iterStop)
+	} else {
+		it, err := engine.NewDBRangeIterator(db.eng, iterStart, iterStop, common.RangeROpen, false)
+		if err != nil {
+			return 0, err
+		}
+		defer it.Close()
+		for ; it.Valid(); it.Next() {
+			rawk := it.RefKey()
+			wb.Delete(rawk)
+		}
+	}
+
+	metaKey := bitEncodeMetaKey(key)
+	wb.Delete(metaKey)
+	err = db.MaybeCommitBatch()
+	return 1, err
 }
 
-func (db *RockDB) BitExpire(ts int64, key []byte) (int64, error) {
-	return 0, nil
-}
-
-func (db *RockDB) BitExist(key []byte) (int64, error) {
-	return 0, nil
+func (db *RockDB) BitKeyExist(key []byte) (int64, error) {
+	_, ok, err := db.getBitmapMeta(key, true)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return db.KVExists(key)
+	}
+	return 1, nil
 }
