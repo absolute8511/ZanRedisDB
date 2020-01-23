@@ -61,6 +61,8 @@ func (db *RockDB) collHeaderMeta(ts int64, dt byte, key []byte, useLock bool) (*
 		sizeKey = hEncodeSizeKey(key)
 	case SetType:
 		sizeKey = sEncodeSizeKey(key)
+	case BitmapType:
+		sizeKey = bitEncodeMetaKey(key)
 	case ListType:
 	case ZSetType:
 	default:

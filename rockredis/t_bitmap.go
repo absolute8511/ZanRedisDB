@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	math "math"
+	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -368,4 +369,24 @@ func (db *RockDB) BitKeyExist(key []byte) (int64, error) {
 		return db.KVExists(key)
 	}
 	return 1, nil
+}
+
+func (db *RockDB) BitExpire(tn int64, key []byte, ttlSec int64) (int64, error) {
+	oldh, metaV, expired, err := db.collHeaderMeta(tn, BitmapType, key, false)
+	if err != nil || expired || metaV == nil {
+		return 0, err
+	}
+
+	rawV := db.expiration.encodeToRawValue(BitmapType, oldh, metaV)
+	return db.ExpireAt(BitmapType, key, rawV, ttlSec+tn/int64(time.Second))
+}
+
+func (db *RockDB) BitPersist(tn int64, key []byte) (int64, error) {
+	oldh, metaV, expired, err := db.collHeaderMeta(tn, BitmapType, key, false)
+	if err != nil || expired || metaV == nil {
+		return 0, err
+	}
+
+	rawV := db.expiration.encodeToRawValue(BitmapType, oldh, metaV)
+	return db.ExpireAt(BitmapType, key, rawV, 0)
 }

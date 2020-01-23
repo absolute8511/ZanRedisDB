@@ -195,19 +195,26 @@ func (db *RockDB) DelKeys(keys ...[]byte) (int64, error) {
 }
 
 func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
+	tn := time.Now().UnixNano()
 	if len(keys) == 1 {
 		_, kk, err := convertRedisKeyToDBKVKey(keys[0])
 		if err != nil {
 			return 0, err
 		}
-		vok, err := db.eng.Exist(db.defaultReadOpts, kk)
+		vref, err := db.eng.Get(db.defaultReadOpts, kk)
 		if err != nil {
 			return 0, err
 		}
-		if vok {
-			return 1, nil
+		defer vref.Free()
+		v := vref.Data()
+		if v == nil {
+			return 0, nil
 		}
-		return 0, nil
+		expired, err := db.expiration.isExpired(tn, KVType, keys[0], v, true)
+		if expired {
+			return 0, err
+		}
+		return 1, err
 	}
 	keyList := make([][]byte, len(keys))
 	valueList := make([][]byte, len(keys))
@@ -222,7 +229,6 @@ func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
 		}
 	}
 	cnt := int64(0)
-	tn := time.Now().UnixNano()
 	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, valueList, errs)
 	for i, v := range valueList {
 		if errs[i] == nil && v != nil {
@@ -249,29 +255,59 @@ func (db *RockDB) KVGetVer(key []byte) (int64, error) {
 	return int64(ts), err
 }
 
-func (db *RockDB) GetValueWithOpNoLock(key []byte,
+func (db *RockDB) GetValueWithOpNoLock(rawKey []byte,
 	op func([]byte) error) error {
-	_, key, err := convertRedisKeyToDBKVKey(key)
+	_, key, err := convertRedisKeyToDBKVKey(rawKey)
 	if err != nil {
 		return err
 	}
 	return db.rockEng.GetValueWithOpNoLock(db.defaultReadOpts, key, func(v []byte) error {
+		if v == nil {
+			return op(nil)
+		}
+		ts := time.Now().UnixNano()
+		expired, err := db.expiration.isExpired(ts, KVType, rawKey, v, false)
+		if err != nil {
+			return err
+		}
+		if expired {
+			return op(nil)
+		}
 		if len(v) >= tsLen {
 			v = v[:len(v)-tsLen]
+		}
+		v, _, err = db.expiration.decodeRawValue(KVType, v)
+		if err != nil {
+			return err
 		}
 		return op(v)
 	})
 }
 
-func (db *RockDB) GetValueWithOp(key []byte,
+func (db *RockDB) GetValueWithOp(rawKey []byte,
 	op func([]byte) error) error {
-	_, key, err := convertRedisKeyToDBKVKey(key)
+	_, key, err := convertRedisKeyToDBKVKey(rawKey)
 	if err != nil {
 		return err
 	}
 	return db.rockEng.GetValueWithOp(db.defaultReadOpts, key, func(v []byte) error {
+		if v == nil {
+			return op(nil)
+		}
+		ts := time.Now().UnixNano()
+		expired, err := db.expiration.isExpired(ts, KVType, rawKey, v, false)
+		if err != nil {
+			return err
+		}
+		if expired {
+			return op(nil)
+		}
 		if len(v) >= tsLen {
 			v = v[:len(v)-tsLen]
+		}
+		v, _, err = db.expiration.decodeRawValue(KVType, v)
+		if err != nil {
+			return err
 		}
 		return op(v)
 	})

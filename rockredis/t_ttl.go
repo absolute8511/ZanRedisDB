@@ -146,6 +146,15 @@ func (db *RockDB) HashTtl(key []byte) (t int64, err error) {
 	return db.ttl(tn, HashType, key, v)
 }
 
+func (db *RockDB) BitTtl(key []byte) (t int64, err error) {
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, BitmapType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, BitmapType, key, v)
+}
+
 func (db *RockDB) ListTtl(key []byte) (t int64, err error) {
 	tn := time.Now().UnixNano()
 	v, err := db.expiration.getRawValueForHeader(tn, ListType, key)

@@ -352,7 +352,8 @@ func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) er
 		return err
 	}
 	if expired {
-		return nil
+		// we must call the callback if no error returned
+		return op(nil)
 	}
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {

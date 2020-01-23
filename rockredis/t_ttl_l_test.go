@@ -102,6 +102,42 @@ func TestHashTTL_L(t *testing.T) {
 	assert.Equal(t, int64(0), v)
 }
 
+func TestBitmapV2TTL_L(t *testing.T) {
+	db := getTestDBWithExpirationPolicy(t, common.LocalDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdbTTL_bitmap_l")
+	var ttl int64 = rand.Int63()
+
+	tn := time.Now().UnixNano()
+	if v, err := db.BitExpire(tn, key, ttl); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal("return value from expire of not exist key != 0")
+	}
+
+	if _, err := db.BitSetV2(0, key, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if v, err := db.BitExpire(tn, key, ttl); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from expire != 1")
+	}
+
+	if v, err := db.BitTtl(key); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatal("return value from BitTtl of LocalDeletion Policy != -1")
+	}
+
+	v, err := db.BitPersist(tn, key)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(0), v)
+}
+
 func TestListTTL_L(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.LocalDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
