@@ -3,6 +3,7 @@ package rockredis
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -212,7 +213,8 @@ func TestBitmapV2FromOld(t *testing.T) {
 	defer db.Close()
 
 	key := []byte("test:testdb_kv_bit_convert")
-	n, err := db.BitSetOld(0, key, 5, 1)
+	tn := time.Now().UnixNano()
+	n, err := db.BitSetOld(tn, key, 5, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 	n, err = db.BitGetV2(key, int64(5))
@@ -226,7 +228,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	n, err = db.BitSetV2(0, key, 6, 1)
+	n, err = db.BitSetV2(tn, key, 6, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
@@ -285,7 +287,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 	bitsForOne[bitmapSegBits*2+bitmapSegBytes+1] = true
 
 	for bpos := range bitsForOne {
-		n, err = db.BitSetOld(0, key, int64(bpos), 1)
+		n, err = db.BitSetOld(tn, key, int64(bpos), 1)
 		assert.Nil(t, err)
 		assert.Equal(t, int64(0), n)
 		n, err = db.bitGetOld(key, int64(bpos))
@@ -318,7 +320,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	n, err = db.BitSetV2(0, key, bitmapSegBits, 1)
+	n, err = db.BitSetV2(tn, key, bitmapSegBits, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 	n, err = db.BitCountV2(key, 0, -1)
@@ -344,7 +346,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 		}
 	}
 	key = []byte("test:testdb_kv_bit_convert3")
-	err = db.KVSet(0, key, []byte("foobar"))
+	err = db.KVSet(tn, key, []byte("foobar"))
 	assert.Nil(t, err)
 	n, err = db.BitKeyExist(key)
 	assert.Nil(t, err)
@@ -365,7 +367,7 @@ func TestBitmapV2FromOld(t *testing.T) {
 	n, err = db.BitGetV2(key, 0)
 	assert.Nil(t, err)
 	// convert to new
-	n, err = db.BitSetV2(0, key, 0, int(n))
+	n, err = db.BitSetV2(tn, key, 0, int(n))
 	assert.Nil(t, err)
 
 	n, err = db.BitCountV2(key, 0, -1)
