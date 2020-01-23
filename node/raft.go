@@ -34,6 +34,7 @@ import (
 	"github.com/youzan/ZanRedisDB/pkg/types"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/settings"
 	"github.com/youzan/ZanRedisDB/snap"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"github.com/youzan/ZanRedisDB/wal"
@@ -41,20 +42,24 @@ import (
 	"golang.org/x/net/context"
 )
 
-const (
-	DefaultSnapCount = 160000
+var (
+	// DefaultSnapCount is the count for trigger snapshot
+	DefaultSnapCount = int(settings.Soft.DefaultSnapCount)
 
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
-	HealthInterval = 5 * time.Second
+	HealthInterval = time.Duration(settings.Soft.HealthIntervalSec) * time.Second
 
 	// max number of in-flight snapshot messages allows to have
-	maxInFlightMsgSnap        = 16
-	releaseDelayAfterSnapshot = 30 * time.Second
-	maxSizePerMsg             = 1024 * 1024
-	maxInflightMsgs           = 256
-	commitBufferLen           = 5000
+	maxInFlightMsgSnap = int(settings.Soft.MaxInFlightMsgSnap)
+	maxInflightMsgs    = settings.Soft.MaxInflightMsgs
 )
+
+const (
+	releaseDelayAfterSnapshot = 30 * time.Second
+)
+
+var errWALMetaMismatch = errors.New("wal meta mismatch config (maybe reused old deleted data)")
 
 type Snapshot interface {
 	GetData() ([]byte, error)
@@ -76,6 +81,7 @@ type DataStorage interface {
 	RestoreFromSnapshot(raftpb.Snapshot) error
 	PrepareSnapshot(raftpb.Snapshot) error
 	GetSnapshot(term uint64, index uint64) (Snapshot, error)
+	UpdateSnapshotState(term uint64, index uint64)
 	Stop()
 }
 
@@ -121,6 +127,9 @@ type raftNode struct {
 	lastLeaderChangedTs int64
 	stopping            int32
 	replayRunning       int32
+	busySnapshot        int32
+	loopServering       int32
+	lastPublished       uint64
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -131,7 +140,7 @@ type raftNode struct {
 func newRaftNode(rconfig *RaftConfig, transport *rafthttp.Transport,
 	join bool, ds DataStorage, rs raft.IExtRaftStorage, newLeaderChan chan string) (<-chan applyInfo, *raftNode, error) {
 
-	commitC := make(chan applyInfo, commitBufferLen)
+	commitC := make(chan applyInfo, settings.Soft.CommitBufferLen)
 	if rconfig.SnapCount <= 0 {
 		rconfig.SnapCount = DefaultSnapCount
 	}
@@ -252,7 +261,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 		m.GroupID != rc.config.GroupID {
 		w.Close()
 		nodeLog.Errorf("meta starting mismatch config: %v, %v", m, rc.config)
-		return err
+		return errWALMetaMismatch
 	}
 	if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
 		rs.WAL = w
@@ -336,15 +345,16 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 		elecTick = 10
 	}
 	c := &raft.Config{
-		ID:              uint64(rc.config.ID),
-		ElectionTick:    elecTick,
-		HeartbeatTick:   elecTick / 10,
-		Storage:         rc.raftStorage,
-		MaxSizePerMsg:   maxSizePerMsg,
-		MaxInflightMsgs: maxInflightMsgs,
-		CheckQuorum:     true,
-		PreVote:         true,
-		Logger:          nodeLog,
+		ID:                       uint64(rc.config.ID),
+		ElectionTick:             elecTick,
+		HeartbeatTick:            elecTick / 10,
+		Storage:                  rc.raftStorage,
+		MaxSizePerMsg:            settings.Soft.MaxSizePerMsg,
+		MaxInflightMsgs:          int(maxInflightMsgs),
+		MaxCommittedSizePerReady: settings.Soft.MaxCommittedSizePerReady,
+		CheckQuorum:              true,
+		PreVote:                  true,
+		Logger:                   nodeLog,
 		Group: raftpb.Group{NodeId: rc.config.nodeConfig.NodeID,
 			Name: rc.config.GroupName, GroupId: rc.config.GroupID,
 			RaftReplicaId: uint64(rc.config.ID)},
@@ -363,6 +373,8 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			rc.Infof("loading snapshot at term %d and index %d, snap: %v",
 				snapshot.Metadata.Term,
 				snapshot.Metadata.Index, snapshot.Metadata.ConfState)
+			// update the latest snapshot index for statemachine
+			rc.ds.UpdateSnapshotState(snapshot.Metadata.Term, snapshot.Metadata.Index)
 			err := rc.ds.PrepareSnapshot(*snapshot)
 			if err == nil {
 				if err := rc.ds.RestoreFromSnapshot(*snapshot); err != nil {
@@ -452,8 +464,7 @@ func (rc *raftNode) initForTransport() {
 }
 
 func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error {
-	var err error
-	err = rc.replayWAL(snapshot, false)
+	err := rc.replayWAL(snapshot, false)
 	if err != nil {
 		rc.Infof("restarting node failed to replay wal: %v", err.Error())
 		return err
@@ -464,8 +475,7 @@ func (rc *raftNode) restartNode(c *raft.Config, snapshot *raftpb.Snapshot) error
 }
 
 func (rc *raftNode) restartAsStandaloneNode(cfg *raft.Config, snapshot *raftpb.Snapshot) error {
-	var err error
-	err = rc.replayWAL(snapshot, true)
+	err := rc.replayWAL(snapshot, true)
 	if err != nil {
 		return err
 	}
@@ -672,6 +682,9 @@ func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftp
 			return
 		}
 
+		// update the latest snapshot index for statemachine
+		rc.ds.UpdateSnapshotState(snap.Metadata.Term, snap.Metadata.Index)
+
 		compactIndex := uint64(1)
 		if snapi > uint64(rc.config.SnapCatchup) {
 			compactIndex = snapi - uint64(rc.config.SnapCatchup)
@@ -694,8 +707,13 @@ func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftp
 func (rc *raftNode) publishEntries(ents []raftpb.Entry, snapshot raftpb.Snapshot, snapResult chan error,
 	raftDone chan struct{}, applyWaitDone chan struct{}) {
 	select {
-	case rc.commitC <- applyInfo{ents: ents, snapshot: snapshot, applySnapshotResult: snapResult,
-		raftDone: raftDone, applyWaitDone: applyWaitDone}:
+	case rc.commitC <- applyInfo{
+		ents:                ents,
+		snapshot:            snapshot,
+		applySnapshotResult: snapResult,
+		raftDone:            raftDone,
+		applyWaitDone:       applyWaitDone,
+	}:
 	case <-rc.stopc:
 		return
 	}
@@ -812,10 +830,16 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 	return false, confChanged, nil
 }
 
+func (rc *raftNode) isServerRunning() bool {
+	return atomic.LoadInt32(&rc.loopServering) == 1
+}
+
 func (rc *raftNode) serveChannels() {
 	purgeDone := make(chan struct{})
 	raftReadyLoopC := make(chan struct{})
 	go rc.purgeFile(purgeDone, raftReadyLoopC)
+	atomic.StoreInt32(&rc.loopServering, 1)
+	defer atomic.StoreInt32(&rc.loopServering, 0)
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -845,11 +869,15 @@ func (rc *raftNode) serveChannels() {
 		case <-rc.stopc:
 			return
 		case <-rc.node.EventNotifyCh():
-			rd, hasUpdate := rc.node.StepNode()
+			moreEntriesToApply := cap(rc.commitC)-len(rc.commitC) > 3
+			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, rc.IsBusySnapshot())
 			if !hasUpdate {
 				continue
 			}
 			rc.processReady(rd)
+			if rd.MoreCommittedEntries {
+				rc.node.NotifyEventCh()
+			}
 		}
 	}
 }
@@ -903,12 +931,32 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		applySnapshotTransferResult = make(chan error, 1)
 	}
-
-	// TODO: do we need publish entry if commitedentries and snapshot is empty?
-	rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
+	processedMsgs, hasRequestSnapMsg := rc.processMessages(rd.Messages)
+	if len(rd.CommittedEntries) > 0 || !raft.IsEmptySnap(rd.Snapshot) || hasRequestSnapMsg {
+		var newPublished uint64
+		if !raft.IsEmptySnap(rd.Snapshot) {
+			newPublished = rd.Snapshot.Metadata.Index
+		}
+		if len(rd.CommittedEntries) > 0 {
+			firsti := rd.CommittedEntries[0].Index
+			if rc.lastPublished != 0 && firsti > rc.lastPublished+1 {
+				e := fmt.Sprintf("%v first index of committed entry[%d] should <= last published[%d] + 1, snap: %v",
+					rc.Descrp(), firsti, rc.lastPublished, rd.Snapshot.Metadata.String())
+				rc.Errorf("%s", e)
+				rc.Errorf("raft node status: %v", rc.node.DebugString())
+			}
+			newPublished = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+		}
+		rc.lastPublished = newPublished
+		rc.publishEntries(rd.CommittedEntries, rd.Snapshot, applySnapshotTransferResult, raftDone, applyWaitDone)
+	}
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		// since the snapshot only has metadata, we need rsync the real snapshot data first.
 		// if the real snapshot failed to pull, we need stop raft and retry restart later.
+
+		// fixme: this is not the best way since it will block the raft loop, ideally we should
+		// have the full snap data while receiving the snapshot request and we save to raft. Then
+		// we can make it async while applying on local without blocking raft loop (just pause the entries apply)
 		rc.Infof("raft begin to transfer incoming snapshot : %v", rd.Snapshot.String())
 		select {
 		case applyErr := <-applySnapshotTransferResult:
@@ -924,15 +972,20 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		rc.Infof("raft transfer incoming snapshot done : %v", rd.Snapshot.String())
 	}
 	if isMeNewLeader {
-		rc.transport.Send(rc.processMessages(rd.Messages))
+		rc.transport.Send(processedMsgs)
 	}
 
+	start := time.Now()
 	// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
 	if err := rc.persistRaftState(&rd); err != nil {
 		nodeLog.Errorf("raft save states to disk error: %v", err)
 		go rc.ds.Stop()
 		<-rc.stopc
 		return
+	}
+	cost := time.Since(start)
+	if cost >= raftSlow {
+		rc.Infof("raft persist state slow: %v, cost: %v", len(rd.Entries), cost)
 	}
 
 	if !raft.IsEmptySnap(rd.Snapshot) {
@@ -950,24 +1003,27 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	rc.raftStorage.Append(rd.Entries)
 
 	if !isMeNewLeader {
-		msgs := rc.processMessages(rd.Messages)
 		raftDone <- struct{}{}
 		if waitApply {
 			s := time.Now()
 			// wait and handle pending config change
-			select {
-			case cc := <-rc.node.ConfChangedCh():
-				rc.node.HandleConfChanged(cc)
-			case <-applyWaitDone:
-			case <-rc.stopc:
-				return
+			confDone := false
+			for !confDone {
+				select {
+				case cc := <-rc.node.ConfChangedCh():
+					rc.node.HandleConfChanged(cc)
+				case <-applyWaitDone:
+					confDone = true
+				case <-rc.stopc:
+					return
+				}
 			}
 			cost := time.Since(s)
 			if cost > time.Second {
-				nodeLog.Infof("wait apply %v msgs done cost: %v", len(msgs), cost.String())
+				nodeLog.Infof("wait apply %v msgs done cost: %v", len(processedMsgs), cost.String())
 			}
 		}
-		rc.transport.Send(msgs)
+		rc.transport.Send(processedMsgs)
 	} else {
 		raftDone <- struct{}{}
 	}
@@ -988,6 +1044,8 @@ func (rc *raftNode) persistRaftState(rd *raft.Ready) error {
 			return err
 		}
 		rc.Infof("raft persist snapshot meta done : %v", rd.Snapshot.String())
+		// update the latest snapshot index for statemachine
+		rc.ds.UpdateSnapshotState(rd.Snapshot.Metadata.Term, rd.Snapshot.Metadata.Index)
 	}
 	return nil
 }
@@ -1010,8 +1068,9 @@ func (rc *raftNode) processReadStates(rd *raft.Ready) {
 	}
 }
 
-func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
+func (rc *raftNode) processMessages(msgs []raftpb.Message) ([]raftpb.Message, bool) {
 	sentAppResp := false
+	hasSnapMsg := false
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Type == raftpb.MsgAppResp {
 			if sentAppResp {
@@ -1026,6 +1085,7 @@ func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 			rc.Infof("some node request snapshot: %v", msgs[i].String())
 			select {
 			case rc.msgSnapC <- msgs[i]:
+				hasSnapMsg = true
 			default:
 				// drop msgSnap if the inflight chan if full.
 			}
@@ -1036,7 +1096,7 @@ func (rc *raftNode) processMessages(msgs []raftpb.Message) []raftpb.Message {
 			rc.Infof("process vote/prevote :%v ", msgs[i].String())
 		}
 	}
-	return msgs
+	return msgs, hasSnapMsg
 }
 
 func (rc *raftNode) Lead() uint64  { return atomic.LoadUint64(&rc.lead) }
@@ -1189,6 +1249,18 @@ func (rc *raftNode) triggerLeaderChanged() {
 	case rc.newLeaderChan <- rc.config.GroupName:
 	case <-rc.stopc:
 	}
+}
+
+func (rc *raftNode) SetPrepareSnapshot(busy bool) {
+	if busy {
+		atomic.StoreInt32(&rc.busySnapshot, 1)
+	} else {
+		atomic.StoreInt32(&rc.busySnapshot, 0)
+	}
+}
+
+func (rc *raftNode) IsBusySnapshot() bool {
+	return atomic.LoadInt32(&rc.busySnapshot) == 1
 }
 
 func (rc *raftNode) ReportUnreachable(id uint64, group raftpb.Group) {

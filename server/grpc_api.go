@@ -47,6 +47,9 @@ func (s *Server) GetSyncedRaft(ctx context.Context, req *syncerpb.SyncedRaftReq)
 func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*syncerpb.RpcErr, error) {
 	var rpcErr syncerpb.RpcErr
 	receivedTs := time.Now()
+	// TODO: to speed up we can use pipeline write, propose all raft logs to raft buffer and wait
+	// all raft responses. However, it may make it unordered if part of them failed and retry. Maybe 
+	// combine them to a single raft proposal.
 	for _, r := range reqs.RaftLog {
 		if sLog.Level() >= common.LOG_DETAIL {
 			sLog.Debugf("applying raft log from remote cluster syncer: %v", r.String())

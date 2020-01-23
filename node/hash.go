@@ -8,12 +8,20 @@ import (
 )
 
 func (nd *KVNode) hgetCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, err := nd.store.HGet(cmd.Args[1], cmd.Args[2])
-	if err != nil || val == nil {
-		conn.WriteNull()
-	} else {
-		conn.WriteBulk(val)
+	err := nd.store.HGetWithOp(cmd.Args[1], cmd.Args[2], func(val []byte) error {
+		if val == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(val)
+			// since val will be freed, we need flush before return
+			conn.Flush()
+		}
+		return nil
+	})
+	if err != nil {
+		conn.WriteError(err.Error())
 	}
+	return
 }
 
 func (nd *KVNode) hgetallCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -54,8 +62,8 @@ func (nd *KVNode) hvalsCommand(conn redcon.Conn, cmd redcon.Command) {
 }
 
 func (nd *KVNode) hexistsCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, err := nd.store.HGet(cmd.Args[1], cmd.Args[2])
-	if err != nil || val == nil {
+	val, err := nd.store.HExist(cmd.Args[1], cmd.Args[2])
+	if err != nil || !val {
 		conn.WriteInt(0)
 	} else {
 		conn.WriteInt(1)
@@ -80,50 +88,6 @@ func (nd *KVNode) hlenCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteInt(0)
 	} else {
 		conn.WriteInt64(val)
-	}
-}
-
-func (nd *KVNode) hsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hsetnxCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hmsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) hdelCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hincrbyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) hclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
 	}
 }
 

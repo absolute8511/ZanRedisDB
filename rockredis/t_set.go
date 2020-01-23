@@ -222,7 +222,7 @@ func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.Wr
 	ek := sEncodeSetKey(table, rk, member)
 
 	var n int64 = 1
-	if v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); v != nil {
+	if vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, ek); vok {
 		n = 0
 	} else {
 		if newNum, err := db.sIncrSize(ts, key, oldh, 1, wb); err != nil {
@@ -230,9 +230,9 @@ func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.Wr
 		} else if newNum == 1 {
 			db.IncrTableKeyCount(table, 1, wb)
 		}
+		wb.Put(ek, nil)
 	}
 
-	wb.Put(ek, nil)
 	return n, nil
 }
 
@@ -262,13 +262,13 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}
 		ek = sEncodeSetKey(table, rk, args[i])
 
-		// TODO: how to tell not found and nil value (member value is also nil)
-		if v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
+		// must use exist to tell the different of not found and nil value (member value is also nil)
+		if vok, err := db.eng.ExistNoLock(db.defaultReadOpts, ek); err != nil {
 			return 0, err
-		} else if v == nil {
+		} else if !vok {
 			num++
+			wb.Put(ek, nil)
 		}
-		wb.Put(ek, nil)
 	}
 
 	if newNum, err := db.sIncrSize(ts, key, oldh, num, wb); err != nil {
@@ -326,9 +326,9 @@ func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
 	ek := sEncodeSetKey(table, rk, member)
 
 	var n int64 = 1
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, ek); err != nil {
+	if vok, err := db.eng.Exist(db.defaultReadOpts, ek); err != nil {
 		return 0, err
-	} else if v == nil {
+	} else if !vok {
 		n = 0
 	}
 	return n, nil
@@ -404,7 +404,6 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	rk = db.expiration.encodeToVersionKey(SetType, oldh, rk)
 
 	var ek []byte
-	var v []byte
 
 	var num int64 = 0
 	for i := 0; i < len(args); i++ {
@@ -413,8 +412,8 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}
 
 		ek = sEncodeSetKey(table, rk, args[i])
-		v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
-		if v == nil {
+		vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, ek)
+		if !vok {
 			continue
 		} else {
 			num++

@@ -39,6 +39,22 @@ func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
 	return testDB
 }
 
+func getTestDBForBench() *RockDB {
+	cfg := NewRockRedisDBConfig()
+	cfg.EnableTableCounter = true
+	cfg.EnablePartitionedIndexFilter = true
+	var err error
+	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	if err != nil {
+		panic(err)
+	}
+	testDB, err := OpenRockDB(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return testDB
+}
+
 func getTestDB(t *testing.T) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
@@ -689,4 +705,63 @@ func testRockDBScanTableForZSet(t *testing.T, reverse bool) {
 	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
 	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
 	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
+}
+
+func Test_purgeOldCheckpoint(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("sm-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	defer os.RemoveAll(tmpDir)
+	t.Logf("dir:%v\n", tmpDir)
+	term := uint64(0x011a)
+	index := uint64(0x0c000)
+	cntIdx := 25
+
+	type args struct {
+		keepNum         int
+		checkpointDir   string
+		latestSnapIndex uint64
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{"keep0_1", args{0, "keep0_1dir", index + 1}},
+		{"keep0_2", args{0, "keep0_2dir", index + 2}},
+		{"keep0_10", args{0, "keep0_10dir", index + 10}},
+		{"keep0_max", args{0, "keep0_maxdir", index + uint64(cntIdx)}},
+		{"keep1_1", args{1, "keep1_1dir", index + 1}},
+		{"keep1_2", args{1, "keep1_2dir", index + 2}},
+		{"keep1_10", args{1, "keep1_10dir", index + 10}},
+		{"keep1_max", args{1, "keep1_maxdir", index + uint64(cntIdx)}},
+		{"keep10_1", args{10, "keep10_1dir", index + 1}},
+		{"keep10_2", args{10, "keep10_2dir", index + 2}},
+		{"keep10_10", args{10, "keep10_10dir", index + 10}},
+		{"keep10_max", args{10, "keep10_maxdir", index + uint64(cntIdx)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checkDir := path.Join(tmpDir, tt.args.checkpointDir)
+			fns := make([]string, 0, cntIdx)
+			fnIndexes := make([]uint64, 0, cntIdx)
+			for j := 0; j < cntIdx; j++ {
+				idx := index + uint64(j)
+				p := path.Join(checkDir, fmt.Sprintf("%04x-%05x", term, idx))
+				err := os.MkdirAll(p, 0755)
+				assert.Nil(t, err)
+				fns = append(fns, p)
+				fnIndexes = append(fnIndexes, idx)
+			}
+			purgeOldCheckpoint(tt.args.keepNum, checkDir, tt.args.latestSnapIndex)
+			for i, fn := range fns {
+				_, err := os.Stat(fn)
+				t.Logf("checking file: %v, %v", fn, err)
+				if int64(fnIndexes[i]) >= int64(tt.args.latestSnapIndex)-int64(tt.args.keepNum) {
+					assert.Nil(t, err)
+					continue
+				}
+				assert.True(t, os.IsNotExist(err), "should not keep")
+			}
+		})
+	}
 }

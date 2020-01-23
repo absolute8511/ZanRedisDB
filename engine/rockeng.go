@@ -62,9 +62,7 @@ func FillDefaultOptions(opts *RockOptions) {
 	if opts.BlockSize <= 0 {
 		// for hdd use 64KB and above
 		// for ssd use 32KB and below
-		// for point lookup use small such as: 4KB~16KB
-		// for scan use large : 32KB
-		opts.BlockSize = 1024 * 16
+		opts.BlockSize = 1024 * 8
 	}
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
@@ -495,4 +493,24 @@ func (r *RockEng) GetInternalStatus() map[string]interface{} {
 
 func (r *RockEng) GetInternalPropertyStatus(p string) string {
 	return r.eng.GetProperty(p)
+}
+
+func (r *RockEng) GetValueWithOp(opts *gorocksdb.ReadOptions, key []byte,
+	op func([]byte) error) error {
+	val, err := r.eng.Get(opts, key)
+	if err != nil {
+		return err
+	}
+	defer val.Free()
+	return op(val.Data())
+}
+
+func (r *RockEng) GetValueWithOpNoLock(opts *gorocksdb.ReadOptions, key []byte,
+	op func([]byte) error) error {
+	val, err := r.eng.GetNoLock(opts, key)
+	if err != nil {
+		return err
+	}
+	defer val.Free()
+	return op(val.Data())
 }

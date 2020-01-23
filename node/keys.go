@@ -11,7 +11,7 @@ import (
 )
 
 func (nd *KVNode) Lookup(key []byte) ([]byte, error) {
-	_, key, err := common.ExtractNamesapce(key)
+	key, err := common.CutNamesapce(key)
 	if err != nil {
 		return nil, err
 	}
@@ -20,13 +20,45 @@ func (nd *KVNode) Lookup(key []byte) ([]byte, error) {
 	return v, err
 }
 
-func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
-	val, err := nd.store.KVGet(cmd.Args[1])
-	if err != nil || val == nil {
-		conn.WriteNull()
-	} else {
-		conn.WriteBulk(val)
+func (nd *KVNode) getNoLockCommand(conn redcon.Conn, cmd redcon.Command) {
+	err := nd.store.GetValueWithOpNoLock(cmd.Args[1], func(val []byte) error {
+		if val == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(val)
+			// since val will be freed, we need flush before return
+			conn.Flush()
+		}
+		return nil
+	})
+	if err != nil {
+		conn.WriteError(err.Error())
 	}
+}
+
+func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
+	err := nd.store.GetValueWithOp(cmd.Args[1], func(val []byte) error {
+		if val == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(val)
+			// since val will be freed, we need flush before return
+			conn.Flush()
+		}
+		return nil
+	})
+	if err != nil {
+		conn.WriteError(err.Error())
+	}
+}
+
+func (nd *KVNode) strlenCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, err := nd.store.StrLen(cmd.Args[1])
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteInt64(val)
 }
 
 func (nd *KVNode) existsCommand(cmd redcon.Command) (interface{}, error) {
@@ -44,7 +76,7 @@ func (nd *KVNode) getbitCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError(err.Error())
 		return
 	}
-	val, err := nd.store.BitGet(cmd.Args[1], offset)
+	val, err := nd.store.BitGetV2(cmd.Args[1], offset)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -71,7 +103,7 @@ func (nd *KVNode) bitcountCommand(conn redcon.Conn, cmd redcon.Command) {
 			return
 		}
 	}
-	val, err := nd.store.BitCount(cmd.Args[1], int(start), int(end))
+	val, err := nd.store.BitCountV2(cmd.Args[1], int(start), int(end))
 	if err != nil {
 		conn.WriteError(err.Error())
 		return
@@ -102,115 +134,49 @@ func (nd *KVNode) pfcountCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) setCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) setRangeCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) appendCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) getsetCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if v == nil {
-		conn.WriteNull()
-		return
-	}
-	if rsp, ok := v.([]byte); ok {
-		conn.WriteBulk(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) setnxCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) setnxCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 3 {
-		conn.WriteError("ERR wrong number arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
-	val, err := nd.store.KVGet(cmd.Args[1])
-	if err != nil || val == nil {
-	} else {
+	ex, _ := nd.store.KVExists(cmd.Args[1])
+	if ex == 1 {
 		// already exist
-		conn.WriteInt64(0)
-		return
+		return int64(0), nil
 	}
-	cmd, rsp, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+
+	cmd, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	if err != nil {
+		return nil, err
 	}
-	if rspV, ok := rsp.(int64); ok {
-		conn.WriteInt64(rspV)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
+	return rsp, nil
 }
 
-func (nd *KVNode) setbitCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) setbitCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError(errWrongNumberArgs.Error())
-		return
+		return nil, errWrongNumberArgs
 	}
 
 	offset, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return nil, err
 	}
 	on, err := strconv.ParseInt(string(cmd.Args[3]), 10, 64)
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return nil, err
 	}
-	if offset > rockredis.MaxBitOffset {
-		conn.WriteError(rockredis.ErrBitOverflow.Error())
-		return
+	if offset > rockredis.MaxBitOffset || offset < 0 {
+		return nil, rockredis.ErrBitOverflow
 	}
 	if (on & ^1) != 0 {
-		conn.WriteError(fmt.Errorf("bit should be 0 or 1, got %d", on).Error())
-		return
+		return nil, fmt.Errorf("bit should be 0 or 1, got %d", on)
 	}
 
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	if err != nil {
+		return nil, err
 	}
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) msetCommand(cmd redcon.Command, v interface{}) (interface{}, error) {
-	return nil, nil
-}
-
-func (nd *KVNode) incrCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) incrbyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
+	return v, nil
 }
 
 func (nd *KVNode) delCommand(cmd redcon.Command, v interface{}) (interface{}, error) {
@@ -218,14 +184,6 @@ func (nd *KVNode) delCommand(cmd redcon.Command, v interface{}) (interface{}, er
 		return rsp, nil
 	} else {
 		return nil, errInvalidResponse
-	}
-}
-
-func (nd *KVNode) pfaddCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
 	}
 }
 
@@ -302,7 +260,7 @@ func (kvsm *kvStoreSM) localBitSetCommand(cmd redcon.Command, ts int64) (interfa
 	if err != nil {
 		return 0, err
 	}
-	return kvsm.store.BitSet(ts, cmd.Args[1], offset, int(on))
+	return kvsm.store.BitSetOld(ts, cmd.Args[1], offset, int(on))
 }
 
 func (kvsm *kvStoreSM) localAppendCommand(cmd redcon.Command, ts int64) (interface{}, error) {

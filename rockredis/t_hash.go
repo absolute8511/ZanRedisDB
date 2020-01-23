@@ -105,7 +105,6 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 	if err != nil {
 		return 0, err
 	}
-
 	ek := hEncodeHashKey(table, rk, field)
 
 	tsBuf := PutInt64(ts)
@@ -307,6 +306,33 @@ func (db *RockDB) hGetRawFieldValue(ts int64, key []byte, field []byte, checkExp
 	}
 }
 
+func (db *RockDB) hExistRawField(ts int64, key []byte, field []byte, checkExpired bool, useLock bool) (bool, error) {
+	if err := checkCollKFSize(key, field); err != nil {
+		return false, err
+	}
+	oldh, _, expired, err := db.hHeaderMeta(ts, key, useLock)
+	if err != nil {
+		return false, err
+	}
+	if checkExpired && expired {
+		return false, nil
+	}
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return false, err
+	}
+	rk = db.expiration.encodeToVersionKey(HashType, oldh, rk)
+	ek := hEncodeHashKey(table, rk, field)
+
+	if useLock {
+		v, err := db.eng.Exist(db.defaultReadOpts, ek)
+		return v, err
+	} else {
+		v, err := db.eng.ExistNoLock(db.defaultReadOpts, ek)
+		return v, err
+	}
+}
+
 func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
 	v, err := db.hGetRawFieldValue(0, key, field, false, true)
 	var ts uint64
@@ -316,6 +342,33 @@ func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
 	return int64(ts), err
 }
 
+func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) error {
+	tn := time.Now().UnixNano()
+	if err := checkCollKFSize(key, field); err != nil {
+		return err
+	}
+	oldh, _, expired, err := db.hHeaderMeta(tn, key, true)
+	if err != nil {
+		return err
+	}
+	if expired {
+		return nil
+	}
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return err
+	}
+	rk = db.expiration.encodeToVersionKey(HashType, oldh, rk)
+	ek := hEncodeHashKey(table, rk, field)
+
+	return db.rockEng.GetValueWithOp(db.defaultReadOpts, ek, func(v []byte) error {
+		if len(v) >= tsLen {
+			v = v[:len(v)-tsLen]
+		}
+		return op(v)
+	})
+}
+
 func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 	tn := time.Now().UnixNano()
 	v, err := db.hGetRawFieldValue(tn, key, field, true, true)
@@ -323,6 +376,12 @@ func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 		v = v[:len(v)-tsLen]
 	}
 	return v, err
+}
+
+func (db *RockDB) HExist(key []byte, field []byte) (bool, error) {
+	tn := time.Now().UnixNano()
+	vok, err := db.hExistRawField(tn, key, field, true, true)
+	return vok, err
 }
 
 func (db *RockDB) HKeyExists(key []byte) (int64, error) {
@@ -388,7 +447,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	var newNum int64 = -1
 	rk = db.expiration.encodeToVersionKey(HashType, oldh, rk)
 	for i := 0; i < len(args); i++ {
-		if err := checkCollKFSize(rk, args[i]); err != nil {
+		if err := checkKeySubKey(rk, args[i]); err != nil {
 			return 0, err
 		}
 
@@ -451,7 +510,7 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 		defer it.Close()
 
 		for ; it.Valid(); it.Next() {
-			rawk := it.RefKey()
+			rawk := it.Key()
 			if hlen <= RangeDeleteNum {
 				wb.Delete(rawk)
 			}

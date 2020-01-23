@@ -37,15 +37,6 @@ const (
 	zsetMemSep   byte = ':'
 )
 
-func checkZSetKMSize(key []byte, member []byte) error {
-	if len(key) > MaxKeySize || len(key) == 0 {
-		return errKeySize
-	} else if len(member) > MaxZSetMemberSize {
-		return errZSetMemberSize
-	}
-	return nil
-}
-
 func zEncodeSizeKey(key []byte) []byte {
 	buf := make([]byte, len(key)+1+len(metaPrefix))
 	pos := 0
@@ -72,7 +63,7 @@ func convertRedisKeyToDBZSetKey(key []byte, member []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkZSetKMSize(rk, member); err != nil {
+	if err := checkKeySubKey(rk, member); err != nil {
 		return nil, err
 	}
 	return zEncodeSetKey(table, rk, member), nil
@@ -83,7 +74,7 @@ func convertRedisKeyToDBZScoreKey(key []byte, member []byte, score float64) ([]b
 	if err != nil {
 		return nil, err
 	}
-	if err := checkZSetKMSize(rk, member); err != nil {
+	if err := checkKeySubKey(rk, member); err != nil {
 		return nil, err
 	}
 	return zEncodeScoreKey(false, false, table, rk, member, score), nil
@@ -307,7 +298,7 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 		score := args[i].Score
 		member := args[i].Member
 
-		if err := checkZSetKMSize(key, member); err != nil {
+		if err := checkKeySubKey(key, member); err != nil {
 			return 0, err
 		}
 		if n, err := db.zSetItem(key, score, member, wb); err != nil {
@@ -446,14 +437,16 @@ func (db *RockDB) ZScore(key []byte, member []byte) (float64, error) {
 	if err != nil {
 		return score, err
 	}
-	if v, err := db.eng.GetBytes(db.defaultReadOpts, k); err != nil {
+	refv, err := db.eng.Get(db.defaultReadOpts, k)
+	if err != nil {
 		return score, err
-	} else if v == nil {
+	}
+	defer refv.Free()
+	if refv.Data() == nil {
 		return score, errScoreMiss
-	} else {
-		if score, err = Float64(v, nil); err != nil {
-			return score, err
-		}
+	}
+	if score, err = Float64(refv.Data(), nil); err != nil {
+		return score, err
 	}
 	return score, nil
 }
@@ -475,7 +468,7 @@ func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 
 	var num int64 = 0
 	for i := 0; i < len(members); i++ {
-		if err := checkZSetKMSize(key, members[i]); err != nil {
+		if err := checkKeySubKey(key, members[i]); err != nil {
 			return 0, err
 		}
 		if n, err := db.zDelItem(key, members[i], wb); err != nil {
@@ -498,7 +491,7 @@ func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 
 func (db *RockDB) ZIncrBy(ts int64, key []byte, delta float64, member []byte) (float64, error) {
 	var score float64
-	if err := checkZSetKMSize(key, member); err != nil {
+	if err := checkKeySubKey(key, member); err != nil {
 		return score, err
 	}
 	table, rk, err := extractTableFromRedisKey(key)
@@ -569,7 +562,7 @@ func (db *RockDB) ZCount(key []byte, min float64, max float64) (int64, error) {
 }
 
 func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) {
-	if err := checkZSetKMSize(key, member); err != nil {
+	if err := checkKeySubKey(key, member); err != nil {
 		return 0, err
 	}
 
@@ -607,7 +600,7 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 			var n int64 = 0
 
 			for ; rit.Valid(); rit.Next() {
-				rawk := rit.RefKey()
+				rawk := rit.Key()
 				n++
 				lastKey = lastKey[0:0]
 				lastKey = append(lastKey, rawk...)
@@ -749,6 +742,7 @@ func (db *RockDB) zRangeBytes(preCheckCnt bool, key []byte, minKey []byte, maxKe
 		nv = MAX_BATCH_NUM
 	}
 
+	// TODO: use buf pool
 	v := make([]common.ScorePair, 0, nv)
 
 	var err error
@@ -1147,8 +1141,8 @@ func (db *RockDB) ZKeyExists(key []byte) (int64, error) {
 		return 0, err
 	}
 	sk := zEncodeSizeKey(key)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
-	if v != nil && err == nil {
+	vok, err := db.eng.Exist(db.defaultReadOpts, sk)
+	if vok && err == nil {
 		return 1, nil
 	}
 	return 0, err

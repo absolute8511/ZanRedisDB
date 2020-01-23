@@ -7,14 +7,10 @@ const (
 	collStopSep  byte = collStartSep + 1
 )
 
-var (
-	errSubKeySize = errors.New("invalid sub key size")
-)
-
 func checkCollKFSize(key []byte, field []byte) error {
 	if len(key) > MaxKeySize || len(key) == 0 {
 		return errKeySize
-	} else if len(field) > MaxHashFieldSize {
+	} else if len(field) > MaxSubKeyLen {
 		return errSubKeySize
 	}
 	return nil

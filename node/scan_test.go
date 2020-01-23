@@ -42,14 +42,22 @@ func TestKVNode_scanCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	for _, cmd := range tests {
 		c.Reset()
-		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
+		handler, _ := nd.router.GetCmdHandler(cmd.name)
 		if handler != nil {
 			handler(c, cmd.args)
 			assert.Nil(t, c.GetError())
 		} else {
-			mhandler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
-			_, err := mhandler(cmd.args)
-			assert.Nil(t, err)
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			if whandler != nil {
+				rsp, err := whandler(cmd.args)
+				assert.Nil(t, err)
+				_, ok := rsp.(error)
+				assert.True(t, !ok)
+			} else {
+				mhandler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
+				_, err := mhandler(cmd.args)
+				assert.Nil(t, err)
+			}
 		}
 	}
 }

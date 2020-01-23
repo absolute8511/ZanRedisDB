@@ -531,7 +531,7 @@ func GetHashedPartitionID(pk []byte, pnum int) int {
 	return int(murmur3.Sum32(pk)) % pnum
 }
 
-func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []byte) (*NamespaceNode, error) {
+func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKeySum(nsBaseName string, pk []byte, pkSum int) (*NamespaceNode, error) {
 	nsm.mutex.RLock()
 	defer nsm.mutex.RUnlock()
 	v, ok := nsm.nsMetas[nsBaseName]
@@ -539,7 +539,7 @@ func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []
 		nodeLog.Infof("namespace %v meta not found", nsBaseName)
 		return nil, ErrNamespaceNotFound
 	}
-	pid := GetHashedPartitionID(pk, v.PartitionNum)
+	pid := pkSum % v.PartitionNum
 	fullName := common.GetNsDesp(nsBaseName, pid)
 	n, ok := nsm.kvNodes[fullName]
 	if !ok {
@@ -550,6 +550,11 @@ func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []
 		return nil, ErrRaftGroupNotReady
 	}
 	return n, nil
+}
+
+func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []byte) (*NamespaceNode, error) {
+	pkSum := int(murmur3.Sum32(pk))
+	return nsm.GetNamespaceNodeWithPrimaryKeySum(nsBaseName, pk, pkSum)
 }
 
 func (nsm *NamespaceMgr) GetNamespaceNodes(nsBaseName string, leaderOnly bool) (map[string]*NamespaceNode, error) {

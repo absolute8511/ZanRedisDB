@@ -58,12 +58,12 @@
   version = "v0.1.1"
 
 [[projects]]
-  digest = "1:b5cc037a300f39b1bf24d682304fabead140413bf7f7c8e8386d52d7d7b6b0e1"
+  digest = "1:ec75d8578bd091cfe4dbe39549cb1ddedbe4d42bb23e5be1120c456765ba9fe4"
   name = "github.com/absolute8511/redcon"
   packages = ["."]
   pruneopts = "UT"
-  revision = "8afd629b936ec06f454d233713029f9db326e56d"
-  version = "v0.8.0"
+  revision = "4fd4d25c0b1c5ae06aa70ec7566517bd2afbb3a2"
+  version = "v0.9.1"
 
 [[projects]]
   digest = "1:5ced5e29b089c54190dae59246df1bd96d38fb89a92b4d51fd3fc22facded871"
@@ -294,7 +294,7 @@
   version = "v0.2.3"
 
 [[projects]]
-  digest = "1:8f13f978d35181fada0ea713c14a224f2b329fa91c13438b2811331ecd8b16e1"
+  digest = "1:4652941215f23c7ad6546bab86964c72248a1134baa53f0df618661344ba5cac"
   name = "github.com/gogo/protobuf"
   packages = [
     "gogoproto",
@@ -302,11 +302,11 @@
     "protoc-gen-gogo/descriptor",
   ]
   pruneopts = "UT"
-  revision = "1adfc126b41513cc696b209667c8656ea7aac67c"
-  version = "v1.0.0"
+  revision = "ba06b47c162d49f2af050fb4c75bcbc86a159d5c"
+  version = "v1.2.1"
 
 [[projects]]
-  digest = "1:69d5e4ea47a10826ceeacc88f99b1f3e509b07690cee667d70e13b5dd505bdcc"
+  digest = "1:9d6dc4d6de69b330d0de86494d6db90c09848c003d5db748f40c925f865c8534"
   name = "github.com/golang/protobuf"
   packages = [
     "jsonpb",
@@ -318,8 +318,8 @@
     "ptypes/timestamp",
   ]
   pruneopts = "UT"
-  revision = "b4deda0973fb4c70b50d226b1af49f3da59f5265"
-  version = "v1.1.0"
+  revision = "aa810b61a9c79d51363740d207bb46cf8e620ed5"
+  version = "v1.2.0"
 
 [[projects]]
   digest = "1:e4f5819333ac698d294fe04dbf640f84719658d5c7ce195b10060cc37292ce79"
@@ -724,7 +724,7 @@
     "github.com/dgraph-io/badger/options",
     "github.com/gobwas/glob",
     "github.com/gogo/protobuf/gogoproto",
-    "github.com/golang/protobuf/proto",
+    "github.com/gogo/protobuf/proto",
     "github.com/golang/snappy",
     "github.com/hashicorp/golang-lru",
     "github.com/judwhite/go-svc/svc",

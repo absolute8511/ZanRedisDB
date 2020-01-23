@@ -21,24 +21,24 @@ apt-get install libsnappy1 libsnappy-dev (for Debian/Ubuntu)
 brew install snappy (for Mac)
 </pre>
 
-Build the rocksdb 
+Build the rocksdb with jemalloc
 <pre>
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
 git checkout v5.18-patched
-make static_lib
+WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 </pre>
 
-Install the dependency:
+Install the dependency (for old go version only, if using go1.13+, it will be done in go modules):
 <pre>
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/youzan/gorocksdb
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -ljemalloc" go get github.com/youzan/gorocksdb
 
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy" go get github.com/youzan/gorocksdb (for MacOS)
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -ljemalloc" go get github.com/youzan/gorocksdb (for MacOS)
 </pre>
 
-use the `dep ensure` to install other dependencies
+use the `dep ensure` to install other dependencies or use go modules for go1.13+
 
-Build zankv and placedriver from the source (only support go version 1.9+, gcc 4.9+ or xcode-command-line-tools on Mac):
+Build zankv and placedriver from the source (only support go version 1.10+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
 ROCKSDB=/path/to/rocksdb make
 </pre>
@@ -63,6 +63,7 @@ ROCKSDB=/path/to/rocksdb ./dist.sh
  * Setting `vm.min_free_kbytes` to at least 1GB (8GB on larger memory system)
  * Disable NUMA zone reclaim with `vm.zone_reclaim_mode=0`
  * Disable THP(transparent huge pages)
+ * Avoid the tcp delay ack by `echo 4 > /proc/sys/net/ipv4/tcp_delack_min` (for old OS only)
 
 
 ## API

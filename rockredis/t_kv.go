@@ -123,8 +123,8 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	delCnt := int64(1)
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
-			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
-			if v != nil {
+			vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, key)
+			if vok {
 				db.IncrTableKeyCount(table, -1, db.wb)
 			} else {
 				delCnt = int64(0)
@@ -151,8 +151,8 @@ func (db *RockDB) KVDelWithBatch(key []byte, wb *gorocksdb.WriteBatch) error {
 	}
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
-			v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
-			if v != nil {
+			vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, key)
+			if vok {
 				db.IncrTableKeyCount(table, -1, wb)
 			}
 		} else {
@@ -195,6 +195,20 @@ func (db *RockDB) DelKeys(keys ...[]byte) (int64, error) {
 }
 
 func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
+	if len(keys) == 1 {
+		_, kk, err := convertRedisKeyToDBKVKey(keys[0])
+		if err != nil {
+			return 0, err
+		}
+		vok, err := db.eng.Exist(db.defaultReadOpts, kk)
+		if err != nil {
+			return 0, err
+		}
+		if vok {
+			return 1, nil
+		}
+		return 0, nil
+	}
 	keyList := make([][]byte, len(keys))
 	valueList := make([][]byte, len(keys))
 	errs := make([]error, len(keys))
@@ -233,6 +247,34 @@ func (db *RockDB) KVGetVer(key []byte) (int64, error) {
 		ts, err = Uint64(v[len(v)-tsLen:], err)
 	}
 	return int64(ts), err
+}
+
+func (db *RockDB) GetValueWithOpNoLock(key []byte,
+	op func([]byte) error) error {
+	_, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return err
+	}
+	return db.rockEng.GetValueWithOpNoLock(db.defaultReadOpts, key, func(v []byte) error {
+		if len(v) >= tsLen {
+			v = v[:len(v)-tsLen]
+		}
+		return op(v)
+	})
+}
+
+func (db *RockDB) GetValueWithOp(key []byte,
+	op func([]byte) error) error {
+	_, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return err
+	}
+	return db.rockEng.GetValueWithOp(db.defaultReadOpts, key, func(v []byte) error {
+		if len(v) >= tsLen {
+			v = v[:len(v)-tsLen]
+		}
+		return op(v)
+	})
 }
 
 func (db *RockDB) KVGet(key []byte) ([]byte, error) {
@@ -318,11 +360,11 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		value = value[:0]
 		value = append(value, args[i].Value...)
 		if db.cfg.EnableTableCounter {
-			var v []byte
+			vok := false
 			if !db.cfg.EstimateTableCounter {
-				v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+				vok, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
 			}
-			if v == nil {
+			if !vok {
 				n := tableCnt[string(table)]
 				n++
 				tableCnt[string(table)] = n
@@ -354,11 +396,11 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		var v []byte
+		found := false
 		if !db.cfg.EstimateTableCounter {
-			v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			found, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
 		}
-		if v == nil {
+		if !found {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
 	}
@@ -426,11 +468,11 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	}
 	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
-		var v []byte
+		vok := false
 		if !db.cfg.EstimateTableCounter {
-			v, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+			vok, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
 		}
-		if v == nil {
+		if !vok {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
 	}
@@ -614,8 +656,14 @@ func (db *RockDB) Append(ts int64, rawKey []byte, value []byte) (int64, error) {
 	return int64(newLen), nil
 }
 
-func (db *RockDB) BitSet(ts int64, key []byte, offset int64, on int) (int64, error) {
-	if offset > MaxBitOffset {
+// BitSet set the bitmap data with format as below:
+// key -> 0(first bit) 0 0 0 0 0 0 0 (last bit) | (second byte with 8 bits) | .... | (last byte with 8bits) at most MaxBitOffset/8 bytes for each bitmap
+func (db *RockDB) BitSetOld(ts int64, key []byte, offset int64, on int) (int64, error) {
+	table, key, err := convertRedisKeyToDBKVKey(key)
+	if err != nil {
+		return 0, err
+	}
+	if offset > MaxBitOffset || offset < 0 {
 		return 0, ErrBitOverflow
 	}
 
@@ -694,7 +742,7 @@ func popcountBytes(s []byte) (count int64) {
 	return
 }
 
-func (db *RockDB) BitGet(key []byte, offset int64) (int64, error) {
+func (db *RockDB) bitGetOld(key []byte, offset int64) (int64, error) {
 	v, err := db.KVGet(key)
 	if err != nil {
 		return 0, err
@@ -714,7 +762,7 @@ func (db *RockDB) BitGet(key []byte, offset int64) (int64, error) {
 	return 0, nil
 }
 
-func (db *RockDB) BitCount(key []byte, start, end int) (int64, error) {
+func (db *RockDB) bitCountOld(key []byte, start, end int) (int64, error) {
 	v, err := db.KVGet(key)
 	if err != nil {
 		return 0, err

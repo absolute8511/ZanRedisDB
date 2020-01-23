@@ -24,9 +24,11 @@ import (
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/snap"
 	"github.com/youzan/ZanRedisDB/stats"
+
 	//"github.com/youzan/ZanRedisDB/pkg/logutil"
 	"github.com/youzan/ZanRedisDB/pkg/transport"
 	"github.com/youzan/ZanRedisDB/pkg/types"
+
 	//"github.com/coreos/pkg/capnslog"
 	"github.com/xiang90/probing"
 	"golang.org/x/net/context"
@@ -159,6 +161,7 @@ func (t *Transport) Handler() http.Handler {
 	mux.Handle(RaftPrefix, pipelineHandler)
 	mux.Handle(RaftStreamPrefix+"/", streamHandler)
 	mux.Handle(RaftSnapshotPrefix, snapHandler)
+	mux.Handle(RaftSnapshotCheckPrefix, snapHandler)
 	mux.Handle(ProbingPrefix, probing.NewHandler())
 	return mux
 }

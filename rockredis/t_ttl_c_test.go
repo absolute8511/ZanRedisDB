@@ -215,23 +215,23 @@ func TestKVTTL_C_KeepTTL(t *testing.T) {
 	assert.Equal(t, "2ranged", string(v))
 	db.KVDel(key1)
 	// bitset
-	db.BitSet(0, key1, 1, 1)
+	db.BitSetOld(0, key1, 1, 1)
 	if v, err := db.Expire(tn, key1, ttl1); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from expire != 1")
 	}
-	db.BitSet(0, key1, 2, 1)
-	db.BitSet(0, key1, 1, 0)
+	db.BitSetOld(0, key1, 2, 1)
+	db.BitSetOld(0, key1, 1, 0)
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
 	} else if v != ttl1 {
 		t.Fatal("ttl != expire")
 	}
-	bitV, err := db.BitGet(key1, 1)
+	bitV, err := db.BitGetV2(key1, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), bitV)
-	bitV, err = db.BitGet(key1, 2)
+	bitV, err = db.BitGetV2(key1, 2)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), bitV)
 }

@@ -7,6 +7,6 @@ echo $GOROOT
 echo $GOPATH
 for dir in ${DIRS}; do
     pushd ${dir}
-        protoc --proto_path=$GOPATH:$GOGOPATH:./ --gofast_out=plugins=grpc:. *.proto
+        protoc --proto_path=$GOPATH:$GOGOPATH:./ --gogofaster_out=plugins=grpc:. *.proto
     popd
 done

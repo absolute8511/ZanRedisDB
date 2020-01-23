@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -42,6 +43,7 @@ type StateMachine interface {
 	ApplyRaftRequest(isReplaying bool, b IBatchOperator, req BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error)
 	ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, index uint64, stop chan struct{}) error
 	GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error)
+	UpdateSnapshotState(term uint64, index uint64)
 	PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	RestoreFromSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error
 	Destroy()
@@ -85,7 +87,7 @@ type IBatchOperator interface {
 	BeginBatch() error
 	AddBatchKey(string)
 	AddBatchRsp(uint64, interface{})
-	IsBatchable(string, string) bool
+	IsBatchable(string, string, [][]byte) bool
 	CommitBatch()
 }
 
@@ -127,7 +129,11 @@ func (bo *kvbatchOperator) AddBatchRsp(reqID uint64, v interface{}) {
 	bo.batchReqRspList = append(bo.batchReqRspList, v)
 }
 
-func (bo *kvbatchOperator) IsBatchable(cmdName string, pk string) bool {
+func (bo *kvbatchOperator) IsBatchable(cmdName string, pk string, args [][]byte) bool {
+	if cmdName == "del" && len(args) > 2 {
+		// del for multi keys, no batch
+		return false
+	}
 	_, ok := bo.dupCheckMap[string(pk)]
 	if rockredis.IsBatchableWrite(cmdName) &&
 		len(bo.batchReqIDList) < maxDBBatchCmdNum &&
@@ -172,6 +178,14 @@ type emptySM struct {
 }
 
 func (esm *emptySM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, reqList BatchInternalRaftRequest, term uint64, index uint64, stop chan struct{}) (bool, error) {
+	ts := reqList.Timestamp
+	tn := time.Now()
+	if ts > 0 && !isReplaying {
+		cost := tn.UnixNano() - ts
+		if cost > raftSlow.Nanoseconds()*2 {
+			nodeLog.Infof("receive raft requests in state machine slow cost: %v, %v, %v", reqList.ReqId, len(reqList.Reqs), cost)
+		}
+	}
 	for _, req := range reqList.Reqs {
 		reqID := req.Header.ID
 		if reqID == 0 {
@@ -189,6 +203,9 @@ func (esm *emptySM) ApplyRaftConfRequest(req raftpb.ConfChange, term uint64, ind
 func (esm *emptySM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
 	var s KVSnapInfo
 	return &s, nil
+}
+
+func (esm *emptySM) UpdateSnapshotState(term uint64, index uint64) {
 }
 
 func (esm *emptySM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
@@ -343,6 +360,12 @@ func (kvsm *kvStoreSM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop ch
 	return kvsm.store.CheckExpiredData(buffer, stop)
 }
 
+func (kvsm *kvStoreSM) UpdateSnapshotState(term uint64, index uint64) {
+	if kvsm.store != nil {
+		kvsm.store.SetLatestSnapIndex(index)
+	}
+}
+
 func (kvsm *kvStoreSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, error) {
 	var si KVSnapInfo
 	// use the rocksdb backup/checkpoint interface to backup data
@@ -355,11 +378,6 @@ func (kvsm *kvStoreSM) GetSnapshot(term uint64, index uint64) (*KVSnapInfo, erro
 }
 
 func checkLocalBackup(store *KVStore, rs raftpb.Snapshot) (bool, error) {
-	var si KVSnapInfo
-	err := json.Unmarshal(rs.Data, &si)
-	if err != nil {
-		return false, err
-	}
 	return store.IsLocalBackupOK(rs.Metadata.Term, rs.Metadata.Index)
 }
 
@@ -384,9 +402,13 @@ func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, ind
 	if latest != "" && latest != newPath {
 		nodeLog.Infof("transfer reuse old path: %v to new: %v", latest, newPath)
 		reused = latest
-		err := os.Rename(latest, newPath)
-		if err != nil {
-			nodeLog.Infof("transfer reuse old path failed to rename: %v", err.Error())
+		// we use hard link to avoid change the old stable checkpoint files which should keep unchanged in case of
+		// crashed during new checkpoint transferring
+		files, _ := filepath.Glob(path.Join(latest, "*.sst"))
+		for _, fn := range files {
+			nfn := path.Join(newPath, filepath.Base(fn))
+			nodeLog.Infof("hard link for: %v, %v", fn, nfn)
+			CopyFileForHardLink(fn, nfn)
 		}
 	}
 	return reused, newPath
@@ -423,7 +445,7 @@ func prepareSnapshotForStore(store *KVStore, machineConfig MachineConfig,
 	srcPath := path.Join(rockredis.GetBackupDir(syncDir),
 		rockredis.GetCheckpointDir(raftSnapshot.Metadata.Term, raftSnapshot.Metadata.Index))
 
-	// TODO: since most backup on local is not transferred by others,
+	// since most backup on local is not transferred by others,
 	// if we need reuse we need check all backups that has source node info,
 	// and skip the latest snap file in snap dir.
 	_, newPath := handleReuseOldCheckpoint(srcInfo, localPath,
@@ -586,6 +608,13 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 			kvsm.Debugf("recv write from cluster syncer at (%v-%v): %v", term, index, reqList.String())
 		}
 	}
+	if ts > 0 {
+		cost := start.UnixNano() - ts
+		if cost > raftSlow.Nanoseconds()/2 {
+			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
+		}
+	}
+	// TODO: maybe we can merge the same write with same key and value to avoid too much hot write on the same key-value
 	var retErr error
 	for _, req := range reqList.Reqs {
 		reqTs := ts
@@ -622,8 +651,8 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 				}
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
-				_, pk, _ := common.ExtractNamesapce(cmd.Args[1])
-				if batch.IsBatchable(cmdName, string(pk)) {
+				pk, _ := common.CutNamesapce(cmd.Args[1])
+				if batch.IsBatchable(cmdName, string(pk), cmd.Args) {
 					if !batch.IsBatched() {
 						err := batch.BeginBatch()
 						if err != nil {

@@ -26,14 +26,24 @@ func TestDBKV(t *testing.T) {
 	defer db.Close()
 
 	key1 := []byte("test:testdb_kv_a")
-
-	err := db.KVSet(0, key1, []byte("hello world 1"))
-	assert.Nil(t, err)
-
 	key2 := []byte("test:testdb_kv_b")
+	n, err := db.KVExists(key1, key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	err = db.KVSet(0, key1, []byte("hello world 1"))
+	assert.Nil(t, err)
+	n, err = db.KVExists(key1, key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
 
 	err = db.KVSet(0, key2, []byte("hello world 2"))
 	assert.Nil(t, err)
+
+	n, err = db.KVExists(key1, key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
 	v1, _ := db.KVGet(key1)
 	assert.Equal(t, "hello world 1", string(v1))
 	v2, _ := db.KVGet(key2)
@@ -52,7 +62,7 @@ func TestDBKV(t *testing.T) {
 
 	key3 := []byte("test:testdb_kv_range")
 
-	n, err := db.Append(0, key3, []byte("Hello"))
+	n, err = db.Append(0, key3, []byte("Hello"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(5), n)
 
@@ -89,7 +99,8 @@ func TestDBKV(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(11), n)
 
-	r, _ := db.KVExists(key3)
+	r, err := db.KVExists(key3)
+	assert.Nil(t, err)
 	assert.NotEqual(t, int64(0), r)
 	r, err = db.SetNX(0, key3, []byte(""))
 	assert.Nil(t, err)
@@ -147,46 +158,114 @@ func TestDBKVBit(t *testing.T) {
 	defer db.Close()
 
 	key := []byte("test:testdb_kv_bit")
-	n, err := db.BitSet(0, key, 5, 1)
+	n, err := db.BitSetOld(0, key, 5, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
-	n, err = db.BitGet(key, 0)
+	n, err = db.bitGetOld(key, 0)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
-	n, err = db.BitGet(key, 5)
+	n, err = db.bitGetOld(key, 5)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	n, err = db.BitGet(key, 100)
+	n, err = db.bitGetOld(key, 100)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
-	n, err = db.BitCount(key, 0, -1)
+	n, err = db.bitCountOld(key, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	n, err = db.BitSet(0, key, 5, 0)
+	n, err = db.BitSetOld(0, key, 5, 0)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
+	_, err = db.BitSetOld(0, key, -5, 0)
+	assert.NotNil(t, err)
+
+	for i := 0; i < bitmapSegBits*3; i++ {
+		n, err = db.bitGetOld(key, int64(i))
+		assert.Nil(t, err)
+		assert.Equal(t, int64(0), n)
+
+		n, err = db.bitCountOld(key, 0, -1)
+		assert.Nil(t, err)
+		assert.Equal(t, int64(0), n)
+	}
+	bitsForOne := make(map[int]bool)
+	bitsForOne[0] = true
+	bitsForOne[bitmapSegBytes-1] = true
+	bitsForOne[bitmapSegBytes] = true
+	bitsForOne[bitmapSegBytes+1] = true
+	bitsForOne[bitmapSegBytes*2-1] = true
+	bitsForOne[bitmapSegBytes*2] = true
+	bitsForOne[bitmapSegBits-bitmapSegBytes-1] = true
+	bitsForOne[bitmapSegBits-bitmapSegBytes] = true
+	bitsForOne[bitmapSegBits-bitmapSegBytes+1] = true
+
+	bitsForOne[bitmapSegBits-1] = true
+	bitsForOne[bitmapSegBits] = true
+	bitsForOne[bitmapSegBits+1] = true
+	bitsForOne[bitmapSegBits+bitmapSegBytes-1] = true
+	bitsForOne[bitmapSegBits+bitmapSegBytes] = true
+	bitsForOne[bitmapSegBits+bitmapSegBytes+1] = true
+	bitsForOne[bitmapSegBits*2-bitmapSegBytes-1] = true
+	bitsForOne[bitmapSegBits*2-bitmapSegBytes] = true
+	bitsForOne[bitmapSegBits*2-1] = true
+	bitsForOne[bitmapSegBits*2] = true
+	bitsForOne[bitmapSegBits*2+1] = true
+	bitsForOne[bitmapSegBits*2+bitmapSegBytes-1] = true
+	bitsForOne[bitmapSegBits*2+bitmapSegBytes] = true
+	bitsForOne[bitmapSegBits*2+bitmapSegBytes+1] = true
+
+	for bpos := range bitsForOne {
+		n, err = db.BitSetOld(0, key, int64(bpos), 1)
+		assert.Nil(t, err)
+		assert.Equal(t, int64(0), n)
+		n, err = db.bitGetOld(key, int64(bpos))
+		assert.Nil(t, err)
+		assert.Equal(t, int64(1), n)
+		// new v2 should read old
+		n, err = db.BitGetV2(key, int64(bpos))
+		assert.Nil(t, err)
+		assert.Equal(t, int64(1), n)
+	}
+
+	for i := 0; i < bitmapSegBits*3; i++ {
+		n, err = db.bitGetOld(key, int64(i))
+		assert.Nil(t, err)
+		if _, ok := bitsForOne[i]; ok {
+			assert.Equal(t, int64(1), n)
+		} else {
+			assert.Equal(t, int64(0), n)
+		}
+	}
+	n, err = db.bitCountOld(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(bitsForOne)), n)
+	// new v2 should read old
+	n, err = db.BitCountV2(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(bitsForOne)), n)
 	err = db.KVSet(0, key, []byte{0x00, 0x00, 0x00})
 	assert.Nil(t, err)
 
 	err = db.KVSet(0, key, []byte("foobar"))
 	assert.Nil(t, err)
 
-	n, err = db.BitCount(key, 0, -1)
+	n, err = db.bitCountOld(key, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(26), n)
 
-	n, err = db.BitCount(key, 0, 0)
+	n, err = db.bitCountOld(key, 0, 0)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(4), n)
 
-	n, err = db.BitCount(key, 1, 1)
+	n, err = db.bitCountOld(key, 1, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(6), n)
+
 }
 
 func TestDBKVWithNoTable(t *testing.T) {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -63,6 +64,7 @@ func TestMain(m *testing.M) {
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	node.EnableForTest()
+	flag.Parse()
 
 	if testing.Verbose() {
 		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
@@ -664,4 +666,98 @@ func BenchmarkWriteToClusterWithEmptySM(b *testing.B) {
 	})
 
 	b.StopTimer()
+}
+
+func BenchmarkGetOpWithLockAndNoLock(b *testing.B) {
+	costStatsLevel = 3
+	sLog.SetLevel(int32(common.LOG_WARN))
+	rockredis.SetLogger(int32(common.LOG_ERR), nil)
+	node.SetLogLevel(int(common.LOG_WARN))
+	raft.SetLogger(nil)
+	rafthttp.SetLogLevel(0)
+
+	kvs, _, _, dir, err := startTestClusterWithBasePort(23355, 1, 0, false)
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+	defer func() {
+		for _, v := range kvs {
+			v.server.Stop()
+		}
+	}()
+	_, err = waitForLeaderForClusters(time.Minute, kvs)
+	if err != nil {
+		panic(err)
+	}
+	rport := 0
+	for _, n := range kvs {
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
+		if replicaNode.Node.IsLead() {
+			rport = n.redisPort
+			break
+		}
+	}
+	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(rport), "")
+	c.SetMaxIdleConns(10)
+	key := "default:test-cluster:test-get"
+	goredis.String(c.Do("set", key, "1234"))
+
+	b.Run("bench-get-withlock", func(b *testing.B) {
+		b.ReportAllocs()
+		start := time.Now()
+		var wg sync.WaitGroup
+		for i := 0; i < 30; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				conn, err := c.Get()
+				if err != nil {
+					panic(err)
+				}
+				defer conn.Close()
+				for i := 0; i < b.N; i++ {
+					v, err := goredis.String(conn.Do("get", key))
+					if err != nil {
+						panic(err)
+					}
+					if v != "1234" {
+						panic(v)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		cost := time.Since(start)
+		b.Logf("cost time: %v for %v", cost, b.N)
+	})
+
+	b.Run("bench-get-nolock", func(b *testing.B) {
+		b.ReportAllocs()
+		start := time.Now()
+		var wg sync.WaitGroup
+		for i := 0; i < 30; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				conn, err := c.Get()
+				if err != nil {
+					panic(err)
+				}
+				defer conn.Close()
+				for i := 0; i < b.N; i++ {
+					v, err := goredis.String(conn.Do("getnolock", key))
+					if err != nil {
+						panic(err)
+					}
+					if v != "1234" {
+						panic(v)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		cost := time.Since(start)
+		b.Logf("get nolock cost time: %v for %v", cost, b.N)
+	})
 }

@@ -121,7 +121,7 @@ func GetLatestCheckpoint(checkpointDir string, skipN int, matchFunc func(string)
 	return ""
 }
 
-func purgeOldCheckpoint(keepNum int, checkpointDir string) {
+func purgeOldCheckpoint(keepNum int, checkpointDir string, latestSnapIndex uint64) {
 	defer func() {
 		if e := recover(); e != nil {
 			dbLog.Infof("purge old checkpoint failed: %v", e)
@@ -135,6 +135,19 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string) {
 		sortedNameList := CheckpointSortNames(checkpointList)
 		sort.Sort(sortedNameList)
 		for i := 0; i < len(sortedNameList)-keepNum; i++ {
+			fn := path.Base(sortedNameList[i+keepNum])
+			subs := strings.Split(fn, "-")
+			if len(subs) != 2 {
+				continue
+			}
+			sindex, err := strconv.ParseUint(subs[1], 16, 64)
+			if err != nil {
+				dbLog.Infof("checkpoint name index invalid: %v, %v", subs, err.Error())
+				continue
+			}
+			if sindex >= latestSnapIndex {
+				break
+			}
 			os.RemoveAll(sortedNameList[i])
 			dbLog.Infof("clean checkpoint : %v", sortedNameList[i])
 		}
@@ -159,6 +172,7 @@ type RockDB struct {
 	hllCache          *hllCache
 	stopping          int32
 	engOpened         int32
+	latestSnapIndex   uint64
 }
 
 func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
@@ -224,6 +238,10 @@ func (r *RockDB) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan str
 		return fmt.Errorf("can not check expired data at the expiration-policy:%d", r.cfg.ExpirationPolicy)
 	}
 	return r.expiration.check(buffer, stop)
+}
+
+func (r *RockDB) SetLatestSnapIndex(i uint64) {
+	atomic.StoreUint64(&r.latestSnapIndex, i)
 }
 
 func (r *RockDB) GetBackupBase() string {
@@ -667,8 +685,9 @@ func (r *RockDB) backupLoop() {
 				if r.cfg.KeepBackup > 0 {
 					keepNum = r.cfg.KeepBackup
 				}
-				purgeOldCheckpoint(keepNum, r.GetBackupDir())
-				purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote())
+				// avoid purge the checkpoint in the raft snapshot
+				purgeOldCheckpoint(keepNum, r.GetBackupDir(), atomic.LoadUint64(&r.latestSnapIndex))
+				purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote(), math.MaxUint64-1)
 				r.checkpointDirLock.Unlock()
 			}()
 		case <-r.quit:
@@ -746,21 +765,29 @@ func copyFile(src, dst string, override bool) error {
 		return err
 	}
 	defer in.Close()
+	// we remove dst to avoid override the hard link file content which may affect the origin linked file
+	err = os.Remove(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		cerr := out.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 	_, err = io.Copy(out, in)
 	if err != nil {
-		out.Close()
 		return err
 	}
 	err = out.Sync()
-	if err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return err
 }
 
 func (r *RockDB) RestoreFromRemoteBackup(term uint64, index uint64) error {
@@ -911,8 +938,8 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 		if r.cfg.KeepBackup > 0 {
 			keepNum = r.cfg.KeepBackup
 		}
-		purgeOldCheckpoint(keepNum, r.GetBackupDir())
-		purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote())
+		purgeOldCheckpoint(keepNum, r.GetBackupDir(), atomic.LoadUint64(&r.latestSnapIndex))
+		purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote(), math.MaxUint64-1)
 	}
 	return err
 }

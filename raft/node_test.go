@@ -16,7 +16,9 @@ package raft
 
 import (
 	"bytes"
+	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +26,14 @@ import (
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
 )
+
+type ignoreSizeHintMemStorage struct {
+	*MemoryStorage
+}
+
+func (s *ignoreSizeHintMemStorage) Entries(lo, hi uint64, maxSize uint64) ([]raftpb.Entry, error) {
+	return s.MemoryStorage.Entries(lo, hi, math.MaxUint64)
+}
 
 // TestNodeStep ensures that node.Step sends msgProp to propc chan
 // and other kinds of messages to recvc chan.
@@ -128,7 +138,7 @@ func TestNodePropose(t *testing.T) {
 		case <-n.done:
 			return
 		}
-		rd, hasEvent := n.StepNode()
+		rd, hasEvent := n.StepNode(true, false)
 		if !hasEvent {
 			continue
 		}
@@ -142,7 +152,7 @@ func TestNodePropose(t *testing.T) {
 		n.Advance(rd)
 	}
 	n.Propose(context.TODO(), []byte("somedata"))
-	n.StepNode()
+	n.StepNode(true, false)
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -183,7 +193,7 @@ func TestNodeReadIndex(t *testing.T) {
 		case <-n.done:
 			return
 		}
-		rd, hasEvent := n.StepNode()
+		rd, hasEvent := n.StepNode(true, false)
 		if !hasEvent {
 			continue
 		}
@@ -203,7 +213,7 @@ func TestNodeReadIndex(t *testing.T) {
 	r.step = appendStep
 	wrequestCtx := []byte("somedata2")
 	n.ReadIndex(context.TODO(), wrequestCtx)
-	n.StepNode()
+	n.StepNode(true, false)
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -339,7 +349,7 @@ func TestNodeProposeConfig(t *testing.T) {
 		case <-n.done:
 			return
 		}
-		rd, hasEvent := n.StepNode()
+		rd, hasEvent := n.StepNode(true, false)
 		if !hasEvent {
 			continue
 		}
@@ -358,7 +368,7 @@ func TestNodeProposeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	n.ProposeConfChange(context.TODO(), cc)
-	n.StepNode()
+	n.StepNode(true, false)
 	time.Sleep(time.Millisecond)
 	n.Stop()
 
@@ -399,7 +409,7 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 			case <-ticker.C:
 				n.Tick()
 			case <-n.EventNotifyCh():
-				rd, hasEvent := n.StepNode()
+				rd, hasEvent := n.StepNode(true, false)
 				if !hasEvent {
 					continue
 				}
@@ -500,7 +510,7 @@ func TestNodeTick(t *testing.T) {
 	n.Tick()
 	for len(n.tickc) != 0 {
 		time.Sleep(100 * time.Millisecond)
-		n.StepNode()
+		n.StepNode(true, false)
 	}
 	n.Stop()
 	if r.electionElapsed != elapsed+1 {
@@ -524,7 +534,7 @@ func TestNodeStop(t *testing.T) {
 		for {
 			select {
 			case <-n.EventNotifyCh():
-				n.StepNode()
+				n.StepNode(true, false)
 			case <-n.done:
 				return
 			}
@@ -535,7 +545,7 @@ func TestNodeStop(t *testing.T) {
 	}()
 
 	status := n.Status()
-	n.StepNode()
+	n.StepNode(true, false)
 	n.Stop()
 
 	select {
@@ -627,7 +637,7 @@ func TestNodeStart(t *testing.T) {
 	}
 	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
-	g, _ := n.StepNode()
+	g, _ := n.StepNode(true, false)
 	if !reflect.DeepEqual(g, wants[0]) {
 		t.Fatalf("#%d: g = %+v,\n             w   %+v", 1, g, wants[0])
 	} else {
@@ -636,12 +646,12 @@ func TestNodeStart(t *testing.T) {
 	}
 
 	n.Campaign(ctx)
-	rd, _ := n.StepNode()
+	rd, _ := n.StepNode(true, false)
 	storage.Append(rd.Entries)
 	n.Advance(rd)
 
 	n.Propose(ctx, []byte("foo"))
-	if g2, _ := n.StepNode(); !reflect.DeepEqual(g2, wants[1]) {
+	if g2, _ := n.StepNode(true, false); !reflect.DeepEqual(g2, wants[1]) {
 		t.Errorf("#%d: g = %+v,\n             w   %+v", 2, g2, wants[1])
 	} else {
 		storage.Append(g2.Entries)
@@ -650,7 +660,7 @@ func TestNodeStart(t *testing.T) {
 
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent := n.StepNode()
+		rd, hasEvent := n.StepNode(true, false)
 		if hasEvent {
 			t.Errorf("unexpected Ready: %+v", rd)
 		}
@@ -694,7 +704,7 @@ func TestNodeRestart(t *testing.T) {
 	n := RestartNode(c)
 	defer n.Stop()
 	<-n.EventNotifyCh()
-	g, _ := n.StepNode()
+	g, _ := n.StepNode(true, false)
 	if !reflect.DeepEqual(g, want) {
 		t.Errorf("g = %+v,\n             w   %+v", g, want)
 	}
@@ -702,7 +712,7 @@ func TestNodeRestart(t *testing.T) {
 
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent := n.StepNode()
+		rd, hasEvent := n.StepNode(true, false)
 		if hasEvent {
 			t.Errorf("unexpected Ready: %+v", rd)
 		}
@@ -762,7 +772,7 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 	}
 	n := RestartNode(c)
 	defer n.Stop()
-	g, _ := n.StepNode()
+	g, _ := n.StepNode(true, false)
 	if !reflect.DeepEqual(g, want) {
 		t.Errorf("g = %+v,\n             w   %+v", g, want)
 	} else {
@@ -771,7 +781,7 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent := n.StepNode()
+		rd, hasEvent := n.StepNode(true, false)
 		if hasEvent {
 			t.Errorf("unexpected Ready: %+v", rd)
 		}
@@ -803,19 +813,19 @@ func TestNodeAdvance(t *testing.T) {
 	n := StartNode(c, []Peer{{NodeID: 1, ReplicaID: 1}}, false)
 	defer n.Stop()
 	<-n.EventNotifyCh()
-	rd, _ := n.StepNode()
+	rd, _ := n.StepNode(true, false)
 	storage.Append(rd.Entries)
 	n.Advance(rd)
 
 	n.Campaign(ctx)
 	<-n.EventNotifyCh()
-	n.StepNode()
+	n.StepNode(true, false)
 
 	n.Propose(ctx, []byte("foo"))
 	hasEvent := false
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent = n.StepNode()
+		rd, hasEvent = n.StepNode(true, false)
 		if hasEvent {
 			t.Fatalf("unexpected Ready before Advance: %+v", rd)
 		}
@@ -825,12 +835,12 @@ func TestNodeAdvance(t *testing.T) {
 	n.Advance(rd)
 	select {
 	case <-n.EventNotifyCh():
-		rd, hasEvent = n.StepNode()
+		rd, hasEvent = n.StepNode(true, false)
 		if !hasEvent {
 			t.Errorf("expect Ready after Advance, but there is no Ready available")
 		}
 	case <-time.After(100 * time.Millisecond):
-		rd, hasEvent = n.StepNode()
+		rd, hasEvent = n.StepNode(true, false)
 		if !hasEvent {
 			t.Errorf("expect Ready after Advance, but there is no Ready available")
 		}
@@ -899,7 +909,7 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 			case <-ticker.C:
 				n.Tick()
 			case <-n.EventNotifyCh():
-				rd, hasEvent := n.StepNode()
+				rd, hasEvent := n.StepNode(true, false)
 				if !hasEvent {
 					continue
 				}
@@ -934,4 +944,217 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 	<-applyConfChan
 	close(stop)
 	<-done
+}
+
+func TestAppendPagination(t *testing.T) {
+	const maxSizePerMsg = 2048
+	n := newNetworkWithConfig(func(c *Config) {
+		c.MaxSizePerMsg = maxSizePerMsg
+	}, nil, nil, nil)
+
+	seenFullMessage := false
+	// Inspect all messages to see that we never exceed the limit, but
+	// we do see messages of larger than half the limit.
+	n.msgHook = func(m raftpb.Message) bool {
+		if m.Type == raftpb.MsgApp {
+			size := 0
+			for _, e := range m.Entries {
+				size += len(e.Data)
+			}
+			if size > maxSizePerMsg {
+				t.Errorf("sent MsgApp that is too large: %d bytes", size)
+			}
+			if size > maxSizePerMsg/2 {
+				seenFullMessage = true
+			}
+		}
+		return true
+	}
+
+	n.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgHup})
+
+	// Partition the network while we make our proposals. This forces
+	// the entries to be batched into larger messages.
+	n.isolate(1)
+	blob := []byte(strings.Repeat("a", 1000))
+	for i := 0; i < 5; i++ {
+		n.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgProp, Entries: []raftpb.Entry{{Data: blob}}})
+	}
+	n.recover()
+
+	// After the partition recovers, tick the clock to wake everything
+	// back up and send the messages.
+	n.send(raftpb.Message{From: 1, To: 1, Type: raftpb.MsgBeat})
+	if !seenFullMessage {
+		t.Error("didn't see any messages more than half the max size; something is wrong with this test")
+	}
+}
+
+func TestCommitPagination(t *testing.T) {
+	s := NewMemoryStorage()
+	cfg := newTestConfig(1, []uint64{1}, 10, 1, s)
+	cfg.MaxSizePerMsg = 2048
+	r := newRaft(cfg)
+	n := newNode()
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
+	n.Campaign(context.TODO())
+
+	rd, _ := n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 (empty) entry, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+
+	blob := []byte(strings.Repeat("a", 1000))
+	for i := 0; i < 3; i++ {
+		if err := n.Propose(context.TODO(), blob); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The 3 proposals will commit in two batches.
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 2 {
+		t.Fatalf("expected 2 entries in first batch, got %d", len(rd.CommittedEntries))
+	}
+	lastIndex := rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 entry in second batch, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	if rd.CommittedEntries[0].Index != lastIndex+1 {
+		t.Fatalf("expected 1 entry in second batch will be continued, got %d after %v", rd.CommittedEntries[0].Index, lastIndex)
+	}
+}
+
+// TestNodeCommitPaginationAfterRestart regression tests a scenario in which the
+// Storage's Entries size limitation is slightly more permissive than Raft's
+// internal one. The original bug was the following:
+//
+// - node learns that index 11 (or 100, doesn't matter) is committed
+// - nextEnts returns index 1..10 in CommittedEntries due to size limiting. However,
+//   index 10 already exceeds maxBytes, due to a user-provided impl of Entries.
+// - Commit index gets bumped to 10
+// - the node persists the HardState, but crashes before applying the entries
+// - upon restart, the storage returns the same entries, but `slice` takes a different code path
+//   (since it is now called with an upper bound of 10) and removes the last entry.
+// - Raft emits a HardState with a regressing commit index.
+//
+// A simpler version of this test would have the storage return a lot less entries than dictated
+// by maxSize (for example, exactly one entry) after the restart, resulting in a larger regression.
+// This wouldn't need to exploit anything about Raft-internal code paths to fail.
+func TestNodeCommitPaginationAfterRestart(t *testing.T) {
+	s := &ignoreSizeHintMemStorage{
+		MemoryStorage: NewRealMemoryStorage(),
+	}
+	persistedHardState := raftpb.HardState{
+		Term:   1,
+		Vote:   1,
+		Commit: 10,
+	}
+
+	s.hardState = persistedHardState
+	s.ents = make([]raftpb.Entry, 10)
+	var size uint64
+	for i := range s.ents {
+		ent := raftpb.Entry{
+			Term:  1,
+			Index: uint64(i + 1),
+			Type:  raftpb.EntryNormal,
+			Data:  []byte("a"),
+		}
+
+		s.ents[i] = ent
+		size += uint64(ent.Size())
+	}
+
+	cfg := newTestConfig(1, []uint64{1}, 10, 1, s)
+	// Set a MaxSizePerMsg that would suggest to Raft that the last committed entry should
+	// not be included in the initial rd.CommittedEntries. However, our storage will ignore
+	// this and *will* return it (which is how the Commit index ended up being 10 initially).
+	cfg.MaxSizePerMsg = size - uint64(s.ents[len(s.ents)-1].Size()) - 1
+
+	r := newRaft(cfg)
+	n := newNode()
+	defer s.Close()
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
+	n.Campaign(context.TODO())
+
+	defer n.Stop()
+
+	rd, _ := n.StepNode(true, false)
+	if !IsEmptyHardState(rd.HardState) && rd.HardState.Commit < persistedHardState.Commit {
+		t.Errorf("HardState regressed: Commit %d -> %d\nCommitting:\n",
+			persistedHardState.Commit, rd.HardState.Commit,
+		)
+	}
+}
+
+// TestNodeCommitEntriesTooMuch check the commit index will be continued even
+// if the apply commit channel is full
+func TestNodeCommitEntriesWhileNoMoreApply(t *testing.T) {
+	s := NewMemoryStorage()
+	cfg := newTestConfig(1, []uint64{1}, 10, 1, s)
+	cfg.MaxSizePerMsg = 2048
+	r := newRaft(cfg)
+	n := newNode()
+	n.r = r
+	n.prevS = newPrevState(r)
+	n.NotifyEventCh()
+	n.Campaign(context.TODO())
+
+	rd, _ := n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 (empty) entry, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	lastIndex := rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+
+	blob := []byte(strings.Repeat("a", 1000))
+	for i := 0; i < 3; i++ {
+		if err := n.Propose(context.TODO(), blob); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// step node with no more commit entries
+	rd, _ = n.StepNode(false, false)
+	if len(rd.CommittedEntries) != 0 {
+		t.Fatalf("expected 0 entries if no more need, got %d", len(rd.CommittedEntries))
+	}
+	if rd.HardState.Commit <= lastIndex {
+		t.Fatalf("hard commit should inc even no more commit entries: %v, %v", rd.HardState, lastIndex)
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+
+	// The 3 proposals will commit in two batches.
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 2 {
+		t.Fatalf("expected 2 entries in first batch, got %d", len(rd.CommittedEntries))
+	}
+	if rd.CommittedEntries[0].Index != lastIndex+1 {
+		t.Fatalf("expected 1 entry in second batch will be continued, got %d after %v", rd.CommittedEntries[0].Index, lastIndex)
+	}
+	lastIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	rd, _ = n.StepNode(true, false)
+	if len(rd.CommittedEntries) != 1 {
+		t.Fatalf("expected 1 entry in second batch, got %d", len(rd.CommittedEntries))
+	}
+	s.Append(rd.Entries)
+	n.Advance(rd)
+	if rd.CommittedEntries[0].Index != lastIndex+1 {
+		t.Fatalf("expected 1 entry in second batch will be continued, got %d after %v", rd.CommittedEntries[0].Index, lastIndex)
+	}
 }

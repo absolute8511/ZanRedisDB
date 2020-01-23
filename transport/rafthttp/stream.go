@@ -425,11 +425,14 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 		}
 
 		err = cr.r.Process(ctx, m)
-		if cr.status.isActive() {
-			plog.MergeWarningf("dropped internal raft message from %s since receiving buffer is full (overloaded network)", types.ID(m.From))
+		if err != nil {
+			if cr.status.isActive() {
+				plog.MergeWarningf("error process raft message from %s, err %v", types.ID(m.From), err.Error())
+			} else {
+				plog.Debugf("dropped %s from %s since err %v", m.Type, types.ID(m.From), err.Error())
+			}
+			recvFailures.WithLabelValues(m.FromGroup.Name).Inc()
 		}
-		plog.Debugf("dropped %s from %s since receiving buffer is full", m.Type, types.ID(m.From))
-		recvFailures.WithLabelValues(m.FromGroup.Name).Inc()
 	}
 }
 

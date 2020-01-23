@@ -72,6 +72,15 @@ func isValidNameString(name string) bool {
 	return validNamespaceTableNameRegex.MatchString(name)
 }
 
+func CutNamesapce(rawKey []byte) ([]byte, error) {
+	index := bytes.IndexByte(rawKey, NamespaceTableSeperator)
+	if index <= 0 {
+		return nil, ErrInvalidRedisKey
+	}
+	realKey := rawKey[index+1:]
+	return realKey, nil
+}
+
 func ExtractNamesapce(rawKey []byte) (string, []byte, error) {
 	index := bytes.IndexByte(rawKey, NamespaceTableSeperator)
 	if index <= 0 {

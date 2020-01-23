@@ -18,6 +18,7 @@ import (
 )
 
 type nodeInfo struct {
+	NodeID           string `json:"node_id"`
 	BroadcastAddress string `json:"broadcast_address"`
 	Hostname         string `json:"hostname"`
 	RedisPort        string `json:"redis_port"`
@@ -133,6 +134,7 @@ func (s *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httpr
 		dc, _ := n.Tags[cluster.DCInfoTag]
 		dcInfo, _ := dc.(string)
 		dn := &nodeInfo{
+			NodeID:           n.GetID(),
 			BroadcastAddress: n.NodeIP,
 			Hostname:         n.Hostname,
 			Version:          n.Version,
@@ -252,9 +254,15 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 	partNodes := make(map[int]PartitionNodeInfo)
 
 	pnum := 0
+	replicator := 1
+	ex := ""
+	useFsync := false
 	engType := ""
 	for _, nsInfo := range nsPartsInfo {
 		pnum = nsInfo.PartitionNum
+		replicator = nsInfo.Replica
+		ex = nsInfo.ExpirationPolicy
+		useFsync = nsInfo.OptimizedFsync
 		engType = nsInfo.EngType
 		var pn PartitionNodeInfo
 		for _, nid := range nsInfo.RaftNodes {
@@ -274,6 +282,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 				}
 			}
 			dn := nodeInfo{
+				NodeID:           nid,
 				BroadcastAddress: ip,
 				Hostname:         hostname,
 				Version:          version,
@@ -290,10 +299,13 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 		partNodes[nsInfo.Partition] = pn
 	}
 	return map[string]interface{}{
-		"epoch":         curEpoch,
-		"partition_num": pnum,
-		"eng_type":      engType,
-		"partitions":    partNodes,
+		"epoch":           curEpoch,
+		"partition_num":   pnum,
+		"replicator":      replicator,
+		"expire_policy":   ex,
+		"fsync_optimized": useFsync,
+		"eng_type":        engType,
+		"partitions":      partNodes,
 	}, nil
 }
 

@@ -440,6 +440,8 @@ func TestKVBitOp(t *testing.T) {
 	} else if n != 3 {
 		t.Fatal(n)
 	}
+	_, err := goredis.Int64(c.Do("setbit", key, -7, 1))
+	assert.NotNil(t, err)
 }
 
 func TestKVBatch(t *testing.T) {
@@ -609,6 +611,23 @@ func TestKVBatch(t *testing.T) {
 	}
 	wg.Wait()
 
+}
+
+func TestKVStringOp(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:kv_stringop"
+	if n, err := goredis.Int64(c.Do("strlen", key)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	c.Do("setex", key, 10, "Hello")
+	n, err := goredis.Int64(c.Do("strlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, len("Hello"), int(n))
+	// append
 }
 
 func TestKVErrorParams(t *testing.T) {

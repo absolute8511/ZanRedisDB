@@ -3,6 +3,8 @@ package rockredis
 import (
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func convertRedisKeyToDBSKey(key []byte, member []byte) ([]byte, error) {
@@ -112,6 +114,9 @@ func TestDBSet(t *testing.T) {
 	} else if n != 1 {
 		t.Fatal(n)
 	}
+	n, err := db.SAdd(0, key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 
 	if cnt, err := db.SCard(key); err != nil {
 		t.Fatal(err)
@@ -178,7 +183,6 @@ func TestSKeyExists(t *testing.T) {
 	} else if n != 1 {
 		t.Fatal("invalid value ", n)
 	}
-
 }
 
 func TestDBSPop(t *testing.T) {

@@ -43,24 +43,19 @@ fi
 pushd $rocksdb
 git pull
 git checkout v5.18-patched
-CC=/opt/rh/devtoolset-3/root/usr/bin/gcc CXX=/opt/rh/devtoolset-3/root/usr/bin/g++ LD=/opt/rh/devtoolset-3/root/usr/bin/ld USE_SSE=1 make static_lib
+USE_SSE=1 make static_lib
 popd
 
-LD=/opt/rh/devtoolset-3/root/usr/bin/ld CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/youzan/gorocksdb
+CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/youzan/gorocksdb
 
-wget -c https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm
 export PATH=$(pwd):$PATH
 
 echo $(pwd)
 pushd $(go env GOPATH)/src/github.com/youzan/ZanRedisDB/
 git pull
-
 ./pre-dist.sh || true
-
 ## we also use gpm in ci because some dep can not be pulled since gfw.
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GOPATH=$DIR/.godeps gpm get || true
-
 ROCKSDB=$rocksdb ./dist.sh
 popd
 

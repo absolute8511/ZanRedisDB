@@ -101,7 +101,7 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 4 {
 		return nil, common.ErrInvalidArgs
 	}
-	_, table, err := common.ExtractNamesapce(cmd.Args[1])
+	table, err := common.CutNamesapce(cmd.Args[1])
 	if err != nil {
 		return nil, err
 	}

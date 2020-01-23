@@ -105,6 +105,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 	time.Sleep(time.Second)
 	return kv, redisport, tmpDir
 }
+
 func waitServerForLeader(t *testing.T, w time.Duration) {
 	start := time.Now()
 	for {

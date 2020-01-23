@@ -197,12 +197,12 @@ func (ms *RocksStorage) seekEntry(e *pb.Entry, seekTo uint64, reverse bool) (uin
 	if !it.Valid() {
 		return 0, errNotFound
 	}
-	index := ms.parseIndex(it.Key())
+	index := ms.parseIndex(it.RefKey())
 	//raftLogger.Infof("seeked: %v", index)
 	if e == nil {
 		return index, nil
 	}
-	v := it.Value()
+	v := it.RefValue()
 	err = e.Unmarshal(v)
 	return index, err
 }
@@ -305,7 +305,7 @@ func (ms *RocksStorage) deleteUntil(batch *gorocksdb.WriteBatch, until uint64) e
 	defer it.Close()
 	cnt := 0
 	for ; it.Valid(); it.Next() {
-		batch.Delete(it.Key())
+		batch.Delete(it.RefKey())
 		cnt++
 	}
 	//raftLogger.Infof("compact raft storage to %d , cnt: %v", until, cnt)
@@ -357,7 +357,7 @@ func (ms *RocksStorage) allEntries(lo, hi, maxSize uint64) (es []pb.Entry, rerr 
 	defer it.Close()
 	size := uint64(0)
 	for ; it.Valid(); it.Next() {
-		v := it.Value()
+		v := it.RefValue()
 		var e pb.Entry
 		if err = e.Unmarshal(v); err != nil {
 			raftLogger.Infof("failed to unmarshal: %v", v)
@@ -472,6 +472,7 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 	}
 	ms.setCachedFirstIndex(0)
 	batch := gorocksdb.NewWriteBatch()
+	defer batch.Destroy()
 	// TODO: delete too much will slow down the write in db, improve this to avoid high rt.
 	err = ms.deleteUntil(batch, compactIndex)
 	if err != nil {
@@ -578,7 +579,7 @@ func (ms *RocksStorage) deleteFrom(batch *gorocksdb.WriteBatch, from uint64) err
 	defer it.Close()
 	cnt := 0
 	for ; it.Valid(); it.Next() {
-		batch.Delete(it.Key())
+		batch.Delete(it.RefKey())
 		cnt++
 	}
 	ms.entryDB.AddDeletedCnt(int64(cnt))
