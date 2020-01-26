@@ -136,7 +136,7 @@ func encodeVerKey(h *headerMetaValue, key []byte) []byte {
 
 func (exp *compactExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte {
 	switch dt {
-	case HashType, SetType:
+	case HashType, SetType, BitmapType:
 		return encodeVerKey(h, key)
 	default:
 		return exp.localExp.encodeToVersionKey(dt, h, key)
@@ -145,7 +145,7 @@ func (exp *compactExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, ke
 
 func (exp *compactExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte, int64, error) {
 	switch dt {
-	case HashType, SetType:
+	case HashType, SetType, BitmapType:
 		vals, err := Decode(key, len(key))
 		if err != nil {
 			return nil, 0, err
@@ -164,7 +164,7 @@ func (exp *compactExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte,
 
 func (exp *compactExpiration) encodeToRawValue(dataType byte, h *headerMetaValue, realValue []byte) []byte {
 	switch dataType {
-	case HashType, KVType, SetType:
+	case HashType, KVType, SetType, BitmapType:
 		if h == nil {
 			h = newHeaderMetaV1()
 		}
@@ -179,7 +179,7 @@ func (exp *compactExpiration) encodeToRawValue(dataType byte, h *headerMetaValue
 func (exp *compactExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]byte, *headerMetaValue, error) {
 	h := newHeaderMetaV1()
 	switch dataType {
-	case HashType, KVType, SetType:
+	case HashType, KVType, SetType, BitmapType:
 		if rawValue == nil {
 			return nil, h, nil
 		}
@@ -206,6 +206,10 @@ func (exp *compactExpiration) getRawValueForHeader(ts int64, dataType byte, key 
 		metaKey := sEncodeSizeKey(key)
 		v, err := exp.db.eng.GetBytes(exp.db.defaultReadOpts, metaKey)
 		return v, err
+	case BitmapType:
+		metaKey := bitEncodeMetaKey(key)
+		v, err := exp.db.eng.GetBytes(exp.db.defaultReadOpts, metaKey)
+		return v, err
 	default:
 		return exp.localExp.getRawValueForHeader(ts, dataType, key)
 	}
@@ -213,7 +217,7 @@ func (exp *compactExpiration) getRawValueForHeader(ts int64, dataType byte, key 
 
 func (exp *compactExpiration) isExpired(ts int64, dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
 	switch dataType {
-	case HashType, KVType, SetType:
+	case HashType, KVType, SetType, BitmapType:
 		if rawValue == nil {
 			return false, nil
 		}
@@ -230,7 +234,7 @@ func (exp *compactExpiration) isExpired(ts int64, dataType byte, key []byte, raw
 
 func (exp *compactExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) (int64, error) {
 	switch dataType {
-	case HashType, KVType, SetType:
+	case HashType, KVType, SetType, BitmapType:
 		wb := exp.db.wb
 		wb.Clear()
 		if rawValue == nil {
@@ -247,6 +251,8 @@ func (exp *compactExpiration) ExpireAt(dataType byte, key []byte, rawValue []byt
 			key = hEncodeSizeKey(key)
 		} else if dataType == SetType {
 			key = sEncodeSizeKey(key)
+		} else if dataType == BitmapType {
+			key = bitEncodeMetaKey(key)
 		}
 		wb.Put(key, newValue)
 		if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
@@ -260,7 +266,7 @@ func (exp *compactExpiration) ExpireAt(dataType byte, key []byte, rawValue []byt
 
 func (exp *compactExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	switch dataType {
-	case HashType, KVType, SetType:
+	case HashType, KVType, SetType, BitmapType:
 		h := newHeaderMetaV1()
 		if when >= int64(math.MaxUint32-1) {
 			return nil, errExpOverflow
@@ -279,7 +285,7 @@ func (exp *compactExpiration) rawExpireAt(dataType byte, key []byte, rawValue []
 
 func (exp *compactExpiration) ttl(ts int64, dataType byte, key []byte, rawValue []byte) (int64, error) {
 	switch dataType {
-	case KVType, HashType, SetType:
+	case KVType, HashType, SetType, BitmapType:
 		if rawValue == nil {
 			return -1, nil
 		}
@@ -299,7 +305,7 @@ func (exp *compactExpiration) renewOnExpired(ts int64, dataType byte, key []byte
 		return
 	}
 	switch dataType {
-	case KVType, HashType, SetType:
+	case KVType, HashType, SetType, BitmapType:
 		oldh.ExpireAt = 0
 		oldh.UserData = nil
 		oldh.ValueVersion = ts
@@ -322,7 +328,7 @@ func (exp *compactExpiration) Stop() {
 
 func (exp *compactExpiration) delExpire(dataType byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	switch dataType {
-	case HashType, KVType, SetType:
+	case HashType, KVType, SetType, BitmapType:
 		if !keepValue {
 			return rawValue, nil
 		}
