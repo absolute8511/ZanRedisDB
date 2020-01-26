@@ -240,10 +240,6 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	table, rk, _ := extractTableFromRedisKey(key)
-	if len(table) == 0 {
-		return 0, errTableName
-	}
 
 	wb := db.wb
 	wb.Clear()

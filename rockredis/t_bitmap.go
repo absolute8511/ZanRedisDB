@@ -94,7 +94,11 @@ func encodeBitmapStopKey(table []byte, key []byte) ([]byte, error) {
 }
 
 func (db *RockDB) bitSetToNew(ts int64, wb *gorocksdb.WriteBatch, bmSize int64, key []byte, offset int64, on int) (int64, error) {
-	table, rk, _ := extractTableFromRedisKey(key)
+	oldh, table, rk, err := db.prepareCollKeyForWrite(ts, BitmapType, key, nil)
+	if err != nil {
+		return 0, err
+	}
+
 	index := (offset / bitmapSegBits) * bitmapSegBytes
 	bmk, err := encodeBitmapKey(table, rk, index)
 	if err != nil {
@@ -122,7 +126,7 @@ func (db *RockDB) bitSetToNew(ts int64, wb *gorocksdb.WriteBatch, bmSize int64, 
 	byteVal |= (uint8(on&0x1) << bit)
 	bmv[byteOffset] = byteVal
 	wb.Put(bmk, bmv)
-	db.updateBitmapMeta(ts, wb, key, bmSize)
+	db.updateBitmapMeta(ts, wb, oldh, key, bmSize)
 	var ret int64
 	if oldBit > 0 {
 		ret = 1
@@ -154,7 +158,7 @@ func (db *RockDB) BitSetV2(ts int64, key []byte, offset int64, on int) (int64, e
 	// if new v2 is not exist, merge the old data to the new v2 first
 	// if new v2 already exist, it means the old data has been merged before, we can ignore old
 	// for old data, we can just split them to the 1KB segments
-	bmSize, ok, err := db.getBitmapMeta(key, false)
+	_, bmSize, ok, err := db.getBitmapMeta(ts, key, false)
 	if err != nil {
 		return 0, err
 	}
@@ -208,49 +212,48 @@ func (db *RockDB) BitSetV2(ts int64, key []byte, offset int64, on int) (int64, e
 	return oldBit, err
 }
 
-func (db *RockDB) updateBitmapMeta(ts int64, wb *gorocksdb.WriteBatch, key []byte, bmSize int64) error {
+func (db *RockDB) updateBitmapMeta(ts int64, wb *gorocksdb.WriteBatch, oldh *headerMetaValue, key []byte, bmSize int64) error {
 	metaKey := bitEncodeMetaKey(key)
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint64(buf[:8], uint64(bmSize))
 	binary.BigEndian.PutUint64(buf[8:], uint64(ts))
-	wb.Put(metaKey, buf)
+	oldh.UserData = buf
+	nv := oldh.encodeWithData()
+	wb.Put(metaKey, nv)
 	return nil
 }
 
-func (db *RockDB) getBitmapMeta(key []byte, lock bool) (int64, bool, error) {
-	metaKey := bitEncodeMetaKey(key)
-	var v []byte
-	var err error
-	if lock {
-		v, err = db.eng.GetBytes(db.defaultReadOpts, metaKey)
-	} else {
-		v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, metaKey)
-	}
+func (db *RockDB) getBitmapMeta(tn int64, key []byte, lock bool) (*headerMetaValue, int64, bool, error) {
+	oldh, meta, expired, err := db.collHeaderMeta(tn, BitmapType, key, lock)
 	if err != nil {
-		return 0, false, err
+		return oldh, 0, false, err
 	}
-	if v == nil {
-		return 0, false, nil
+	if len(meta) == 0 || expired {
+		return oldh, 0, false, nil
 	}
-	if len(v) < 8 {
-		return 0, false, errors.New("invalid bitmap meta value")
+	if len(meta) < 8 {
+		return oldh, 0, false, errors.New("invalid bitmap meta value")
 	}
-	s, err := Int64(v[:8], nil)
-	return s, true, err
+	s, err := Int64(meta[:8], nil)
+	return oldh, s, true, err
 }
 
 func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 	// read new v2 first, if not exist, try old version
-	_, ok, err := db.getBitmapMeta(key, true)
+	tn := time.Now().UnixNano()
+	oldh, _, ok, err := db.getBitmapMeta(tn, key, true)
 	if err != nil {
 		return 0, err
 	}
 	if !ok {
 		return db.bitGetOld(key, offset)
 	}
-
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+	rk = db.expiration.encodeToVersionKey(BitmapType, oldh, rk)
 	index := (offset / bitmapSegBits) * bitmapSegBytes
-	table, rk, _ := extractTableFromRedisKey(key)
 	bitk, err := encodeBitmapKey(table, rk, index)
 	if err != nil {
 		return 0, err
@@ -276,7 +279,8 @@ func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 
 func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 	// read new v2 first, if not exist, try old version
-	bmSize, ok, err := db.getBitmapMeta(key, true)
+	tn := time.Now().UnixNano()
+	oldh, bmSize, ok, err := db.getBitmapMeta(tn, key, true)
 	if err != nil {
 		return 0, err
 	}
@@ -288,7 +292,12 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 	if start > end {
 		return 0, nil
 	}
-	table, rk, _ := extractTableFromRedisKey(key)
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+	rk = db.expiration.encodeToVersionKey(BitmapType, oldh, rk)
+
 	total := int64(0)
 	startI := start / bitmapSegBytes
 	stopI := end / bitmapSegBytes
@@ -327,17 +336,21 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 }
 
 func (db *RockDB) BitClear(key []byte) (int64, error) {
-	bmSize, ok, err := db.getBitmapMeta(key, false)
+	oldh, meta, _, err := db.collHeaderMeta(0, BitmapType, key, false)
 	if err != nil {
 		return 0, err
 	}
-	if !ok {
-		return 0, nil
+	bmSize := int64(0)
+	if len(meta) >= 8 {
+		bmSize, _ = Int64(meta[:8], nil)
 	}
-
 	db.MaybeClearBatch()
 	wb := db.wb
-	table, rk, _ := extractTableFromRedisKey(key)
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return 0, err
+	}
+	rk = db.expiration.encodeToVersionKey(BitmapType, oldh, rk)
 	iterStart, _ := encodeBitmapStartKey(table, rk, 0)
 	iterStop, _ := encodeBitmapStopKey(table, rk)
 	if bmSize/bitmapSegBytes > RangeDeleteNum {
@@ -355,13 +368,15 @@ func (db *RockDB) BitClear(key []byte) (int64, error) {
 	}
 
 	metaKey := bitEncodeMetaKey(key)
+	db.delExpire(BitmapType, key, nil, false, wb)
 	wb.Delete(metaKey)
 	err = db.MaybeCommitBatch()
 	return 1, err
 }
 
 func (db *RockDB) BitKeyExist(key []byte) (int64, error) {
-	_, ok, err := db.getBitmapMeta(key, true)
+	tn := time.Now().UnixNano()
+	_, _, ok, err := db.getBitmapMeta(tn, key, true)
 	if err != nil {
 		return 0, err
 	}
