@@ -215,7 +215,10 @@ func (self *localBatchedBuffer) commit() {
 	for _, v := range self.buff {
 		dt, key, _, err := expDecodeTimeKey(v.timeKey)
 		if err != nil || dataType2CommonType(dt) == common.NONE {
-			dbLog.Errorf("decode time-key failed, bad data encounter, err:%s", err.Error())
+			// currently the bitmap/json type is not supported
+			if err != nil {
+				dbLog.Errorf("decode time-key failed, bad data encounter, err:%s, %v", err, dt)
+			}
 			continue
 		}
 
@@ -310,6 +313,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			return db.eng.Write(db.defaultWriteOpts, wb)
 		}
 	default:
+		// TODO: currently bitmap/json is not handled
 		return nil
 	}
 }

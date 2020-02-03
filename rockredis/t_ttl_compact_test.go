@@ -1032,11 +1032,54 @@ func TestDBCompactTTL(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType}
+	kTypeMap := make(map[string]byte)
+	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType, BitmapType}
 
 	for i := 0; i < 10000*3+rand.Intn(10000); i++ {
-		key := "test:ttl_checker_consistency:" + strconv.Itoa(i)
+		key := "test:ttl_checker_compact:" + strconv.Itoa(i)
 		dataType := dataTypes[rand.Int()%len(dataTypes)]
+		kTypeMap[key] = dataType
+
+		switch dataType {
+		case KVType:
+			db.KVSet(0, []byte(key), []byte("test_checker_local_kvValue"))
+
+		case ListType:
+			tListKey := []byte(key)
+			db.LPush(0, tListKey, []byte("this"), []byte("is"), []byte("list"),
+				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
+
+		case HashType:
+			tHashKey := []byte(key)
+			tHashVal := []common.KVRecord{
+				{Key: []byte("field0"), Value: []byte("value0")},
+				{Key: []byte("field1"), Value: []byte("value1")},
+				{Key: []byte("field2"), Value: []byte("value2")},
+			}
+			db.HMset(0, tHashKey, tHashVal...)
+
+		case SetType:
+			tSetKey := []byte(key)
+			db.SAdd(0, tSetKey, []byte("this"), []byte("is"), []byte("set"),
+				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
+
+		case ZSetType:
+			tZsetKey := []byte(key)
+			members := []common.ScorePair{
+				{Member: []byte("member1"), Score: 11},
+				{Member: []byte("member2"), Score: 22},
+				{Member: []byte("member3"), Score: 33},
+				{Member: []byte("member4"), Score: 44},
+			}
+
+			db.ZAdd(0, tZsetKey, members...)
+		case BitmapType:
+			tBitKey := []byte(key)
+			db.BitSetV2(0, tBitKey, 0, 1)
+			db.BitSetV2(0, tBitKey, 1, 1)
+			db.BitSetV2(0, tBitKey, bitmapSegBits, 1)
+		}
+
 		tn := time.Now().UnixNano()
 		if _, err := db.expire(tn, dataType, []byte(key), nil, 2); err != nil {
 			t.Fatalf("expire key %v , type %v, err: %v", key, dataType, err)
@@ -1044,4 +1087,45 @@ func TestDBCompactTTL(t *testing.T) {
 	}
 
 	time.Sleep(3 * time.Second)
+
+	for k, v := range kTypeMap {
+		switch v {
+		case KVType:
+			if v, err := db.KVGet([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != nil {
+				t.Errorf("key:%s of KVType do not expired", string(k))
+			}
+		case HashType:
+			if v, err := db.HLen([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != 0 {
+				t.Errorf("key:%s of HashType do not expired", string(k))
+			}
+		case ListType:
+			//if v, err := db.LLen([]byte(k)); err != nil {
+			//	t.Fatal(err)
+			//} else if v != 0 {
+			//	t.Errorf("key:%s of ListType do not expired", string(k))
+			//}
+		case SetType:
+			if v, err := db.SCard([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != 0 {
+				t.Errorf("key:%s of SetType do not expired", string(k))
+			}
+		case ZSetType:
+			//if v, err := db.ZCard([]byte(k)); err != nil {
+			//	t.Fatal(err)
+			//} else if v != 0 {
+			//	t.Errorf("key:%s of ZSetType do not expired", string(k))
+			//}
+		case BitmapType:
+			if n, err := db.BitCountV2([]byte(k), 0, -1); err != nil {
+				t.Fatal(err)
+			} else if n != 0 {
+				t.Errorf("key:%s of BitmapType do not expired", string(k))
+			}
+		}
+	}
 }

@@ -325,3 +325,48 @@ func TestKVNode_batchWithNonBatchCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestKVNode_bitV2Command(t *testing.T) {
+	nd, dataDir, stopC := getTestKVNode(t)
+	testBitKey := []byte("default:test:bitv2_1")
+	tests := []struct {
+		name string
+		args redcon.Command
+	}{
+		{"setbitv2", buildCommand([][]byte{[]byte("setbitv2"), testBitKey, []byte("1"), []byte("1")})},
+		{"getbit", buildCommand([][]byte{[]byte("getbit"), testBitKey, []byte("1")})},
+		{"bitcount", buildCommand([][]byte{[]byte("bitcount"), testBitKey, []byte("1"), []byte("2")})},
+		{"bttl", buildCommand([][]byte{[]byte("bttl"), testBitKey})},
+		{"bkeyexist", buildCommand([][]byte{[]byte("bkeyexist"), testBitKey})},
+		{"bexpire", buildCommand([][]byte{[]byte("bexpire"), testBitKey, []byte("10")})},
+		{"bpersist", buildCommand([][]byte{[]byte("bpersist"), testBitKey})},
+		{"bitclear", buildCommand([][]byte{[]byte("bitclear"), testBitKey})},
+	}
+	defer os.RemoveAll(dataDir)
+	defer nd.Stop()
+	defer close(stopC)
+	c := &fakeRedisConn{}
+	defer c.Close()
+	defer c.Reset()
+	for _, cmd := range tests {
+		c.Reset()
+		handler, _ := nd.router.GetCmdHandler(cmd.name)
+		if handler != nil {
+			handler(c, cmd.args)
+		} else {
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			if whandler != nil {
+				rsp, err := whandler(cmd.args)
+				assert.Nil(t, err)
+				_, ok := rsp.(error)
+				assert.True(t, !ok)
+			} else {
+				handler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
+				_, err := handler(cmd.args)
+				assert.Nil(t, err)
+			}
+		}
+		t.Logf("handler response: %v", c.rsp)
+		assert.Nil(t, c.GetError())
+	}
+}

@@ -274,7 +274,7 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 
 	kTypeMap := make(map[string]byte)
 
-	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType}
+	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType, BitmapType}
 
 	for i := 0; i < 1000*3+rand.Intn(1000); i++ {
 		key := "test:ttl_checker_local:" + strconv.Itoa(i)
@@ -282,15 +282,15 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 		kTypeMap[key] = dataType
 		switch dataType {
 		case KVType:
-			db.KVSet(0, []byte("test_checker_local_kvKey"), []byte("test_checker_local_kvValue"))
+			db.KVSet(0, []byte(key), []byte("test_checker_local_kvValue"))
 
 		case ListType:
-			tListKey := []byte("test_checker_local_listKey")
+			tListKey := []byte(key)
 			db.LPush(0, tListKey, []byte("this"), []byte("is"), []byte("list"),
 				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
 
 		case HashType:
-			tHashKey := []byte("test_checker_local_hashKey")
+			tHashKey := []byte(key)
 			tHashVal := []common.KVRecord{
 				{Key: []byte("field0"), Value: []byte("value0")},
 				{Key: []byte("field1"), Value: []byte("value1")},
@@ -299,12 +299,12 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 			db.HMset(0, tHashKey, tHashVal...)
 
 		case SetType:
-			tSetKey := []byte("test_checker_local_setKey")
+			tSetKey := []byte(key)
 			db.SAdd(0, tSetKey, []byte("this"), []byte("is"), []byte("set"),
 				[]byte("local"), []byte("deletion"), []byte("ttl"), []byte("checker"), []byte("test"))
 
 		case ZSetType:
-			tZsetKey := []byte("test_checker_local_zsetKey")
+			tZsetKey := []byte(key)
 			members := []common.ScorePair{
 				{Member: []byte("member1"), Score: 11},
 				{Member: []byte("member2"), Score: 22},
@@ -313,10 +313,15 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 			}
 
 			db.ZAdd(0, tZsetKey, members...)
+		case BitmapType:
+			tBitKey := []byte(key)
+			db.BitSetV2(0, tBitKey, 0, 1)
+			db.BitSetV2(0, tBitKey, 1, 1)
+			db.BitSetV2(0, tBitKey, bitmapSegBits, 1)
 		}
 
 		tn := time.Now().UnixNano()
-		if _, err := db.expire(tn, dataType, []byte(key), nil, 8); err != nil {
+		if _, err := db.expire(tn, dataType, []byte(key), nil, 1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -329,31 +334,37 @@ func TestLocalDeletionTTLChecker(t *testing.T) {
 			if v, err := db.KVGet([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != nil {
-				t.Fatalf("key:%s of KVType do not expired", string(k))
+				t.Errorf("key:%s of KVType do not expired", string(k))
 			}
 		case HashType:
 			if v, err := db.HLen([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatalf("key:%s of HashType do not expired", string(k))
+				t.Errorf("key:%s of HashType do not expired", string(k))
 			}
 		case ListType:
 			if v, err := db.LLen([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatalf("key:%s of ListType do not expired", string(k))
+				t.Errorf("key:%s of ListType do not expired", string(k))
 			}
 		case SetType:
 			if v, err := db.SCard([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatalf("key:%s of SetType do not expired", string(k))
+				t.Errorf("key:%s of SetType do not expired", string(k))
 			}
 		case ZSetType:
 			if v, err := db.ZCard([]byte(k)); err != nil {
 				t.Fatal(err)
 			} else if v != 0 {
-				t.Fatalf("key:%s of ZSetType do not expired", string(k))
+				t.Errorf("key:%s of ZSetType do not expired", string(k))
+			}
+		case BitmapType:
+			if n, err := db.BitCountV2([]byte(k), 0, -1); err != nil {
+				t.Fatal(err)
+			} else if n == 0 {
+				t.Errorf("key:%s of BitmapType should not expired", string(k))
 			}
 		}
 	}

@@ -263,6 +263,22 @@ func (kvsm *kvStoreSM) localBitSetCommand(cmd redcon.Command, ts int64) (interfa
 	return kvsm.store.BitSetOld(ts, cmd.Args[1], offset, int(on))
 }
 
+func (kvsm *kvStoreSM) localBitSetV2Command(cmd redcon.Command, ts int64) (interface{}, error) {
+	offset, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	on, err := strconv.ParseInt(string(cmd.Args[3]), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return kvsm.store.BitSetV2(ts, cmd.Args[1], offset, int(on))
+}
+
+func (kvsm *kvStoreSM) localBitClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.BitClear(cmd.Args[1])
+}
+
 func (kvsm *kvStoreSM) localAppendCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	ret, err := kvsm.store.Append(ts, cmd.Args[1], cmd.Args[2])
 	return ret, err

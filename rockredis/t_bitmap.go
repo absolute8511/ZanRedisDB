@@ -158,7 +158,7 @@ func (db *RockDB) BitSetV2(ts int64, key []byte, offset int64, on int) (int64, e
 	// if new v2 is not exist, merge the old data to the new v2 first
 	// if new v2 already exist, it means the old data has been merged before, we can ignore old
 	// for old data, we can just split them to the 1KB segments
-	_, bmSize, ok, err := db.getBitmapMeta(ts, key, false)
+	_, bmSize, _, ok, err := db.getBitmapMeta(ts, key, false)
 	if err != nil {
 		return 0, err
 	}
@@ -223,25 +223,40 @@ func (db *RockDB) updateBitmapMeta(ts int64, wb *gorocksdb.WriteBatch, oldh *hea
 	return nil
 }
 
-func (db *RockDB) getBitmapMeta(tn int64, key []byte, lock bool) (*headerMetaValue, int64, bool, error) {
+func (db *RockDB) getBitmapMeta(tn int64, key []byte, lock bool) (*headerMetaValue, int64, int64, bool, error) {
 	oldh, meta, expired, err := db.collHeaderMeta(tn, BitmapType, key, lock)
 	if err != nil {
-		return oldh, 0, false, err
+		return oldh, 0, 0, false, err
 	}
-	if len(meta) == 0 || expired {
-		return oldh, 0, false, nil
+	if len(meta) == 0 {
+		return oldh, 0, 0, false, nil
 	}
-	if len(meta) < 8 {
-		return oldh, 0, false, errors.New("invalid bitmap meta value")
+	if len(meta) < 16 {
+		return oldh, 0, 0, false, errors.New("invalid bitmap meta value")
 	}
 	s, err := Int64(meta[:8], nil)
-	return oldh, s, true, err
+	if err != nil {
+		return oldh, s, 0, !expired, err
+	}
+	timestamp, err := Int64(meta[8:16], err)
+	return oldh, s, timestamp, !expired, err
+}
+
+func (db *RockDB) BitGetVer(key []byte) (int64, error) {
+	_, _, ts, ok, err := db.getBitmapMeta(time.Now().UnixNano(), key, true)
+	if err != nil {
+		return 0, err
+	}
+	if !ok && ts == 0 {
+		return db.KVGetVer(key)
+	}
+	return ts, err
 }
 
 func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 	// read new v2 first, if not exist, try old version
 	tn := time.Now().UnixNano()
-	oldh, _, ok, err := db.getBitmapMeta(tn, key, true)
+	oldh, _, _, ok, err := db.getBitmapMeta(tn, key, true)
 	if err != nil {
 		return 0, err
 	}
@@ -280,7 +295,7 @@ func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 	// read new v2 first, if not exist, try old version
 	tn := time.Now().UnixNano()
-	oldh, bmSize, ok, err := db.getBitmapMeta(tn, key, true)
+	oldh, bmSize, _, ok, err := db.getBitmapMeta(tn, key, true)
 	if err != nil {
 		return 0, err
 	}
@@ -376,7 +391,7 @@ func (db *RockDB) BitClear(key []byte) (int64, error) {
 
 func (db *RockDB) BitKeyExist(key []byte) (int64, error) {
 	tn := time.Now().UnixNano()
-	_, _, ok, err := db.getBitmapMeta(tn, key, true)
+	_, _, _, ok, err := db.getBitmapMeta(tn, key, true)
 	if err != nil {
 		return 0, err
 	}

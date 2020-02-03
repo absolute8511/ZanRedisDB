@@ -9,6 +9,7 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	kvsm.router.RegisterInternal("setrange", kvsm.localSetRangeCommand)
 	kvsm.router.RegisterInternal("getset", kvsm.localGetSetCommand)
 	kvsm.router.RegisterInternal("setbit", kvsm.localBitSetCommand)
+	kvsm.router.RegisterInternal("setbitv2", kvsm.localBitSetV2Command)
 	kvsm.router.RegisterInternal("setnx", kvsm.localSetnxCommand)
 	kvsm.router.RegisterInternal("mset", kvsm.localMSetCommand)
 	kvsm.router.RegisterInternal("incr", kvsm.localIncrCommand)
@@ -16,6 +17,9 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	kvsm.router.RegisterInternal("plset", kvsm.localPlsetCommand)
 	kvsm.router.RegisterInternal("pfadd", kvsm.localPFAddCommand)
 	//kvsm.router.RegisterInternal("pfcount", kvsm.localPFCountCommand)
+	// bitmap
+	kvsm.router.RegisterInternal("bitclear", kvsm.localBitClearCommand)
+
 	// hash
 	kvsm.router.RegisterInternal("hset", kvsm.localHSetCommand)
 	kvsm.router.RegisterInternal("hsetnx", kvsm.localHSetNXCommand)
@@ -55,18 +59,21 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	kvsm.router.RegisterInternal("sclear", kvsm.localSclear)
 	kvsm.router.RegisterInternal("smclear", kvsm.localSmclear)
 	kvsm.router.RegisterInternal("spop", kvsm.localSpop)
-	// expire
+	// expire&persist
 	kvsm.router.RegisterInternal("setex", kvsm.localSetexCommand)
 	kvsm.router.RegisterInternal("expire", kvsm.localExpireCommand)
 	kvsm.router.RegisterInternal("lexpire", kvsm.localListExpireCommand)
 	kvsm.router.RegisterInternal("hexpire", kvsm.localHashExpireCommand)
 	kvsm.router.RegisterInternal("sexpire", kvsm.localSetExpireCommand)
 	kvsm.router.RegisterInternal("zexpire", kvsm.localZSetExpireCommand)
+	kvsm.router.RegisterInternal("bexpire", kvsm.localBitExpireCommand)
+
 	kvsm.router.RegisterInternal("persist", kvsm.localPersistCommand)
 	kvsm.router.RegisterInternal("hpersist", kvsm.localHashPersistCommand)
 	kvsm.router.RegisterInternal("lpersist", kvsm.localListPersistCommand)
 	kvsm.router.RegisterInternal("spersist", kvsm.localSetPersistCommand)
 	kvsm.router.RegisterInternal("zpersist", kvsm.localZSetPersistCommand)
+	kvsm.router.RegisterInternal("bpersist", kvsm.localBitPersistCommand)
 }
 
 func (nd *KVNode) registerHandler() {
@@ -86,11 +93,13 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterWrite("setrange", wrapWriteCommandKAnySubkey(nd, checkAndRewriteIntRsp, 2))
 	nd.router.RegisterWrite("getset", wrapWriteCommandKV(nd, checkAndRewriteBulkRsp))
 	nd.router.RegisterWrite("setbit", nd.setbitCommand)
+	nd.router.RegisterWrite("setbitv2", nd.setbitCommand)
 	nd.router.RegisterWrite("setnx", nd.setnxCommand)
 	nd.router.RegisterWrite("incr", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("incrby", wrapWriteCommandKV(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("pfadd", wrapWriteCommandKAnySubkey(nd, checkAndRewriteIntRsp, 0))
 	nd.router.RegisterRead("pfcount", wrapReadCommandK(nd.pfcountCommand))
+	nd.router.RegisterWrite("bitclear", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	// for hash
 	nd.router.RegisterRead("hget", wrapReadCommandKSubkey(nd.hgetCommand))
 	nd.router.RegisterRead("hgetall", wrapReadCommandK(nd.hgetallCommand))
@@ -165,11 +174,13 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterRead("lttl", wrapReadCommandK(nd.lttlCommand))
 	nd.router.RegisterRead("sttl", wrapReadCommandK(nd.sttlCommand))
 	nd.router.RegisterRead("zttl", wrapReadCommandK(nd.zttlCommand))
+	nd.router.RegisterRead("bttl", wrapReadCommandK(nd.bttlCommand))
 	// extended exist
 	nd.router.RegisterRead("hkeyexist", wrapReadCommandK(nd.hKeyExistCommand))
 	nd.router.RegisterRead("lkeyexist", wrapReadCommandK(nd.lKeyExistCommand))
 	nd.router.RegisterRead("skeyexist", wrapReadCommandK(nd.sKeyExistCommand))
 	nd.router.RegisterRead("zkeyexist", wrapReadCommandK(nd.zKeyExistCommand))
+	nd.router.RegisterRead("bkeyexist", wrapReadCommandK(nd.bKeyExistCommand))
 
 	nd.router.RegisterWrite("setex", wrapWriteCommandKVV(nd, checkOKRsp))
 	nd.router.RegisterWrite("expire", wrapWriteCommandKV(nd, checkAndRewriteIntRsp))
@@ -177,12 +188,14 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterWrite("lexpire", wrapWriteCommandKV(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("sexpire", wrapWriteCommandKV(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("zexpire", wrapWriteCommandKV(nd, checkAndRewriteIntRsp))
+	nd.router.RegisterWrite("bexpire", wrapWriteCommandKV(nd, checkAndRewriteIntRsp))
 
 	nd.router.RegisterWrite("persist", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("hpersist", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("lpersist", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("spersist", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("zpersist", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
+	nd.router.RegisterWrite("bpersist", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 
 	// for scan
 	nd.router.RegisterRead("hscan", wrapReadCommandKAnySubkey(nd.hscanCommand))
@@ -229,6 +242,9 @@ func (kvsm *kvStoreSM) registerConflictHandlers() {
 	kvsm.cRouter.Register("plset", kvsm.checkKVKVConflict)
 	// hll
 	kvsm.cRouter.Register("pfadd", kvsm.checkHLLConflict)
+	// bitmap
+	kvsm.cRouter.Register("setbitv2", kvsm.checkBitmapConflict)
+	kvsm.cRouter.Register("setbit", kvsm.checkBitmapConflict)
 	// hash
 	kvsm.cRouter.Register("hset", kvsm.checkHashKFVConflict)
 	kvsm.cRouter.Register("hsetnx", kvsm.checkHashKFVConflict)

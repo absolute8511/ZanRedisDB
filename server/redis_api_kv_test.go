@@ -444,6 +444,133 @@ func TestKVBitOp(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
+func TestKVBitExpire(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key1 := "default:test:bit_exp"
+	ttl := 3
+
+	if n, err := goredis.Int(c.Do("setbitv2", key1, 1, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if v, err := goredis.Int(c.Do("getbit", key1, 1)); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal(v)
+	}
+	c.Do("bexpire", key1, ttl)
+	realTtl, err := goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+	// check write keep ttl
+	if _, err := goredis.Int(c.Do("setbitv2", key1, 2, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := goredis.Int(c.Do("getbit", key1, 2)); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal(v)
+	}
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+
+	time.Sleep(time.Second * time.Duration(ttl+2))
+	if v, err := goredis.Int(c.Do("getbit", key1, 1)); err != goredis.ErrNil && err != nil {
+		t.Fatalf("expired key should be expired: %v, %v", v, err)
+	} else if v != 0 {
+		t.Fatal(v)
+	}
+
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+
+	if n, err := goredis.Int(c.Do("setbitv2", key1, 3, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("bexpire", key1, ttl)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal(n)
+	}
+	if v, err := goredis.Int(c.Do("getbit", key1, 3)); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal(v)
+	}
+	if v, err := goredis.Int(c.Do("getbit", key1, 1)); err != nil {
+		t.Fatal(err)
+	} else if v != 0 {
+		t.Fatal(v)
+	}
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+	if n, err := goredis.Int(c.Do("setbitv2", key1, 4, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+	//persist
+	c.Do("bpersist", key1)
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+
+	// change ttl
+	_, err = c.Do("bexpire", key1, ttl+4)
+	assert.Nil(t, err)
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl+4, realTtl)
+
+	time.Sleep(time.Second * time.Duration(ttl+5))
+	// check expired kv should not get from any read command
+	if v, err := goredis.Int(c.Do("getbit", key1, 3)); err != goredis.ErrNil && err != nil {
+		t.Fatalf("expired key should be expired: %v, %v", v, err)
+	} else if v != 0 {
+		t.Fatal(v)
+	}
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+	if n, err := goredis.Int(c.Do("bkeyexist", key1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	// persist
+	if n, err := goredis.Int(c.Do("setbitv2", key1, 5, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+
+	_, err = c.Do("bexpire", key1, ttl)
+	assert.Nil(t, err)
+
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assertTTLNear(t, ttl, realTtl)
+
+	_, err = c.Do("bpersist", key1)
+	assert.Nil(t, err)
+
+	realTtl, err = goredis.Int(c.Do("bttl", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, -1, realTtl)
+}
+
 func TestKVBatch(t *testing.T) {
 
 	var wg sync.WaitGroup
