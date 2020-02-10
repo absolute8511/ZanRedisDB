@@ -28,14 +28,14 @@ func (exp *consistencyExpiration) decodeFromVersionKey(dt byte, key []byte) ([]b
 	return key, 0, nil
 }
 
-func (exp *consistencyExpiration) encodeToRawValue(dataType byte, h *headerMetaValue, rawValue []byte) []byte {
-	return rawValue
+func (exp *consistencyExpiration) encodeToRawValue(dataType byte, h *headerMetaValue) []byte {
+	return h.UserData
 }
 
-func (exp *consistencyExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]byte, *headerMetaValue, error) {
+func (exp *consistencyExpiration) decodeRawValue(dataType byte, rawValue []byte) (*headerMetaValue, error) {
 	var h headerMetaValue
 	h.UserData = rawValue
-	return rawValue, &h, nil
+	return &h, nil
 }
 
 func (exp *consistencyExpiration) getRawValueForHeader(ts int64, dataType byte, key []byte) ([]byte, error) {

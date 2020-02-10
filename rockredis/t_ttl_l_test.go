@@ -170,11 +170,9 @@ func TestListTTL_L(t *testing.T) {
 		t.Fatal("return value from ListTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.LPersist(tn, listKey); err != nil {
-		t.Fatal(err)
-	} else if v != 0 {
-		t.Fatal("return value from LPersist of LocalDeletion Policy != 0")
-	}
+	v, err := db.LPersist(tn, listKey)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(0), v)
 }
 
 func TestSetTTL_L(t *testing.T) {
@@ -252,12 +250,9 @@ func TestZSetTTL_L(t *testing.T) {
 		t.Fatal("return value from ZSetTtl of LocalDeletion Policy != -1")
 	}
 
-	if v, err := db.ZPersist(tn, zsetKey); err != nil {
-		t.Fatal(err)
-	} else if v != 0 {
-		t.Fatal("return value from ZPersist of LocalDeletion Policy != 0")
-	}
-
+	v, err := db.ZPersist(tn, zsetKey)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(0), v)
 }
 
 func TestLocalDeletionTTLChecker(t *testing.T) {

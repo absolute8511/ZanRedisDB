@@ -94,10 +94,13 @@ func encodeBitmapStopKey(table []byte, key []byte) ([]byte, error) {
 }
 
 func (db *RockDB) bitSetToNew(ts int64, wb *gorocksdb.WriteBatch, bmSize int64, key []byte, offset int64, on int) (int64, error) {
-	oldh, table, rk, err := db.prepareCollKeyForWrite(ts, BitmapType, key, nil)
+	keyInfo, err := db.prepareCollKeyForWrite(ts, BitmapType, key, nil)
 	if err != nil {
 		return 0, err
 	}
+	oldh := keyInfo.OldHeader
+	table := keyInfo.Table
+	rk := keyInfo.VerKey
 
 	index := (offset / bitmapSegBits) * bitmapSegBytes
 	bmk, err := encodeBitmapKey(table, rk, index)
@@ -224,10 +227,11 @@ func (db *RockDB) updateBitmapMeta(ts int64, wb *gorocksdb.WriteBatch, oldh *hea
 }
 
 func (db *RockDB) getBitmapMeta(tn int64, key []byte, lock bool) (*headerMetaValue, int64, int64, bool, error) {
-	oldh, meta, expired, err := db.collHeaderMeta(tn, BitmapType, key, lock)
+	oldh, expired, err := db.collHeaderMeta(tn, BitmapType, key, lock)
 	if err != nil {
 		return oldh, 0, 0, false, err
 	}
+	meta := oldh.UserData
 	if len(meta) == 0 {
 		return oldh, 0, 0, false, nil
 	}
@@ -351,10 +355,11 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 }
 
 func (db *RockDB) BitClear(key []byte) (int64, error) {
-	oldh, meta, _, err := db.collHeaderMeta(0, BitmapType, key, false)
+	oldh, _, err := db.collHeaderMeta(0, BitmapType, key, false)
 	if err != nil {
 		return 0, err
 	}
+	meta := oldh.UserData
 	bmSize := int64(0)
 	if len(meta) >= 8 {
 		bmSize, _ = Int64(meta[:8], nil)
@@ -390,33 +395,20 @@ func (db *RockDB) BitClear(key []byte) (int64, error) {
 }
 
 func (db *RockDB) BitKeyExist(key []byte) (int64, error) {
-	tn := time.Now().UnixNano()
-	_, _, _, ok, err := db.getBitmapMeta(tn, key, true)
+	n, err := db.collKeyExists(BitmapType, key)
 	if err != nil {
 		return 0, err
 	}
-	if !ok {
+	if n == 0 {
 		return db.KVExists(key)
 	}
 	return 1, nil
 }
 
-func (db *RockDB) BitExpire(tn int64, key []byte, ttlSec int64) (int64, error) {
-	oldh, metaV, expired, err := db.collHeaderMeta(tn, BitmapType, key, false)
-	if err != nil || expired || metaV == nil {
-		return 0, err
-	}
-
-	rawV := db.expiration.encodeToRawValue(BitmapType, oldh, metaV)
-	return db.ExpireAt(BitmapType, key, rawV, ttlSec+tn/int64(time.Second))
+func (db *RockDB) BitExpire(ts int64, key []byte, ttlSec int64) (int64, error) {
+	return db.collExpire(ts, BitmapType, key, ttlSec)
 }
 
-func (db *RockDB) BitPersist(tn int64, key []byte) (int64, error) {
-	oldh, metaV, expired, err := db.collHeaderMeta(tn, BitmapType, key, false)
-	if err != nil || expired || metaV == nil {
-		return 0, err
-	}
-
-	rawV := db.expiration.encodeToRawValue(BitmapType, oldh, metaV)
-	return db.ExpireAt(BitmapType, key, rawV, 0)
+func (db *RockDB) BitPersist(ts int64, key []byte) (int64, error) {
+	return db.collPersist(ts, BitmapType, key)
 }

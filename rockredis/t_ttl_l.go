@@ -51,14 +51,14 @@ func (exp *localExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte, i
 	return key, 0, nil
 }
 
-func (exp *localExpiration) encodeToRawValue(dataType byte, h *headerMetaValue, rawValue []byte) []byte {
-	return rawValue
+func (exp *localExpiration) encodeToRawValue(dataType byte, h *headerMetaValue) []byte {
+	return h.UserData
 }
 
-func (exp *localExpiration) decodeRawValue(dataType byte, rawValue []byte) ([]byte, *headerMetaValue, error) {
+func (exp *localExpiration) decodeRawValue(dataType byte, rawValue []byte) (*headerMetaValue, error) {
 	var h headerMetaValue
 	h.UserData = rawValue
-	return rawValue, &h, nil
+	return &h, nil
 }
 
 func (exp *localExpiration) getRawValueForHeader(ts int64, dataType byte, key []byte) ([]byte, error) {

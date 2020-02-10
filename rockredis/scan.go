@@ -309,15 +309,15 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 	v := make([]common.KVRecord, 0, count)
 
 	tn := time.Now().UnixNano()
-	expired, _, table, verKey, err := db.GetHashVersionKey(tn, key)
+	keyInfo, err := db.GetCollVersionKey(tn, HashType, key, true)
 	if err != nil {
 		return nil, err
 	}
-	if expired {
+	if keyInfo.IsExpired() {
 		return v, nil
 	}
 
-	it, err := db.buildSpecificDataScanIterator(HashType, table, verKey, cursor, count, reverse)
+	it, err := db.buildSpecificDataScanIterator(HashType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -350,15 +350,15 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 
 	v := make([][]byte, 0, count)
 	tn := time.Now().UnixNano()
-	expired, _, table, verKey, err := db.GetCollVersionKey(tn, SetType, key)
+	keyInfo, err := db.GetCollVersionKey(tn, SetType, key, true)
 	if err != nil {
 		return nil, err
 	}
-	if expired {
+	if keyInfo.IsExpired() {
 		return v, nil
 	}
 
-	it, err := db.buildSpecificDataScanIterator(SetType, table, verKey, cursor, count, reverse)
+	it, err := db.buildSpecificDataScanIterator(SetType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -389,13 +389,18 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
-	table, rk, err := extractTableFromRedisKey(key)
+
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.GetCollVersionKey(tn, ZSetType, key, true)
 	if err != nil {
 		return nil, err
 	}
 	v := make([]common.ScorePair, 0, count)
+	if keyInfo.IsExpired() {
+		return v, nil
+	}
 
-	it, err := db.buildSpecificDataScanIterator(ZSetType, table, rk, cursor, count, reverse)
+	it, err := db.buildSpecificDataScanIterator(ZSetType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}

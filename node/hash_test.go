@@ -36,6 +36,10 @@ func TestKVNode_hashCommand(t *testing.T) {
 		{"hkeys", buildCommand([][]byte{[]byte("hkeys"), testKey})},
 		{"hexists", buildCommand([][]byte{[]byte("hexists"), testKey, testField})},
 		{"hlen", buildCommand([][]byte{[]byte("hlen"), testKey})},
+		{"httl", buildCommand([][]byte{[]byte("httl"), testKey})},
+		{"hkeyexist", buildCommand([][]byte{[]byte("hkeyexist"), testKey})},
+		{"hexpire", buildCommand([][]byte{[]byte("hexpire"), testKey, []byte("10")})},
+		{"hpersist", buildCommand([][]byte{[]byte("hpersist"), testKey})},
 		{"hclear", buildCommand([][]byte{[]byte("hclear"), testKey})},
 	}
 	defer os.RemoveAll(dataDir)

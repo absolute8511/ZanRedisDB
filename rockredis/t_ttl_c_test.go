@@ -740,6 +740,139 @@ func TestListTTL_C(t *testing.T) {
 		t.Fatal("ListPersist do not clear the ttl")
 	}
 }
+func TestListTTL_C_KeepTTL(t *testing.T) {
+	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	setKey := []byte("test:testdbTTL_list_c_keepttl")
+	var ttl int64 = int64(rand.Int31() - 10)
+	tn := time.Now().UnixNano()
+	mems := [][]byte{
+		[]byte("m1"), []byte("m2"), []byte("m3"),
+	}
+
+	n, err := db.LPush(tn, setKey, mems...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+	n, err = db.LExpire(tn, setKey, ttl)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.ListTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+
+	// should keep ttl
+	n, err = db.LPush(tn, setKey, []byte("newm1"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(4), n)
+	n, err = db.ListTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+
+	elem, err := db.LPop(tn, setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("newm1"), elem)
+	n, err = db.ListTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+}
+
+func TestListTTL_C_TTLExpired(t *testing.T) {
+	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	setKey := []byte("test:testdbTTL_list_c_expired")
+	var ttl int64 = int64(3)
+	tn := time.Now().UnixNano()
+	mems := [][]byte{
+		[]byte("mem1"), []byte("mem2"), []byte("mem3"),
+	}
+
+	n, err := db.RPush(tn, setKey, mems...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+	n, err = db.LExpire(tn, setKey, ttl)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.ListTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+
+	elem, err := db.LIndex(setKey, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, mems[0], elem)
+	vlist, err := db.LRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems), len(vlist))
+	n, err = db.LLen(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	dbLog.Infof("wait expired done")
+	n, err = db.ListTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.LLen(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.LKeyExists(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err = db.LRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	elem, err = db.LPop(tn, setKey)
+	assert.Nil(t, err)
+	var emptyBytes []byte
+	assert.Equal(t, emptyBytes, elem)
+
+	// renew
+	mems2 := [][]byte{
+		[]byte("newmem1"), []byte("newmem2"),
+	}
+	time.Sleep(time.Second)
+	tn = time.Now().UnixNano()
+	// consistence expire can not ensure we delete all while rewrite the expired data
+	// even we write new data, it will keep expired until the check processed expired data
+	n, err = db.RPush(tn, setKey, mems2...)
+	assert.Nil(t, err)
+
+	n, err = db.ListTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.LLen(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	vlist, err = db.LRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	// clean and rewrite
+	db.LClear(setKey)
+
+	n, err = db.RPush(tn, setKey, mems2...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems2)), n)
+
+	n, err = db.ListTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.LLen(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems2)), n)
+
+	vlist, err = db.LRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems2), len(vlist))
+}
 
 func TestSetTTL_C(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
@@ -1003,6 +1136,192 @@ func TestZSetTTL_C(t *testing.T) {
 	} else if v != -1 {
 		t.Fatal("ZSetPersist do not clear the ttl")
 	}
+}
+func TestZSetTTL_C_KeepTTL(t *testing.T) {
+	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	setKey := []byte("test:testdbTTL_zset_c_keepttl")
+	var ttl int64 = int64(rand.Int31() - 10)
+	tn := time.Now().UnixNano()
+	mems := []common.ScorePair{
+		common.ScorePair{1, []byte("m1")},
+		common.ScorePair{2, []byte("m2")},
+		common.ScorePair{3, []byte("m3")},
+	}
+
+	n, err := db.ZAdd(tn, setKey, mems...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+	n, err = db.ZExpire(tn, setKey, ttl)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.ZSetTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+	mems2 := []common.ScorePair{
+		common.ScorePair{4, []byte("newm4")},
+		common.ScorePair{5, []byte("newm5")},
+	}
+	// should keep ttl
+	n, err = db.ZAdd(tn, setKey, mems2[0])
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.ZSetTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+
+	n, err = db.ZRem(tn, setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.ZSetTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+}
+
+func TestZSetTTL_C_TTLExpired(t *testing.T) {
+	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	setKey := []byte("test:testdbTTL_zset_c_expired")
+	var ttl int64 = int64(3)
+	tn := time.Now().UnixNano()
+	mems := []common.ScorePair{
+		common.ScorePair{1, []byte("m1")},
+		common.ScorePair{2, []byte("m2")},
+		common.ScorePair{3, []byte("m3")},
+	}
+
+	n, err := db.ZAdd(tn, setKey, mems...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+	n, err = db.ZExpire(tn, setKey, ttl)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.ZSetTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+
+	score, err := db.ZScore(setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, mems[0].Score, score)
+	n, err = db.ZRank(setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.ZRevRank(setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	vlist, err := db.ZRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems), len(vlist))
+	mlist, err := db.ZRangeByLex(setKey, nil, nil, common.RangeClose, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems), len(mlist))
+	vlist, err = db.ZRangeByScore(setKey, 0, 100, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems), len(vlist))
+
+	n, err = db.ZCard(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+	n, err = db.ZCount(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+	n, err = db.ZLexCount(setKey, nil, nil, common.RangeClose)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	dbLog.Infof("wait expired done")
+	n, err = db.ZSetTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	tn = time.Now().UnixNano()
+	score, err = db.ZScore(setKey, mems[0].Member)
+	assert.Equal(t, errScoreMiss, err)
+	assert.Equal(t, float64(0), score)
+	n, err = db.ZRank(setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.ZRevRank(setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.ZKeyExists(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err = db.ZRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	mlist, err = db.ZRangeByLex(setKey, nil, nil, common.RangeClose, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(mlist))
+	vlist, err = db.ZRangeByScore(setKey, 0, 100, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	vlist, err = db.ZRevRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	vlist, err = db.ZScan(setKey, []byte(""), -1, "", false)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+
+	n, err = db.ZCard(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.ZCount(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.ZLexCount(setKey, nil, nil, common.RangeClose)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	// renew
+	mems2 := []common.ScorePair{
+		common.ScorePair{4, []byte("newm4")},
+		common.ScorePair{5, []byte("newm5")},
+	}
+	time.Sleep(time.Second)
+	tn = time.Now().UnixNano()
+	// consistence expire can not ensure we delete all while rewrite the expired data
+	// even we write new data, it will keep expired until the check processed expired data
+	n, err = db.ZAdd(tn, setKey, mems2...)
+	assert.Nil(t, err)
+
+	n, err = db.ZSetTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.ZCard(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	vlist, err = db.ZRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	// clean and rewrite
+	db.ZClear(setKey)
+
+	n, err = db.ZAdd(tn, setKey, mems2...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems2)), n)
+
+	n, err = db.ZSetTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.ZCard(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems2)), n)
+
+	vlist, err = db.ZRange(setKey, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems2), len(vlist))
 }
 
 type TExpiredDataBuffer struct {

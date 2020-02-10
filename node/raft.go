@@ -1291,7 +1291,7 @@ func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 	keepBackup := rc.config.nodeConfig.KeepBackup
 	keep := rc.config.nodeConfig.KeepWAL
 	if keep <= 1 {
-		keep = 20
+		keep = 40
 	}
 	if keepBackup <= 1 {
 		keepBackup = 10

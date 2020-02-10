@@ -11,6 +11,8 @@ import (
 	"github.com/youzan/gorocksdb"
 )
 
+// kv new format as below:
+// KVType | key  ->  |value header| value | modify time|
 const (
 	tsLen = 8
 	// 2MB
@@ -82,15 +84,17 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 	var oldh *headerMetaValue
 	if v == nil || expired {
 		created = (v == nil)
+		oldh, _ = db.expiration.decodeRawValue(KVType, nil)
 	} else {
 		if len(v) < tsLen {
 			return 0, errIntNumber
 		}
-		rv, h, err := db.expiration.decodeRawValue(KVType, v)
+		h, err := db.expiration.decodeRawValue(KVType, v)
 		if err != nil {
 			return 0, err
 		}
 		oldh = h
+		rv := oldh.UserData
 		n, err = StrInt64(rv[:len(rv)-tsLen], err)
 		if err != nil {
 			return 0, err
@@ -100,7 +104,8 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 	n += delta
 	buf := FormatInt64ToSlice(n)
 	tsBuf := PutInt64(ts)
-	buf = db.expiration.encodeToRawValue(KVType, oldh, buf)
+	oldh.UserData = buf
+	buf = db.expiration.encodeToRawValue(KVType, oldh)
 	buf = append(buf, tsBuf...)
 	db.wb.Put(key, buf)
 	if created {
@@ -276,11 +281,11 @@ func (db *RockDB) GetValueWithOpNoLock(rawKey []byte,
 		if len(v) >= tsLen {
 			v = v[:len(v)-tsLen]
 		}
-		v, _, err = db.expiration.decodeRawValue(KVType, v)
+		oldh, err := db.expiration.decodeRawValue(KVType, v)
 		if err != nil {
 			return err
 		}
-		return op(v)
+		return op(oldh.UserData)
 	})
 }
 
@@ -305,17 +310,17 @@ func (db *RockDB) GetValueWithOp(rawKey []byte,
 		if len(v) >= tsLen {
 			v = v[:len(v)-tsLen]
 		}
-		v, _, err = db.expiration.decodeRawValue(KVType, v)
+		oldh, err := db.expiration.decodeRawValue(KVType, v)
 		if err != nil {
 			return err
 		}
-		return op(v)
+		return op(oldh.UserData)
 	})
 }
 
 func (db *RockDB) KVGet(key []byte) ([]byte, error) {
 	tn := time.Now().UnixNano()
-	_, key, v, expired, err := db.getRawDBKVValue(tn, key, true)
+	_, key, v, expired, err := db.getDBKVRealValue(tn, key, true)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +330,6 @@ func (db *RockDB) KVGet(key []byte) ([]byte, error) {
 	if len(v) >= tsLen {
 		v = v[:len(v)-tsLen]
 	}
-	v, _, err = db.expiration.decodeRawValue(KVType, v)
 	return v, err
 }
 
@@ -362,7 +366,7 @@ func (db *RockDB) MGet(keys ...[]byte) ([][]byte, []error) {
 			if expired {
 				valueList[i] = nil
 			} else {
-				valueList[i], _, errs[i] = db.expiration.decodeRawValue(KVType, valueList[i])
+				valueList[i], _, errs[i] = db.decodeToKVRealValue(valueList[i])
 			}
 		}
 	}
@@ -406,7 +410,7 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 				tableCnt[string(table)] = n
 			}
 		}
-		value = db.expiration.encodeToRawValue(KVType, nil, value)
+		value = db.encodeToDBKVRawValue(value)
 		// the expire meta data related to the key should be cleared as the key-value has been reset
 		value, err = db.delExpire(KVType, args[i].Key, value, true, db.wb)
 		if err != nil {
@@ -441,7 +445,7 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 		}
 	}
 	tsBuf := PutInt64(ts)
-	value = db.expiration.encodeToRawValue(KVType, nil, value)
+	value = db.encodeToDBKVRawValue(value)
 	// clean ttl since key-value is reset
 	value, err = db.delExpire(KVType, rawKey, value, true, db.wb)
 	if err != nil {
@@ -474,14 +478,14 @@ func (db *RockDB) KVGetSet(ts int64, rawKey []byte, value []byte) ([]byte, error
 		if expired {
 			v = nil
 		} else {
-			v, _, err = db.expiration.decodeRawValue(KVType, v)
+			v, _, err = db.decodeToKVRealValue(v)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
 	tsBuf := PutInt64(ts)
-	value = db.expiration.encodeToRawValue(KVType, nil, value)
+	value = db.encodeToDBKVRawValue(value)
 	// clean ttl since key-value is reset
 	value, err = db.delExpire(KVType, rawKey, value, true, db.wb)
 	if err != nil {
@@ -512,7 +516,7 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
 	}
-	value = db.expiration.encodeToRawValue(KVType, nil, value)
+	value = db.encodeToDBKVRawValue(value)
 	value, err = db.rawExpireAt(KVType, rawKey, value, duration+ts/int64(time.Second), db.wb)
 	if err != nil {
 		return err
@@ -544,7 +548,7 @@ func (db *RockDB) SetNX(ts int64, rawKey []byte, value []byte) (int64, error) {
 		if v == nil {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
-		rawV := db.expiration.encodeToRawValue(KVType, nil, value)
+		rawV := db.encodeToDBKVRawValue(value)
 		value, err = db.delExpire(KVType, rawKey, rawV, true, db.wb)
 		if err != nil {
 			return 0, err
@@ -573,13 +577,13 @@ func (db *RockDB) SetRange(ts int64, rawKey []byte, offset int, value []byte) (i
 		if oldValue == nil {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
-		oldValue = db.encodeToRawValue(KVType, nil, nil)
+		oldValue = db.encodeToDBKVRawValue(nil)
 	} else if len(oldValue) < tsLen {
 		return 0, errInvalidDBValue
 	} else {
 		oldValue = oldValue[:len(oldValue)-tsLen]
 	}
-	_, h, err := db.expiration.decodeRawValue(KVType, oldValue)
+	h, err := db.expiration.decodeRawValue(KVType, oldValue)
 	if err != nil {
 		return 0, err
 	}
@@ -667,18 +671,19 @@ func (db *RockDB) Append(ts int64, rawKey []byte, value []byte) (int64, error) {
 		if oldValue == nil {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
-		oldValue = db.encodeToRawValue(KVType, nil, nil)
+		// old expired header will be cleaned
+		oldValue = db.encodeToDBKVRawValue(nil)
 	} else if len(oldValue) < tsLen {
 		return 0, errInvalidDBValue
 	} else {
 		oldValue = oldValue[:len(oldValue)-tsLen]
 	}
 
-	realV, _, err := db.expiration.decodeRawValue(KVType, oldValue)
+	rv, _, err := db.decodeToKVRealValue(oldValue)
 	if err != nil {
 		return 0, err
 	}
-	newLen := len(realV) + len(value)
+	newLen := len(rv) + len(value)
 
 	oldValue = append(oldValue, value...)
 	oldValue = append(oldValue, PutInt64(ts)...)
@@ -715,10 +720,11 @@ func (db *RockDB) BitSetOld(ts int64, key []byte, offset int64, on int) (int64, 
 	if expired {
 		dbv = nil
 	}
-	v, h, err := db.expiration.decodeRawValue(KVType, dbv)
+	oldh, err := db.expiration.decodeRawValue(KVType, dbv)
 	if err != nil {
 		return 0, err
 	}
+	v := oldh.UserData
 
 	byteOffset := int(uint32(offset) >> 3)
 	expandLen := byteOffset + 1 - len(v)
@@ -737,7 +743,8 @@ func (db *RockDB) BitSetOld(ts int64, key []byte, offset int64, on int) (int64, 
 	byteVal |= (uint8(on&0x1) << bit)
 	v[byteOffset] = byteVal
 
-	v = db.expiration.encodeToRawValue(KVType, h, v)
+	oldh.UserData = v
+	v = db.expiration.encodeToRawValue(KVType, oldh)
 	v = append(v, PutInt64(ts)...)
 	db.wb.Put(key, v)
 	err = db.eng.Write(db.defaultWriteOpts, db.wb)
@@ -815,6 +822,35 @@ func (db *RockDB) Expire(ts int64, rawKey []byte, duration int64) (int64, error)
 	return db.ExpireAt(KVType, rawKey, v, ts/int64(time.Second)+duration)
 }
 
+func (db *RockDB) encodeToDBKVRawValue(rawV []byte) []byte {
+	h, _ := db.expiration.decodeRawValue(KVType, nil)
+	h.UserData = rawV
+	return db.expiration.encodeToRawValue(KVType, h)
+}
+
+// decode raw db value to real kv value and header meta
+func (db *RockDB) decodeToKVRealValue(rawV []byte) ([]byte, *headerMetaValue, error) {
+	oldh, err := db.expiration.decodeRawValue(KVType, rawV)
+	if err != nil {
+		return nil, oldh, err
+	}
+	return oldh.UserData, oldh, nil
+}
+
+// Get value without any header meta data
+func (db *RockDB) getDBKVRealValue(ts int64, rawKey []byte, useLock bool) ([]byte, []byte, []byte, bool, error) {
+	table, rk, v, expired, err := db.getRawDBKVValue(ts, rawKey, useLock)
+	if err != nil {
+		return table, rk, nil, expired, err
+	}
+	oldh, err := db.expiration.decodeRawValue(KVType, v)
+	if err != nil {
+		return table, rk, nil, expired, err
+	}
+	return table, rk, oldh.UserData, expired, nil
+}
+
+// Get the value including the meta data
 func (db *RockDB) getRawDBKVValue(ts int64, rawKey []byte, useLock bool) ([]byte, []byte, []byte, bool, error) {
 	table, key, err := convertRedisKeyToDBKVKey(rawKey)
 	if err != nil {
