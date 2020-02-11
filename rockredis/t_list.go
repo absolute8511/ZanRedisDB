@@ -114,7 +114,7 @@ func (db *RockDB) fixListKey(ts int64, key []byte) {
 		dbLog.Warningf("read list %v meta error: %v", string(key), err.Error())
 		return
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return
 	}
 	table := keyInfo.Table
@@ -227,7 +227,8 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		}
 		wb.Put(ek, args[i])
 	}
-	if size == 0 && pushCnt > 0 {
+	// rewrite old expired value should keep table counter unchanged
+	if size == 0 && pushCnt > 0 && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
 	seq += int64(pushCnt-1) * delta
@@ -260,7 +261,7 @@ func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return nil, nil
 	}
 	table := keyInfo.Table
@@ -328,7 +329,7 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 	if err != nil {
 		return err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return nil
 	}
 	table := keyInfo.Table
@@ -406,7 +407,7 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil
 	}
 	table := keyInfo.Table
@@ -504,7 +505,7 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 }
 
 func parseListMeta(v []byte) (headSeq int64, tailSeq int64, size int64, ts int64, err error) {
-	if v == nil {
+	if len(v) == 0 {
 		headSeq = listInitialSeq
 		tailSeq = listInitialSeq
 		size = 0
@@ -555,9 +556,6 @@ func (db *RockDB) lHeaderAndMeta(ts int64, key []byte, useLock bool) (collVerKey
 		return keyInfo, 0, 0, 0, 0, err
 	}
 	headSeq, tailSeq, size, ts, err := parseListMeta(keyInfo.MetaData())
-	if keyInfo.IsExpired() {
-		err = nil
-	}
 	return keyInfo, headSeq, tailSeq, size, ts, err
 }
 
@@ -567,7 +565,7 @@ func (db *RockDB) LIndex(key []byte, index int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return nil, nil
 	}
 	table := keyInfo.Table
@@ -599,7 +597,7 @@ func (db *RockDB) LLen(key []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil
 	}
 	_, _, size, _, err := parseListMeta(keyInfo.MetaData())
@@ -640,7 +638,7 @@ func (db *RockDB) LSet(ts int64, key []byte, index int64, value []byte) error {
 	if err != nil {
 		return err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return errListIndex
 	}
 	table := keyInfo.Table
@@ -676,7 +674,7 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return [][]byte{}, nil
 	}
 	table := keyInfo.Table

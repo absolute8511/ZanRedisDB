@@ -253,6 +253,13 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	} else if v != ttl1 {
 		t.Fatal("ttl != expire")
 	}
+	// setnx no ok should keep ttl
+	n, err := db.SetNX(tn, key1, []byte("new"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(ttl1), n)
 
 	time.Sleep(time.Second * time.Duration(ttl1+1))
 	if v, err := db.KVTtl(key1); err != nil {
@@ -260,7 +267,6 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	} else if v != -1 {
 		t.Fatalf("should expired: %v", v)
 	}
-	tn = time.Now().UnixNano()
 	exist, err := db.KVExists(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), exist)
@@ -270,17 +276,51 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	vlist, errs := db.MGet(key1)
 	assert.Nil(t, errs[0])
 	assert.Nil(t, vlist[0])
-	v, err = db.KVGetSet(tn, key1, []byte("new"))
+
+	// success setnx should renew ttl
+	tn = time.Now().UnixNano()
+	n, err = db.SetNX(tn, key1, []byte("new1"))
 	assert.Nil(t, err)
-	assert.Nil(t, v)
-	if v, err := db.KVTtl(key1); err != nil {
-		t.Fatal(err)
-	} else if v != -1 {
-		t.Fatalf("should has no expired: %v", v)
-	}
+	assert.Equal(t, int64(1), n)
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
 	v, err = db.KVGet(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, []byte("new"), v)
+	assert.Equal(t, []byte("new1"), v)
+
+	n, err = db.Expire(tn, key1, ttl1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(ttl1), n)
+
+	time.Sleep(time.Second * time.Duration(ttl1+1))
+	exist, err = db.KVExists(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), exist)
+	v, err = db.KVGet(key1)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	vlist, errs = db.MGet(key1)
+	assert.Nil(t, errs[0])
+	assert.Nil(t, vlist[0])
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	tn = time.Now().UnixNano()
+	v, err = db.KVGetSet(tn, key1, []byte("new2"))
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	v, err = db.KVGet(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("new2"), v)
 }
 
 func TestKVTTL_CompactOverflow(t *testing.T) {
@@ -857,6 +897,7 @@ func TestListTTL_Compact_TTLExpired(t *testing.T) {
 	n, err = db.LLen(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
+
 	elem, err = db.LPop(tn, setKey)
 	assert.Nil(t, err)
 	assert.Nil(t, elem)
@@ -1466,4 +1507,216 @@ func TestDBCompactTTL(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDBTableCounterWithExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test-set:compact_ttl_tablecounter_test")
+	key2 := []byte("test-set:compact_ttl_tablecounter_test2")
+	ttl := 2
+
+	tn := time.Now().UnixNano()
+	db.SAdd(tn, key, []byte("hello"), []byte("world"))
+	db.SAdd(tn, key2, []byte("hello"), []byte("world"))
+
+	n, err := db.GetTableKeyCount([]byte("test-set"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	db.SExpire(tn, key, int64(ttl))
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	tn = time.Now().UnixNano()
+	db.SAdd(tn, key, []byte("hello2"), []byte("world2"))
+
+	n, err = db.GetTableKeyCount([]byte("test-set"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	key = []byte("test-list:compact_ttl_tablecounter_test")
+	key2 = []byte("test-list:compact_ttl_tablecounter_test2")
+
+	tn = time.Now().UnixNano()
+	db.RPush(tn, key, []byte("hello"), []byte("world"))
+	db.RPush(tn, key2, []byte("hello"), []byte("world"))
+
+	n, err = db.GetTableKeyCount([]byte("test-list"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.LExpire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.ListTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.RPush(tn, key, []byte("hello2"), []byte("world2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-list"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	key = []byte("test-hash:compact_ttl_tablecounter_test")
+	key2 = []byte("test-hash:compact_ttl_tablecounter_test2")
+
+	tn = time.Now().UnixNano()
+	db.HSet(tn, false, key, []byte("hello"), []byte("world"))
+	db.HSet(tn, false, key2, []byte("hello"), []byte("world"))
+
+	n, err = db.GetTableKeyCount([]byte("test-hash"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.HExpire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.HashTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.HSet(tn, false, key, []byte("hello2"), []byte("world2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-hash"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	key = []byte("test-zset:compact_ttl_tablecounter_test")
+	key2 = []byte("test-zset:compact_ttl_tablecounter_test2")
+
+	tn = time.Now().UnixNano()
+	db.ZAdd(tn, key, common.ScorePair{1, []byte("hello")})
+	db.ZAdd(tn, key2, common.ScorePair{2, []byte("hello")})
+
+	n, err = db.GetTableKeyCount([]byte("test-zset"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.ZExpire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.ZSetTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.ZAdd(tn, key, common.ScorePair{3, []byte("hello")})
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-zset"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+}
+
+func TestDBTableCounterWithKVExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test-kv:compact_ttl_tablecounter_test")
+	key2 := []byte("test-kv:compact_ttl_tablecounter_test2")
+	ttl := 2
+
+	tn := time.Now().UnixNano()
+	db.KVSet(tn, key, []byte("hello"))
+	db.KVSet(tn, key2, []byte("hello"))
+
+	n, err := db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.Expire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.KVTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	err = db.KVSet(tn, key, []byte("hello2"))
+	assert.Nil(t, err)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.Expire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.SetNX(tn, key, []byte("hello2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.Expire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	err = db.SetEx(tn, key, int64(ttl), []byte("hello2"))
+	assert.Nil(t, err)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.SetRange(tn, key, 10, []byte("hello2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(16), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
 }

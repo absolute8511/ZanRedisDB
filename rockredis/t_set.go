@@ -217,7 +217,7 @@ func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.Wr
 	} else {
 		if newNum, err := db.sIncrSize(ts, key, keyInfo.OldHeader, 1, wb); err != nil {
 			return 0, err
-		} else if newNum == 1 {
+		} else if newNum == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(keyInfo.Table, 1, wb)
 		}
 		wb.Put(ek, nil)
@@ -261,7 +261,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 
 	if newNum, err := db.sIncrSize(ts, key, oldh, num, wb); err != nil {
 		return 0, err
-	} else if newNum > 0 && newNum == num {
+	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
 
@@ -283,7 +283,7 @@ func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil
 	}
 	if err := checkSubKey(member); err != nil {
@@ -322,7 +322,7 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 		return nil, err
 	}
 	v := make([][]byte, 0, num)
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return v, nil
 	}
 

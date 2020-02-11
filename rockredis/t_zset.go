@@ -347,7 +347,7 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 
 	if newNum, err := db.zIncrSize(ts, key, keyInfo.OldHeader, num, wb); err != nil {
 		return 0, err
-	} else if newNum > 0 && newNum == num {
+	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
 
@@ -442,7 +442,7 @@ func (db *RockDB) ZScore(key []byte, member []byte) (float64, error) {
 	if err != nil {
 		return score, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return score, errScoreMiss
 	}
 	k := zEncodeSetKey(keyInfo.Table, keyInfo.VerKey, member)
@@ -528,7 +528,7 @@ func (db *RockDB) ZIncrBy(ts int64, key []byte, delta float64, member []byte) (f
 		newNum, err := db.zIncrSize(ts, key, keyInfo.OldHeader, 1, wb)
 		if err != nil {
 			return score, err
-		} else if newNum == 1 {
+		} else if newNum == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(table, 1, wb)
 		}
 	} else {
@@ -562,7 +562,7 @@ func (db *RockDB) ZCount(key []byte, min float64, max float64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil
 	}
 	minKey := keyInfo.RangeStart
@@ -591,7 +591,7 @@ func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return -1, nil
 	}
 	table := keyInfo.Table
@@ -821,7 +821,7 @@ func (db *RockDB) zRange(key []byte, min float64, max float64, offset int, count
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return nil, nil
 	}
 
@@ -985,7 +985,7 @@ func (db *RockDB) ZRangeGeneric(key []byte, start int, stop int, reverse bool) (
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return nil, nil
 	}
 	num, err := parseZMetaSize(keyInfo.OldHeader.UserData)
@@ -1041,7 +1041,7 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return nil, nil
 	}
 	min = keyInfo.RangeStart
@@ -1142,7 +1142,7 @@ func (db *RockDB) ZLexCount(key []byte, min []byte, max []byte, rangeType uint8)
 	if err != nil {
 		return 0, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil
 	}
 

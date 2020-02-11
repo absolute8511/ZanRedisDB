@@ -313,7 +313,7 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return v, nil
 	}
 
@@ -354,7 +354,7 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return v, nil
 	}
 
@@ -396,7 +396,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 		return nil, err
 	}
 	v := make([]common.ScorePair, 0, count)
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return v, nil
 	}
 

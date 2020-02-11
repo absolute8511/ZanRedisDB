@@ -120,7 +120,7 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 	} else {
 		if n, err := db.hIncrSize(hkey, keyInfo.OldHeader, 1, wb); err != nil {
 			return 0, err
-		} else if n == 1 {
+		} else if n == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(table, 1, wb)
 		}
 	}
@@ -270,7 +270,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	c2 := time.Since(s)
 	if newNum, err := db.hIncrSize(key, keyInfo.OldHeader, num, db.wb); err != nil {
 		return err
-	} else if newNum > 0 && newNum == num {
+	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
 	c3 := time.Since(s)
@@ -291,7 +291,7 @@ func (db *RockDB) hGetRawFieldValue(ts int64, key []byte, field []byte, checkExp
 	if err != nil {
 		return nil, err
 	}
-	if checkExpired && keyInfo.IsExpired() {
+	if checkExpired && keyInfo.IsNotExistOrExpired() {
 		return nil, nil
 	}
 	table := keyInfo.Table
@@ -315,7 +315,7 @@ func (db *RockDB) hExistRawField(ts int64, key []byte, field []byte, checkExpire
 	if err != nil {
 		return false, err
 	}
-	if checkExpired && keyInfo.IsExpired() {
+	if checkExpired && keyInfo.IsNotExistOrExpired() {
 		return false, nil
 	}
 	table := keyInfo.Table
@@ -349,7 +349,7 @@ func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) er
 	if err != nil {
 		return err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		// we must call the callback if no error returned
 		return op(nil)
 	}
@@ -632,7 +632,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, []common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil, nil
 	}
 	start := keyInfo.RangeStart
@@ -674,7 +674,7 @@ func (db *RockDB) HKeys(key []byte) (int64, []common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil, nil
 	}
 	start := keyInfo.RangeStart
@@ -720,7 +720,7 @@ func (db *RockDB) HValues(key []byte) (int64, []common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil, nil
 	}
 	start := keyInfo.RangeStart

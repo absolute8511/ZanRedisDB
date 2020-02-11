@@ -118,7 +118,7 @@ func (exp *consistencyExpiration) ttl(ts int64, dataType byte, key []byte, rawVa
 }
 
 func (exp *consistencyExpiration) renewOnExpired(ts int64, dataType byte, key []byte, oldh *headerMetaValue) {
-	// consistency expire should not renew on expired hash data, since it will be checked by expire handler
+	// consistency expire should not renew on expired collection data, since it will be checked by expire handler
 	// and it will clean ttl and all the sub fields data
 	return
 }

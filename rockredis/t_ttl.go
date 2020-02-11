@@ -98,15 +98,15 @@ type expiredMetaBuffer interface {
 }
 
 type expiration interface {
+	// key here should be full key in ns:table:realK
 	getRawValueForHeader(ts int64, dt byte, key []byte) ([]byte, error)
 	ExpireAt(dt byte, key []byte, rawValue []byte, when int64) (int64, error)
 	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error)
 	// should be called only in read operation
 	ttl(ts int64, dt byte, key []byte, rawValue []byte) (int64, error)
 	// if in raft write loop should avoid lock, otherwise lock should be used
+	// should mark as not expired if the value is not exist
 	isExpired(ts int64, dt byte, key []byte, rawValue []byte, useLock bool) (bool, error)
-	encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte
-	decodeFromVersionKey(dt byte, vk []byte) ([]byte, int64, error)
 	decodeRawValue(dt byte, rawValue []byte) (*headerMetaValue, error)
 	encodeToRawValue(dt byte, h *headerMetaValue) []byte
 	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error)
@@ -115,6 +115,10 @@ type expiration interface {
 	Start()
 	Stop()
 	Destroy()
+
+	// key here should be key without namespace in table:realK
+	encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte
+	decodeFromVersionKey(dt byte, vk []byte) ([]byte, int64, error)
 }
 
 func (db *RockDB) expire(ts int64, dataType byte, key []byte, rawValue []byte, duration int64) (int64, error) {

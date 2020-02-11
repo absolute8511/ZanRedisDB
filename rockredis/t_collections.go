@@ -24,7 +24,7 @@ func (info collVerKeyInfo) MetaData() []byte {
 	return info.OldHeader.UserData
 }
 
-func (info collVerKeyInfo) IsExpired() bool {
+func (info collVerKeyInfo) IsNotExistOrExpired() bool {
 	return info.Expired || info.MetaData() == nil
 }
 
@@ -122,7 +122,7 @@ func (db *RockDB) prepareCollKeyForWrite(ts int64, dt byte, key []byte, field []
 		return keyInfo, err
 	}
 
-	if keyInfo.IsExpired() {
+	if keyInfo.IsNotExistOrExpired() {
 		// since renew on expired may change the header meta in old header in some expire policy,
 		// then the renewed meta data should also be return for different expire policy
 		db.expiration.renewOnExpired(ts, dt, key, keyInfo.OldHeader)

@@ -279,7 +279,6 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	} else if v != -1 {
 		t.Fatalf("should expired: %v", v)
 	}
-	tn = time.Now().UnixNano()
 	exist, err := db.KVExists(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), exist)
@@ -289,14 +288,50 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	vlist, errs := db.MGet(key1)
 	assert.Nil(t, errs[0])
 	assert.Nil(t, vlist[0])
+
+	// success setnx should renew ttl
+	// note in consistence expire policy, we need make sure the new set will
+	// remove the old expired ttl, otherwise it may check and expire the new set value.
+	tn = time.Now().UnixNano()
+	n, err := db.SetNX(tn, key1, []byte("new1"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	v, err = db.KVGet(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("new1"), v)
+	n, err = db.Expire(tn, key1, ttl1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(ttl1), n)
+
+	time.Sleep(time.Second * time.Duration(ttl1+1))
+
+	exist, err = db.KVExists(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), exist)
+	v, err = db.KVGet(key1)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	vlist, errs = db.MGet(key1)
+	assert.Nil(t, errs[0])
+	assert.Nil(t, vlist[0])
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	tn = time.Now().UnixNano()
 	v, err = db.KVGetSet(tn, key1, []byte("new"))
 	assert.Nil(t, err)
 	assert.Nil(t, v)
-	if v, err := db.KVTtl(key1); err != nil {
-		t.Fatal(err)
-	} else if v != -1 {
-		t.Fatalf("should has no expired: %v", v)
-	}
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
 	v, err = db.KVGet(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, []byte("new"), v)
