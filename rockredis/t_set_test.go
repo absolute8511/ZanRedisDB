@@ -7,6 +7,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func convertRedisKeyToDBSKey(key []byte, member []byte) ([]byte, error) {
+	table, rk, err := extractTableFromRedisKey(key)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkCollKFSize(rk, member); err != nil {
+		return nil, err
+	}
+	dbKey := sEncodeSetKey(table, rk, member)
+	return dbKey, nil
+}
+
 func TestSetCodec(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)

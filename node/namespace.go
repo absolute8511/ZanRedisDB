@@ -419,12 +419,25 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 		return nil, err
 	}
 
+	dv, err := common.StringToDataVersionType(conf.DataVersion)
+	if err != nil {
+		nodeLog.Infof("namespace %v invalid data version: %v", conf.Name, conf.DataVersion)
+		return nil, err
+	}
+	if expPolicy == common.WaitCompact && dv == common.DefaultDataVer {
+		return nil, errors.New("can not use compact ttl for old data version")
+	}
+	if dv != common.DefaultDataVer {
+		nodeLog.Infof("namespace %v data version: %v, expire policy: %v", conf.Name, conf.DataVersion, expPolicy)
+	}
+
 	kvOpts := &KVOptions{
 		DataDir:          path.Join(nsm.machineConf.DataRootDir, conf.Name),
 		KeepBackup:       nsm.machineConf.KeepBackup,
 		EngType:          conf.EngType,
 		RockOpts:         nsm.machineConf.RocksDBOpts,
 		ExpirationPolicy: expPolicy,
+		DataVersion:      dv,
 		SharedConfig:     nsm.machineConf.RocksDBSharedConfig,
 	}
 	engine.FillDefaultOptions(&kvOpts.RockOpts)

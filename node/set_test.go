@@ -26,6 +26,10 @@ func TestKVNode_setCommand(t *testing.T) {
 		{"scard", buildCommand([][]byte{[]byte("scard"), testKey})},
 		{"spop", buildCommand([][]byte{[]byte("spop"), testKey})},
 		{"srem", buildCommand([][]byte{[]byte("srem"), testKey, testMember})},
+		{"sttl", buildCommand([][]byte{[]byte("sttl"), testKey})},
+		{"skeyexist", buildCommand([][]byte{[]byte("skeyexist"), testKey})},
+		{"sexpire", buildCommand([][]byte{[]byte("sexpire"), testKey, []byte("10")})},
+		{"spersist", buildCommand([][]byte{[]byte("spersist"), testKey})},
 		{"sclear", buildCommand([][]byte{[]byte("sclear"), testKey})},
 	}
 	defer os.RemoveAll(dataDir)

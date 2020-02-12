@@ -52,6 +52,10 @@ func TestKVNode_zsetCommand(t *testing.T) {
 		{"zremrangebyrank", buildCommand([][]byte{[]byte("zremrangebyrank"), testKey, []byte("0"), []byte("1")})},
 		{"zremrangebyscore", buildCommand([][]byte{[]byte("zremrangebyscore"), testKey, testLrange, testRrange})},
 		{"zremrangebylex", buildCommand([][]byte{[]byte("zremrangebylex"), testKey, testLexLrange, testLexRrange})},
+		{"zttl", buildCommand([][]byte{[]byte("zttl"), testKey})},
+		{"zkeyexist", buildCommand([][]byte{[]byte("zkeyexist"), testKey})},
+		{"zexpire", buildCommand([][]byte{[]byte("zexpire"), testKey, []byte("10")})},
+		{"zpersist", buildCommand([][]byte{[]byte("zpersist"), testKey})},
 		{"zclear", buildCommand([][]byte{[]byte("zclear"), testKey})},
 	}
 	defer os.RemoveAll(dataDir)

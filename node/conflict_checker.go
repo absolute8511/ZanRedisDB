@@ -112,6 +112,20 @@ func (kvsm *kvStoreSM) checkListConflict(cmd redcon.Command, reqTs int64) Confli
 	return Conflict
 }
 
+func (kvsm *kvStoreSM) checkBitmapConflict(cmd redcon.Command, reqTs int64) ConflictState {
+	oldTs, err := kvsm.store.BitGetVer(cmd.Args[1])
+	if err != nil {
+		kvsm.Infof("key %v failed to get modify version: %v", cmd.Args[1], err)
+	}
+	if oldTs >= GetSyncedOnlyChangedTs() && reqTs >= GetSyncedOnlyChangedTs() {
+		return MaybeConflict
+	}
+	if oldTs < reqTs {
+		return NoConflict
+	}
+	return MaybeConflict
+}
+
 // for set and zset, mostly it is safe to handle conflict, since the set and zset will not have the same member
 // and good for both add op. (possible issue is the order of delete and add may be out of order)
 func (kvsm *kvStoreSM) checkSetConflict(cmd redcon.Command, reqTs int64) ConflictState {

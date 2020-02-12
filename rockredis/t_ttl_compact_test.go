@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"bytes"
+	math "math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -10,19 +11,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/gorocksdb"
 )
 
-func TestKVTTL_C(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestKVTTL_Compact(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdbTTL_kv_c")
-	var ttl1 int64 = rand.Int63() - 10
+	key1 := []byte("test:testdbTTL_kv_compact")
+	var ttl1 int64 = int64(rand.Int31() - 10)
 	ttl2 := ttl1 + 10
 	tn := time.Now().UnixNano()
-
 	if v, err := db.Expire(tn, key1, ttl1); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
@@ -51,11 +50,10 @@ func TestKVTTL_C(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 
-	if v, err := db.Expire(tn, key1, ttl2); err != nil {
-		t.Fatal(err)
-	} else if v != 1 {
-		t.Fatal("return value from expire != 1")
-	}
+	// test change ttl
+	v, err := db.Expire(tn, key1, ttl2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), v)
 
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
@@ -93,19 +91,10 @@ func TestKVTTL_C(t *testing.T) {
 		t.Fatalf("ttl != setex: %v vs %v", v, ttl1)
 	}
 
-	if err := db.SetEx(tn, key1, ttl2, testValue); err != nil {
-		t.Fatal(err)
-	}
-	if v, err := db.KVTtl(key1); err != nil {
-		t.Fatal(err)
-	} else if v != ttl2 {
-		t.Fatalf("ttl != setex: %v vs %v", v, ttl2)
-	}
-
-	err := db.SetEx(tn, key1, ttl2, testValue)
+	err = db.SetEx(tn, key1, ttl2, testValue)
 	assert.Nil(t, err)
 
-	v, err := db.KVTtl(key1)
+	v, err = db.KVTtl(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, ttl2, v)
 	// set, setnx, mset should clean ttl
@@ -142,10 +131,6 @@ func TestKVTTL_C(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 	// set success should clean ttl
-	changed, err = db.SetNX(0, key1, testValue)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), changed)
-	// set success should clean ttl
 	tn = time.Now().UnixNano()
 	changed, err = db.SetNX(tn, key1, testValue)
 	assert.Nil(t, err)
@@ -155,12 +140,12 @@ func TestKVTTL_C(t *testing.T) {
 	assert.Equal(t, int64(-1), v)
 }
 
-func TestKVTTL_C_KeepTTL(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestKVTTL_CompactKeepTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdbTTL_kv_c_keepttl")
+	key1 := []byte("test:testdbTTL_kv_compact_keepttl")
 	var ttl1 int64 = int64(rand.Int31())
 	tn := time.Now().UnixNano()
 	if c, err := db.Incr(0, key1); err != nil {
@@ -199,9 +184,6 @@ func TestKVTTL_C_KeepTTL(t *testing.T) {
 	} else if v != ttl1 {
 		t.Fatal("ttl != expire")
 	}
-	v, err := db.KVGet(key1)
-	assert.Nil(t, err)
-	assert.Equal(t, "2append", string(v))
 	// setrange
 	_, err = db.SetRange(0, key1, 1, []byte("range"))
 	assert.Nil(t, err)
@@ -210,7 +192,7 @@ func TestKVTTL_C_KeepTTL(t *testing.T) {
 	} else if v != ttl1 {
 		t.Fatal("ttl != expire")
 	}
-	v, err = db.KVGet(key1)
+	v, err := db.KVGet(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, "2ranged", string(v))
 	db.KVDel(key1)
@@ -236,12 +218,12 @@ func TestKVTTL_C_KeepTTL(t *testing.T) {
 	assert.Equal(t, int64(1), bitV)
 }
 
-func TestKVTTL_C_TTLExpired(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestKVTTL_Compact_TTLExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key1 := []byte("test:testdbTTL_kv_c_ttlexpired")
+	key1 := []byte("test:testdbTTL_kv_compact_ttlexpire")
 	var ttl1 int64 = int64(2)
 	tn := time.Now().UnixNano()
 	if c, err := db.Incr(0, key1); err != nil {
@@ -271,9 +253,15 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	} else if v != ttl1 {
 		t.Fatal("ttl != expire")
 	}
+	// setnx no ok should keep ttl
+	n, err := db.SetNX(tn, key1, []byte("new"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(ttl1), n)
 
 	time.Sleep(time.Second * time.Duration(ttl1+1))
-	dbLog.Infof("wait expired done")
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
 	} else if v != -1 {
@@ -290,10 +278,8 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	assert.Nil(t, vlist[0])
 
 	// success setnx should renew ttl
-	// note in consistence expire policy, we need make sure the new set will
-	// remove the old expired ttl, otherwise it may check and expire the new set value.
 	tn = time.Now().UnixNano()
-	n, err := db.SetNX(tn, key1, []byte("new1"))
+	n, err = db.SetNX(tn, key1, []byte("new1"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 	n, err = db.KVTtl(key1)
@@ -302,6 +288,7 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	v, err = db.KVGet(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, []byte("new1"), v)
+
 	n, err = db.Expire(tn, key1, ttl1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
@@ -310,7 +297,6 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	assert.Equal(t, int64(ttl1), n)
 
 	time.Sleep(time.Second * time.Duration(ttl1+1))
-
 	exist, err = db.KVExists(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), exist)
@@ -325,7 +311,7 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 	assert.Equal(t, int64(-1), n)
 
 	tn = time.Now().UnixNano()
-	v, err = db.KVGetSet(tn, key1, []byte("new"))
+	v, err = db.KVGetSet(tn, key1, []byte("new2"))
 	assert.Nil(t, err)
 	assert.Nil(t, v)
 	n, err = db.KVTtl(key1)
@@ -334,16 +320,48 @@ func TestKVTTL_C_TTLExpired(t *testing.T) {
 
 	v, err = db.KVGet(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, []byte("new"), v)
+	assert.Equal(t, []byte("new2"), v)
 }
 
-func TestHashTTL_C(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestKVTTL_CompactOverflow(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	hashKey := []byte("test:testdbTTL_hash_c")
-	var hashTTL int64 = int64(rand.Int31() - 10)
+	key1 := []byte("test:testdbTTL_kv_compact")
+	var ttl1 int64 = math.MaxUint32
+	tn := time.Now().UnixNano()
+	err := db.KVSet(0, key1, []byte("hello world 1"))
+	assert.Nil(t, err)
+
+	_, err = db.Expire(tn, key1, ttl1)
+	assert.NotNil(t, err)
+
+	if v, err := db.KVTtl(key1); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatal("ttl != -1")
+	}
+
+	tn = time.Now().UnixNano()
+	testValue := []byte("test value for SetEx command")
+	err = db.SetEx(tn, key1, ttl1, testValue)
+	assert.NotNil(t, err)
+
+	if v, err := db.KVTtl(key1); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatalf("ttl != setex: %v vs %v", v, ttl1)
+	}
+}
+
+func TestHashTTL_Compact(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	hashKey := []byte("test:testdbTTL_hash_compact")
+	var hashTTL int64 = int64(rand.Int31()) - 10
 
 	if v, err := db.HashTtl(hashKey); err != nil {
 		t.Fatal(err)
@@ -370,7 +388,7 @@ func TestHashTTL_C(t *testing.T) {
 		{Key: []byte("field2"), Value: []byte("value2")},
 	}
 
-	if err := db.HMset(0, hashKey, hash_val...); err != nil {
+	if err := db.HMset(tn, hashKey, hash_val...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -390,17 +408,19 @@ func TestHashTTL_C(t *testing.T) {
 		t.Fatal("return value from hpersist is != 1")
 	}
 
-	v, err = db.HashTtl(hashKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), v)
+	if v, err := db.HashTtl(hashKey); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatal("HashPersist do not clear the ttl")
+	}
 }
 
-func TestHashTTL_C_KeepTTL(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestHashTTL_Compact_KeepTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	hashKey := []byte("test:testdbTTL_hash_c_keepttl")
+	hashKey := []byte("test:testdbTTL_hash_compact_keepttl")
 	var hashTTL int64 = int64(rand.Int31() - 10)
 	tn := time.Now().UnixNano()
 	hash_val := []common.KVRecord{
@@ -445,12 +465,12 @@ func TestHashTTL_C_KeepTTL(t *testing.T) {
 	assert.Equal(t, hashTTL, n)
 }
 
-func TestHashTTL_C_TTLExpired(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestHashTTL_Compact_TTLExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	hashKey := []byte("test:testdbTTL_hash_c_expired")
+	hashKey := []byte("test:testdbTTL_hash_compact_expired")
 	var hashTTL int64 = int64(3)
 	tn := time.Now().UnixNano()
 	hash_val := []common.KVRecord{
@@ -506,25 +526,6 @@ func TestHashTTL_C_TTLExpired(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	tn = time.Now().UnixNano()
-	// consistence expire can not ensure we delete all while rewrite the expired data
-	// even we write new data, it will keep expired until the check processed expired data
-	err = db.HMset(tn, hashKey, hash_val2...)
-	assert.Nil(t, err)
-
-	n, err = db.HashTtl(hashKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), n)
-
-	n, err = db.HLen(hashKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-
-	n, recs, err = db.HGetAll(hashKey)
-	assert.Equal(t, int64(0), n)
-	assert.Equal(t, 0, len(recs))
-	// clean and rewrite
-	db.HClear(hashKey)
-
 	err = db.HMset(tn, hashKey, hash_val2...)
 	assert.Nil(t, err)
 
@@ -539,187 +540,210 @@ func TestHashTTL_C_TTLExpired(t *testing.T) {
 	n, recs, err = db.HGetAll(hashKey)
 	assert.Equal(t, int64(len(hash_val2)), n)
 	assert.Equal(t, len(hash_val2), len(recs))
+
+	v, err = db.HGet(hashKey, hash_val2[0].Key)
+	assert.Nil(t, err)
+	assert.Equal(t, hash_val2[0].Value, v)
+	n, err = db.HKeyExists(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	vlist, err = db.HMget(hashKey, hash_val2[0].Key, hash_val2[1].Key)
+	assert.Nil(t, err)
+	assert.Equal(t, hash_val2[0].Value, vlist[0])
+	assert.Equal(t, hash_val2[1].Value, vlist[1])
+
+	n, recs, err = db.HKeys(hashKey)
+	assert.Equal(t, int64(len(hash_val2)), n)
+	assert.Equal(t, len(hash_val2), len(recs))
+	n, recs, err = db.HValues(hashKey)
+	assert.Equal(t, int64(len(hash_val2)), n)
+	assert.Equal(t, len(hash_val2), len(recs))
 }
 
-func TestBitmapV2TTL_C(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestBitmapTTL_Compact(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key := []byte("test:testdbTTL_bitmap_c")
-	var ttl int64 = int64(rand.Int31() - 10)
+	setKey := []byte("test:testdbTTL_bitmap_compact")
+	var setTTL int64 = int64(rand.Int31() - 10)
 
-	if v, err := db.BitTtl(key); err != nil {
+	if v, err := db.BitTtl(setKey); err != nil {
 		t.Fatal(err)
 	} else if v != -1 {
 		t.Fatal("ttl of not exist key is not -1")
 	}
-
 	tn := time.Now().UnixNano()
-	if v, err := db.BitExpire(tn, key, ttl); err != nil {
+
+	if v, err := db.BitExpire(tn, setKey, setTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
 		t.Fatal("return value from expire of not exist key != 0")
 	}
 
-	if v, err := db.BitPersist(tn, key); err != nil {
+	if v, err := db.BitPersist(tn, setKey); err != nil {
 		t.Fatal(err)
 	} else if v != 0 {
-		t.Fatal("return value from persist of not exist hash key != 0")
+		t.Fatal("return value from persist of not exist set key != 0")
 	}
 
-	if _, err := db.BitSetV2(0, key, 1, 1); err != nil {
+	if _, err := db.BitSetV2(tn, setKey, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.BitSetV2(tn, setKey, 2, 1); err != nil {
 		t.Fatal(err)
 	}
 
-	if v, err := db.BitExpire(tn, key, ttl); err != nil {
+	if v, err := db.BitExpire(tn, setKey, setTTL); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
 		t.Fatal("return value from expire != 1")
 	}
 
-	v, err := db.BitTtl(key)
-	assert.Nil(t, err)
-	assert.Equal(t, ttl, v)
-
-	if v, err := db.BitPersist(tn, key); err != nil {
+	if v, err := db.BitTtl(setKey); err != nil {
 		t.Fatal(err)
-	} else if v != 1 {
-		t.Fatal("return value from persist is != 1")
+	} else if v != setTTL {
+		t.Errorf("ttl != expire, %v, %v", v, setTTL)
 	}
 
-	v, err = db.BitTtl(key)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), v)
+	if v, err := db.BitPersist(tn, setKey); err != nil {
+		t.Fatal(err)
+	} else if v != 1 {
+		t.Fatal("return value from persist!= 1")
+	}
+
+	if v, err := db.BitTtl(setKey); err != nil {
+		t.Fatal(err)
+	} else if v != -1 {
+		t.Fatal("Persist do not clear the ttl")
+	}
 }
 
-func TestBitmapV2TTL_C_KeepTTL(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestBitmapTTL_Compact_KeepTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key := []byte("test:testdbTTL_bitmap_c_keepttl")
+	setKey := []byte("test:testdbTTL_bitmap_compact_keepttl")
 	var ttl int64 = int64(rand.Int31() - 10)
 	tn := time.Now().UnixNano()
 
-	_, err := db.BitSetV2(tn, key, 1, 1)
-	assert.Nil(t, err)
-	n, err := db.BitExpire(tn, key, ttl)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(1), n)
-
-	// should keep ttl
-	n, err = db.BitSetV2(tn, key, 2, 1)
+	n, err := db.BitSetV2(tn, setKey, 1, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
-	n, err = db.BitTtl(key)
+	n, err = db.BitSetV2(tn, setKey, 2, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitExpire(tn, setKey, ttl)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.BitTtl(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, ttl, n)
 
-	// clear 1 bit
-	n, err = db.BitSetV2(tn, key, 1, 0)
+	// should keep ttl
+	n, err = db.BitSetV2(tn, setKey, 3, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+
+	n, err = db.BitSetV2(tn, setKey, 1, 0)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
-	n, err = db.BitTtl(key)
+	n, err = db.BitTtl(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, ttl, n)
+	_, err = db.BitSetV2(tn, setKey, 2, 0)
+	assert.Nil(t, err)
+	n, err = db.BitTtl(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, ttl, n)
 }
 
-func TestBitmapV2TTL_C_TTLExpired(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestBitmapTTL_Compact_TTLExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	key := []byte("test:testdbTTL_bit_c_expired")
-	var ttl int64 = int64(8)
+	setKey := []byte("test:testdbTTL_bitmap_compact_expired")
+	var ttl int64 = int64(3)
 	tn := time.Now().UnixNano()
 
-	_, err := db.BitSetV2(tn, key, 1, 1)
+	n, err := db.BitSetV2(tn, setKey, 1, 1)
 	assert.Nil(t, err)
-	n, err := db.BitExpire(tn, key, ttl)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitSetV2(tn, setKey, 2, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitExpire(tn, setKey, ttl)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	n, err = db.BitTtl(key)
+	n, err = db.BitTtl(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, ttl, n)
-	n, err = db.BitGetV2(key, 1)
+
+	n, err = db.BitGetV2(setKey, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
-	n, err = db.BitKeyExist(key)
+	n, err = db.BitCountV2(setKey, 0, -1)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(1), n)
-	n, err = db.BitCountV2(key, 0, -1)
+	assert.Equal(t, int64(2), n)
+	n, err = db.BitKeyExist(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
 	time.Sleep(time.Second * time.Duration(ttl+1))
 	dbLog.Infof("wait expired done")
-	n, err = db.BitTtl(key)
+	n, err = db.BitTtl(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(-1), n)
 
 	tn = time.Now().UnixNano()
-	n, err = db.BitGetV2(key, 1)
+	n, err = db.BitGetV2(setKey, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
-	n, err = db.BitKeyExist(key)
+	n, err = db.BitKeyExist(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
-	n, err = db.BitCountV2(key, 0, -1)
+	n, err = db.BitCountV2(setKey, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
 	// renew
 	time.Sleep(time.Second)
 	tn = time.Now().UnixNano()
-	// consistence expire can not ensure we delete all while rewrite the expired data
-	// even we write new data, it will keep expired until the check processed expired data
-	_, err = db.BitSetV2(tn, key, 1, 1)
+	n, err = db.BitSetV2(tn, setKey, 3, 1)
 	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitSetV2(tn, setKey, 4, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 
-	n, err = db.BitTtl(key)
+	n, err = db.BitTtl(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(-1), n)
 
-	// clean all bitmap data
-	db.BitClear(key)
-	n, err = db.BitGetV2(key, 1)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-	n, err = db.BitKeyExist(key)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-	n, err = db.BitCountV2(key, 0, -1)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-
-	n, err = db.BitSetV2(tn, key, 3, 1)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-	n, err = db.BitSetV2(tn, key, 1, 1)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-
-	n, err = db.BitTtl(key)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), n)
-
-	n, err = db.BitGetV2(key, 1)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(1), n)
-	n, err = db.BitGetV2(key, 3)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(1), n)
-	n, err = db.BitKeyExist(key)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(1), n)
-	n, err = db.BitCountV2(key, 0, -1)
+	n, err = db.BitCountV2(setKey, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(2), n)
+
+	n, err = db.BitGetV2(setKey, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitGetV2(setKey, 3)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.BitKeyExist(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
 }
 
-func TestListTTL_C(t *testing.T) {
+func TestListTTL_Compact(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -775,19 +799,19 @@ func TestListTTL_C(t *testing.T) {
 		t.Fatal("ListPersist do not clear the ttl")
 	}
 }
-func TestListTTL_C_KeepTTL(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestListTTL_Compact_KeepTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	setKey := []byte("test:testdbTTL_list_c_keepttl")
+	setKey := []byte("test:testdbTTL_list_compact_keepttl")
 	var ttl int64 = int64(rand.Int31() - 10)
 	tn := time.Now().UnixNano()
 	mems := [][]byte{
 		[]byte("m1"), []byte("m2"), []byte("m3"),
 	}
 
-	n, err := db.LPush(tn, setKey, mems...)
+	n, err := db.RPush(tn, setKey, mems...)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(mems)), n)
 	n, err = db.LExpire(tn, setKey, ttl)
@@ -798,7 +822,7 @@ func TestListTTL_C_KeepTTL(t *testing.T) {
 	assert.Equal(t, ttl, n)
 
 	// should keep ttl
-	n, err = db.LPush(tn, setKey, []byte("newm1"))
+	n, err = db.RPush(tn, setKey, []byte("newm1"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(4), n)
 	n, err = db.ListTtl(setKey)
@@ -807,18 +831,18 @@ func TestListTTL_C_KeepTTL(t *testing.T) {
 
 	elem, err := db.LPop(tn, setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, []byte("newm1"), elem)
+	assert.Equal(t, mems[0], elem)
 	n, err = db.ListTtl(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, ttl, n)
 }
 
-func TestListTTL_C_TTLExpired(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestListTTL_Compact_TTLExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	setKey := []byte("test:testdbTTL_list_c_expired")
+	setKey := []byte("test:testdbTTL_list_compact_expired")
 	var ttl int64 = int64(3)
 	tn := time.Now().UnixNano()
 	mems := [][]byte{
@@ -846,6 +870,12 @@ func TestListTTL_C_TTLExpired(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(mems)), n)
 
+	err = db.LSet(tn, setKey, 0, []byte("newv"))
+	assert.Nil(t, err)
+	elem, err = db.LIndex(setKey, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("newv"), elem)
+
 	time.Sleep(time.Second * time.Duration(ttl+1))
 	dbLog.Infof("wait expired done")
 	n, err = db.ListTtl(setKey)
@@ -853,19 +883,24 @@ func TestListTTL_C_TTLExpired(t *testing.T) {
 	assert.Equal(t, int64(-1), n)
 
 	tn = time.Now().UnixNano()
-	n, err = db.LLen(setKey)
+	elem, err = db.LIndex(setKey, 0)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
+	assert.Nil(t, elem)
+	err = db.LSet(tn, setKey, 0, []byte("newv2"))
+	assert.NotNil(t, err)
 	n, err = db.LKeyExists(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 	vlist, err = db.LRange(setKey, 0, 100)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(vlist))
+	n, err = db.LLen(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
 	elem, err = db.LPop(tn, setKey)
 	assert.Nil(t, err)
-	var emptyBytes []byte
-	assert.Equal(t, emptyBytes, elem)
+	assert.Nil(t, elem)
 
 	// renew
 	mems2 := [][]byte{
@@ -873,25 +908,6 @@ func TestListTTL_C_TTLExpired(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	tn = time.Now().UnixNano()
-	// consistence expire can not ensure we delete all while rewrite the expired data
-	// even we write new data, it will keep expired until the check processed expired data
-	n, err = db.RPush(tn, setKey, mems2...)
-	assert.Nil(t, err)
-
-	n, err = db.ListTtl(setKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), n)
-
-	n, err = db.LLen(setKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-
-	vlist, err = db.LRange(setKey, 0, 100)
-	assert.Nil(t, err)
-	assert.Equal(t, 0, len(vlist))
-	// clean and rewrite
-	db.LClear(setKey)
-
 	n, err = db.RPush(tn, setKey, mems2...)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(mems2)), n)
@@ -907,15 +923,29 @@ func TestListTTL_C_TTLExpired(t *testing.T) {
 	vlist, err = db.LRange(setKey, 0, 100)
 	assert.Nil(t, err)
 	assert.Equal(t, len(mems2), len(vlist))
+	assert.Equal(t, mems2[0], vlist[0])
+
+	elem, err = db.LIndex(setKey, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, mems2[0], elem)
+	err = db.LSet(tn, setKey, 0, []byte("newv3"))
+	assert.Nil(t, err)
+	elem, err = db.LIndex(setKey, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("newv3"), elem)
+
+	n, err = db.LKeyExists(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
 }
 
-func TestSetTTL_C(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestSetTTL_Compact(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	setKey := []byte("test:testdbTTL_set_c")
-	var setTTL int64 = rand.Int63()
+	setKey := []byte("test:testdbTTL_set_compact")
+	var setTTL int64 = int64(rand.Int31() - 10)
 
 	if v, err := db.SetTtl(setKey); err != nil {
 		t.Fatal(err)
@@ -966,12 +996,12 @@ func TestSetTTL_C(t *testing.T) {
 	}
 }
 
-func TestSetTTL_C_KeepTTL(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestSetTTL_Compact_KeepTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	setKey := []byte("test:testdbTTL_set_c_keepttl")
+	setKey := []byte("test:testdbTTL_set_compact_keepttl")
 	var ttl int64 = int64(rand.Int31() - 10)
 	tn := time.Now().UnixNano()
 	mems := [][]byte{
@@ -1009,12 +1039,12 @@ func TestSetTTL_C_KeepTTL(t *testing.T) {
 	assert.Equal(t, ttl, n)
 }
 
-func TestSetTTL_C_TTLExpired(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestSetTTL_Compact_TTLExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	setKey := []byte("test:testdbTTL_set_c_expired")
+	setKey := []byte("test:testdbTTL_set_compact_expired")
 	var ttl int64 = int64(3)
 	tn := time.Now().UnixNano()
 	mems := [][]byte{
@@ -1074,25 +1104,6 @@ func TestSetTTL_C_TTLExpired(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	tn = time.Now().UnixNano()
-	// consistence expire can not ensure we delete all while rewrite the expired data
-	// even we write new data, it will keep expired until the check processed expired data
-	n, err = db.SAdd(tn, setKey, mems2...)
-	assert.Nil(t, err)
-
-	n, err = db.SetTtl(setKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), n)
-
-	n, err = db.SCard(setKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-
-	vlist, err = db.SMembers(setKey)
-	assert.Nil(t, err)
-	assert.Equal(t, 0, len(vlist))
-	// clean and rewrite
-	db.SClear(setKey)
-
 	n, err = db.SAdd(tn, setKey, mems2...)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(mems2)), n)
@@ -1108,9 +1119,31 @@ func TestSetTTL_C_TTLExpired(t *testing.T) {
 	vlist, err = db.SMembers(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, len(mems2), len(vlist))
+	assert.Equal(t, mems2[0], vlist[0])
+
+	n, err = db.SIsMember(setKey, mems[0])
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.SIsMember(setKey, mems2[0])
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.SKeyExists(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	vlist, err = db.SScan(setKey, []byte(""), -1, "", false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems2), len(vlist))
+	assert.Equal(t, mems2[0], vlist[0])
+
+	vlist, err = db.SPop(tn, setKey, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(vlist))
+	assert.Equal(t, mems2[0], vlist[0])
 }
 
-func TestZSetTTL_C(t *testing.T) {
+func TestZSetTTL_Compact(t *testing.T) {
 	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
@@ -1172,12 +1205,13 @@ func TestZSetTTL_C(t *testing.T) {
 		t.Fatal("ZSetPersist do not clear the ttl")
 	}
 }
-func TestZSetTTL_C_KeepTTL(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+
+func TestZSetTTL_Compact_KeepTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	setKey := []byte("test:testdbTTL_zset_c_keepttl")
+	setKey := []byte("test:testdbTTL_zset_compact_keepttl")
 	var ttl int64 = int64(rand.Int31() - 10)
 	tn := time.Now().UnixNano()
 	mems := []common.ScorePair{
@@ -1195,6 +1229,7 @@ func TestZSetTTL_C_KeepTTL(t *testing.T) {
 	n, err = db.ZSetTtl(setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, ttl, n)
+
 	mems2 := []common.ScorePair{
 		common.ScorePair{4, []byte("newm4")},
 		common.ScorePair{5, []byte("newm5")},
@@ -1215,14 +1250,15 @@ func TestZSetTTL_C_KeepTTL(t *testing.T) {
 	assert.Equal(t, ttl, n)
 }
 
-func TestZSetTTL_C_TTLExpired(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestZSetTTL_Compact_TTLExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	setKey := []byte("test:testdbTTL_zset_c_expired")
+	setKey := []byte("test:testdbTTL_zset_compact_expired")
 	var ttl int64 = int64(3)
 	tn := time.Now().UnixNano()
+
 	mems := []common.ScorePair{
 		common.ScorePair{1, []byte("m1")},
 		common.ScorePair{2, []byte("m2")},
@@ -1323,25 +1359,6 @@ func TestZSetTTL_C_TTLExpired(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	tn = time.Now().UnixNano()
-	// consistence expire can not ensure we delete all while rewrite the expired data
-	// even we write new data, it will keep expired until the check processed expired data
-	n, err = db.ZAdd(tn, setKey, mems2...)
-	assert.Nil(t, err)
-
-	n, err = db.ZSetTtl(setKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), n)
-
-	n, err = db.ZCard(setKey)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(0), n)
-
-	vlist, err = db.ZRange(setKey, 0, 100)
-	assert.Nil(t, err)
-	assert.Equal(t, 0, len(vlist))
-	// clean and rewrite
-	db.ZClear(setKey)
-
 	n, err = db.ZAdd(tn, setKey, mems2...)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(mems2)), n)
@@ -1357,37 +1374,40 @@ func TestZSetTTL_C_TTLExpired(t *testing.T) {
 	vlist, err = db.ZRange(setKey, 0, 100)
 	assert.Nil(t, err)
 	assert.Equal(t, len(mems2), len(vlist))
+	assert.Equal(t, mems2[0], vlist[0])
+
+	score, err = db.ZScore(setKey, mems[0].Member)
+	assert.Equal(t, errScoreMiss, err)
+	assert.Equal(t, float64(0), score)
+	n, err = db.ZRank(setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.ZRevRank(setKey, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	score, err = db.ZScore(setKey, mems2[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, float64(mems2[0].Score), score)
+	n, err = db.ZRank(setKey, mems2[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.ZRevRank(setKey, mems2[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.ZKeyExists(setKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	vlist, err = db.ZScan(setKey, []byte(""), -1, "", false)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems2), len(vlist))
+	assert.Equal(t, mems2[0], vlist[0])
 }
 
-type TExpiredDataBuffer struct {
-	db           *RockDB
-	wb           *gorocksdb.WriteBatch
-	kTypeMap     map[string]byte
-	expiredCount int
-	t            *testing.T
-}
-
-func (buff *TExpiredDataBuffer) Write(dt common.DataType, key []byte) error {
-	buff.expiredCount += 1
-	if kt, ok := buff.kTypeMap[string(key)]; !ok {
-		buff.t.Fatalf("unknown expired key: %v", string(key))
-	} else if dataType2CommonType(kt) != dt {
-		buff.t.Fatalf("mismatched key-type, %s - %d, should be [%s - %d]", string(key), dt, string(key), dataType2CommonType(kt))
-	} else {
-		buff.wb.Clear()
-		buff.db.delExpire(kt, key, nil, false, buff.wb)
-		buff.db.eng.Write(buff.db.defaultWriteOpts, buff.wb)
-		delete(buff.kTypeMap, string(key))
-	}
-	return nil
-}
-
-func (buff *TExpiredDataBuffer) Full() bool {
-	return false
-}
-
-func TestConsistencyTTLChecker(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+func TestDBCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
@@ -1395,9 +1415,10 @@ func TestConsistencyTTLChecker(t *testing.T) {
 	dataTypes := []byte{KVType, ListType, HashType, SetType, ZSetType, BitmapType}
 
 	for i := 0; i < 10000*3+rand.Intn(10000); i++ {
-		key := "test:ttl_checker_consistency:" + strconv.Itoa(i)
+		key := "test:ttl_checker_compact:" + strconv.Itoa(i)
 		dataType := dataTypes[rand.Int()%len(dataTypes)]
 		kTypeMap[key] = dataType
+
 		switch dataType {
 		case KVType:
 			db.KVSet(0, []byte(key), []byte("test_checker_local_kvValue"))
@@ -1437,35 +1458,265 @@ func TestConsistencyTTLChecker(t *testing.T) {
 			db.BitSetV2(0, tBitKey, 1, 1)
 			db.BitSetV2(0, tBitKey, bitmapSegBits, 1)
 		}
+
 		tn := time.Now().UnixNano()
 		if _, err := db.expire(tn, dataType, []byte(key), nil, 2); err != nil {
-			t.Fatal(err)
+			t.Fatalf("expire key %v , type %v, err: %v", key, dataType, err)
 		}
 	}
 
 	time.Sleep(3 * time.Second)
-	buffer := &TExpiredDataBuffer{
-		t:        t,
-		db:       db,
-		wb:       gorocksdb.NewWriteBatch(),
-		kTypeMap: kTypeMap,
-	}
 
-	if err := db.CheckExpiredData(buffer, make(chan struct{})); err != nil {
-		t.Fatal(err)
+	for k, v := range kTypeMap {
+		switch v {
+		case KVType:
+			if v, err := db.KVGet([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != nil {
+				t.Errorf("key:%s of KVType do not expired", string(k))
+			}
+		case HashType:
+			if v, err := db.HLen([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != 0 {
+				t.Errorf("key:%s of HashType do not expired", string(k))
+			}
+		case ListType:
+			if v, err := db.LLen([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != 0 {
+				t.Errorf("key:%s of ListType do not expired", string(k))
+			}
+		case SetType:
+			if v, err := db.SCard([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != 0 {
+				t.Errorf("key:%s of SetType do not expired", string(k))
+			}
+		case ZSetType:
+			if v, err := db.ZCard([]byte(k)); err != nil {
+				t.Fatal(err)
+			} else if v != 0 {
+				t.Errorf("key:%s of ZSetType do not expired", string(k))
+			}
+		case BitmapType:
+			if n, err := db.BitCountV2([]byte(k), 0, -1); err != nil {
+				t.Fatal(err)
+			} else if n != 0 {
+				t.Errorf("key:%s of BitmapType do not expired", string(k))
+			}
+		}
 	}
+}
 
-	if len(kTypeMap) != 0 {
-		t.Fatal("not all keys has expired")
-	}
+func TestDBTableCounterWithExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test-set:compact_ttl_tablecounter_test")
+	key2 := []byte("test-set:compact_ttl_tablecounter_test2")
+	ttl := 2
 
-	buffer.expiredCount = 0
+	tn := time.Now().UnixNano()
+	db.SAdd(tn, key, []byte("hello"), []byte("world"))
+	db.SAdd(tn, key2, []byte("hello"), []byte("world"))
 
-	if err := db.CheckExpiredData(buffer, make(chan struct{})); err != nil {
-		t.Fatal(err)
-	}
+	n, err := db.GetTableKeyCount([]byte("test-set"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
 
-	if buffer.expiredCount != 0 {
-		t.Fatal("find some keys expired after all the keys stored has expired and deleted")
-	}
+	db.SExpire(tn, key, int64(ttl))
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	tn = time.Now().UnixNano()
+	db.SAdd(tn, key, []byte("hello2"), []byte("world2"))
+
+	n, err = db.GetTableKeyCount([]byte("test-set"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	key = []byte("test-list:compact_ttl_tablecounter_test")
+	key2 = []byte("test-list:compact_ttl_tablecounter_test2")
+
+	tn = time.Now().UnixNano()
+	db.RPush(tn, key, []byte("hello"), []byte("world"))
+	db.RPush(tn, key2, []byte("hello"), []byte("world"))
+
+	n, err = db.GetTableKeyCount([]byte("test-list"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.LExpire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.ListTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.RPush(tn, key, []byte("hello2"), []byte("world2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-list"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	key = []byte("test-hash:compact_ttl_tablecounter_test")
+	key2 = []byte("test-hash:compact_ttl_tablecounter_test2")
+
+	tn = time.Now().UnixNano()
+	db.HSet(tn, false, key, []byte("hello"), []byte("world"))
+	db.HSet(tn, false, key2, []byte("hello"), []byte("world"))
+
+	n, err = db.GetTableKeyCount([]byte("test-hash"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.HExpire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.HashTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.HSet(tn, false, key, []byte("hello2"), []byte("world2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-hash"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	key = []byte("test-zset:compact_ttl_tablecounter_test")
+	key2 = []byte("test-zset:compact_ttl_tablecounter_test2")
+
+	tn = time.Now().UnixNano()
+	db.ZAdd(tn, key, common.ScorePair{1, []byte("hello")})
+	db.ZAdd(tn, key2, common.ScorePair{2, []byte("hello")})
+
+	n, err = db.GetTableKeyCount([]byte("test-zset"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.ZExpire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.ZSetTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.ZAdd(tn, key, common.ScorePair{3, []byte("hello")})
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-zset"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+}
+
+func TestDBTableCounterWithKVExpired(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test-kv:compact_ttl_tablecounter_test")
+	key2 := []byte("test-kv:compact_ttl_tablecounter_test2")
+	ttl := 2
+
+	tn := time.Now().UnixNano()
+	db.KVSet(tn, key, []byte("hello"))
+	db.KVSet(tn, key2, []byte("hello"))
+
+	n, err := db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.Expire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	// wait expired and renew should keep counter
+	time.Sleep(time.Second * time.Duration(ttl+1))
+
+	n, err = db.KVTtl(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	err = db.KVSet(tn, key, []byte("hello2"))
+	assert.Nil(t, err)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.Expire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.SetNX(tn, key, []byte("hello2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.Expire(tn, key, int64(ttl))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	err = db.SetEx(tn, key, int64(ttl), []byte("hello2"))
+	assert.Nil(t, err)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	time.Sleep(time.Second * time.Duration(ttl+1))
+	n, err = db.KVExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	tn = time.Now().UnixNano()
+	n, err = db.SetRange(tn, key, 10, []byte("hello2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(16), n)
+
+	n, err = db.GetTableKeyCount([]byte("test-kv"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
 }

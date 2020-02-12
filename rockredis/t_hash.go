@@ -12,27 +12,9 @@ import (
 )
 
 var (
-	errHashKey       = errors.New("invalid hash key")
-	errHSizeKey      = errors.New("invalid hash size key")
-	errHashFieldSize = errors.New("invalid hash field size")
+	errHashKey  = errors.New("invalid hash key")
+	errHSizeKey = errors.New("invalid hash size key")
 )
-
-const (
-	hashStartSep byte = ':'
-)
-
-func convertRedisKeyToDBHKey(key []byte, field []byte) ([]byte, error) {
-	table, rk, err := extractTableFromRedisKey(key)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := checkKeySubKey(rk, field); err != nil {
-		return nil, err
-	}
-	key = hEncodeHashKey(table, key[len(table)+1:], field)
-	return key, nil
-}
 
 func hEncodeSizeKey(key []byte) []byte {
 	buf := make([]byte, len(key)+1+len(metaPrefix))
@@ -70,7 +52,7 @@ func hEncodeHashKey(table []byte, key []byte, field []byte) []byte {
 	copy(buf[pos:], key)
 	pos += len(key)
 
-	buf[pos] = hashStartSep
+	buf[pos] = collStartSep
 	pos++
 	copy(buf[pos:], field)
 	return buf
@@ -96,7 +78,7 @@ func hDecodeHashKey(ek []byte) ([]byte, []byte, []byte, error) {
 	key := ek[pos : pos+keyLen]
 	pos += keyLen
 
-	if ek[pos] != hashStartSep {
+	if ek[pos] != collStartSep {
 		return nil, nil, nil, errHashKey
 	}
 
@@ -118,17 +100,15 @@ func hEncodeStopKey(table []byte, key []byte) []byte {
 // return if we create the new field or override it
 func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, value []byte,
 	wb *gorocksdb.WriteBatch, hindex *HsetIndex) (int64, error) {
-	table, rk, err := extractTableFromRedisKey(hkey)
-
+	created := int64(1)
+	keyInfo, err := db.prepareHashKeyForWrite(ts, hkey, field)
 	if err != nil {
 		return 0, err
 	}
-	if err := checkKeySubKey(rk, field); err != nil {
-		return 0, err
-	}
+	table := keyInfo.Table
+	rk := keyInfo.VerKey
 	ek := hEncodeHashKey(table, rk, field)
 
-	created := int64(1)
 	tsBuf := PutInt64(ts)
 	value = append(value, tsBuf...)
 	var oldV []byte
@@ -138,12 +118,13 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 			return created, nil
 		}
 	} else {
-		if n, err := db.hIncrSize(hkey, 1, wb); err != nil {
+		if n, err := db.hIncrSize(hkey, keyInfo.OldHeader, 1, wb); err != nil {
 			return 0, err
-		} else if n == 1 {
+		} else if n == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(table, 1, wb)
 		}
 	}
+
 	wb.Put(ek, value)
 
 	if hindex != nil {
@@ -163,26 +144,32 @@ func (db *RockDB) HLen(hkey []byte) (int64, error) {
 	if err := checkKeySize(hkey); err != nil {
 		return 0, err
 	}
-	sizeKey := hEncodeSizeKey(hkey)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sizeKey)
-	return Int64(v, err)
+	tn := time.Now().UnixNano()
+	oldh, expired, err := db.hHeaderMeta(tn, hkey, true)
+	if err != nil {
+		return 0, err
+	}
+	if expired {
+		return 0, nil
+	}
+	return Int64(oldh.UserData, err)
 }
 
-func (db *RockDB) hIncrSize(hkey []byte, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) hIncrSize(hkey []byte, oldh *headerMetaValue, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
 	sk := hEncodeSizeKey(hkey)
-
-	var err error
-	var size int64
-	if size, err = Int64(db.eng.GetBytesNoLock(db.defaultReadOpts, sk)); err != nil {
+	metaV := oldh.UserData
+	size, err := Int64(metaV, nil)
+	if err != nil {
 		return 0, err
+	}
+	size += delta
+	if size <= 0 {
+		size = 0
+		wb.Delete(sk)
 	} else {
-		size += delta
-		if size <= 0 {
-			size = 0
-			wb.Delete(sk)
-		} else {
-			wb.Put(sk, PutInt64(size))
-		}
+		oldh.UserData = PutInt64(size)
+		nv := oldh.encodeWithData()
+		wb.Put(sk, nv)
 	}
 	return size, nil
 }
@@ -229,28 +216,33 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	if len(args) == 0 {
 		return nil
 	}
-	table, rk, err := extractTableFromRedisKey(key)
+	db.MaybeClearBatch()
+
+	c1 := time.Since(s)
+	// get old header for this hash key
+	keyInfo, err := db.prepareHashKeyForWrite(ts, key, nil)
 	if err != nil {
 		return err
 	}
+	table := keyInfo.Table
+	verKey := keyInfo.VerKey
+
 	tableIndexes := db.indexMgr.GetTableIndexes(string(table))
 	if tableIndexes != nil {
 		tableIndexes.Lock()
 		defer tableIndexes.Unlock()
 	}
-	db.MaybeClearBatch()
 
-	c1 := time.Since(s)
 	var num int64
 	var value []byte
 	tsBuf := PutInt64(ts)
 	for i := 0; i < len(args); i++ {
-		if err = checkKeySubKey(rk, args[i].Key); err != nil {
+		if err = checkCollKFSize(verKey, args[i].Key); err != nil {
 			return err
 		} else if err = checkValueSize(args[i].Value); err != nil {
 			return err
 		}
-		ek := hEncodeHashKey(table, rk, args[i].Key)
+		ek := hEncodeHashKey(table, verKey, args[i].Key)
 
 		var oldV []byte
 		if oldV, err = db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
@@ -276,9 +268,9 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 		}
 	}
 	c2 := time.Since(s)
-	if newNum, err := db.hIncrSize(key, num, db.wb); err != nil {
+	if newNum, err := db.hIncrSize(key, keyInfo.OldHeader, num, db.wb); err != nil {
 		return err
-	} else if newNum > 0 && newNum == num {
+	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
 	c3 := time.Since(s)
@@ -291,17 +283,57 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	return err
 }
 
-func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
-	if err := checkKeySubKey(key, field); err != nil {
-		return 0, err
+func (db *RockDB) hGetRawFieldValue(ts int64, key []byte, field []byte, checkExpired bool, useLock bool) ([]byte, error) {
+	if err := checkCollKFSize(key, field); err != nil {
+		return nil, err
 	}
-
-	dbKey, err := convertRedisKeyToDBHKey(key, field)
+	keyInfo, err := db.GetCollVersionKey(ts, HashType, key, useLock)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
+	if checkExpired && keyInfo.IsNotExistOrExpired() {
+		return nil, nil
+	}
+	table := keyInfo.Table
+	rk := keyInfo.VerKey
+	ek := hEncodeHashKey(table, rk, field)
+
+	if useLock {
+		v, err := db.eng.GetBytes(db.defaultReadOpts, ek)
+		return v, err
+	} else {
+		v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
+		return v, err
+	}
+}
+
+func (db *RockDB) hExistRawField(ts int64, key []byte, field []byte, checkExpired bool, useLock bool) (bool, error) {
+	if err := checkCollKFSize(key, field); err != nil {
+		return false, err
+	}
+	keyInfo, err := db.GetCollVersionKey(ts, HashType, key, useLock)
+	if err != nil {
+		return false, err
+	}
+	if checkExpired && keyInfo.IsNotExistOrExpired() {
+		return false, nil
+	}
+	table := keyInfo.Table
+	rk := keyInfo.VerKey
+	ek := hEncodeHashKey(table, rk, field)
+
+	if useLock {
+		v, err := db.eng.Exist(db.defaultReadOpts, ek)
+		return v, err
+	} else {
+		v, err := db.eng.ExistNoLock(db.defaultReadOpts, ek)
+		return v, err
+	}
+}
+
+func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
+	v, err := db.hGetRawFieldValue(0, key, field, false, true)
 	var ts uint64
-	v, err := db.eng.GetBytes(db.defaultReadOpts, dbKey)
 	if len(v) >= tsLen {
 		ts, err = Uint64(v[len(v)-tsLen:], err)
 	}
@@ -309,15 +341,23 @@ func (db *RockDB) HGetVer(key []byte, field []byte) (int64, error) {
 }
 
 func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) error {
-	if err := checkKeySubKey(key, field); err != nil {
+	tn := time.Now().UnixNano()
+	if err := checkCollKFSize(key, field); err != nil {
 		return err
 	}
-
-	dbKey, err := convertRedisKeyToDBHKey(key, field)
+	keyInfo, err := db.GetCollVersionKey(tn, HashType, key, true)
 	if err != nil {
 		return err
 	}
-	return db.rockEng.GetValueWithOp(db.defaultReadOpts, dbKey, func(v []byte) error {
+	if keyInfo.IsNotExistOrExpired() {
+		// we must call the callback if no error returned
+		return op(nil)
+	}
+	table := keyInfo.Table
+	rk := keyInfo.VerKey
+	ek := hEncodeHashKey(table, rk, field)
+
+	return db.rockEng.GetValueWithOp(db.defaultReadOpts, ek, func(v []byte) error {
 		if len(v) >= tsLen {
 			v = v[:len(v)-tsLen]
 		}
@@ -326,15 +366,8 @@ func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) er
 }
 
 func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
-	if err := checkKeySubKey(key, field); err != nil {
-		return nil, err
-	}
-
-	dbKey, err := convertRedisKeyToDBHKey(key, field)
-	if err != nil {
-		return nil, err
-	}
-	v, err := db.eng.GetBytes(db.defaultReadOpts, dbKey)
+	tn := time.Now().UnixNano()
+	v, err := db.hGetRawFieldValue(tn, key, field, true, true)
 	if len(v) >= tsLen {
 		v = v[:len(v)-tsLen]
 	}
@@ -342,28 +375,9 @@ func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 }
 
 func (db *RockDB) HExist(key []byte, field []byte) (bool, error) {
-	if err := checkKeySubKey(key, field); err != nil {
-		return false, err
-	}
-
-	dbKey, err := convertRedisKeyToDBHKey(key, field)
-	if err != nil {
-		return false, err
-	}
-	vok, err := db.eng.Exist(db.defaultReadOpts, dbKey)
+	tn := time.Now().UnixNano()
+	vok, err := db.hExistRawField(tn, key, field, true, true)
 	return vok, err
-}
-
-func (db *RockDB) HKeyExists(key []byte) (int64, error) {
-	if err := checkKeySize(key); err != nil {
-		return 0, err
-	}
-	sk := hEncodeSizeKey(key)
-	vok, err := db.eng.Exist(db.defaultReadOpts, sk)
-	if vok && err == nil {
-		return 1, nil
-	}
-	return 0, err
 }
 
 func (db *RockDB) HMget(key []byte, args ...[]byte) ([][]byte, error) {
@@ -388,10 +402,13 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	if len(args) == 0 {
 		return 0, nil
 	}
-	table, rk, err := extractTableFromRedisKey(key)
+	keyInfo, err := db.GetCollVersionKey(0, HashType, key, false)
 	if err != nil {
 		return 0, err
 	}
+	table := keyInfo.Table
+	rk := keyInfo.VerKey
+	oldh := keyInfo.OldHeader
 
 	tableIndexes := db.indexMgr.GetTableIndexes(string(table))
 	if tableIndexes != nil {
@@ -430,11 +447,14 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		}
 	}
 
-	if newNum, err = db.hIncrSize(key, -num, wb); err != nil {
+	if newNum, err = db.hIncrSize(key, oldh, -num, wb); err != nil {
 		return 0, err
-	} else if num > 0 && newNum == 0 {
+	}
+	if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(HashType, key, wb)
+	}
+	if newNum == 0 {
+		db.delExpire(HashType, key, nil, false, wb)
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -442,17 +462,16 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 }
 
 func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes *TableIndexContainer) error {
-	sk := hEncodeSizeKey(hkey)
-	table, rk, err := extractTableFromRedisKey(hkey)
+	keyInfo, err := db.getCollVerKeyForRange(0, HashType, hkey, false)
 	if err != nil {
 		return err
 	}
-	start := hEncodeStartKey(table, rk)
-	stop := hEncodeStopKey(table, rk)
 	hlen, err := db.HLen(hkey)
 	if err != nil {
 		return err
 	}
+	start := keyInfo.RangeStart
+	stop := keyInfo.RangeEnd
 
 	if tableIndexes != nil || hlen <= RangeDeleteNum {
 		it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
@@ -481,6 +500,7 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 	if hlen > RangeDeleteNum {
 		wb.DeleteRange(start, stop)
 	}
+	sk := hEncodeSizeKey(hkey)
 	wb.Delete(sk)
 	return nil
 }
@@ -513,8 +533,8 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	}
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(HashType, hkey, wb)
 	}
+	db.delExpire(HashType, hkey, nil, false, wb)
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return hlen, err
@@ -545,8 +565,8 @@ func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
 	}
 	if hlen > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
-		db.delExpire(HashType, hkey, wb)
 	}
+	db.delExpire(HashType, hkey, nil, false, wb)
 
 	return err
 }
@@ -558,7 +578,7 @@ func (db *RockDB) HMclear(keys ...[]byte) {
 }
 
 func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int64, error) {
-	if err := checkKeySubKey(key, field); err != nil {
+	if err := checkCollKFSize(key, field); err != nil {
 		return 0, err
 	}
 	table, _, err := extractTableFromRedisKey(key)
@@ -566,9 +586,7 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 		return 0, err
 	}
 
-	var ek []byte
-
-	ek, err = convertRedisKeyToDBHKey(key, field)
+	fv, err := db.hGetRawFieldValue(ts, key, field, true, false)
 	if err != nil {
 		return 0, err
 	}
@@ -584,12 +602,13 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 	wb.Clear()
 
 	var n int64
-	oldV, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
-	if len(oldV) >= tsLen {
-		oldV = oldV[:len(oldV)-tsLen]
-	}
-	if n, err = StrInt64(oldV, err); err != nil {
-		return 0, err
+	if fv != nil {
+		if len(fv) >= tsLen {
+			fv = fv[:len(fv)-tsLen]
+		}
+		if n, err = StrInt64(fv, err); err != nil {
+			return 0, err
+		}
 	}
 
 	n += delta
@@ -603,109 +622,110 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 	return n, err
 }
 
-func (db *RockDB) HGetAll(key []byte) (int64, chan common.KVRecordRet, error) {
+func (db *RockDB) HGetAll(key []byte) (int64, []common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
 
-	table, rk, err := extractTableFromRedisKey(key)
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.getCollVerKeyForRange(tn, HashType, key, true)
 	if err != nil {
 		return 0, nil, err
 	}
+	if keyInfo.IsNotExistOrExpired() {
+		return 0, nil, nil
+	}
+	start := keyInfo.RangeStart
+	stop := keyInfo.RangeEnd
 
-	length, err := db.HLen(key)
-	if err != nil {
-		return 0, nil, err
-	}
+	length, err := Int64(keyInfo.MetaData(), err)
 	if length > MAX_BATCH_NUM {
 		return length, nil, errTooMuchBatchSize
 	}
 
-	start := hEncodeStartKey(table, rk)
-	stop := hEncodeStopKey(table, rk)
 	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
 	it.NoTimestamp(HashType)
 
-	valCh := make(chan common.KVRecordRet, 16)
+	vals := make([]common.KVRecordRet, 0, length)
 	doScan := func() {
 		defer it.Close()
-		defer close(valCh)
 		for ; it.Valid(); it.Next() {
 			_, _, f, err := hDecodeHashKey(it.Key())
 			v := it.Value()
-			select {
-			case valCh <- common.KVRecordRet{
+			vals = append(vals, common.KVRecordRet{
 				Rec: common.KVRecord{Key: f, Value: v},
 				Err: err,
-			}:
-			case <-db.quit:
-				break
-			}
+			})
 		}
 	}
-	if length < int64(len(valCh)) {
-		doScan()
-	} else {
-		go doScan()
-	}
-
-	return length, valCh, nil
+	doScan()
+	return length, vals, nil
 }
 
-func (db *RockDB) HKeys(key []byte) (int64, chan common.KVRecordRet, error) {
+func (db *RockDB) HKeys(key []byte) (int64, []common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
-	table, rk, err := extractTableFromRedisKey(key)
-
-	length, err := db.HLen(key)
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.getCollVerKeyForRange(tn, HashType, key, true)
+	if err != nil {
+		return 0, nil, err
+	}
+	if keyInfo.IsNotExistOrExpired() {
+		return 0, nil, nil
+	}
+	start := keyInfo.RangeStart
+	stop := keyInfo.RangeEnd
+	length, err := Int64(keyInfo.MetaData(), err)
 	if err != nil {
 		return 0, nil, err
 	}
 	if length > MAX_BATCH_NUM {
 		return length, nil, errTooMuchBatchSize
 	}
-	start := hEncodeStartKey(table, rk)
-	stop := hEncodeStopKey(table, rk)
+
 	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	valCh := make(chan common.KVRecordRet, 16)
+	vals := make([]common.KVRecordRet, 0, length)
 	doScan := func() {
 		defer it.Close()
-		defer close(valCh)
 		for ; it.Valid(); it.Next() {
-			_, _, f, err := hDecodeHashKey(it.Key())
-			valCh <- common.KVRecordRet{
-				Rec: common.KVRecord{Key: f, Value: nil},
-				Err: err,
+			_, _, f, _ := hDecodeHashKey(it.Key())
+			if f == nil {
+				continue
 			}
+			vals = append(vals, common.KVRecordRet{
+				Rec: common.KVRecord{Key: f, Value: nil},
+				Err: nil,
+			})
 		}
 	}
-	if length < int64(len(valCh)) {
-		doScan()
-	} else {
-		go doScan()
-	}
-	return length, valCh, nil
+	doScan()
+	return length, vals, nil
 }
 
-func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
+func (db *RockDB) HValues(key []byte) (int64, []common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
 
-	table, rk, err := extractTableFromRedisKey(key)
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.getCollVerKeyForRange(tn, HashType, key, true)
 	if err != nil {
 		return 0, nil, err
 	}
-
-	length, err := db.HLen(key)
+	if keyInfo.IsNotExistOrExpired() {
+		return 0, nil, nil
+	}
+	start := keyInfo.RangeStart
+	stop := keyInfo.RangeEnd
+	length, err := Int64(keyInfo.MetaData(), err)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -713,58 +733,47 @@ func (db *RockDB) HValues(key []byte) (int64, chan common.KVRecordRet, error) {
 		return length, nil, errTooMuchBatchSize
 	}
 
-	start := hEncodeStartKey(table, rk)
-	stop := hEncodeStopKey(table, rk)
 	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
 	it.NoTimestamp(HashType)
-	valCh := make(chan common.KVRecordRet, 16)
-	go func() {
-		defer it.Close()
-		defer close(valCh)
-		for ; it.Valid(); it.Next() {
-			va := it.Value()
-			valCh <- common.KVRecordRet{
-				Rec: common.KVRecord{Key: nil, Value: va},
-				Err: nil,
-			}
+	vals := make([]common.KVRecordRet, 0, length)
+	defer it.Close()
+	for ; it.Valid(); it.Next() {
+		va := it.Value()
+		if va == nil {
+			continue
 		}
-	}()
+		vals = append(vals, common.KVRecordRet{
+			Rec: common.KVRecord{Key: nil, Value: va},
+			Err: nil,
+		})
+	}
 
-	return length, valCh, nil
+	return length, vals, nil
 }
 
-func (db *RockDB) HExpire(key []byte, duration int64) (int64, error) {
-	if exists, err := db.HKeyExists(key); err != nil || exists != 1 {
+func (db *RockDB) HKeyExists(key []byte) (int64, error) {
+	if err := checkKeySize(key); err != nil {
 		return 0, err
-	} else {
-		if err2 := db.expire(HashType, key, duration); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
 	}
+
+	return db.collKeyExists(HashType, key)
 }
 
-func (db *RockDB) HPersist(key []byte) (int64, error) {
-	if exists, err := db.HKeyExists(key); err != nil || exists != 1 {
-		return 0, err
-	}
+func (db *RockDB) HExpire(ts int64, key []byte, duration int64) (int64, error) {
+	return db.collExpire(ts, HashType, key, duration)
+}
 
-	if ttl, err := db.ttl(HashType, key); err != nil || ttl < 0 {
-		return 0, err
-	}
+func (db *RockDB) HPersist(ts int64, key []byte) (int64, error) {
+	return db.collPersist(ts, HashType, key)
+}
 
-	db.wb.Clear()
-	if err := db.delExpire(HashType, key, db.wb); err != nil {
-		return 0, err
-	} else {
-		if err2 := db.eng.Write(db.defaultWriteOpts, db.wb); err2 != nil {
-			return 0, err2
-		} else {
-			return 1, nil
-		}
-	}
+func (db *RockDB) prepareHashKeyForWrite(ts int64, key []byte, field []byte) (collVerKeyInfo, error) {
+	return db.prepareCollKeyForWrite(ts, HashType, key, field)
+}
+
+func (db *RockDB) hHeaderMeta(ts int64, hkey []byte, useLock bool) (*headerMetaValue, bool, error) {
+	return db.collHeaderMeta(ts, HashType, hkey, useLock)
 }

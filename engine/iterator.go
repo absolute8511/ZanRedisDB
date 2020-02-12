@@ -30,6 +30,41 @@ type Iterator interface {
 	Value() []byte
 	NoTimestamp(vt byte)
 }
+type emptyIterator struct {
+}
+
+func (eit *emptyIterator) Valid() bool {
+	return false
+}
+
+func (eit *emptyIterator) Next() {
+}
+func (eit *emptyIterator) Prev() {
+}
+func (eit *emptyIterator) Seek([]byte) {
+}
+func (eit *emptyIterator) SeekForPrev([]byte) {
+}
+func (eit *emptyIterator) SeekToFirst() {
+}
+func (eit *emptyIterator) SeekToLast() {
+}
+func (eit *emptyIterator) Close() {
+}
+func (eit *emptyIterator) RefKey() []byte {
+	return nil
+}
+func (eit *emptyIterator) Key() []byte {
+	return nil
+}
+func (eit *emptyIterator) RefValue() []byte {
+	return nil
+}
+func (eit *emptyIterator) Value() []byte {
+	return nil
+}
+func (eit *emptyIterator) NoTimestamp(vt byte) {
+}
 
 type Range struct {
 	Min  []byte

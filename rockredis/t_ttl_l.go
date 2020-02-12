@@ -21,6 +21,7 @@ const (
 var (
 	ErrLocalBatchFullToCommit = errors.New("batched is fully filled and should commit right now")
 	ErrLocalBatchedBuffFull   = errors.New("the local batched buffer is fully filled")
+	errChangeTTLNotSupported  = errors.New("change ttl is not supported in current expire policy")
 )
 
 type localExpiration struct {
@@ -42,36 +43,68 @@ func newLocalExpiration(db *RockDB) *localExpiration {
 	return exp
 }
 
-func (exp *localExpiration) expireAt(dataType byte, key []byte, when int64) error {
+func (exp *localExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte {
+	return key
+}
+
+func (exp *localExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte, int64, error) {
+	return key, 0, nil
+}
+
+func (exp *localExpiration) encodeToRawValue(dataType byte, h *headerMetaValue) []byte {
+	return h.UserData
+}
+
+func (exp *localExpiration) decodeRawValue(dataType byte, rawValue []byte) (*headerMetaValue, error) {
+	var h headerMetaValue
+	h.UserData = rawValue
+	return &h, nil
+}
+
+func (exp *localExpiration) getRawValueForHeader(ts int64, dataType byte, key []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (exp *localExpiration) isExpired(ts int64, dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
+	return false, nil
+}
+
+func (exp *localExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) (int64, error) {
+	if when == 0 {
+		return 0, errChangeTTLNotSupported
+	}
 	wb := exp.db.wb
 	wb.Clear()
-
-	tk := expEncodeTimeKey(dataType, key, when)
-	mk := expEncodeMetaKey(dataType, key)
-
-	wb.Put(tk, mk)
-
-	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
-		return err
-	} else {
-		exp.setNextCheckTime(when, false)
-		return nil
+	_, err := exp.rawExpireAt(dataType, key, rawValue, when, wb)
+	if err != nil {
+		return 0, err
 	}
+	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
-func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch) error {
+func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
 	tk := expEncodeTimeKey(dataType, key, when)
 	mk := expEncodeMetaKey(dataType, key)
 	wb.Put(tk, mk)
-	return nil
+	exp.setNextCheckTime(when, false)
+	return rawValue, nil
 }
 
-func (exp *localExpiration) ttl(byte, []byte) (int64, error) {
+func (exp *localExpiration) ttl(int64, byte, []byte, []byte) (int64, error) {
 	return -1, nil
 }
 
-func (exp *localExpiration) delExpire(byte, []byte, *gorocksdb.WriteBatch) error {
-	return nil
+func (exp *localExpiration) renewOnExpired(ts int64, dataType byte, key []byte, oldh *headerMetaValue) {
+	// local expire should not renew on expired data, since it will be checked by expire handler
+	// and it will clean ttl and all the sub data
+	return
+}
+
+func (exp *localExpiration) delExpire(dt byte, key []byte, rawv []byte, keepV bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
+	return rawv, nil
 }
 
 func (exp *localExpiration) check(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
@@ -182,7 +215,10 @@ func (self *localBatchedBuffer) commit() {
 	for _, v := range self.buff {
 		dt, key, _, err := expDecodeTimeKey(v.timeKey)
 		if err != nil || dataType2CommonType(dt) == common.NONE {
-			dbLog.Errorf("decode time-key failed, bad data encounter, err:%s", err.Error())
+			// currently the bitmap/json type is not supported
+			if err != nil {
+				dbLog.Errorf("decode time-key failed, bad data encounter, err:%s, %v", err, dt)
+			}
 			continue
 		}
 
@@ -277,6 +313,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			return db.eng.Write(db.defaultWriteOpts, wb)
 		}
 	default:
+		// TODO: currently bitmap/json is not handled
 		return nil
 	}
 }

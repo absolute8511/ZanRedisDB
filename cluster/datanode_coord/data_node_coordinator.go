@@ -900,6 +900,9 @@ func (dc *DataCoordinator) prepareNamespaceConf(nsInfo *cluster.PartitionMetaInf
 	if nsInfo.ExpirationPolicy != "" {
 		nsConf.ExpirationPolicy = nsInfo.ExpirationPolicy
 	}
+	if nsInfo.DataVersion != "" {
+		nsConf.DataVersion = nsInfo.DataVersion
+	}
 	if nsInfo.SnapCount > 100 {
 		nsConf.SnapCount = nsInfo.SnapCount
 		nsConf.SnapCatchup = nsInfo.SnapCount / 4

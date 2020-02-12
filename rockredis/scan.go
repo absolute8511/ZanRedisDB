@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"errors"
+	"time"
 
 	"github.com/gobwas/glob"
 	"github.com/youzan/ZanRedisDB/common"
@@ -225,36 +226,36 @@ func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
 }
 
 // for special data scan
-func buildSpecificDataScanKeyRange(storeDataType byte, key []byte, cursor []byte, reverse bool) (minKey []byte, maxKey []byte, err error) {
+func buildSpecificDataScanKeyRange(storeDataType byte, table []byte, key []byte, cursor []byte, reverse bool) (minKey []byte, maxKey []byte, err error) {
 	if reverse {
 		// for reverse, we need use current cursor as the end if cursor is nil
-		if maxKey, err = encodeSpecificDataScanKey(storeDataType, key, cursor); err != nil {
+		if maxKey, err = encodeSpecificDataScanKey(storeDataType, table, key, cursor); err != nil {
 			return
 		}
-		if minKey, err = encodeSpecificDataScanMinKey(storeDataType, key, nil); err != nil {
+		if minKey, err = encodeSpecificDataScanMinKey(storeDataType, table, key, nil); err != nil {
 			return
 		}
 	} else {
-		if minKey, err = encodeSpecificDataScanMinKey(storeDataType, key, cursor); err != nil {
+		if minKey, err = encodeSpecificDataScanMinKey(storeDataType, table, key, cursor); err != nil {
 			return
 		}
-		if maxKey, err = encodeSpecificDataScanMaxKey(storeDataType, key, nil); err != nil {
+		if maxKey, err = encodeSpecificDataScanMaxKey(storeDataType, table, key, nil); err != nil {
 			return
 		}
 	}
 	return
 }
 
-func encodeSpecificDataScanMinKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
-	return encodeSpecificDataScanKey(storeDataType, key, cursor)
+func encodeSpecificDataScanMinKey(storeDataType byte, table []byte, key []byte, cursor []byte) ([]byte, error) {
+	return encodeSpecificDataScanKey(storeDataType, table, key, cursor)
 }
 
-func encodeSpecificDataScanMaxKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
+func encodeSpecificDataScanMaxKey(storeDataType byte, table []byte, key []byte, cursor []byte) ([]byte, error) {
 	if len(cursor) > 0 {
-		return encodeSpecificDataScanKey(storeDataType, key, cursor)
+		return encodeSpecificDataScanKey(storeDataType, table, key, cursor)
 	}
 
-	k, err := encodeSpecificDataScanKey(storeDataType, key, nil)
+	k, err := encodeSpecificDataScanKey(storeDataType, table, key, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -263,11 +264,7 @@ func encodeSpecificDataScanMaxKey(storeDataType byte, key []byte, cursor []byte)
 	return k, nil
 }
 
-func encodeSpecificDataScanKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
-	table, rk, err := extractTableFromRedisKey(key)
-	if err != nil {
-		return nil, err
-	}
+func encodeSpecificDataScanKey(storeDataType byte, table []byte, rk []byte, cursor []byte) ([]byte, error) {
 
 	switch storeDataType {
 	case HashType:
@@ -282,14 +279,14 @@ func encodeSpecificDataScanKey(storeDataType byte, key []byte, cursor []byte) ([
 }
 
 func (db *RockDB) buildSpecificDataScanIterator(storeDataType byte,
-	key []byte, cursor []byte,
+	table []byte, key []byte, cursor []byte,
 	count int, reverse bool) (*engine.RangeLimitedIterator, error) {
 
 	if err := checkKeySize(key); err != nil {
 		return nil, err
 	}
 
-	minKey, maxKey, err := buildSpecificDataScanKeyRange(storeDataType, key, cursor, reverse)
+	minKey, maxKey, err := buildSpecificDataScanKeyRange(storeDataType, table, key, cursor, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -309,10 +306,18 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
-
 	v := make([]common.KVRecord, 0, count)
 
-	it, err := db.buildSpecificDataScanIterator(HashType, key, cursor, count, reverse)
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.GetCollVersionKey(tn, HashType, key, true)
+	if err != nil {
+		return nil, err
+	}
+	if keyInfo.IsNotExistOrExpired() {
+		return v, nil
+	}
+
+	it, err := db.buildSpecificDataScanIterator(HashType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -342,9 +347,18 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
-	v := make([][]byte, 0, count)
 
-	it, err := db.buildSpecificDataScanIterator(SetType, key, cursor, count, reverse)
+	v := make([][]byte, 0, count)
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.GetCollVersionKey(tn, SetType, key, true)
+	if err != nil {
+		return nil, err
+	}
+	if keyInfo.IsNotExistOrExpired() {
+		return v, nil
+	}
+
+	it, err := db.buildSpecificDataScanIterator(SetType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -376,9 +390,17 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 		return nil, err
 	}
 
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.GetCollVersionKey(tn, ZSetType, key, true)
+	if err != nil {
+		return nil, err
+	}
 	v := make([]common.ScorePair, 0, count)
+	if keyInfo.IsNotExistOrExpired() {
+		return v, nil
+	}
 
-	it, err := db.buildSpecificDataScanIterator(ZSetType, key, cursor, count, reverse)
+	it, err := db.buildSpecificDataScanIterator(ZSetType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}

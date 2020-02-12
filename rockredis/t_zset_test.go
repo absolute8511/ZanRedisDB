@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
@@ -37,7 +38,7 @@ func TestZSetCodec(t *testing.T) {
 		t.Fatal(string(k))
 	}
 
-	ek, _ = convertRedisKeyToDBZSetKey(key, member)
+	ek = zEncodeSetKey([]byte("test"), []byte("key"), member)
 	if tb, k, m, err := zDecodeSetKey(ek); err != nil {
 		t.Fatal(err)
 	} else if string(k) != "key" {
@@ -48,7 +49,7 @@ func TestZSetCodec(t *testing.T) {
 		t.Fatal(string(tb))
 	}
 
-	ek, _ = convertRedisKeyToDBZScoreKey(key, member, 100)
+	ek = zEncodeScoreKey(false, false, []byte("test"), []byte("key"), member, 100)
 	if tb, k, m, s, err := zDecodeScoreKey(ek); err != nil {
 		t.Fatal(err)
 	} else if string(k) != "key" {
@@ -68,55 +69,56 @@ func TestDBZSetWithEmptyMember(t *testing.T) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
+	tn := time.Now().UnixNano()
 	key := bin("test:testdb_zset_empty")
-	if n, err := db.ZAdd(0, key, pair("a", 0), pair("b", 1),
-		pair("c", 2), pair("", 3)); err != nil {
-		t.Fatal(err)
-	} else if n != 4 {
-		t.Fatal(n)
-	}
+	n, err := db.ZAdd(tn, key, pair("a", 0), pair("b", 1),
+		pair("c", 2), pair("", 3))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(4), n)
 
-	if n, err := db.ZCount(key, 0, 0XFF); err != nil {
-		t.Fatal(err)
-	} else if n != 4 {
-		t.Fatal(n)
-	}
+	s, err := db.ZScore(key, bin("b"))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(1), s)
+	s, err = db.ZScore(key, bin(""))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(3), s)
 
-	if s, err := db.ZScore(key, bin("")); err != nil {
-		t.Fatal(err)
-	} else if s != 3 {
-		t.Fatal(s)
-	}
+	n, err = db.ZCount(key, 0, 0xFF)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(4), n)
 
-	if n, err := db.ZRem(0, key, bin("a"), bin("b")); err != nil {
-		t.Fatal(err)
-	} else if n != 2 {
-		t.Fatal(n)
-	}
+	n, err = db.ZRem(tn, key, bin("a"), bin("b"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
 
-	if n, err := db.ZRem(0, key, bin("a"), bin("b")); err != nil {
-		t.Fatal(err)
-	} else if n != 0 {
-		t.Fatal(n)
-	}
+	n, err = db.ZCount(key, 0, 0xFF)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
 
-	if n, err := db.ZCard(key); err != nil {
-		t.Fatal(err)
-	} else if n != 2 {
-		t.Fatal(n)
-	}
+	n, err = db.ZRem(tn, key, bin("a"), bin("b"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 
-	if n, err := db.ZClear(key); err != nil {
-		t.Fatal(err)
-	} else if n != 2 {
-		t.Fatal(n)
-	}
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
 
-	if n, err := db.ZCount(key, 0, 0XFF); err != nil {
-		t.Fatal(err)
-	} else if n != 0 {
-		t.Fatal(n)
-	}
+	n, err = db.ZClear(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.ZCount(key, 0, 0xFF)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	// test zrange, zrank, zscore for empty
+	vals, err := db.ZRange(key, 0, 0xFF)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vals))
+	n, err = db.ZRank(key, []byte("a"))
+	assert.Nil(t, err)
+	assert.Equal(t, true, n < 0)
+	_, err = db.ZScore(key, []byte("a"))
+	assert.NotNil(t, err)
 }
 
 func TestDBZSet(t *testing.T) {
@@ -134,21 +136,25 @@ func TestDBZSet(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	if n, err := db.ZCount(key, 0, 0XFF); err != nil {
-		t.Fatal(err)
-	} else if n != 4 {
-		t.Fatal(n)
-	}
+	s, err := db.ZScore(key, bin("d"))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(3), s)
+	_, err = db.ZScore(key, bin("zzz"))
+	assert.Equal(t, errScoreMiss, err)
 
-	if s, err := db.ZScore(key, bin("d")); err != nil {
-		t.Fatal(err)
-	} else if s != 3 {
-		t.Fatal(s)
-	}
+	n, err := db.ZCount(key, 0, 0xFF)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(4), n)
 
-	if s, err := db.ZScore(key, bin("zzz")); err != errScoreMiss {
-		t.Fatal(fmt.Sprintf("s=[%v] err=[%s]", s, err))
-	}
+	// test zadd mixed with the same score
+	n, err = db.ZAdd(0, key, pair("a", 0), pair("b", 1),
+		pair("c", 2), pair("d", 4))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	s, err = db.ZScore(key, bin("d"))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(4), s)
 
 	// {c':2, 'd':3}
 	if n, err := db.ZRem(0, key, bin("a"), bin("b")); err != nil {
@@ -286,8 +292,137 @@ func TestZSetOrder(t *testing.T) {
 	return
 }
 
-func TestZRemRange(t *testing.T) {
+func TestZSetRange(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
 	// all range remove test
+	key := []byte("test:zkey_zrange_test")
+	mems := []common.ScorePair{
+		common.ScorePair{1, []byte("a")},
+		common.ScorePair{2, []byte("b")},
+		common.ScorePair{3, []byte("c")},
+		common.ScorePair{4, []byte("d")},
+	}
+	n, err := db.ZAdd(0, key, mems...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+
+	vlist, err := db.ZRange(key, 0, 3)
+	assert.Nil(t, err)
+	assert.Equal(t, mems, vlist)
+
+	vlist, err = db.ZRange(key, 1, 4)
+	assert.Nil(t, err)
+	assert.Equal(t, mems[1:], vlist)
+
+	vlist, err = db.ZRange(key, -2, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, mems[2:], vlist)
+
+	vlist, err = db.ZRange(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, mems, vlist)
+
+	vlist, err = db.ZRange(key, -1, -2)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+
+	vlist, err = db.ZRevRange(key, 0, 4)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems), len(vlist))
+	assert.Equal(t, mems[0], vlist[len(vlist)-1])
+
+	vlist, err = db.ZRevRange(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems), len(vlist))
+	assert.Equal(t, mems[len(mems)-1], vlist[0])
+
+	vlist, err = db.ZRevRange(key, 2, 3)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems)-2, len(vlist))
+	assert.Equal(t, mems[len(mems)-1-2], vlist[0])
+
+	vlist, err = db.ZRevRange(key, -2, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(mems)-2, len(vlist))
+	assert.Equal(t, mems[1], vlist[0])
+}
+
+func TestZRemRange(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	// all range remove test
+	key := []byte("test:zkey_range_rm_test")
+	mems := []common.ScorePair{
+		common.ScorePair{1, []byte("a")},
+		common.ScorePair{2, []byte("b")},
+		common.ScorePair{3, []byte("c")},
+		common.ScorePair{4, []byte("d")},
+		common.ScorePair{5, []byte("e")},
+		common.ScorePair{6, []byte("f")},
+	}
+	n, err := db.ZAdd(0, key, mems...)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(len(mems)), n)
+
+	vlist, err := db.ZRange(key, 0, len(mems))
+	assert.Nil(t, err)
+	assert.Equal(t, mems, vlist)
+
+	total := len(mems)
+	n, err = db.ZRemRangeByRank(0, key, 2, 3)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+	total -= 2
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(total), n)
+	vlist, err = db.ZRange(key, 0, len(mems))
+	assert.Nil(t, err)
+	assert.Equal(t, mems[:2], vlist[:2])
+	assert.Equal(t, mems[4:], vlist[2:])
+
+	n, err = db.ZRem(0, key, mems[0].Member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	total--
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(total), n)
+	vlist, err = db.ZRange(key, 0, len(mems))
+	assert.Nil(t, err)
+	assert.Equal(t, total, len(vlist))
+	assert.Equal(t, mems[1], vlist[0])
+	assert.Equal(t, mems[4:], vlist[1:])
+
+	n, err = db.ZRemRangeByScore(0, key, 0, 3)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	total--
+
+	n, err = db.ZRemRangeByLex(0, key, []byte("e"), []byte("e"), common.RangeClose)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	total--
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(total), n)
+	vlist, err = db.ZRange(key, 0, len(mems))
+	assert.Nil(t, err)
+	assert.Equal(t, total, len(vlist))
+	assert.Equal(t, mems[5:], vlist)
+
+	n, err = db.ZClear(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 }
 
 func TestZRangeLimit(t *testing.T) {

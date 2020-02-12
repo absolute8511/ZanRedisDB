@@ -98,38 +98,92 @@ type expiredMetaBuffer interface {
 }
 
 type expiration interface {
-	rawExpireAt(byte, []byte, int64, *gorocksdb.WriteBatch) error
-	expireAt(byte, []byte, int64) error
-	ttl(byte, []byte) (int64, error)
-	delExpire(byte, []byte, *gorocksdb.WriteBatch) error
+	// key here should be full key in ns:table:realK
+	getRawValueForHeader(ts int64, dt byte, key []byte) ([]byte, error)
+	ExpireAt(dt byte, key []byte, rawValue []byte, when int64) (int64, error)
+	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error)
+	// should be called only in read operation
+	ttl(ts int64, dt byte, key []byte, rawValue []byte) (int64, error)
+	// if in raft write loop should avoid lock, otherwise lock should be used
+	// should mark as not expired if the value is not exist
+	isExpired(ts int64, dt byte, key []byte, rawValue []byte, useLock bool) (bool, error)
+	decodeRawValue(dt byte, rawValue []byte) (*headerMetaValue, error)
+	encodeToRawValue(dt byte, h *headerMetaValue) []byte
+	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error)
+	renewOnExpired(ts int64, dt byte, key []byte, oldh *headerMetaValue)
 	check(common.ExpiredDataBuffer, chan struct{}) error
 	Start()
 	Stop()
 	Destroy()
+
+	// key here should be key without namespace in table:realK
+	encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte
+	decodeFromVersionKey(dt byte, vk []byte) ([]byte, int64, error)
 }
 
-func (db *RockDB) expire(dataType byte, key []byte, duration int64) error {
-	return db.expiration.expireAt(dataType, key, time.Now().Unix()+duration)
+func (db *RockDB) expire(ts int64, dataType byte, key []byte, rawValue []byte, duration int64) (int64, error) {
+	var err error
+	if rawValue == nil {
+		rawValue, err = db.expiration.getRawValueForHeader(ts, dataType, key)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return db.expiration.ExpireAt(dataType, key, rawValue, ts/int64(time.Second)+duration)
 }
 
 func (db *RockDB) KVTtl(key []byte) (t int64, err error) {
-	return db.ttl(KVType, key)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, KVType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, KVType, key, v)
 }
 
 func (db *RockDB) HashTtl(key []byte) (t int64, err error) {
-	return db.ttl(HashType, key)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, HashType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, HashType, key, v)
+}
+
+func (db *RockDB) BitTtl(key []byte) (t int64, err error) {
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, BitmapType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, BitmapType, key, v)
 }
 
 func (db *RockDB) ListTtl(key []byte) (t int64, err error) {
-	return db.ttl(ListType, key)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, ListType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, ListType, key, v)
 }
 
 func (db *RockDB) SetTtl(key []byte) (t int64, err error) {
-	return db.ttl(SetType, key)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, SetType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, SetType, key, v)
 }
 
 func (db *RockDB) ZSetTtl(key []byte) (t int64, err error) {
-	return db.ttl(ZSetType, key)
+	tn := time.Now().UnixNano()
+	v, err := db.expiration.getRawValueForHeader(tn, ZSetType, key)
+	if err != nil {
+		return -1, err
+	}
+	return db.ttl(tn, ZSetType, key, v)
 }
 
 type TTLChecker struct {

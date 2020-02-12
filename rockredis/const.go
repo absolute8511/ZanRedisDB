@@ -110,6 +110,13 @@ const (
 	MaxValueSize int = 1024 * 1024 * 8
 )
 
+func checkSubKey(subkey []byte) error {
+	if len(subkey) > MaxSubKeyLen {
+		return errSubKeySize
+	}
+	return nil
+}
+
 func checkKeySubKey(key []byte, field []byte) error {
 	if len(key) > MaxKeySize || len(key) == 0 {
 		return errKeySize

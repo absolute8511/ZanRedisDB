@@ -33,6 +33,10 @@ func TestKVNode_listCommand(t *testing.T) {
 		{"lfixkey", buildCommand([][]byte{[]byte("lfixkey"), testKey})},
 		{"rpop", buildCommand([][]byte{[]byte("rpop"), testKey})},
 		{"rpush", buildCommand([][]byte{[]byte("rpush"), testKey, testKeyValue})},
+		{"lttl", buildCommand([][]byte{[]byte("lttl"), testKey})},
+		{"lkeyexist", buildCommand([][]byte{[]byte("lkeyexist"), testKey})},
+		{"lexpire", buildCommand([][]byte{[]byte("lexpire"), testKey, []byte("10")})},
+		{"lpersist", buildCommand([][]byte{[]byte("lpersist"), testKey})},
 		{"lclear", buildCommand([][]byte{[]byte("lclear"), testKey})},
 	}
 	defer os.RemoveAll(dataDir)

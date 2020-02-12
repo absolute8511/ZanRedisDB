@@ -49,7 +49,7 @@ func (kvsm *kvStoreSM) localExpireCommand(cmd redcon.Command, ts int64) (interfa
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.Expire(cmd.Args[1], int64(duration))
+		return kvsm.store.Expire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -57,7 +57,7 @@ func (kvsm *kvStoreSM) localHashExpireCommand(cmd redcon.Command, ts int64) (int
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.HExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.HExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -65,7 +65,7 @@ func (kvsm *kvStoreSM) localListExpireCommand(cmd redcon.Command, ts int64) (int
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.LExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.LExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -73,7 +73,7 @@ func (kvsm *kvStoreSM) localSetExpireCommand(cmd redcon.Command, ts int64) (inte
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.SExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.SExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
@@ -81,28 +81,40 @@ func (kvsm *kvStoreSM) localZSetExpireCommand(cmd redcon.Command, ts int64) (int
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return int64(0), err
 	} else {
-		return kvsm.store.ZExpire(cmd.Args[1], int64(duration))
+		return kvsm.store.ZExpire(ts, cmd.Args[1], int64(duration))
+	}
+}
+
+func (kvsm *kvStoreSM) localBitExpireCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
+		return int64(0), err
+	} else {
+		return kvsm.store.BitExpire(ts, cmd.Args[1], int64(duration))
 	}
 }
 
 func (kvsm *kvStoreSM) localPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.Persist(cmd.Args[1])
+	return kvsm.store.Persist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localHashPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.HPersist(cmd.Args[1])
+	return kvsm.store.HPersist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localListPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.LPersist(cmd.Args[1])
+	return kvsm.store.LPersist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.SPersist(cmd.Args[1])
+	return kvsm.store.SPersist(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localZSetPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.ZPersist(cmd.Args[1])
+	return kvsm.store.ZPersist(ts, cmd.Args[1])
+}
+
+func (kvsm *kvStoreSM) localBitPersistCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return kvsm.store.BitPersist(ts, cmd.Args[1])
 }
 
 //read commands related to TTL
@@ -140,6 +152,54 @@ func (nd *KVNode) sttlCommand(conn redcon.Conn, cmd redcon.Command) {
 
 func (nd *KVNode) zttlCommand(conn redcon.Conn, cmd redcon.Command) {
 	if v, err := nd.store.ZSetTtl(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) bttlCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.BitTtl(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) hKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.HKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) lKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.LKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) sKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.SKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) zKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.ZKeyExists(cmd.Args[1]); err != nil {
+		conn.WriteError(err.Error())
+	} else {
+		conn.WriteInt64(v)
+	}
+}
+
+func (nd *KVNode) bKeyExistCommand(conn redcon.Conn, cmd redcon.Command) {
+	if v, err := nd.store.BitKeyExist(cmd.Args[1]); err != nil {
 		conn.WriteError(err.Error())
 	} else {
 		conn.WriteInt64(v)

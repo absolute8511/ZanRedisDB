@@ -18,6 +18,7 @@ type NamespaceConfig struct {
 	OptimizedFsync   bool            `json:"optimized_fsync"`
 	RaftGroupConf    RaftGroupConfig `json:"raft_group_conf"`
 	ExpirationPolicy string          `json:"expiration_policy"`
+	DataVersion      string          `json:"data_version"`
 }
 
 func NewNSConfig() *NamespaceConfig {

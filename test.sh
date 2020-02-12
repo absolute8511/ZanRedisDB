@@ -22,11 +22,11 @@ fi
 echo $CGO_LDFLAGS
 
 if [ "$TEST_RACE" = "false" ]; then
-    GOMAXPROCS=1 CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go test -timeout 900s $TESTDIRS
+    GOMAXPROCS=1 CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go test -timeout 1500s $TESTDIRS
 else
-    GOMAXPROCS=4 CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go test -timeout 900s -race $TESTDIRS
+    GOMAXPROCS=4 CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go test -timeout 1500s -race $TESTDIRS
     for d in $TESTDIRS; do 
-        GOMAXPROCS=4 CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go test -timeout 900s -race -coverprofile=profile.out -covermode=atomic $d
+        GOMAXPROCS=4 CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} go test -timeout 1500s -race -coverprofile=profile.out -covermode=atomic $d
         if [ -f profile.out ]; then
             cat profile.out >> coverage.txt
             rm profile.out
