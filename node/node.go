@@ -187,7 +187,6 @@ type KVNode struct {
 	commitC            <-chan applyInfo
 	appliedIndex       uint64
 	clusterInfo        common.IClusterInfo
-	expireHandler      *ExpireHandler
 	expirationPolicy   common.ExpirationPolicy
 	remoteSyncedStates *remoteSyncedStateMgr
 	applyWait          wait.WaitTime
@@ -255,7 +254,6 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	}
 
 	s.clusterInfo = clusterInfo
-	s.expireHandler = NewExpireHandler(s)
 
 	s.registerHandler()
 
@@ -306,7 +304,6 @@ func (nd *KVNode) Start(standalone bool) error {
 		nd.readIndexLoop()
 	}()
 
-	nd.expireHandler.Start()
 	return nil
 }
 
@@ -324,7 +321,6 @@ func (nd *KVNode) Stop() {
 	}
 	defer close(nd.stopDone)
 	close(nd.stopChan)
-	nd.expireHandler.Stop()
 	nd.wg.Wait()
 	nd.rn.StopNode()
 	nd.sm.Close()
@@ -1383,8 +1379,6 @@ func (nd *KVNode) ReportMeLeaderToCluster() {
 
 // should not block long in this
 func (nd *KVNode) OnRaftLeaderChanged() {
-	nd.expireHandler.LeaderChanged()
-
 	if nd.rn.IsLead() {
 		go nd.ReportMeLeaderToCluster()
 	}

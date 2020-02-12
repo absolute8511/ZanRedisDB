@@ -197,8 +197,6 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 	}
 
 	switch cfg.ExpirationPolicy {
-	case common.ConsistencyDeletion:
-		db.expiration = newConsistencyExpiration(db)
 	case common.LocalDeletion:
 		db.expiration = newLocalExpiration(db)
 	case common.WaitCompact:
@@ -231,13 +229,6 @@ func GetBackupDir(base string) string {
 
 func GetBackupDirForRemote(base string) string {
 	return path.Join(base, "rocksdb_backup", "remote")
-}
-
-func (r *RockDB) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
-	if r.cfg.ExpirationPolicy != common.ConsistencyDeletion {
-		return fmt.Errorf("can not check expired data at the expiration-policy:%d", r.cfg.ExpirationPolicy)
-	}
-	return r.expiration.check(buffer, stop)
 }
 
 func (r *RockDB) SetLatestSnapIndex(i uint64) {

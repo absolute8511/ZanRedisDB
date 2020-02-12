@@ -87,13 +87,6 @@ func (s *KVStore) Destroy() error {
 	return nil
 }
 
-func (s *KVStore) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
-	if s.opts.EngType == rockredis.EngType {
-		return s.RockDB.CheckExpiredData(buffer, stop)
-	}
-	return nil
-}
-
 func (s *KVStore) LocalLookup(key []byte) ([]byte, error) {
 	value, err := s.KVGet(key)
 	return value, err

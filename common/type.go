@@ -95,12 +95,6 @@ const (
 	// do not need to care about the data expiration. Every node in the cluster should start the 'TTLChecker' of the storage system
 	// with this policy.
 	LocalDeletion ExpirationPolicy = iota
-
-	// ConsistencyDeletion indicates all the expired data should be deleted through Raft, the underlying storage system should
-	// not delete any data and all the expired keys should be sent to the expired channel. Only the leader should starts
-	// the 'TTLChecker' with this policy.
-	ConsistencyDeletion
-
 	//
 	PeriodicalRotation
 
@@ -111,9 +105,8 @@ const (
 )
 
 const (
-	DefaultExpirationPolicy             = "local_deletion"
-	ConsistencyDeletionExpirationPolicy = "consistency_deletion"
-	WaitCompactExpirationPolicy         = "wait_compact"
+	DefaultExpirationPolicy     = "local_deletion"
+	WaitCompactExpirationPolicy = "wait_compact"
 )
 
 var (
@@ -125,8 +118,6 @@ func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
 	switch s {
 	case DefaultExpirationPolicy:
 		return LocalDeletion, nil
-	case ConsistencyDeletionExpirationPolicy:
-		return ConsistencyDeletion, nil
 	case WaitCompactExpirationPolicy:
 		return WaitCompact, nil
 	default:
