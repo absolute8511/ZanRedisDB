@@ -870,7 +870,8 @@ func (rc *raftNode) serveChannels() {
 			return
 		case <-rc.node.EventNotifyCh():
 			moreEntriesToApply := cap(rc.commitC)-len(rc.commitC) > 3
-			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, rc.IsBusySnapshot())
+			busy := rc.IsBusySnapshot() || !rc.IsReplayFinished()
+			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, busy)
 			if !hasUpdate {
 				continue
 			}
