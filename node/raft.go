@@ -875,6 +875,9 @@ func (rc *raftNode) serveChannels() {
 			busy := rc.IsBusySnapshot()
 			if !busy {
 				// note: if the lastIndex and FirstIndex is slow, we should avoid call it in every step
+				// and this may cause the raft log send some overflowed messages because the raft logs will
+				// send as much as MaxInflights*MaxSizePerMsg in pipeline (may increase the network bandwidth), so if we replaced the memory raft
+				// storage we can remove this to allow receiving all logs from leader.
 				last, err := rc.raftStorage.LastIndex()
 				if err == nil {
 					fi, _ := rc.raftStorage.FirstIndex()
@@ -1311,14 +1314,21 @@ func (rc *raftNode) purgeFile(done chan struct{}, stopC chan struct{}) {
 		keepBackup = 10
 	}
 	var serrc, werrc <-chan error
-	serrc = fileutil.PurgeFile(rc.config.SnapDir, "snap", uint(keepBackup), time.Minute*10, rc.stopc)
-	werrc = fileutil.PurgeFile(rc.config.WALDir, "wal", uint(keep), time.Minute*10, rc.stopc)
+	var sdonec, wdonec <-chan struct{}
+	sdonec, serrc = fileutil.PurgeFileWithDoneNotify(rc.config.SnapDir, "snap", uint(keepBackup), time.Minute*10, stopC)
+	wdonec, werrc = fileutil.PurgeFileWithDoneNotify(rc.config.WALDir, "wal", uint(keep), time.Minute*10, stopC)
 	select {
 	case e := <-werrc:
 		rc.Infof("failed to purge wal file %v", e)
 	case e := <-serrc:
 		rc.Infof("failed to purge snap file %v", e)
 	case <-stopC:
+		if sdonec != nil {
+			<-sdonec
+		}
+		if wdonec != nil {
+			<-wdonec
+		}
 		return
 	}
 }
