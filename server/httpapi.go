@@ -823,9 +823,6 @@ func (s *Server) initHttpHandler() {
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
 func (s *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
-	if s.conf.ProfilePort >= 0 {
-		go http.ListenAndServe(":"+strconv.Itoa(s.conf.ProfilePort), nil)
-	}
 	s.initHttpHandler()
 	srv := http.Server{
 		Addr:    ":" + strconv.Itoa(port),

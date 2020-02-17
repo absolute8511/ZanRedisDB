@@ -870,7 +870,21 @@ func (rc *raftNode) serveChannels() {
 			return
 		case <-rc.node.EventNotifyCh():
 			moreEntriesToApply := cap(rc.commitC)-len(rc.commitC) > 3
-			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, rc.IsBusySnapshot())
+			// we should slow down raft logs receiving while applying is slow, otherwise we
+			// may have too much logs in memory if the applying is slow.
+			busy := rc.IsBusySnapshot()
+			if !busy {
+				// note: if the lastIndex and FirstIndex is slow, we should avoid call it in every step
+				last, err := rc.raftStorage.LastIndex()
+				if err == nil {
+					fi, _ := rc.raftStorage.FirstIndex()
+					fi = fi - 1
+					if last > fi && last-fi >= uint64(rc.config.SnapCatchup+rc.config.SnapCount)*10 {
+						busy = true
+					}
+				}
+			}
+			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, busy)
 			if !hasUpdate {
 				continue
 			}

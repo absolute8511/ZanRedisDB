@@ -197,7 +197,8 @@ func startTestClusterWithBasePort(portBase int, replicaNum int,
 		nsConf.Replicator = replicaNum
 		nsConf.RaftGroupConf.GroupID = 1000
 		nsConf.RaftGroupConf.SeedNodes = tmpSeeds
-		nsConf.ExpirationPolicy = "consistency_deletion"
+		nsConf.ExpirationPolicy = common.WaitCompactExpirationPolicy
+		nsConf.DataVersion = common.ValueHeaderV1Str
 		kv := NewServer(kvOpts)
 		kv.nsMgr.SetIClusterInfo(fakeCI)
 		if _, err := kv.InitKVNamespace(replica.ReplicaID, nsConf, false); err != nil {
@@ -459,7 +460,8 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	nsConf.SnapCount = testSnap
 	nsConf.SnapCatchup = testSnapCatchup
 	nsConf.RaftGroupConf.GroupID = 1000
-	nsConf.ExpirationPolicy = "consistency_deletion"
+	nsConf.ExpirationPolicy = common.WaitCompactExpirationPolicy
+	nsConf.DataVersion = common.ValueHeaderV1Str
 	learnerNode, err = learnerServers[0].InitKVNamespace(m.ID, nsConf, true)
 	assert.Nil(t, err)
 	node.SetSyncerOnly(true)

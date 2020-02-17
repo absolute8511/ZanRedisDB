@@ -52,7 +52,6 @@ type StateMachine interface {
 	GetStats(table string) common.NamespaceStats
 	Start() error
 	Close()
-	CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error
 	GetBatchOperator() IBatchOperator
 }
 
@@ -354,10 +353,6 @@ func (kvsm *kvStoreSM) CleanData() error {
 
 func (kvsm *kvStoreSM) Destroy() {
 	kvsm.store.Destroy()
-}
-
-func (kvsm *kvStoreSM) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
-	return kvsm.store.CheckExpiredData(buffer, stop)
 }
 
 func (kvsm *kvStoreSM) UpdateSnapshotState(term uint64, index uint64) {

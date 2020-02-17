@@ -159,25 +159,21 @@ func TestKVTTL_CompactKeepTTL(t *testing.T) {
 	} else if v != 1 {
 		t.Fatal("return value from expire != 1")
 	}
-	if v, err := db.KVTtl(key1); err != nil {
-		t.Fatal(err)
-	} else if v != ttl1 {
-		t.Fatal("ttl != expire")
-	}
+	n, err := db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(ttl1), n)
 	// incr should keep ttl
 	if c, err := db.Incr(0, key1); err != nil {
 		t.Fatal(err)
 	} else {
 		assert.Equal(t, int64(2), c)
 	}
-	if v, err := db.KVTtl(key1); err != nil {
-		t.Fatal(err)
-	} else if v != ttl1 {
-		t.Fatal("ttl != expire")
-	}
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(ttl1), n)
 
 	// append
-	_, err := db.Append(0, key1, []byte("append"))
+	_, err = db.Append(0, key1, []byte("append"))
 	assert.Nil(t, err)
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
@@ -744,12 +740,12 @@ func TestBitmapTTL_Compact_TTLExpired(t *testing.T) {
 }
 
 func TestListTTL_Compact(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
 	listKey := []byte("test:testdbTTL_list_c")
-	var listTTL int64 = rand.Int63()
+	var listTTL int64 = 1000
 	tn := time.Now().UnixNano()
 
 	if v, err := db.ListTtl(listKey); err != nil {
@@ -1144,12 +1140,12 @@ func TestSetTTL_Compact_TTLExpired(t *testing.T) {
 }
 
 func TestZSetTTL_Compact(t *testing.T) {
-	db := getTestDBWithExpirationPolicy(t, common.ConsistencyDeletion)
+	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
 	zsetKey := []byte("test:testdbTTL_zset_c")
-	var zsetTTL int64 = rand.Int63()
+	var zsetTTL int64 = 1000
 
 	tn := time.Now().UnixNano()
 	if v, err := db.ZSetTtl(zsetKey); err != nil {

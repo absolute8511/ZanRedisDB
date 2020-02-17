@@ -340,6 +340,11 @@ func (s *Server) Start() {
 		defer s.wg.Done()
 		s.handleRedisWriteLoop()
 	}()
+
+	if s.conf.ProfilePort >= 0 {
+		go http.ListenAndServe(":"+strconv.Itoa(s.conf.ProfilePort), nil)
+	}
+
 	s.wg.Add(1)
 	// redis api enable first, because there are many partitions, some partitions may recover first
 	// and become leader. In this way we need redis api enabled to allow r/w these partitions.

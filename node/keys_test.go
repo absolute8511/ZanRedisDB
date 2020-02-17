@@ -56,7 +56,7 @@ func getTestKVNode(t *testing.T) (*KVNode, string, chan struct{}) {
 	nsConf.Replicator = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	nsConf.ExpirationPolicy = "consistency_deletion"
+	nsConf.ExpirationPolicy = common.DefaultExpirationPolicy
 
 	mconf := &MachineConfig{
 		BroadcastAddr: "127.0.0.1",
