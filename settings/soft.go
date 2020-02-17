@@ -47,7 +47,7 @@ func defaultSoftSettings() soft {
 		HealthIntervalSec:        5,
 		// max number of in-flight snapshot messages allows to have
 		MaxInFlightMsgSnap: 16,
-		MaxSizePerMsg:      1024 * 1024,
+		MaxSizePerMsg:      512 * 1024,
 		MaxInflightMsgs:    256,
 		CommitBufferLen:    5000,
 		ProposalQueueLen:   1024 * 4,
