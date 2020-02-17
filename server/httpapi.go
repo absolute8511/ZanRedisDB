@@ -425,6 +425,10 @@ func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps htt
 	return nil, nil
 }
 
+func (s *Server) getSyncerOnlyState(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	return node.IsSyncerOnly(), nil
+}
+
 func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -802,6 +806,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/rsynclimit", common.Decorate(s.doSetRsyncLimit, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
 	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
+	router.Handle("GET", "/synceronly", common.Decorate(s.getSyncerOnlyState, log, common.V1))
 	router.Handle("POST", "/conf/set", common.Decorate(s.doSetDynamicConf, log, common.V1))
 	router.Handle("GET", "/conf/get", common.Decorate(s.doGetDynamicConf, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
