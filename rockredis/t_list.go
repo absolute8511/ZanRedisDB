@@ -717,10 +717,6 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 		v = append(v, rit.Value())
 	}
 	rit.Close()
-	if int64(len(v)) < llen && int64(len(v)) < limit {
-		dbLog.Infof("list %v range count %v not match llen: %v, meta: %v, %v",
-			string(key), len(v), llen, headSeq, tailSeq)
-	}
 	return v, nil
 }
 
