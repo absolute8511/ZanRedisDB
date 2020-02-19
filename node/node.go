@@ -582,9 +582,9 @@ func (nd *KVNode) ProposeRawAsync(buffer []byte, term uint64, index uint64, raft
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
 	}
-	defer cancel()
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
 	if err != nil {
+		cancel()
 		nd.w.Trigger(reqList.ReqId, err)
 		return nil, reqList, err
 	}
@@ -593,6 +593,7 @@ func (nd *KVNode) ProposeRawAsync(buffer []byte, term uint64, index uint64, raft
 	futureRsp.waitFunc = func() (interface{}, error) {
 		var rsp interface{}
 		var ok bool
+		var err error
 		// will always return a response, timed out or get a error
 		select {
 		case <-ctx.Done():
