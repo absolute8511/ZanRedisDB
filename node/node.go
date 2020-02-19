@@ -539,12 +539,12 @@ func (nd *KVNode) IsWriteReady() bool {
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(rep/2)
 }
 
-func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
+func (nd *KVNode) ProposeRawAsync(buffer []byte, term uint64, index uint64, raftTs int64) (*FutureRsp, BatchInternalRaftRequest, error) {
 	var reqList BatchInternalRaftRequest
 	err := reqList.Unmarshal(buffer)
 	if err != nil {
 		nd.rn.Infof("propose raw failed: %v at (%v-%v)", err.Error(), term, index)
-		return err
+		return nil, reqList, err
 	}
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nd.rn.Infof("propose raw (%v): %v at (%v-%v)", len(buffer), buffer, term, index)
@@ -554,7 +554,7 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	reqList.OrigTerm = term
 	reqList.OrigIndex = index
 	if reqList.Timestamp != raftTs {
-		return fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
+		return nil, reqList, fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
 	}
 
 	for _, req := range reqList.Reqs {
@@ -565,19 +565,17 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	if dataLen <= len(buffer) {
 		n, err := reqList.MarshalTo(buffer[:dataLen])
 		if err != nil {
-			return err
+			return nil, reqList, err
 		}
 		if n != dataLen {
-			return errors.New("marshal length mismatch")
+			return nil, reqList, errors.New("marshal length mismatch")
 		}
 	} else {
 		buffer, err = reqList.Marshal()
 		if err != nil {
-			return err
+			return nil, reqList, err
 		}
 	}
-	start := time.Now()
-
 	// must register before propose
 	wr := nd.w.Register(reqList.ReqId)
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
@@ -588,43 +586,67 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
 	if err != nil {
 		nd.w.Trigger(reqList.ReqId, err)
-		return err
+		return nil, reqList, err
 	}
-	var ok bool
-	var rsp interface{}
-	select {
-	case <-wr.WaitC():
+
+	var futureRsp FutureRsp
+	futureRsp.waitFunc = func() (interface{}, error) {
+		var rsp interface{}
+		var ok bool
+		// will always return a response, timed out or get a error
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			if err == context.Canceled {
+				// proposal canceled can be caused by leader transfer or no leader
+				err = ErrProposalCanceled
+			}
+			nd.w.Trigger(reqList.ReqId, err)
+			<-wr.WaitC()
+		case <-wr.WaitC():
+		}
 		rsp = wr.GetResult()
+		cancel()
 		if err, ok = rsp.(error); ok {
 			rsp = nil
+			//nd.rn.Infof("request return error: %v, %v", req.String(), err.Error())
 		} else {
 			err = nil
 		}
-	// we can avoid wait on stop since ctx will be returned (avoid concurrency performance degrade)
-	//case <-nd.stopChan:
-	//	err = common.ErrStopped
-	case <-ctx.Done():
-		err = ctx.Err()
-		if err == context.DeadlineExceeded {
-			nd.rn.Infof("propose timeout: %v", err.Error())
-		}
-		if err == context.Canceled {
-			// proposal canceled can be caused by leader transfer or no leader
-			err = ErrProposalCanceled
-			nd.rn.Infof("propose canceled ")
-		}
-		nd.w.Trigger(reqList.ReqId, err)
+		return rsp, err
 	}
+	return &futureRsp, reqList, nil
+}
+
+func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
+	f, reqList, err := nd.ProposeRawAsync(buffer, term, index, raftTs)
+	if err != nil {
+		return err
+	}
+	start := time.Now()
+	rsp, err := f.WaitRsp()
+	if err != nil {
+		return err
+	}
+	var ok bool
+	if err, ok = rsp.(error); ok {
+		return err
+	}
+
 	cost := time.Since(start).Nanoseconds()
 	for _, req := range reqList.Reqs {
 		if req.Header.DataType == int32(RedisReq) {
-			nd.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), cost/1000)
+			nd.UpdateWriteStats(int64(len(req.Data)), cost/1000)
 		}
 	}
 	if cost >= int64(proposeTimeout.Nanoseconds())/2 {
 		nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
 	}
 	return err
+}
+
+func (nd *KVNode) UpdateWriteStats(vSize int64, latencyUs int64) {
+	nd.clusterWriteStats.UpdateWriteStats(vSize, latencyUs)
 }
 
 type FutureRsp struct {
@@ -718,7 +740,7 @@ func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 	}
 	rsp, err := fr.WaitRsp()
 	cost := time.Since(start)
-	nd.clusterWriteStats.UpdateWriteStats(int64(len(raftReq.Data)), cost.Nanoseconds()/1000)
+	nd.UpdateWriteStats(int64(len(raftReq.Data)), cost.Nanoseconds()/1000)
 	if err == nil && !nd.IsWriteReady() {
 		nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
 			raftReq.String())
