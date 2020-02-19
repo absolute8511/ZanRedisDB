@@ -482,3 +482,7 @@ func TestSnapshotApplyingShouldNotBlock(t *testing.T) {
 func TestSnapshotPreTransferRetryOnFail(t *testing.T) {
 	// TODO: a failed snapshot receive should retry after report failed
 }
+
+func TestSlowApplyingShouldPauseRaftStep(t *testing.T) {
+	// TODO: slow in state machine should pause raft step to avoid too much memory for raft logs
+}

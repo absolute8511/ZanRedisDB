@@ -22,7 +22,7 @@ func EnableForTest() {
 }
 
 const (
-	logSendBufferLen = 64
+	logSendBufferLen = 512
 )
 
 var syncerNormalInit = false
@@ -217,17 +217,19 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 	in := syncerpb.RaftReqs{}
 	logListBuf := make([]syncerpb.RaftLogData, logSendBufferLen*2)
 	marshalBufs := make([][]byte, logSendBufferLen*2)
+	waitSendNum := 0
 	for {
 		handled := false
 		var err error
 		sendCh := sm.sendCh
-		if len(raftLogs) > logSendBufferLen*2 {
+		if waitSendNum > logSendBufferLen*10 {
 			sendCh = nil
 		}
 		select {
 		case req := <-sendCh:
 			last = req
 			raftLogs = append(raftLogs, req)
+			waitSendNum += len(req.Reqs)
 			if nodeLog.Level() > common.LOG_DETAIL {
 				sm.Debugf("batching raft log: %v in batch: %v", req.String(), len(raftLogs))
 			}
@@ -239,6 +241,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				case req := <-sm.sendCh:
 					last = req
 					raftLogs = append(raftLogs, req)
+					waitSendNum += len(req.Reqs)
 					if nodeLog.Level() >= common.LOG_DETAIL {
 						sm.Debugf("batching raft log: %v in batch: %v", req.String(), len(raftLogs))
 					}
@@ -247,6 +250,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 					case req := <-sm.sendCh:
 						last = req
 						raftLogs = append(raftLogs, req)
+						waitSendNum += len(req.Reqs)
 						go func() {
 							select {
 							// put back to wait next again
@@ -315,6 +319,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				raftLogs[i].Reqs = nil
 			}
 			raftLogs = raftLogs[:0]
+			waitSendNum = 0
 		}
 	}
 }
