@@ -173,6 +173,19 @@ func (rss *remoteSyncedStateMgr) Clone() map[string]SyncedState {
 	return clone
 }
 
+func (nd *KVNode) isContinueCommit(reqList BatchInternalRaftRequest) bool {
+	oldState, ok := nd.remoteSyncedStates.GetState(reqList.OrigCluster)
+	if ok {
+		if reqList.OrigIndex > oldState.SyncedIndex+1 {
+			nd.rn.Infof("request %v is not continue while sync : %v",
+				reqList.OrigIndex, oldState)
+			return false
+		}
+	}
+	// not found, we consider first init
+	return true
+}
+
 func (nd *KVNode) isAlreadyApplied(reqList BatchInternalRaftRequest) bool {
 	oldState, ok := nd.remoteSyncedStates.GetState(reqList.OrigCluster)
 	if ok {
