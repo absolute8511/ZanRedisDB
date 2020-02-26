@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,7 +17,8 @@ import (
 )
 
 var (
-	proposeTimeout = time.Second * 4
+	proposeTimeout          = time.Second * 4
+	errRemoteSyncOutOfOrder = errors.New("remote sync index out of order")
 )
 
 var syncClusterNetStats common.WriteStats
@@ -53,6 +55,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 	// combine them to a single raft proposal.
 	futureList := make([]func() error, 0, len(reqs.RaftLog))
 	start := time.Now()
+	lastIndex := uint64(0)
 	for _, r := range reqs.RaftLog {
 		if sLog.Level() >= common.LOG_DETAIL {
 			sLog.Debugf("applying raft log from remote cluster syncer: %v", r.String())
@@ -72,7 +75,17 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 				r.RaftGroupName, r.Term, r.Index, term, index)
 			continue
 		}
+		if lastIndex == 0 {
+			lastIndex = index
+		}
 
+		if r.Index > lastIndex+1 {
+			sLog.Infof("%v raft log commit not continued: %v-%v, synced: %v-%v, last: %v",
+				r.RaftGroupName, r.Term, r.Index, term, index, lastIndex)
+			rpcErr.ErrCode = http.StatusBadRequest
+			rpcErr.ErrMsg = errRemoteSyncOutOfOrder.Error()
+			return &rpcErr, nil
+		}
 		// raft timestamp should be the same with the real raft request in data
 		logStart := r.RaftTimestamp
 		syncNetLatency := receivedTs.UnixNano() - logStart
@@ -84,6 +97,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 			rpcErr.ErrMsg = err.Error()
 			return &rpcErr, nil
 		}
+		lastIndex = r.Index
 		fuFunc := func() error {
 			rsp, err := fu.WaitRsp()
 			if err != nil {

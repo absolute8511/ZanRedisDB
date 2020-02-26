@@ -45,7 +45,6 @@ var (
 	errRaftNotReadyForWrite = errors.New("ERR_CLUSTER_CHANGED: the raft is not ready for write")
 	errWrongNumberArgs      = errors.New("ERR wrong number of arguments for redis command")
 	ErrReadIndexTimeout     = errors.New("wait read index timeout")
-	errRemoteSyncOutOfOrder = errors.New("remote sync index out of order")
 )
 
 const (
@@ -1138,23 +1137,13 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOp
 				// check if the commit index is continue on remote
 				if !nd.isContinueCommit(reqList) {
 					nd.rn.Infof("request %v-%v is not continue", reqList.OrigTerm, reqList.OrigIndex)
-					for _, req := range reqList.Reqs {
-						if req.Header.ID > 0 && nd.w.IsRegistered(req.Header.ID) {
-							nd.w.Trigger(req.Header.ID, errRemoteSyncOutOfOrder)
-						}
-					}
-					// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
-					if reqList.ReqId > 0 {
-						nd.w.Trigger(reqList.ReqId, errRemoteSyncOutOfOrder)
-					}
-					return false
 				}
 			}
 		}
 		var retErr error
 		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, batch, reqList, evnt.Term, evnt.Index, nd.stopChan)
 		if reqList.Type == FromClusterSyncer {
-			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
+			nd.postprocessRemoteApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
 		}
 	}
 	return forceBackup

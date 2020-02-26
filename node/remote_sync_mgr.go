@@ -229,7 +229,7 @@ func (nd *KVNode) preprocessRemoteSnapApply(reqList BatchInternalRaftRequest) (b
 	return false, false
 }
 
-func (nd *KVNode) postprocessRemoteSnapApply(reqList BatchInternalRaftRequest,
+func (nd *KVNode) postprocessRemoteApply(reqList BatchInternalRaftRequest,
 	isRemoteSnapTransfer bool, isRemoteSnapApply bool, retErr error) {
 	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex, Timestamp: reqList.Timestamp}
 	// for remote snapshot transfer, we need wait apply success before update sync state

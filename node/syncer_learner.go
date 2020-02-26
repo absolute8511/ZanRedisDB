@@ -218,6 +218,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 	logListBuf := make([]syncerpb.RaftLogData, logSendBufferLen*2)
 	marshalBufs := make([][]byte, logSendBufferLen*2)
 	waitSendNum := 0
+	lastIndex := uint64(0)
 	for {
 		handled := false
 		var err error
@@ -227,7 +228,11 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 		}
 		select {
 		case req := <-sendCh:
+			if lastIndex != 0 && req.OrigIndex != lastIndex+1 {
+				sm.Infof("syncer log commit is not continue: %v, %v, %v", req, lastIndex, last)
+			}
 			last = req
+			lastIndex = last.OrigIndex
 			raftLogs = append(raftLogs, req)
 			waitSendNum += len(req.Reqs)
 			if nodeLog.Level() > common.LOG_DETAIL {
@@ -239,7 +244,11 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				case <-sm.sendStop:
 					return
 				case req := <-sm.sendCh:
+					if lastIndex != 0 && req.OrigIndex != lastIndex+1 {
+						sm.Infof("syncer log commit is not continue: %v, %v, %v", req, lastIndex, last)
+					}
 					last = req
+					lastIndex = last.OrigIndex
 					raftLogs = append(raftLogs, req)
 					waitSendNum += len(req.Reqs)
 					if nodeLog.Level() >= common.LOG_DETAIL {
@@ -248,7 +257,13 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				case waitCh := <-sm.waitSendLogChs:
 					select {
 					case req := <-sm.sendCh:
+
+						if lastIndex != 0 && req.OrigIndex != lastIndex+1 {
+							sm.Infof("syncer log commit is not continue: %v, %v, %v", req, lastIndex, last)
+						}
 						last = req
+						lastIndex = last.OrigIndex
+
 						raftLogs = append(raftLogs, req)
 						waitSendNum += len(req.Reqs)
 						go func() {
