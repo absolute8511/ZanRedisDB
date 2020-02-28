@@ -586,9 +586,16 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		sm.Infof("ignore sync from cluster syncer, %v-%v:%v", term, index, reqList.String())
 		return false, nil
 	}
+	ts := reqList.Timestamp
+	if ts == 0 {
+		// for some event such as leader transfer, the reqList will be empty, so no timestamp in it
+		sm.Infof("miss timestamp in raft request: %v", reqList.String())
+		reqList.Timestamp = time.Now().UnixNano()
+	} else {
+		latency := time.Now().UnixNano() - ts
+		syncLearnerRecvStats.UpdateLatencyStats(latency / time.Microsecond.Nanoseconds())
+	}
 	sm.setReceivedState(term, index, reqList.Timestamp)
-	latency := time.Now().UnixNano() - reqList.Timestamp
-	syncLearnerRecvStats.UpdateLatencyStats(latency / time.Microsecond.Nanoseconds())
 
 	forceBackup := false
 	reqList.OrigTerm = term
@@ -619,9 +626,6 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 			reqList.ReqId = e.Header.ID
 			break
 		}
-	}
-	if reqList.Timestamp == 0 {
-		sm.Errorf("miss timestamp in raft request: %v", reqList)
 	}
 	// TODO: stats latency raft write begin to begin sync.
 	for _, req := range reqList.Reqs {

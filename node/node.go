@@ -539,16 +539,7 @@ func (nd *KVNode) IsWriteReady() bool {
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(rep/2)
 }
 
-func (nd *KVNode) ProposeRawAsync(buffer []byte, term uint64, index uint64, raftTs int64) (*FutureRsp, BatchInternalRaftRequest, error) {
-	var reqList BatchInternalRaftRequest
-	err := reqList.Unmarshal(buffer)
-	if err != nil {
-		nd.rn.Infof("propose raw failed: %v at (%v-%v)", err.Error(), term, index)
-		return nil, reqList, err
-	}
-	if nodeLog.Level() >= common.LOG_DETAIL {
-		nd.rn.Infof("propose raw (%v): %v at (%v-%v)", len(buffer), buffer, term, index)
-	}
+func (nd *KVNode) ProposeRawAsyncFromSyncer(buffer []byte, reqList *BatchInternalRaftRequest, term uint64, index uint64, raftTs int64) (*FutureRsp, *BatchInternalRaftRequest, error) {
 	reqList.Type = FromClusterSyncer
 	reqList.ReqId = nd.rn.reqIDGen.Next()
 	reqList.OrigTerm = term
@@ -562,6 +553,7 @@ func (nd *KVNode) ProposeRawAsync(buffer []byte, term uint64, index uint64, raft
 		req.Header.ID = nd.rn.reqIDGen.Next()
 	}
 	dataLen := reqList.Size()
+	var err error
 	if dataLen <= len(buffer) {
 		n, err := reqList.MarshalTo(buffer[:dataLen])
 		if err != nil {
@@ -619,8 +611,8 @@ func (nd *KVNode) ProposeRawAsync(buffer []byte, term uint64, index uint64, raft
 	return &futureRsp, reqList, nil
 }
 
-func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
-	f, reqList, err := nd.ProposeRawAsync(buffer, term, index, raftTs)
+func (nd *KVNode) ProposeRawAndWaitFromSyncer(reqList *BatchInternalRaftRequest, term uint64, index uint64, raftTs int64) error {
+	f, _, err := nd.ProposeRawAsyncFromSyncer(nil, reqList, term, index, raftTs)
 	if err != nil {
 		return err
 	}
@@ -1100,9 +1092,11 @@ func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.Conf
 
 func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOperator) bool {
 	forceBackup := false
+	var reqList BatchInternalRaftRequest
+	isRemoteSnapTransfer := false
+	isRemoteSnapApply := false
 	if evnt.Data != nil {
 		// try redis command
-		var reqList BatchInternalRaftRequest
 		parseErr := reqList.Unmarshal(evnt.Data)
 		if parseErr != nil {
 			nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
@@ -1114,8 +1108,6 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOp
 				reqList, len(reqList.Reqs))
 		}
 
-		isRemoteSnapTransfer := false
-		isRemoteSnapApply := false
 		if reqList.Type == FromClusterSyncer {
 			isApplied := nd.isAlreadyApplied(reqList)
 			// check if retrying duplicate req, we can just ignore old retry
@@ -1136,15 +1128,16 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOp
 			if !isRemoteSnapApply && !isRemoteSnapTransfer {
 				// check if the commit index is continue on remote
 				if !nd.isContinueCommit(reqList) {
-					nd.rn.Infof("request %v-%v is not continue", reqList.OrigTerm, reqList.OrigIndex)
+					nd.rn.Errorf("request %v-%v is not continue while syncing from remote", reqList.OrigTerm, reqList.OrigIndex)
 				}
 			}
 		}
-		var retErr error
-		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, batch, reqList, evnt.Term, evnt.Index, nd.stopChan)
-		if reqList.Type == FromClusterSyncer {
-			nd.postprocessRemoteApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
-		}
+	}
+	// if event.Data is nil, maybe some other event like the leader transfer
+	var retErr error
+	forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, batch, reqList, evnt.Term, evnt.Index, nd.stopChan)
+	if reqList.Type == FromClusterSyncer {
+		nd.postprocessRemoteApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
 	}
 	return forceBackup
 }

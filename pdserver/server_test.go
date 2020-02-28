@@ -587,6 +587,174 @@ func TestAddRemoteClusterLogSyncLearner(t *testing.T) {
 	}
 }
 
+func TestRemoteClusterLogSyncLearnerContinueAfterRestart(t *testing.T) {
+	// test restart and leader changed will continue syncer
+	node.EnableForTest()
+	ensureClusterReady(t, 3)
+
+	time.Sleep(time.Second)
+	ns := "test_learner_continue"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	dnw, leaderNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+
+	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 1)
+	defer func() {
+		for _, kv := range remoteSrvs {
+			kv.s.Stop()
+		}
+		if remotePD != nil {
+			remotePD.Stop()
+		}
+		if strings.Contains(remoteTmpDir, "rocksdb-test") {
+			t.Logf("removing: %v", remoteTmpDir)
+			os.RemoveAll(remoteTmpDir)
+		}
+	}()
+	pduri = "http://127.0.0.1:" + pdRemoteHttpPort
+	ensureDataNodesReady(t, pduri, len(remoteSrvs))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 1)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	leaderNode.Node.OptimizeDB("")
+
+	learnerPD, learnerSrvs, tmpDir := startTestClusterForLearner(t, 1)
+	defer func() {
+		for _, kv := range learnerSrvs {
+			kv.s.Stop()
+		}
+		if learnerPD != nil {
+			learnerPD.Stop()
+		}
+		if strings.Contains(tmpDir, "learner-test") {
+			t.Logf("removing: %v", tmpDir)
+			os.RemoveAll(tmpDir)
+		}
+	}()
+	start := time.Now()
+	remoteNode := remoteSrvs[0].s.GetNamespaceFromFullName(ns + "-0")
+	assert.NotNil(t, remoteNode)
+	time.Sleep(time.Second * 3)
+
+	leaderNode.Node.OptimizeDB("")
+
+	for {
+		time.Sleep(time.Second)
+		if time.Since(start) > time.Minute {
+			t.Errorf("timeout waiting add learner")
+			break
+		}
+		commitID := leaderNode.Node.GetAppliedIndex()
+		done := 0
+		for _, srv := range learnerSrvs {
+			nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
+			if nsNode != nil {
+				lrns := nsNode.GetLearners()
+				t.Log(lrns)
+				if len(lrns) == len(learnerSrvs) {
+					found := false
+					for _, l := range lrns {
+						t.Log(*l)
+						if l.NodeID == srv.s.GetCoord().GetMyRegID() {
+							found = true
+							assert.Equal(t, nsNode.GetRaftID(), l.ID)
+						}
+					}
+					assert.True(t, found, "should found myself in learners")
+					_, remoteIndex, _ := remoteNode.Node.GetRemoteClusterSyncedRaft(TestClusterName)
+					learnerCI := nsNode.Node.GetAppliedIndex()
+					t.Logf("commit %v , current remote :%v, learner: %v", commitID, remoteIndex, learnerCI)
+					if remoteIndex >= commitID && learnerCI == remoteIndex {
+						time.Sleep(time.Second)
+						done++
+					}
+				} else {
+					break
+				}
+			}
+		}
+		if done >= len(learnerSrvs) {
+			break
+		}
+	}
+	commitID := leaderNode.Node.GetAppliedIndex()
+	for _, srv := range learnerSrvs {
+		nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
+		assert.Equal(t, commitID, nsNode.Node.GetAppliedIndex())
+		stats := nsNode.Node.GetStats("")
+		assert.Equal(t, commitID, stats.InternalStats["synced_index"].(uint64))
+	}
+	// restart leader
+	leader.Stop()
+	time.Sleep(time.Second)
+
+	leader.Start()
+	waitEnoughReplica(t, ns, 0)
+	waitForAllFullReady(t, ns, 0)
+
+	dnw, leaderNode = waitForLeader(t, ns, 0)
+	leader = dnw.s
+	assert.NotNil(t, leader)
+	leaderNode.Node.OptimizeDB("")
+	time.Sleep(time.Second * 3)
+
+	for {
+		time.Sleep(time.Second)
+		if time.Since(start) > time.Minute/2 {
+			t.Errorf("timeout waiting ")
+			break
+		}
+		commitID := leaderNode.Node.GetAppliedIndex()
+		done := 0
+		for _, srv := range learnerSrvs {
+			nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
+			if nsNode != nil {
+				lrns := nsNode.GetLearners()
+				t.Log(lrns)
+				if len(lrns) == len(learnerSrvs) {
+					found := false
+					for _, l := range lrns {
+						t.Log(*l)
+						if l.NodeID == srv.s.GetCoord().GetMyRegID() {
+							found = true
+							assert.Equal(t, nsNode.GetRaftID(), l.ID)
+						}
+					}
+					assert.True(t, found, "should found myself in learners")
+					_, remoteIndex, _ := remoteNode.Node.GetRemoteClusterSyncedRaft(TestClusterName)
+					learnerCI := nsNode.Node.GetAppliedIndex()
+					t.Logf("commit %v , current remote :%v, learner: %v", commitID, remoteIndex, learnerCI)
+					if remoteIndex >= commitID && learnerCI == remoteIndex {
+						time.Sleep(time.Second)
+						done++
+					}
+				} else {
+					break
+				}
+			}
+		}
+		if done >= len(learnerSrvs) {
+			break
+		}
+	}
+	commitID = leaderNode.Node.GetAppliedIndex()
+	for _, srv := range learnerSrvs {
+		nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
+		assert.Equal(t, commitID, nsNode.Node.GetAppliedIndex())
+		stats := nsNode.Node.GetStats("")
+		assert.Equal(t, commitID, stats.InternalStats["synced_index"].(uint64))
+	}
+}
+
 func TestClusterBalanceAcrossMultiDC(t *testing.T) {
 	// TODO:
 }

@@ -90,7 +90,22 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		logStart := r.RaftTimestamp
 		syncNetLatency := receivedTs.UnixNano() - logStart
 		syncClusterNetStats.UpdateLatencyStats(syncNetLatency / time.Microsecond.Nanoseconds())
-		fu, origReqs, err := kv.Node.ProposeRawAsync(r.Data, r.Term, r.Index, r.RaftTimestamp)
+		var reqList node.BatchInternalRaftRequest
+		err := reqList.Unmarshal(r.Data)
+		if err != nil {
+			rpcErr.ErrCode = http.StatusBadRequest
+			rpcErr.ErrMsg = err.Error()
+			return &rpcErr, nil
+		}
+		if len(reqList.Reqs) == 0 {
+			// some events (such as leader transfer) no need send to local cluster, just update term/index
+			kv.Node.SetRemoteClusterSyncedRaft(r.ClusterName, r.Term, r.Index, r.RaftTimestamp)
+			sLog.Infof("%v raft log commit synced without proposal: %v-%v, last: %v",
+				r.RaftGroupName, r.Term, r.Index, r.String())
+			lastIndex = r.Index
+			continue
+		}
+		fu, origReqs, err := kv.Node.ProposeRawAsyncFromSyncer(r.Data, &reqList, r.Term, r.Index, r.RaftTimestamp)
 		if err != nil {
 			sLog.Infof("propose failed: %v, err: %v", r.String(), err.Error())
 			rpcErr.ErrCode = http.StatusInternalServerError

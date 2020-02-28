@@ -231,6 +231,9 @@ func (nd *KVNode) preprocessRemoteSnapApply(reqList BatchInternalRaftRequest) (b
 
 func (nd *KVNode) postprocessRemoteApply(reqList BatchInternalRaftRequest,
 	isRemoteSnapTransfer bool, isRemoteSnapApply bool, retErr error) {
+	if reqList.OrigTerm == 0 && reqList.OrigIndex == 0 {
+		return
+	}
 	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex, Timestamp: reqList.Timestamp}
 	// for remote snapshot transfer, we need wait apply success before update sync state
 	if !isRemoteSnapTransfer {
@@ -326,8 +329,7 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		Data:   d,
 	}
 	reqList.Reqs = append(reqList.Reqs, raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
+	err := nd.ProposeRawAndWaitFromSyncer(&reqList, term, index, reqList.Timestamp)
 	if err != nil {
 		nd.rn.Infof("cluster %v applying snap %v-%v failed", name, term, index)
 		// just wait next retry
@@ -372,8 +374,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 		Data:   d,
 	}
 	reqList.Reqs = append(reqList.Reqs, raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
+	err := nd.ProposeRawAndWaitFromSyncer(&reqList, term, index, reqList.Timestamp)
 	if err != nil {
 		nd.rn.Infof("cluster %v applying transfer snap %v failed", name, ss)
 	} else {

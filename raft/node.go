@@ -418,7 +418,7 @@ func (n *node) handleLeaderUpdate(r *raft) bool {
 			if lead == None {
 				r.logger.Infof("raft.node: %x(%v) elected leader %x at term %d", r.id, r.group.Name, r.lead, r.Term)
 			} else {
-				r.logger.Infof("raft.node: %x changed leader from %x to %x at term %d", r.id, r.group.Name, lead, r.lead, r.Term)
+				r.logger.Infof("raft.node: %x(%v) changed leader from %x to %x at term %d", r.id, r.group.Name, lead, r.lead, r.Term)
 			}
 			needHandleProposal = true
 		} else {
