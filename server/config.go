@@ -31,6 +31,7 @@ type ServerConfig struct {
 	KeepWAL              int               `json:"keep_wal"`
 	UseRocksWAL          bool              `json:"use_rocks_wal"`
 	SharedRocksWAL       bool              `json:"shared_rocks_wal"`
+	UseRedisV2           bool              `json:"use_redis_v2"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`

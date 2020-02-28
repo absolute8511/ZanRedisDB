@@ -29,6 +29,7 @@ var enableSnapTransferTest = false
 var enableSnapSaveTest = false
 var enableSnapApplyTest = false
 var enableSnapApplyRestoreStorageTest = false
+var UseRedisV2 = false
 
 func EnableSnapForTest(transfer bool, save bool, apply bool, restore bool) {
 	enableSnapTransferTest = transfer
@@ -51,6 +52,7 @@ const (
 	RedisReq        int8 = 0
 	CustomReq       int8 = 1
 	SchemaChangeReq int8 = 2
+	RedisV2Req      int8 = 3
 	proposeTimeout       = time.Second * 4
 	proposeQueueLen      = 800
 	raftSlow             = time.Millisecond * 200
@@ -628,7 +630,7 @@ func (nd *KVNode) ProposeRawAndWaitFromSyncer(reqList *BatchInternalRaftRequest,
 
 	cost := time.Since(start).Nanoseconds()
 	for _, req := range reqList.Reqs {
-		if req.Header.DataType == int32(RedisReq) {
+		if req.Header.DataType == int32(RedisReq) || req.Header.DataType == int32(RedisV2Req) {
 			nd.UpdateWriteStats(int64(len(req.Data)), cost/1000)
 		}
 	}
@@ -704,10 +706,10 @@ func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*Futur
 	return &futureRsp, nil
 }
 
-func (nd *KVNode) ProposeAsync(buf []byte) (*FutureRsp, error) {
+func (nd *KVNode) RedisV2ProposeAsync(buf []byte) (*FutureRsp, error) {
 	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
-		DataType: int32(RedisReq),
+		DataType: int32(RedisV2Req),
 	}
 	raftReq := InternalRaftRequest{
 		Header: h,
@@ -717,7 +719,21 @@ func (nd *KVNode) ProposeAsync(buf []byte) (*FutureRsp, error) {
 	return nd.queueRequest(start, raftReq)
 }
 
-func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
+func (nd *KVNode) RedisProposeAsync(buf []byte) (*FutureRsp, error) {
+	h := RequestHeader{
+		ID:       nd.rn.reqIDGen.Next(),
+		DataType: int32(RedisReq),
+	}
+
+	raftReq := InternalRaftRequest{
+		Header: h,
+		Data:   buf,
+	}
+	start := time.Now()
+	return nd.queueRequest(start, raftReq)
+}
+
+func (nd *KVNode) RedisPropose(buf []byte) (interface{}, error) {
 	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(RedisReq),

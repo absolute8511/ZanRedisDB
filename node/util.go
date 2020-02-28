@@ -68,18 +68,26 @@ func buildCommand(args [][]byte) redcon.Command {
 	return common.BuildCommand(args)
 }
 
+// we can only use redis v2 for single key write command, otherwise we need cut namespace for different keys in different command
 func rebuildFirstKeyAndPropose(kvn *KVNode, cmd redcon.Command, f common.CommandRspFunc) (redcon.Command,
 	interface{}, error) {
-	key, err := common.CutNamesapce(cmd.Args[1])
-	if err != nil {
-		return cmd, nil, err
-	}
 
-	cmd.Args[1] = key
-	ncmd := buildCommand(cmd.Args)
-	copy(cmd.Raw[0:], ncmd.Raw[:])
-	cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
-	rsp, err := kvn.ProposeAsync(cmd.Raw)
+	var rsp *FutureRsp
+	var err error
+	if !UseRedisV2 {
+		key, err := common.CutNamesapce(cmd.Args[1])
+		if err != nil {
+			return cmd, nil, err
+		}
+
+		cmd.Args[1] = key
+		ncmd := buildCommand(cmd.Args)
+		copy(cmd.Raw[0:], ncmd.Raw[:])
+		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
+		rsp, err = kvn.RedisProposeAsync(cmd.Raw)
+	} else {
+		rsp, err = kvn.RedisV2ProposeAsync(cmd.Raw)
+	}
 	if err != nil {
 		return cmd, nil, err
 	}
@@ -192,6 +200,7 @@ func wrapWriteCommandK(kvn *KVNode, f common.CommandRspFunc) common.WriteCommand
 	}
 }
 
+/*
 func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 2 {
@@ -214,7 +223,7 @@ func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.WriteComman
 		copy(cmd.Raw[0:], ncmd.Raw[:])
 		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
-		rsp, err := kvn.ProposeAsync(cmd.Raw)
+		rsp, err := kvn.RedisProposeAsync(cmd.Raw)
 		if err != nil {
 			return nil, err
 		}
@@ -226,6 +235,7 @@ func wrapWriteCommandKK(kvn *KVNode, f common.CommandRspFunc) common.WriteComman
 		return rsp, nil
 	}
 }
+*/
 
 func wrapWriteCommandKSubkey(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
@@ -282,6 +292,7 @@ func wrapWriteCommandKVV(kvn *KVNode, f common.CommandRspFunc) common.WriteComma
 	}
 }
 
+/*
 func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) < 3 || len(cmd.Args[1:])%2 != 0 {
@@ -307,7 +318,7 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.WriteComm
 		copy(cmd.Raw[0:], ncmd.Raw[:])
 		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
-		rsp, err := kvn.ProposeAsync(cmd.Raw)
+		rsp, err := kvn.RedisProposeAsync(cmd.Raw)
 		if err != nil {
 			return nil, err
 		}
@@ -319,6 +330,7 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.WriteComm
 		return rsp, nil
 	}
 }
+*/
 
 func wrapWriteCommandKSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
@@ -396,7 +408,7 @@ func wrapWriteMergeCommandKK(kvn *KVNode, f common.MergeWriteCommandFunc) common
 		copy(cmd.Raw[0:], ncmd.Raw[:])
 		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
-		rsp, err := kvn.Propose(cmd.Raw)
+		rsp, err := kvn.RedisPropose(cmd.Raw)
 		if err != nil {
 			return nil, err
 		}
@@ -430,7 +442,7 @@ func wrapWriteMergeCommandKVKV(kvn *KVNode, f common.MergeWriteCommandFunc) comm
 		copy(cmd.Raw[0:], ncmd.Raw[:])
 		cmd.Raw = cmd.Raw[:len(ncmd.Raw)]
 
-		rsp, err := kvn.Propose(cmd.Raw)
+		rsp, err := kvn.RedisPropose(cmd.Raw)
 		if err != nil {
 			return nil, err
 		}

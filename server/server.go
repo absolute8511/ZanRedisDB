@@ -109,6 +109,9 @@ func NewServer(conf ServerConfig) *Server {
 		sLog.Infof("server started as normal init")
 		node.SetSyncerNormalInit()
 	}
+	if conf.UseRedisV2 {
+		node.UseRedisV2 = true
+	}
 
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,

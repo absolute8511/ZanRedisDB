@@ -126,7 +126,7 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 			reqList := origReqs
 			cost := time.Since(start).Nanoseconds()
 			for _, req := range reqList.Reqs {
-				if req.Header.DataType == int32(node.RedisReq) {
+				if req.Header.DataType == int32(node.RedisReq) || req.Header.DataType == int32(node.RedisV2Req) {
 					kv.Node.UpdateWriteStats(int64(len(req.Data)), cost/1000)
 				}
 			}
