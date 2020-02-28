@@ -40,6 +40,38 @@ func (nd *KVNode) smembersCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (nd *KVNode) srandmembersCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 2 && len(cmd.Args) != 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		conn.WriteError(err.Error())
+		return
+	}
+	hasCount := len(cmd.Args) == 3
+	cnt := 1
+	var err error
+	if hasCount {
+		cnt, err = strconv.Atoi(string(cmd.Args[2]))
+		if err != nil {
+			conn.WriteError(err.Error())
+			return
+		}
+		if cnt < 1 {
+			conn.WriteError("Invalid count")
+			return
+		}
+	}
+	v, err := nd.store.SRandMembers(cmd.Args[1], int64(cnt))
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+
+	conn.WriteArray(len(v))
+	for _, vv := range v {
+		conn.WriteBulk(vv)
+	}
+}
+
 func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 2 && len(cmd.Args) != 3 {
 		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))

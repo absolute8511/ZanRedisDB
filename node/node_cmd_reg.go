@@ -164,6 +164,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterRead("scard", wrapReadCommandK(nd.scardCommand))
 	nd.router.RegisterRead("sismember", wrapReadCommandKSubkey(nd.sismemberCommand))
 	nd.router.RegisterRead("smembers", wrapReadCommandK(nd.smembersCommand))
+	nd.router.RegisterRead("srandmember", wrapReadCommandKAnySubkey(nd.srandmembersCommand))
 	nd.router.RegisterWrite("spop", nd.spopCommand)
 	nd.router.RegisterWrite("sadd", wrapWriteCommandKSubkeySubkey(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("srem", wrapWriteCommandKSubkeySubkey(nd, checkAndRewriteIntRsp))

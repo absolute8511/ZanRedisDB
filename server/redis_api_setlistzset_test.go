@@ -571,6 +571,22 @@ func TestSet(t *testing.T) {
 	} else if len(n) != 4 {
 		t.Fatal(n)
 	}
+	if n, err := goredis.Values(c.Do("srandmember", key2)); err != nil {
+		t.Fatal(err)
+	} else if len(n) != 1 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Values(c.Do("srandmember", key2, 2)); err != nil {
+		t.Fatal(err)
+	} else if len(n) != 2 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Values(c.Do("srandmember", key2, 10)); err != nil {
+		t.Fatal(err)
+	} else if len(n) != 4 {
+		t.Fatal(n)
+	}
+
 	if val, err := goredis.String(c.Do("spop", key2)); err != nil {
 		t.Fatal(err)
 	} else if val != "0" {
@@ -587,6 +603,11 @@ func TestSet(t *testing.T) {
 		t.Fatal(val)
 	}
 	if n, err := goredis.Values(c.Do("smembers", key2)); err != nil {
+		t.Fatal(err)
+	} else if len(n) != 0 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Values(c.Do("srandmember", key2, 10)); err != nil {
 		t.Fatal(err)
 	} else if len(n) != 0 {
 		t.Fatal(n)
@@ -824,6 +845,15 @@ func TestSetErrorParams(t *testing.T) {
 	}
 
 	if _, err := c.Do("smembers"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+	if _, err := c.Do("srandmember"); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+	if _, err := c.Do("srandmember", key, 0); err == nil {
+		t.Fatalf("invalid err of %v", err)
+	}
+	if _, err := c.Do("srandmember", key, -1); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
 
