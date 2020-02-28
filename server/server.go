@@ -585,6 +585,7 @@ func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, conn red
 	rsp, err := h(cmd)
 	cost1 := time.Since(start)
 	var v interface{}
+	v = rsp
 	if err != nil {
 		v = err
 	} else {

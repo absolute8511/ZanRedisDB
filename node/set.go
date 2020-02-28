@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) scardCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -70,6 +71,33 @@ func (nd *KVNode) srandmembersCommand(conn redcon.Conn, cmd redcon.Command) {
 	for _, vv := range v {
 		conn.WriteBulk(vv)
 	}
+}
+
+func (nd *KVNode) saddCommand(cmd redcon.Command) (interface{}, error) {
+	// optimize the sadd to check before propose to raft
+	if len(cmd.Args) < 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
+	}
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	needChange := false
+	for _, m := range cmd.Args[2:] {
+		n, _ := nd.store.SIsMember(key, m)
+		if n == 0 {
+			// found a new member not exist, we need do raft proposal
+			needChange = true
+			break
+		}
+	}
+	if !needChange {
+		return int64(0), nil
+	}
+	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	return rsp, err
 }
 
 func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {

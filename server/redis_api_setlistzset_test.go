@@ -541,16 +541,32 @@ func TestSet(t *testing.T) {
 	} else if n != 2 {
 		t.Fatal(n)
 	}
-
+	// add again
+	if n, err := goredis.Int(c.Do("sadd", key1, 0, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if n, err := goredis.Int(c.Do("sadd", key1, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
 	if n, err := goredis.Int(c.Do("scard", key1)); err != nil {
 		t.Fatal(err)
 	} else if n != 2 {
 		t.Fatal(n)
 	}
 
-	if n, err := goredis.Int(c.Do("sadd", key2, 0, 1, 2, 3)); err != nil {
+	if n, err := goredis.Int(c.Do("sadd", key2, 0, 1, 2)); err != nil {
 		t.Fatal(err)
-	} else if n != 4 {
+	} else if n != 3 {
+		t.Fatal(n)
+	}
+	// part of dup
+	if n, err := goredis.Int(c.Do("sadd", key2, 1, 2, 3)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
 		t.Fatal(n)
 	}
 

@@ -139,7 +139,11 @@ func (nd *KVNode) setnxCommand(cmd redcon.Command) (interface{}, error) {
 		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
 		return nil, err
 	}
-	ex, _ := nd.store.KVExists(cmd.Args[1])
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	ex, _ := nd.store.KVExists(key)
 	if ex == 1 {
 		// already exist
 		return int64(0), nil
