@@ -80,11 +80,12 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		}
 
 		if r.Index > lastIndex+1 {
-			sLog.Infof("%v raft log commit not continued: %v-%v, synced: %v-%v, last: %v",
+			sLog.Warningf("%v raft log commit not continued: %v-%v, synced: %v-%v, last: %v",
 				r.RaftGroupName, r.Term, r.Index, term, index, lastIndex)
-			rpcErr.ErrCode = http.StatusBadRequest
-			rpcErr.ErrMsg = errRemoteSyncOutOfOrder.Error()
-			return &rpcErr, nil
+			// TODO: for compatible with old syncer, we just log here, after all upgraded, we need check and return here
+			//rpcErr.ErrCode = http.StatusBadRequest
+			//rpcErr.ErrMsg = errRemoteSyncOutOfOrder.Error()
+			//return &rpcErr, nil
 		}
 		// raft timestamp should be the same with the real raft request in data
 		logStart := r.RaftTimestamp
