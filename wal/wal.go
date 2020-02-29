@@ -50,7 +50,7 @@ var (
 	// The actual size might be larger than this. In general, the default
 	// value should be used, but this is defined as an exported variable
 	// so that tests can set a different segment size.
-	SegmentSizeBytes int64 = 32 * 1000 * 1000
+	SegmentSizeBytes int64 = 256 * 1000 * 1000
 
 	plog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("wal"))
 
@@ -422,7 +422,7 @@ func (w *WAL) cut() error {
 	if err := w.tail().Truncate(off); err != nil {
 		return err
 	}
-	if err := w.sync(true); err != nil {
+	if err := w.sync(!w.optimizedFsync); err != nil {
 		return err
 	}
 
@@ -451,7 +451,7 @@ func (w *WAL) cut() error {
 		return err
 	}
 	// atomically move temp wal file to wal file
-	if err = w.sync(true); err != nil {
+	if err = w.sync(!w.optimizedFsync); err != nil {
 		return err
 	}
 
@@ -657,7 +657,7 @@ func (w *WAL) SaveSnapshot(e walpb.Snapshot) error {
 	if w.enti < e.Index {
 		w.enti = e.Index
 	}
-	return w.sync(true)
+	return w.sync(!w.optimizedFsync)
 }
 
 func (w *WAL) saveCrc(prevCrc uint32) error {

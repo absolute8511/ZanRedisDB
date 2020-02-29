@@ -1004,7 +1004,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		return
 	}
 	cost := time.Since(start)
-	if cost >= raftSlow {
+	if cost >= raftSlow/2 {
 		rc.Infof("raft persist state slow: %v, cost: %v", len(rd.Entries), cost)
 	}
 
