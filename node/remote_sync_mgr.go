@@ -149,20 +149,23 @@ func (rss *remoteSyncedStateMgr) UpdateState(name string, state SyncedState) {
 	rss.remoteSyncedStates[name] = state
 	rss.Unlock()
 }
+
 func (rss *remoteSyncedStateMgr) GetState(name string) (SyncedState, bool) {
 	rss.RLock()
 	state, ok := rss.remoteSyncedStates[name]
 	rss.RUnlock()
 	return state, ok
 }
+
 func (rss *remoteSyncedStateMgr) RestoreStates(ss map[string]SyncedState) {
 	rss.Lock()
 	rss.remoteSyncedStates = make(map[string]SyncedState, len(ss))
-	for k, v := range rss.remoteSyncedStates {
+	for k, v := range ss {
 		rss.remoteSyncedStates[k] = v
 	}
 	rss.Unlock()
 }
+
 func (rss *remoteSyncedStateMgr) Clone() map[string]SyncedState {
 	rss.RLock()
 	clone := make(map[string]SyncedState, len(rss.remoteSyncedStates))
