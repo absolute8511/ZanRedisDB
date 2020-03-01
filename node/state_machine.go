@@ -182,7 +182,7 @@ func (esm *emptySM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, req
 	if ts > 0 && !isReplaying {
 		cost := tn.UnixNano() - ts
 		if cost > raftSlow.Nanoseconds()*2 {
-			nodeLog.Infof("receive raft requests in state machine slow cost: %v, %v, %v", reqList.ReqId, len(reqList.Reqs), cost)
+			//nodeLog.Infof("receive raft requests in state machine slow cost: %v, %v, %v", reqList.ReqId, len(reqList.Reqs), cost)
 		}
 	}
 	for _, req := range reqList.Reqs {

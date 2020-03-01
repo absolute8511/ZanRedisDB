@@ -186,9 +186,9 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 		t.mu.RUnlock()
 
 		if pok {
-			if m.Type == raftpb.MsgApp {
-				t.TrStats.SendAppendReq(m.Size())
-			}
+			//if m.Type == raftpb.MsgApp {
+			//	t.TrStats.SendAppendReq(m.Size())
+			//}
 			p.send(m)
 			continue
 		}
