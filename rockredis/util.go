@@ -33,6 +33,10 @@ func FormatInt64ToSlice(v int64) []byte {
 	return strconv.AppendInt(nil, int64(v), 10)
 }
 
+func PutInt64ToBuf(v int64, b []byte) {
+	binary.BigEndian.PutUint64(b, uint64(v))
+}
+
 func PutInt64(v int64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, uint64(v))

@@ -29,6 +29,7 @@ const (
 	MaxRemoteCheckpointNum = 3
 	HLLReadCacheSize       = 1024
 	HLLWriteCacheSize      = 32
+	writeTmpSize           = 1024 * 512
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
@@ -162,6 +163,7 @@ type RockDB struct {
 	defaultWriteOpts  *gorocksdb.WriteOptions
 	defaultReadOpts   *gorocksdb.ReadOptions
 	wb                *gorocksdb.WriteBatch
+	writeTmpBuf       []byte
 	quit              chan struct{}
 	wg                sync.WaitGroup
 	backupC           chan *BackupInfo
@@ -187,6 +189,7 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 		defaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
 		defaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
 		wb:               gorocksdb.NewWriteBatch(),
+		writeTmpBuf:      make([]byte, writeTmpSize),
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
 		hasher64:         murmur3.New64(),

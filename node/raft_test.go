@@ -54,6 +54,11 @@ func (n *nodeRecorder) ProposeWithDrop(ctx context.Context, data []byte, cancel 
 	return nil
 }
 
+func (n *nodeRecorder) ProposeEntryWithDrop(ctx context.Context, e raftpb.Entry, cancel context.CancelFunc) error {
+	n.Record(testutil.Action{Name: "Propose", Params: []interface{}{e.Data}})
+	return nil
+}
+
 func (n *nodeRecorder) ProposeConfChange(ctx context.Context, conf raftpb.ConfChange) error {
 	n.Record(testutil.Action{Name: "ProposeConfChange"})
 	return nil

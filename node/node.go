@@ -110,6 +110,7 @@ type waitReqHeaders struct {
 	wr   wait.WaitResult
 	done chan struct{}
 	reqs BatchInternalRaftRequest
+	buf  *bytes.Buffer
 	pool *sync.Pool
 }
 
@@ -118,6 +119,9 @@ func (wrh *waitReqHeaders) release() {
 		wrh.wr = nil
 		if wrh.pool != nil {
 			wrh.reqs.Reqs = wrh.reqs.Reqs[:0]
+			if wrh.buf != nil {
+				wrh.buf.Reset()
+			}
 			wrh.pool.Put(wrh)
 		}
 	}
@@ -135,6 +139,7 @@ func newWaitReqPoolArray() waitReqPoolArray {
 			obj := &waitReqHeaders{}
 			obj.reqs.Reqs = make([]InternalRaftRequest, 0, 1)
 			obj.done = make(chan struct{}, 1)
+			obj.buf = &bytes.Buffer{}
 			obj.pool = waitReqPool
 			return obj
 		}
@@ -148,6 +153,7 @@ func (wa waitReqPoolArray) getWaitReq(idLen int) *waitReqHeaders {
 		obj := &waitReqHeaders{}
 		obj.reqs.Reqs = make([]InternalRaftRequest, 0, idLen)
 		obj.done = make(chan struct{}, 1)
+		obj.buf = &bytes.Buffer{}
 		return obj
 	}
 	index := 0
@@ -494,23 +500,37 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 
 func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, cancel context.CancelFunc, start time.Time) (*waitReqHeaders, error) {
 	wrh := nd.wrPools.getWaitReq(1)
-	wrh.reqs.Reqs = append(wrh.reqs.Reqs, irr)
-	wrh.reqs.ReqNum = 1
 	wrh.reqs.Timestamp = irr.Header.Timestamp
 	if len(wrh.done) != 0 {
 		wrh.done = make(chan struct{}, 1)
 	}
 	poolCost := time.Since(start)
-	buffer, err := wrh.reqs.Marshal()
-	marshalCost := time.Since(start)
-	// buffer will be reused by raft?
-	// TODO:buffer, err := reqList.MarshalTo()
-	if err != nil {
-		wrh.release()
-		return nil, err
+	var e raftpb.Entry
+	if irr.Header.DataType == int32(RedisV2Req) {
+		e.DataType = irr.Header.DataType
+		e.Timestamp = irr.Header.Timestamp
+		e.ID = irr.Header.ID
+		e.Data = irr.Data
+	} else {
+		wrh.reqs.Reqs = append(wrh.reqs.Reqs, irr)
+		wrh.reqs.ReqNum = 1
+		needSize := wrh.reqs.Size()
+		wrh.buf.Grow(needSize)
+		b := wrh.buf.Bytes()
+		//buffer, err := wrh.reqs.Marshal()
+		// buffer will be reused by raft
+		n, err := wrh.reqs.MarshalTo(b[:needSize])
+		if err != nil {
+			wrh.release()
+			return nil, err
+		}
+		rbuf := make([]byte, n)
+		copy(rbuf, b[:n])
+		e.Data = rbuf
 	}
+	marshalCost := time.Since(start)
 	wrh.wr = nd.w.RegisterWithC(irr.Header.ID, wrh.done)
-	err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
+	err := nd.rn.node.ProposeEntryWithDrop(ctx, e, cancel)
 	if err != nil {
 		nd.rn.Infof("propose failed : %v", err.Error())
 		nd.w.Trigger(irr.Header.ID, err)
@@ -520,7 +540,7 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 	proposalCost := time.Since(start)
 	if proposalCost >= raftSlow/2 {
 		nd.rn.Infof("raft slow for propose buf: %v, cost %v-%v-%v",
-			len(buffer), poolCost, marshalCost, proposalCost)
+			len(e.Data), poolCost, marshalCost, proposalCost)
 	}
 	return wrh, nil
 }
@@ -1112,12 +1132,22 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOp
 	isRemoteSnapTransfer := false
 	isRemoteSnapApply := false
 	if evnt.Data != nil {
-		// try redis command
-		parseErr := reqList.Unmarshal(evnt.Data)
-		if parseErr != nil {
-			nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
-				parseErr, len(evnt.Data), evnt,
-				evnt.String())
+		if evnt.DataType == int32(RedisV2Req) {
+			var r InternalRaftRequest
+			r.Header.ID = evnt.ID
+			r.Header.Timestamp = evnt.Timestamp
+			r.Header.DataType = evnt.DataType
+			r.Data = evnt.Data
+			reqList.ReqNum = 1
+			reqList.Reqs = append(reqList.Reqs, r)
+			reqList.Timestamp = evnt.Timestamp
+		} else {
+			parseErr := reqList.Unmarshal(evnt.Data)
+			if parseErr != nil {
+				nd.rn.Errorf("parse request failed: %v, data len %v, entry: %v, raw:%v",
+					parseErr, len(evnt.Data), evnt,
+					evnt.String())
+			}
 		}
 		if len(reqList.Reqs) != int(reqList.ReqNum) {
 			nd.rn.Infof("request check failed %v, real len:%v",

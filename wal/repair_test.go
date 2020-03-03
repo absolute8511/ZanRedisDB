@@ -57,11 +57,14 @@ func testRepair(t *testing.T, ents [][]raftpb.Entry, corrupt corruptFunc, expect
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	for _, es := range ents {
+	off, _ := w.tail().Seek(0, io.SeekCurrent)
+	t.Logf("offset:%v", off)
+	for i, es := range ents {
 		if err = w.Save(raftpb.HardState{}, es); err != nil {
 			t.Fatal(err)
 		}
+		off, _ := w.tail().Seek(0, io.SeekCurrent)
+		t.Logf("%v offset:%v", i, off)
 	}
 
 	offset, err := w.tail().Seek(0, io.SeekCurrent)
@@ -155,7 +158,9 @@ func TestRepairWriteTearLast(t *testing.T) {
 		}
 		return nil
 	}
-	testRepair(t, makeEnts(50), corruptf, 40)
+	ents := makeEnts(50)
+	t.Log(ents[0][0].Size())
+	testRepair(t, ents, corruptf, 30)
 }
 
 // TestRepairWriteTearMiddle repairs the WAL when there is write tearing

@@ -174,9 +174,9 @@ func (db *RockDB) hIncrSize(hkey []byte, oldh *headerMetaValue, delta int64, wb 
 	return size, nil
 }
 
-func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value []byte) (int64, error) {
+func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, ovalue []byte) (int64, error) {
 	s := time.Now()
-	if err := checkValueSize(value); err != nil {
+	if err := checkValueSize(ovalue); err != nil {
 		return 0, err
 	}
 	table, _, err := extractTableFromRedisKey(key)
@@ -194,6 +194,13 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, value [
 	}
 	db.MaybeClearBatch()
 
+	var value []byte
+	if len(ovalue) > len(db.writeTmpBuf) {
+		value = make([]byte, len(ovalue))
+	} else {
+		value = db.writeTmpBuf[:len(ovalue)]
+	}
+	copy(value, ovalue)
 	created, err := db.hSetField(ts, checkNX, key, field, value, db.wb, hindex)
 	if err != nil {
 		return 0, err
