@@ -109,6 +109,9 @@ func NewServer(conf ServerConfig) *Server {
 		sLog.Infof("server started as normal init")
 		node.SetSyncerNormalInit()
 	}
+	if conf.UseRedisV2 {
+		node.UseRedisV2 = true
+	}
 
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
@@ -585,6 +588,7 @@ func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, conn red
 	rsp, err := h(cmd)
 	cost1 := time.Since(start)
 	var v interface{}
+	v = rsp
 	if err != nil {
 		v = err
 	} else {

@@ -182,7 +182,7 @@ func (esm *emptySM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, req
 	if ts > 0 && !isReplaying {
 		cost := tn.UnixNano() - ts
 		if cost > raftSlow.Nanoseconds()*2 {
-			nodeLog.Infof("receive raft requests in state machine slow cost: %v, %v, %v", reqList.ReqId, len(reqList.Reqs), cost)
+			//nodeLog.Infof("receive raft requests in state machine slow cost: %v, %v, %v", reqList.ReqId, len(reqList.Reqs), cost)
 		}
 	}
 	for _, req := range reqList.Reqs {
@@ -620,11 +620,16 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		if reqID == 0 {
 			reqID = reqList.ReqId
 		}
-		if req.Header.DataType == int32(RedisReq) {
+		if req.Header.DataType == int32(RedisReq) || req.Header.DataType == int32(RedisV2Req) {
 			cmd, err := redcon.Parse(req.Data)
 			if err != nil {
 				kvsm.w.Trigger(reqID, err)
 			} else {
+				if req.Header.DataType == int32(RedisV2Req) {
+					// the old redis request cut before propose, the new redis v2 keep the namespace in raft proposal
+					key, _ := common.CutNamesapce(cmd.Args[1])
+					cmd.Args[1] = key
+				}
 				// we need compare the key timestamp in this cluster and the timestamp from raft request to handle
 				// the conflict change between two cluster.
 				//
@@ -646,7 +651,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 				}
 				cmdStart := time.Now()
 				cmdName := strings.ToLower(string(cmd.Args[0]))
-				pk, _ := common.CutNamesapce(cmd.Args[1])
+				pk := cmd.Args[1]
 				if batch.IsBatchable(cmdName, string(pk), cmd.Args) {
 					if !batch.IsBatched() {
 						err := batch.BeginBatch()

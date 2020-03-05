@@ -887,6 +887,9 @@ func (rc *raftNode) serveChannels() {
 					}
 				}
 			}
+			if !moreEntriesToApply && !busy {
+				rc.Infof("apply buffer nearly full, slow down: %v", len(rc.commitC))
+			}
 			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, busy)
 			if !hasUpdate {
 				continue
@@ -1001,7 +1004,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		return
 	}
 	cost := time.Since(start)
-	if cost >= raftSlow {
+	if cost >= raftSlow/2 {
 		rc.Infof("raft persist state slow: %v, cost: %v", len(rd.Entries), cost)
 	}
 

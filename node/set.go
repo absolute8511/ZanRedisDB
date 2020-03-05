@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) scardCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -38,6 +39,65 @@ func (nd *KVNode) smembersCommand(conn redcon.Conn, cmd redcon.Command) {
 	for _, vv := range v {
 		conn.WriteBulk(vv)
 	}
+}
+
+func (nd *KVNode) srandmembersCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 2 && len(cmd.Args) != 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		conn.WriteError(err.Error())
+		return
+	}
+	hasCount := len(cmd.Args) == 3
+	cnt := 1
+	var err error
+	if hasCount {
+		cnt, err = strconv.Atoi(string(cmd.Args[2]))
+		if err != nil {
+			conn.WriteError(err.Error())
+			return
+		}
+		if cnt < 1 {
+			conn.WriteError("Invalid count")
+			return
+		}
+	}
+	v, err := nd.store.SRandMembers(cmd.Args[1], int64(cnt))
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+
+	conn.WriteArray(len(v))
+	for _, vv := range v {
+		conn.WriteBulk(vv)
+	}
+}
+
+func (nd *KVNode) saddCommand(cmd redcon.Command) (interface{}, error) {
+	// optimize the sadd to check before propose to raft
+	if len(cmd.Args) < 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
+	}
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	needChange := false
+	for _, m := range cmd.Args[2:] {
+		n, _ := nd.store.SIsMember(key, m)
+		if n == 0 {
+			// found a new member not exist, we need do raft proposal
+			needChange = true
+			break
+		}
+	}
+	if !needChange {
+		return int64(0), nil
+	}
+	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	return rsp, err
 }
 
 func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {

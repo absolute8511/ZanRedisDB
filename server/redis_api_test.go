@@ -82,6 +82,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 		ElectionTick:   5,
 		UseRocksWAL:    true,
 		SharedRocksWAL: true,
+		UseRedisV2:     true,
 	}
 	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
 

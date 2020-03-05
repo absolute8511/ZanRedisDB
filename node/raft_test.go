@@ -54,6 +54,11 @@ func (n *nodeRecorder) ProposeWithDrop(ctx context.Context, data []byte, cancel 
 	return nil
 }
 
+func (n *nodeRecorder) ProposeEntryWithDrop(ctx context.Context, e raftpb.Entry, cancel context.CancelFunc) error {
+	n.Record(testutil.Action{Name: "Propose", Params: []interface{}{e.Data}})
+	return nil
+}
+
 func (n *nodeRecorder) ProposeConfChange(ctx context.Context, conf raftpb.ConfChange) error {
 	n.Record(testutil.Action{Name: "ProposeConfChange"})
 	return nil
@@ -481,4 +486,8 @@ func TestSnapshotApplyingShouldNotBlock(t *testing.T) {
 
 func TestSnapshotPreTransferRetryOnFail(t *testing.T) {
 	// TODO: a failed snapshot receive should retry after report failed
+}
+
+func TestSlowApplyingShouldPauseRaftStep(t *testing.T) {
+	// TODO: slow in state machine should pause raft step to avoid too much memory for raft logs
 }

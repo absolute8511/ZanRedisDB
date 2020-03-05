@@ -146,6 +146,7 @@ type Node interface {
 	Propose(ctx context.Context, data []byte) error
 	// Propose proposed that data be appended to the log and cancel it if dropped
 	ProposeWithDrop(ctx context.Context, data []byte, cancel context.CancelFunc) error
+	ProposeEntryWithDrop(ctx context.Context, e pb.Entry, cancel context.CancelFunc) error
 	// ProposeConfChange proposes config change.
 	// At most one ConfChange can be in the process of going through consensus.
 	// Application needs to call ApplyConfChange when applying EntryConfChange type entry.
@@ -418,7 +419,7 @@ func (n *node) handleLeaderUpdate(r *raft) bool {
 			if lead == None {
 				r.logger.Infof("raft.node: %x(%v) elected leader %x at term %d", r.id, r.group.Name, r.lead, r.Term)
 			} else {
-				r.logger.Infof("raft.node: %x changed leader from %x to %x at term %d", r.id, r.group.Name, lead, r.lead, r.Term)
+				r.logger.Infof("raft.node: %x(%v) changed leader from %x to %x at term %d", r.id, r.group.Name, lead, r.lead, r.Term)
 			}
 			needHandleProposal = true
 		} else {
@@ -671,6 +672,10 @@ func (n *node) Campaign(ctx context.Context) error { return n.step(ctx, pb.Messa
 
 func (n *node) Propose(ctx context.Context, data []byte) error {
 	return n.step(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Data: data}}})
+}
+
+func (n *node) ProposeEntryWithDrop(ctx context.Context, e pb.Entry, cancel context.CancelFunc) error {
+	return n.stepWithDrop(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{e}}, cancel)
 }
 
 func (n *node) ProposeWithDrop(ctx context.Context, data []byte, cancel context.CancelFunc) error {

@@ -16,6 +16,7 @@ package rafthttp
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/youzan/ZanRedisDB/pkg/types"
@@ -109,7 +110,7 @@ type peer struct {
 	msgAppReader   *streamReader
 
 	mu     sync.Mutex
-	paused bool
+	paused int32
 
 	stopc chan struct{}
 }
@@ -152,11 +153,8 @@ func startPeer(transport *Transport, urls types.URLs, peerID types.ID, ps *stats
 }
 
 func (p *peer) send(m raftpb.Message) {
-	p.mu.Lock()
-	paused := p.paused
-	p.mu.Unlock()
-
-	if paused {
+	paused := atomic.LoadInt32(&p.paused)
+	if paused == 1 {
 		return
 	}
 
@@ -205,7 +203,7 @@ func (p *peer) activeSince() time.Time { return p.status.activeSince() }
 func (p *peer) Pause() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.paused = true
+	atomic.StoreInt32(&p.paused, 1)
 	p.msgAppReader.pause()
 	p.msgAppV2Reader.pause()
 }
@@ -214,7 +212,7 @@ func (p *peer) Pause() {
 func (p *peer) Resume() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.paused = false
+	atomic.StoreInt32(&p.paused, 0)
 	p.msgAppReader.resume()
 	p.msgAppV2Reader.resume()
 }

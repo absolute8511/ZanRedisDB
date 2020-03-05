@@ -128,9 +128,15 @@ func (db *RockDB) resetWithNewKVValue(ts int64, rawKey []byte, value []byte, ttl
 		return nil, err
 	}
 
-	tsBuf := PutInt64(ts)
-	value = append(value, tsBuf...)
-	return value, nil
+	var nvalue []byte
+	if len(value)+8 > len(db.writeTmpBuf) {
+		nvalue = make([]byte, len(value)+8)
+	} else {
+		nvalue = db.writeTmpBuf[:len(value)+8]
+	}
+	copy(nvalue, value)
+	PutInt64ToBuf(ts, nvalue[len(value):])
+	return nvalue, nil
 }
 
 // encode the user kv data (no header and no modify time) to the db value (include header and modify time)

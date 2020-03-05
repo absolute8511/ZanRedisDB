@@ -43,6 +43,7 @@ const (
 	// warnSyncDuration is the amount of time allotted to an fsync before
 	// logging a warning
 	warnSyncDuration = time.Second
+	bufSize          = 1024 * 1024
 )
 
 var (
@@ -87,6 +88,7 @@ type WAL struct {
 	locks          []*fileutil.LockedFile // the locked files the WAL holds (the name is increasing)
 	fp             *filePipeline
 	optimizedFsync bool
+	buf            []byte
 }
 
 // Create creates a WAL ready for appending records. The given metadata is
@@ -123,6 +125,7 @@ func Create(dirpath string, metadata []byte, optimizedFsync bool) (*WAL, error) 
 		dir:            dirpath,
 		metadata:       metadata,
 		optimizedFsync: optimizedFsync,
+		buf:            make([]byte, bufSize),
 	}
 	w.encoder, err = newFileEncoder(f.File, 0)
 	if err != nil {
@@ -270,6 +273,7 @@ func openAtIndex(dirpath string, snap walpb.Snapshot, write bool, optimizedFsync
 		readClose:      closer,
 		locks:          ls,
 		optimizedFsync: optimizedFsync,
+		buf:            make([]byte, bufSize),
 	}
 
 	if write {
@@ -422,7 +426,7 @@ func (w *WAL) cut() error {
 	if err := w.tail().Truncate(off); err != nil {
 		return err
 	}
-	if err := w.sync(true); err != nil {
+	if err := w.sync(!w.optimizedFsync); err != nil {
 		return err
 	}
 
@@ -451,7 +455,7 @@ func (w *WAL) cut() error {
 		return err
 	}
 	// atomically move temp wal file to wal file
-	if err = w.sync(true); err != nil {
+	if err = w.sync(!w.optimizedFsync); err != nil {
 		return err
 	}
 
@@ -584,9 +588,19 @@ func (w *WAL) Close() error {
 }
 
 func (w *WAL) saveEntry(e *raftpb.Entry) error {
-	// TODO: add MustMarshalTo to reduce one allocation.
-	b := pbutil.MustMarshal(e)
-	rec := &walpb.Record{Type: entryType, Data: b}
+	needSize := e.Size()
+	var data []byte
+	if needSize > len(w.buf) {
+		data = pbutil.MustMarshal(e)
+	} else {
+		n, err := e.MarshalTo(w.buf[:needSize])
+		if err != nil {
+			return err
+		}
+		data = w.buf[:n]
+	}
+
+	rec := &walpb.Record{Type: entryType, Data: data}
 	if err := w.encoder.encode(rec); err != nil {
 		return err
 	}
@@ -657,7 +671,7 @@ func (w *WAL) SaveSnapshot(e walpb.Snapshot) error {
 	if w.enti < e.Index {
 		w.enti = e.Index
 	}
-	return w.sync(true)
+	return w.sync(!w.optimizedFsync)
 }
 
 func (w *WAL) saveCrc(prevCrc uint32) error {

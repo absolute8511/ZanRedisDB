@@ -72,7 +72,10 @@ func encodeJSONStopKey(table []byte, key []byte) []byte {
 
 func (db *RockDB) jSetPath(jdata []byte, path string, value []byte) ([]byte, error) {
 	if len(path) == 0 {
-		return value, nil
+		// for set path it will change the value, so we need return copy
+		v := make([]byte, len(value))
+		copy(v, value)
+		return v, nil
 	}
 	return sjson.SetRawBytes(jdata, path, value)
 }

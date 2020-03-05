@@ -311,6 +311,11 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 	return db.sMembersN(key, int(num))
 }
 
+// we do not use rand here
+func (db *RockDB) SRandMembers(key []byte, count int64) ([][]byte, error) {
+	return db.sMembersN(key, int(count))
+}
+
 func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 	if num > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize

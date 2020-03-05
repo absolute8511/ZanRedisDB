@@ -149,20 +149,23 @@ func (rss *remoteSyncedStateMgr) UpdateState(name string, state SyncedState) {
 	rss.remoteSyncedStates[name] = state
 	rss.Unlock()
 }
+
 func (rss *remoteSyncedStateMgr) GetState(name string) (SyncedState, bool) {
 	rss.RLock()
 	state, ok := rss.remoteSyncedStates[name]
 	rss.RUnlock()
 	return state, ok
 }
+
 func (rss *remoteSyncedStateMgr) RestoreStates(ss map[string]SyncedState) {
 	rss.Lock()
 	rss.remoteSyncedStates = make(map[string]SyncedState, len(ss))
-	for k, v := range rss.remoteSyncedStates {
+	for k, v := range ss {
 		rss.remoteSyncedStates[k] = v
 	}
 	rss.Unlock()
 }
+
 func (rss *remoteSyncedStateMgr) Clone() map[string]SyncedState {
 	rss.RLock()
 	clone := make(map[string]SyncedState, len(rss.remoteSyncedStates))
@@ -171,6 +174,19 @@ func (rss *remoteSyncedStateMgr) Clone() map[string]SyncedState {
 	}
 	rss.RUnlock()
 	return clone
+}
+
+func (nd *KVNode) isContinueCommit(reqList BatchInternalRaftRequest) bool {
+	oldState, ok := nd.remoteSyncedStates.GetState(reqList.OrigCluster)
+	if ok {
+		if reqList.OrigIndex > oldState.SyncedIndex+1 {
+			nd.rn.Infof("request %v is not continue while sync : %v",
+				reqList.OrigIndex, oldState)
+			return false
+		}
+	}
+	// not found, we consider first init
+	return true
 }
 
 func (nd *KVNode) isAlreadyApplied(reqList BatchInternalRaftRequest) bool {
@@ -216,8 +232,11 @@ func (nd *KVNode) preprocessRemoteSnapApply(reqList BatchInternalRaftRequest) (b
 	return false, false
 }
 
-func (nd *KVNode) postprocessRemoteSnapApply(reqList BatchInternalRaftRequest,
+func (nd *KVNode) postprocessRemoteApply(reqList BatchInternalRaftRequest,
 	isRemoteSnapTransfer bool, isRemoteSnapApply bool, retErr error) {
+	if reqList.OrigTerm == 0 && reqList.OrigIndex == 0 {
+		return
+	}
 	ss := SyncedState{SyncedTerm: reqList.OrigTerm, SyncedIndex: reqList.OrigIndex, Timestamp: reqList.Timestamp}
 	// for remote snapshot transfer, we need wait apply success before update sync state
 	if !isRemoteSnapTransfer {
@@ -313,8 +332,7 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 		Data:   d,
 	}
 	reqList.Reqs = append(reqList.Reqs, raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
+	err := nd.ProposeRawAndWaitFromSyncer(&reqList, term, index, reqList.Timestamp)
 	if err != nil {
 		nd.rn.Infof("cluster %v applying snap %v-%v failed", name, term, index)
 		// just wait next retry
@@ -359,8 +377,7 @@ func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64
 		Data:   d,
 	}
 	reqList.Reqs = append(reqList.Reqs, raftReq)
-	buf, _ := reqList.Marshal()
-	err := nd.ProposeRawAndWait(buf, term, index, reqList.Timestamp)
+	err := nd.ProposeRawAndWaitFromSyncer(&reqList, term, index, reqList.Timestamp)
 	if err != nil {
 		nd.rn.Infof("cluster %v applying transfer snap %v failed", name, ss)
 	} else {

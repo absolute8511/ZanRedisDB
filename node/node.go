@@ -29,6 +29,7 @@ var enableSnapTransferTest = false
 var enableSnapSaveTest = false
 var enableSnapApplyTest = false
 var enableSnapApplyRestoreStorageTest = false
+var UseRedisV2 = false
 
 func EnableSnapForTest(transfer bool, save bool, apply bool, restore bool) {
 	enableSnapTransferTest = transfer
@@ -51,6 +52,7 @@ const (
 	RedisReq        int8 = 0
 	CustomReq       int8 = 1
 	SchemaChangeReq int8 = 2
+	RedisV2Req      int8 = 3
 	proposeTimeout       = time.Second * 4
 	proposeQueueLen      = 800
 	raftSlow             = time.Millisecond * 200
@@ -108,6 +110,7 @@ type waitReqHeaders struct {
 	wr   wait.WaitResult
 	done chan struct{}
 	reqs BatchInternalRaftRequest
+	buf  *bytes.Buffer
 	pool *sync.Pool
 }
 
@@ -116,6 +119,9 @@ func (wrh *waitReqHeaders) release() {
 		wrh.wr = nil
 		if wrh.pool != nil {
 			wrh.reqs.Reqs = wrh.reqs.Reqs[:0]
+			if wrh.buf != nil {
+				wrh.buf.Reset()
+			}
 			wrh.pool.Put(wrh)
 		}
 	}
@@ -133,6 +139,7 @@ func newWaitReqPoolArray() waitReqPoolArray {
 			obj := &waitReqHeaders{}
 			obj.reqs.Reqs = make([]InternalRaftRequest, 0, 1)
 			obj.done = make(chan struct{}, 1)
+			obj.buf = &bytes.Buffer{}
 			obj.pool = waitReqPool
 			return obj
 		}
@@ -146,6 +153,7 @@ func (wa waitReqPoolArray) getWaitReq(idLen int) *waitReqHeaders {
 		obj := &waitReqHeaders{}
 		obj.reqs.Reqs = make([]InternalRaftRequest, 0, idLen)
 		obj.done = make(chan struct{}, 1)
+		obj.buf = &bytes.Buffer{}
 		return obj
 	}
 	index := 0
@@ -492,23 +500,37 @@ func (nd *KVNode) GetMergeHandler(cmd string) (common.MergeCommandFunc, bool, bo
 
 func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, cancel context.CancelFunc, start time.Time) (*waitReqHeaders, error) {
 	wrh := nd.wrPools.getWaitReq(1)
-	wrh.reqs.Reqs = append(wrh.reqs.Reqs, irr)
-	wrh.reqs.ReqNum = 1
 	wrh.reqs.Timestamp = irr.Header.Timestamp
 	if len(wrh.done) != 0 {
 		wrh.done = make(chan struct{}, 1)
 	}
 	poolCost := time.Since(start)
-	buffer, err := wrh.reqs.Marshal()
-	marshalCost := time.Since(start)
-	// buffer will be reused by raft?
-	// TODO:buffer, err := reqList.MarshalTo()
-	if err != nil {
-		wrh.release()
-		return nil, err
+	var e raftpb.Entry
+	if irr.Header.DataType == int32(RedisV2Req) {
+		e.DataType = irr.Header.DataType
+		e.Timestamp = irr.Header.Timestamp
+		e.ID = irr.Header.ID
+		e.Data = irr.Data
+	} else {
+		wrh.reqs.Reqs = append(wrh.reqs.Reqs, irr)
+		wrh.reqs.ReqNum = 1
+		needSize := wrh.reqs.Size()
+		wrh.buf.Grow(needSize)
+		b := wrh.buf.Bytes()
+		//buffer, err := wrh.reqs.Marshal()
+		// buffer will be reused by raft
+		n, err := wrh.reqs.MarshalTo(b[:needSize])
+		if err != nil {
+			wrh.release()
+			return nil, err
+		}
+		rbuf := make([]byte, n)
+		copy(rbuf, b[:n])
+		e.Data = rbuf
 	}
+	marshalCost := time.Since(start)
 	wrh.wr = nd.w.RegisterWithC(irr.Header.ID, wrh.done)
-	err = nd.rn.node.ProposeWithDrop(ctx, buffer, cancel)
+	err := nd.rn.node.ProposeEntryWithDrop(ctx, e, cancel)
 	if err != nil {
 		nd.rn.Infof("propose failed : %v", err.Error())
 		nd.w.Trigger(irr.Header.ID, err)
@@ -518,7 +540,7 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 	proposalCost := time.Since(start)
 	if proposalCost >= raftSlow/2 {
 		nd.rn.Infof("raft slow for propose buf: %v, cost %v-%v-%v",
-			len(buffer), poolCost, marshalCost, proposalCost)
+			len(e.Data), poolCost, marshalCost, proposalCost)
 	}
 	return wrh, nil
 }
@@ -539,22 +561,13 @@ func (nd *KVNode) IsWriteReady() bool {
 	return atomic.LoadInt32(&nd.rn.memberCnt) > int32(rep/2)
 }
 
-func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, raftTs int64) error {
-	var reqList BatchInternalRaftRequest
-	err := reqList.Unmarshal(buffer)
-	if err != nil {
-		nd.rn.Infof("propose raw failed: %v at (%v-%v)", err.Error(), term, index)
-		return err
-	}
-	if nodeLog.Level() >= common.LOG_DETAIL {
-		nd.rn.Infof("propose raw (%v): %v at (%v-%v)", len(buffer), buffer, term, index)
-	}
+func (nd *KVNode) ProposeRawAsyncFromSyncer(buffer []byte, reqList *BatchInternalRaftRequest, term uint64, index uint64, raftTs int64) (*FutureRsp, *BatchInternalRaftRequest, error) {
 	reqList.Type = FromClusterSyncer
 	reqList.ReqId = nd.rn.reqIDGen.Next()
 	reqList.OrigTerm = term
 	reqList.OrigIndex = index
 	if reqList.Timestamp != raftTs {
-		return fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
+		return nil, reqList, fmt.Errorf("invalid sync raft request for mismatch timestamp: %v vs %v", reqList.Timestamp, raftTs)
 	}
 
 	for _, req := range reqList.Reqs {
@@ -562,69 +575,93 @@ func (nd *KVNode) ProposeRawAndWait(buffer []byte, term uint64, index uint64, ra
 		req.Header.ID = nd.rn.reqIDGen.Next()
 	}
 	dataLen := reqList.Size()
+	var err error
 	if dataLen <= len(buffer) {
 		n, err := reqList.MarshalTo(buffer[:dataLen])
 		if err != nil {
-			return err
+			return nil, reqList, err
 		}
 		if n != dataLen {
-			return errors.New("marshal length mismatch")
+			return nil, reqList, errors.New("marshal length mismatch")
 		}
 	} else {
 		buffer, err = reqList.Marshal()
 		if err != nil {
-			return err
+			return nil, reqList, err
 		}
 	}
-	start := time.Now()
-
 	// must register before propose
 	wr := nd.w.Register(reqList.ReqId)
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
 	if nodeLog.Level() >= common.LOG_DETAIL {
 		nd.rn.Infof("propose raw after rewrite(%v): %v at (%v-%v)", dataLen, buffer[:dataLen], term, index)
 	}
-	defer cancel()
 	err = nd.rn.node.ProposeWithDrop(ctx, buffer[:dataLen], cancel)
 	if err != nil {
+		cancel()
 		nd.w.Trigger(reqList.ReqId, err)
-		return err
+		return nil, reqList, err
 	}
-	var ok bool
-	var rsp interface{}
-	select {
-	case <-wr.WaitC():
+
+	var futureRsp FutureRsp
+	futureRsp.waitFunc = func() (interface{}, error) {
+		var rsp interface{}
+		var ok bool
+		var err error
+		// will always return a response, timed out or get a error
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			if err == context.Canceled {
+				// proposal canceled can be caused by leader transfer or no leader
+				err = ErrProposalCanceled
+			}
+			nd.w.Trigger(reqList.ReqId, err)
+			<-wr.WaitC()
+		case <-wr.WaitC():
+		}
 		rsp = wr.GetResult()
+		cancel()
 		if err, ok = rsp.(error); ok {
 			rsp = nil
+			//nd.rn.Infof("request return error: %v, %v", req.String(), err.Error())
 		} else {
 			err = nil
 		}
-	// we can avoid wait on stop since ctx will be returned (avoid concurrency performance degrade)
-	//case <-nd.stopChan:
-	//	err = common.ErrStopped
-	case <-ctx.Done():
-		err = ctx.Err()
-		if err == context.DeadlineExceeded {
-			nd.rn.Infof("propose timeout: %v", err.Error())
-		}
-		if err == context.Canceled {
-			// proposal canceled can be caused by leader transfer or no leader
-			err = ErrProposalCanceled
-			nd.rn.Infof("propose canceled ")
-		}
-		nd.w.Trigger(reqList.ReqId, err)
+		return rsp, err
 	}
+	return &futureRsp, reqList, nil
+}
+
+func (nd *KVNode) ProposeRawAndWaitFromSyncer(reqList *BatchInternalRaftRequest, term uint64, index uint64, raftTs int64) error {
+	f, _, err := nd.ProposeRawAsyncFromSyncer(nil, reqList, term, index, raftTs)
+	if err != nil {
+		return err
+	}
+	start := time.Now()
+	rsp, err := f.WaitRsp()
+	if err != nil {
+		return err
+	}
+	var ok bool
+	if err, ok = rsp.(error); ok {
+		return err
+	}
+
 	cost := time.Since(start).Nanoseconds()
 	for _, req := range reqList.Reqs {
-		if req.Header.DataType == int32(RedisReq) {
-			nd.clusterWriteStats.UpdateWriteStats(int64(len(req.Data)), cost/1000)
+		if req.Header.DataType == int32(RedisReq) || req.Header.DataType == int32(RedisV2Req) {
+			nd.UpdateWriteStats(int64(len(req.Data)), cost/1000)
 		}
 	}
 	if cost >= int64(proposeTimeout.Nanoseconds())/2 {
 		nd.rn.Infof("slow for batch propose: %v, cost %v", len(reqList.Reqs), cost)
 	}
 	return err
+}
+
+func (nd *KVNode) UpdateWriteStats(vSize int64, latencyUs int64) {
+	nd.clusterWriteStats.UpdateWriteStats(vSize, latencyUs)
 }
 
 type FutureRsp struct {
@@ -689,10 +726,10 @@ func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*Futur
 	return &futureRsp, nil
 }
 
-func (nd *KVNode) ProposeAsync(buf []byte) (*FutureRsp, error) {
+func (nd *KVNode) RedisV2ProposeAsync(buf []byte) (*FutureRsp, error) {
 	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
-		DataType: int32(RedisReq),
+		DataType: int32(RedisV2Req),
 	}
 	raftReq := InternalRaftRequest{
 		Header: h,
@@ -702,7 +739,21 @@ func (nd *KVNode) ProposeAsync(buf []byte) (*FutureRsp, error) {
 	return nd.queueRequest(start, raftReq)
 }
 
-func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
+func (nd *KVNode) RedisProposeAsync(buf []byte) (*FutureRsp, error) {
+	h := RequestHeader{
+		ID:       nd.rn.reqIDGen.Next(),
+		DataType: int32(RedisReq),
+	}
+
+	raftReq := InternalRaftRequest{
+		Header: h,
+		Data:   buf,
+	}
+	start := time.Now()
+	return nd.queueRequest(start, raftReq)
+}
+
+func (nd *KVNode) RedisPropose(buf []byte) (interface{}, error) {
 	h := RequestHeader{
 		ID:       nd.rn.reqIDGen.Next(),
 		DataType: int32(RedisReq),
@@ -718,7 +769,7 @@ func (nd *KVNode) Propose(buf []byte) (interface{}, error) {
 	}
 	rsp, err := fr.WaitRsp()
 	cost := time.Since(start)
-	nd.clusterWriteStats.UpdateWriteStats(int64(len(raftReq.Data)), cost.Nanoseconds()/1000)
+	nd.UpdateWriteStats(int64(len(raftReq.Data)), cost.Nanoseconds()/1000)
 	if err == nil && !nd.IsWriteReady() {
 		nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
 			raftReq.String())
@@ -1077,22 +1128,32 @@ func (nd *KVNode) applyConfChangeEntry(evnt raftpb.Entry, confState *raftpb.Conf
 
 func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOperator) bool {
 	forceBackup := false
+	var reqList BatchInternalRaftRequest
+	isRemoteSnapTransfer := false
+	isRemoteSnapApply := false
 	if evnt.Data != nil {
-		// try redis command
-		var reqList BatchInternalRaftRequest
-		parseErr := reqList.Unmarshal(evnt.Data)
-		if parseErr != nil {
-			nd.rn.Infof("parse request failed: %v, data len %v, entry: %v, raw:%v",
-				parseErr, len(evnt.Data), evnt,
-				evnt.String())
+		if evnt.DataType == int32(RedisV2Req) {
+			var r InternalRaftRequest
+			r.Header.ID = evnt.ID
+			r.Header.Timestamp = evnt.Timestamp
+			r.Header.DataType = evnt.DataType
+			r.Data = evnt.Data
+			reqList.ReqNum = 1
+			reqList.Reqs = append(reqList.Reqs, r)
+			reqList.Timestamp = evnt.Timestamp
+		} else {
+			parseErr := reqList.Unmarshal(evnt.Data)
+			if parseErr != nil {
+				nd.rn.Errorf("parse request failed: %v, data len %v, entry: %v, raw:%v",
+					parseErr, len(evnt.Data), evnt,
+					evnt.String())
+			}
 		}
 		if len(reqList.Reqs) != int(reqList.ReqNum) {
 			nd.rn.Infof("request check failed %v, real len:%v",
 				reqList, len(reqList.Reqs))
 		}
 
-		isRemoteSnapTransfer := false
-		isRemoteSnapApply := false
 		if reqList.Type == FromClusterSyncer {
 			isApplied := nd.isAlreadyApplied(reqList)
 			// check if retrying duplicate req, we can just ignore old retry
@@ -1110,12 +1171,19 @@ func (nd *KVNode) applyEntry(evnt raftpb.Entry, isReplaying bool, batch IBatchOp
 				return false
 			}
 			isRemoteSnapTransfer, isRemoteSnapApply = nd.preprocessRemoteSnapApply(reqList)
+			if !isRemoteSnapApply && !isRemoteSnapTransfer {
+				// check if the commit index is continue on remote
+				if !nd.isContinueCommit(reqList) {
+					nd.rn.Errorf("request %v-%v is not continue while syncing from remote", reqList.OrigTerm, reqList.OrigIndex)
+				}
+			}
 		}
-		var retErr error
-		forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, batch, reqList, evnt.Term, evnt.Index, nd.stopChan)
-		if reqList.Type == FromClusterSyncer {
-			nd.postprocessRemoteSnapApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
-		}
+	}
+	// if event.Data is nil, maybe some other event like the leader transfer
+	var retErr error
+	forceBackup, retErr = nd.sm.ApplyRaftRequest(isReplaying, batch, reqList, evnt.Term, evnt.Index, nd.stopChan)
+	if reqList.Type == FromClusterSyncer {
+		nd.postprocessRemoteApply(reqList, isRemoteSnapTransfer, isRemoteSnapApply, retErr)
 	}
 	return forceBackup
 }

@@ -22,7 +22,7 @@ func EnableForTest() {
 }
 
 const (
-	logSendBufferLen = 64
+	logSendBufferLen = 512
 )
 
 var syncerNormalInit = false
@@ -217,17 +217,24 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 	in := syncerpb.RaftReqs{}
 	logListBuf := make([]syncerpb.RaftLogData, logSendBufferLen*2)
 	marshalBufs := make([][]byte, logSendBufferLen*2)
+	waitSendNum := 0
+	lastIndex := uint64(0)
 	for {
 		handled := false
 		var err error
 		sendCh := sm.sendCh
-		if len(raftLogs) > logSendBufferLen*2 {
+		if waitSendNum > logSendBufferLen*10 {
 			sendCh = nil
 		}
 		select {
 		case req := <-sendCh:
+			if lastIndex != 0 && req.OrigIndex != lastIndex+1 {
+				sm.Infof("syncer log commit is not continue: %v, %v, %v", req, lastIndex, last)
+			}
 			last = req
+			lastIndex = last.OrigIndex
 			raftLogs = append(raftLogs, req)
+			waitSendNum += len(req.Reqs)
 			if nodeLog.Level() > common.LOG_DETAIL {
 				sm.Debugf("batching raft log: %v in batch: %v", req.String(), len(raftLogs))
 			}
@@ -237,16 +244,28 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				case <-sm.sendStop:
 					return
 				case req := <-sm.sendCh:
+					if lastIndex != 0 && req.OrigIndex != lastIndex+1 {
+						sm.Infof("syncer log commit is not continue: %v, %v, %v", req, lastIndex, last)
+					}
 					last = req
+					lastIndex = last.OrigIndex
 					raftLogs = append(raftLogs, req)
+					waitSendNum += len(req.Reqs)
 					if nodeLog.Level() >= common.LOG_DETAIL {
 						sm.Debugf("batching raft log: %v in batch: %v", req.String(), len(raftLogs))
 					}
 				case waitCh := <-sm.waitSendLogChs:
 					select {
 					case req := <-sm.sendCh:
+
+						if lastIndex != 0 && req.OrigIndex != lastIndex+1 {
+							sm.Infof("syncer log commit is not continue: %v, %v, %v", req, lastIndex, last)
+						}
 						last = req
+						lastIndex = last.OrigIndex
+
 						raftLogs = append(raftLogs, req)
+						waitSendNum += len(req.Reqs)
 						go func() {
 							select {
 							// put back to wait next again
@@ -315,6 +334,7 @@ func (sm *logSyncerSM) handlerRaftLogs() {
 				raftLogs[i].Reqs = nil
 			}
 			raftLogs = raftLogs[:0]
+			waitSendNum = 0
 		}
 	}
 }
@@ -566,9 +586,16 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		sm.Infof("ignore sync from cluster syncer, %v-%v:%v", term, index, reqList.String())
 		return false, nil
 	}
+	ts := reqList.Timestamp
+	if ts == 0 {
+		// for some event such as leader transfer, the reqList will be empty, so no timestamp in it
+		sm.Infof("miss timestamp in raft request: %v", reqList.String())
+		reqList.Timestamp = time.Now().UnixNano()
+	} else {
+		latency := time.Now().UnixNano() - ts
+		syncLearnerRecvStats.UpdateLatencyStats(latency / time.Microsecond.Nanoseconds())
+	}
 	sm.setReceivedState(term, index, reqList.Timestamp)
-	latency := time.Now().UnixNano() - reqList.Timestamp
-	syncLearnerRecvStats.UpdateLatencyStats(latency / time.Microsecond.Nanoseconds())
 
 	forceBackup := false
 	reqList.OrigTerm = term
@@ -599,9 +626,6 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 			reqList.ReqId = e.Header.ID
 			break
 		}
-	}
-	if reqList.Timestamp == 0 {
-		sm.Errorf("miss timestamp in raft request: %v", reqList)
 	}
 	// TODO: stats latency raft write begin to begin sync.
 	for _, req := range reqList.Reqs {
