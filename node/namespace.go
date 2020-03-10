@@ -728,14 +728,14 @@ func (nsm *NamespaceMgr) getNsNodeList(ns string) []*NamespaceNode {
 	return nodeList
 }
 
-func (nsm *NamespaceMgr) BackupDB(ns string) {
+func (nsm *NamespaceMgr) BackupDB(ns string, checkLast bool) {
 	nodeList := nsm.getNsNodeList(ns)
 	for _, n := range nodeList {
 		if atomic.LoadInt32(&nsm.stopping) == 1 {
 			return
 		}
 		if n.IsReady() {
-			n.Node.BackupDB()
+			n.Node.BackupDB(checkLast)
 		}
 	}
 }

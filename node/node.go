@@ -194,6 +194,7 @@ type KVNode struct {
 	wg                 sync.WaitGroup
 	commitC            <-chan applyInfo
 	appliedIndex       uint64
+	lastSnapIndex      uint64
 	clusterInfo        common.IClusterInfo
 	expirationPolicy   common.ExpirationPolicy
 	remoteSyncedStates *remoteSyncedStateMgr
@@ -338,7 +339,18 @@ func (nd *KVNode) Stop() {
 	nd.rn.Infof("node %v stopped", nd.ns)
 }
 
-func (nd *KVNode) BackupDB() {
+// backup to avoid replay after restart, however we can check if last backup is almost up to date to
+// avoid do backup again. In raft, restart will compact all logs before snapshot, so if we backup too new
+// it may cause the snapshot transfer after a full restart raft cluster.
+func (nd *KVNode) BackupDB(checkLast bool) {
+	if checkLast {
+		if nd.rn.Lead() == raft.None {
+			return
+		}
+		if nd.GetAppliedIndex()-nd.GetLastSnapIndex() <= uint64(nd.rn.config.SnapCount/100) {
+			return
+		}
+	}
 	p := &customProposeData{
 		ProposeOp:  ProposeOp_Backup,
 		NeedBackup: true,
@@ -359,7 +371,7 @@ func (nd *KVNode) OptimizeDB(table string) {
 	if table == "" {
 		// since we can not know whether leader or follower is done on optimize
 		// we backup anyway after optimize
-		nd.BackupDB()
+		nd.BackupDB(false)
 	}
 }
 
@@ -916,6 +928,14 @@ func (nd *KVNode) Tick() {
 	}
 }
 
+func (nd *KVNode) GetLastSnapIndex() uint64 {
+	return atomic.LoadUint64(&nd.lastSnapIndex)
+}
+
+func (nd *KVNode) SetLastSnapIndex(ci uint64) {
+	atomic.StoreUint64(&nd.lastSnapIndex, ci)
+}
+
 func (nd *KVNode) GetAppliedIndex() uint64 {
 	return atomic.LoadUint64(&nd.appliedIndex)
 }
@@ -1115,6 +1135,7 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 	np.snapi = applyEvent.snapshot.Metadata.Index
 	np.appliedt = applyEvent.snapshot.Metadata.Term
 	np.appliedi = applyEvent.snapshot.Metadata.Index
+	nd.SetLastSnapIndex(np.snapi)
 }
 
 // return (self removed, any conf changed, error)
@@ -1373,6 +1394,7 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 	}
 
 	np.snapi = np.appliedi
+	nd.SetLastSnapIndex(np.snapi)
 }
 
 func (nd *KVNode) GetSnapshot(term uint64, index uint64) (Snapshot, error) {
