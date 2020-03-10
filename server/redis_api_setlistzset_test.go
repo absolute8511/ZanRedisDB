@@ -1016,6 +1016,40 @@ func TestZSet(t *testing.T) {
 
 }
 
+func TestZSetEmptyMember(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key := "default:test:myzset_empty"
+
+	if n, err := goredis.Int(c.Do("zadd", key, 4, "0", 5, nil)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if s, err := goredis.Int(c.Do("zscore", key, "0")); err != nil {
+		t.Fatal(err)
+	} else if s != 4 {
+		t.Fatal(s)
+	}
+	if s, err := goredis.Int(c.Do("zscore", key, nil)); err != nil {
+		t.Fatal(err)
+	} else if s != 5 {
+		t.Fatal(s)
+	}
+	if n, err := goredis.Int(c.Do("zadd", key, 3, "")); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal(n)
+	}
+	if s, err := goredis.Int(c.Do("zscore", key, "")); err != nil {
+		t.Fatal(err)
+	} else if s != 3 {
+		t.Fatal(s)
+	}
+}
+
 func TestZSetInfScore(t *testing.T) {
 	//TODO: test +inf , -inf score
 	// TODO: test negative score
