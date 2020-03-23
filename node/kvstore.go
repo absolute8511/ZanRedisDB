@@ -128,3 +128,9 @@ func (s *KVStore) CommitBatchWrite() error {
 		return nil
 	}
 }
+
+func (s *KVStore) AbortBatch() {
+	if s.opts.EngType == rockredis.EngType {
+		s.RockDB.AbortBatch()
+	}
+}

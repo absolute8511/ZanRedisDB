@@ -232,7 +232,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 	}
 
 	wb := db.wb
-	wb.Clear()
+	defer wb.Clear()
 
 	keyInfo, err := db.prepareCollKeyForWrite(ts, SetType, key, nil)
 	if err != nil {
@@ -364,7 +364,7 @@ func (db *RockDB) SPop(ts int64, key []byte, count int) ([][]byte, error) {
 
 func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	wb := db.wb
-	wb.Clear()
+	defer wb.Clear()
 	keyInfo, err := db.GetCollVersionKey(ts, SetType, key, false)
 	if err != nil {
 		return 0, err
@@ -411,10 +411,8 @@ func (db *RockDB) SClear(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	wb := db.wb
-	wb.Clear()
-	num := db.sDelete(key, wb)
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	num := db.sDelete(key, db.wb)
+	err := db.CommitBatchWrite()
 	return num, err
 }
 

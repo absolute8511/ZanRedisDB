@@ -125,7 +125,6 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 		return 0, err
 	}
 
-	db.wb.Clear()
 	oldV, err = db.jSetPath(oldV, convertJSONPath(path), value)
 	if err != nil {
 		return 0, err
@@ -146,7 +145,7 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)
 	db.wb.Put(ek, oldV)
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	if isExist {
 		return 0, err
 	}
@@ -175,8 +174,6 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 		return err
 	}
 
-	db.wb.Clear()
-
 	for i := 0; i < len(args); i++ {
 		path := args[i].Key
 		oldV, err = db.jSetPath(oldV, convertJSONPath(path), args[i].Value)
@@ -202,7 +199,7 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 	if !isExist {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return err
 }
 
@@ -280,7 +277,6 @@ func (db *RockDB) JDel(ts int64, key []byte, path []byte) (int64, error) {
 	}
 
 	jpath := convertJSONPath(path)
-	db.wb.Clear()
 	if jpath == "" {
 		// delete whole json
 		db.wb.Delete(ek)
@@ -298,7 +294,7 @@ func (db *RockDB) JDel(ts int64, key []byte, path []byte) (int64, error) {
 		oldV = append(oldV, tsBuf...)
 		db.wb.Put(ek, oldV)
 	}
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return 1, err
 }
 
@@ -351,7 +347,6 @@ func (db *RockDB) JArrayAppend(ts int64, key []byte, path []byte, jsons ...[]byt
 		}
 		arrySize++
 	}
-	db.wb.Clear()
 	if err := checkJSONValueSize(oldV); err != nil {
 		return 0, err
 	}
@@ -364,7 +359,7 @@ func (db *RockDB) JArrayAppend(ts int64, key []byte, path []byte, jsons ...[]byt
 	if !isExist {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return int64(arrySize), err
 }
 
@@ -413,11 +408,10 @@ func (db *RockDB) JArrayPop(ts int64, key []byte, path []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	db.wb.Clear()
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)
 	db.wb.Put(ek, oldV)
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return poped, err
 }
 

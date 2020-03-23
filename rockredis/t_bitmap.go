@@ -157,7 +157,6 @@ func (db *RockDB) BitSetV2(ts int64, key []byte, offset int64, on int) (int64, e
 	}
 
 	wb := db.wb
-	wb.Clear()
 	// if new v2 is not exist, merge the old data to the new v2 first
 	// if new v2 already exist, it means the old data has been merged before, we can ignore old
 	// for old data, we can just split them to the 1KB segments
@@ -200,18 +199,17 @@ func (db *RockDB) BitSetV2(ts int64, key []byte, offset int64, on int) (int64, e
 			}
 			wb.Delete(oldkey)
 			// we need flush write batch before we modify new bit
-			err = db.eng.Write(db.defaultWriteOpts, wb)
+			err = db.MaybeCommitBatch()
 			if err != nil {
 				return 0, err
 			}
-			wb.Clear()
 		}
 	}
 	oldBit, err := db.bitSetToNew(ts, wb, bmSize, key, offset, on)
 	if err != nil {
 		return 0, err
 	}
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.MaybeCommitBatch()
 	return oldBit, err
 }
 
@@ -364,7 +362,6 @@ func (db *RockDB) BitClear(key []byte) (int64, error) {
 	if len(meta) >= 8 {
 		bmSize, _ = Int64(meta[:8], nil)
 	}
-	db.MaybeClearBatch()
 	wb := db.wb
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {

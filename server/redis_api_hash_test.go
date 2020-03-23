@@ -99,6 +99,8 @@ func testHashArray(ay []interface{}, checkValues ...int) error {
 	for i := 0; i < len(ay); i++ {
 		if ay[i] == nil && checkValues[i] != 0 {
 			return fmt.Errorf("must nil")
+		} else if checkValues[i] == 0 && ay[i] != nil {
+			return fmt.Errorf("not exist hash field must be nil")
 		} else if ay[i] != nil {
 			v, ok := ay[i].([]byte)
 			if !ok {

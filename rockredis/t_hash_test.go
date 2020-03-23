@@ -442,12 +442,11 @@ func TestHashIndexStringV(t *testing.T) {
 	for i := 0; i < pkCnt; i++ {
 		inputPKList = append(inputPKList, []byte("test:key"+strconv.Itoa(i)))
 	}
-	db.wb.Clear()
 	for i, pk := range inputPKList {
 		err = db.hsetIndexAddRec(pk, hindex.IndexField, inputFVList[i], db.wb)
 		assert.Nil(t, err)
 	}
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.CommitBatchWrite()
 	condAll := &IndexCondition{
 		StartKey:     nil,
 		IncludeStart: false,
@@ -580,9 +579,8 @@ func TestHashIndexStringV(t *testing.T) {
 		assert.True(t, comp == -1 || comp == 0)
 	}
 
-	db.wb.Clear()
 	db.hsetIndexRemoveRec(inputPKList[0], hindex.IndexField, inputFVList[0], db.wb)
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.CommitBatchWrite()
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condEqual, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
@@ -932,7 +930,6 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	inputFVList = append(inputFVList, []byte("fv1"))
 	inputFVList = append(inputFVList, []byte("fv2"))
 	inputFVList = append(inputFVList, []byte("fv3"))
-	db.wb.Clear()
 	for i, pk := range inputPKList {
 		err = db.HMset(0, pk, common.KVRecord{stringIndex.IndexField, inputFVList[i]})
 		assert.Nil(t, err)
