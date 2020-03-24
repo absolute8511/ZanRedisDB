@@ -772,7 +772,13 @@ func (db *RockDB) zRangeBytes(preCheckCnt bool, key []byte, minKey []byte, maxKe
 	}
 
 	// TODO: use buf pool
-	v := make([]common.ScorePair, 0, nv)
+	// we can not use count for prealloc since it may large than we have for (total - offset),
+	// since it have minkey~maxkey range, it may much smaller than count
+	preAlloc := 16
+	if count > 0 && count < preAlloc {
+		preAlloc = count
+	}
+	v := make([]common.ScorePair, 0, preAlloc)
 
 	var err error
 	var it *engine.RangeLimitedIterator
@@ -1058,7 +1064,11 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	}
 	defer it.Close()
 
-	ay := make([][]byte, 0, 16)
+	preAlloc := 16
+	if count > 0 && count < preAlloc {
+		preAlloc = count
+	}
+	ay := make([][]byte, 0, preAlloc)
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()
 		if _, _, m, err := zDecodeSetKey(rawk); err == nil {
