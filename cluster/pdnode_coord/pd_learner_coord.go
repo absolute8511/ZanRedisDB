@@ -168,17 +168,19 @@ func (pdCoord *PDCoordinator) addNsLearnerToNode(origNSInfo *cluster.PartitionMe
 }
 
 // remove learner should be manual since learner is not expected to change too often
-func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid string) error {
+func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid string, checkNode bool) error {
 	origNSInfo, err := pdCoord.register.GetNamespacePartInfo(ns, pid)
 	if err != nil {
 		return err
 	}
 
 	nsInfo := origNSInfo.GetCopy()
-	currentNodes, _ := pdCoord.getCurrentLearnerNodes()
-	if _, ok := currentNodes[nid]; ok {
-		cluster.CoordLog().Infof("namespace %v: mark learner node %v removing before stopped", nsInfo.GetDesp(), nid)
-		return errors.New("removing learner node should be stopped first")
+	if checkNode {
+		currentNodes, _ := pdCoord.getCurrentLearnerNodes()
+		if _, ok := currentNodes[nid]; ok {
+			cluster.CoordLog().Infof("namespace %v: mark learner node %v removing before stopped", nsInfo.GetDesp(), nid)
+			return errors.New("removing learner node should be stopped first")
+		}
 	}
 	role := pdCoord.learnerRole
 	cluster.CoordLog().Infof("namespace %v: mark learner role %v node %v removing , current : %v", nsInfo.GetDesp(), role, nid,

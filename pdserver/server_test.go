@@ -605,7 +605,7 @@ func TestRemoteClusterLearnerContinueAfterSrcRestart(t *testing.T) {
 	ensureClusterReady(t, 3)
 
 	time.Sleep(time.Second)
-	ns := "test_learner_continue"
+	ns := "test_learner_continue_after_restart"
 	partNum := 1
 
 	pduri := "http://127.0.0.1:" + pdHttpPort

@@ -312,7 +312,7 @@ func (pdCoord *PDCoordinator) RemoveLearnerFromNs(ns string, pidStr string, nid 
 			return err
 		}
 		for i := 0; i < oldMeta.PartitionNum; i++ {
-			err = pdCoord.removeNsLearnerFromNode(ns, i, nid)
+			err = pdCoord.removeNsLearnerFromNode(ns, i, nid, true)
 			if err != nil {
 				cluster.CoordLog().Infof("namespace %v-%v remove learner %v failed :%v", ns, i, nid, err)
 				return err
@@ -327,5 +327,5 @@ func (pdCoord *PDCoordinator) RemoveLearnerFromNs(ns string, pidStr string, nid 
 	if err != nil {
 		return err
 	}
-	return pdCoord.removeNsLearnerFromNode(ns, pid, nid)
+	return pdCoord.removeNsLearnerFromNode(ns, pid, nid, false)
 }
