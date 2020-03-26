@@ -70,6 +70,12 @@ func getTestDB(t *testing.T) *RockDB {
 	return testDB
 }
 
+func TestMain(m *testing.M) {
+	common.InitDefaultForGLogger("")
+	ret := m.Run()
+	os.Exit(ret)
+}
+
 func TestDB(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)

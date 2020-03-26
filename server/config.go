@@ -16,6 +16,7 @@ type ServerConfig struct {
 	GrpcAPIPort          int               `json:"grpc_api_port"`
 	ProfilePort          int               `json:"profile_port"`
 	DataDir              string            `json:"data_dir"`
+	LogDir               string            `json:"log_dir"`
 	DataRsyncModule      string            `json:"data_rsync_module"`
 	LocalRaftAddr        string            `json:"local_raft_addr"`
 	Tags                 map[string]string `json:"tags"`

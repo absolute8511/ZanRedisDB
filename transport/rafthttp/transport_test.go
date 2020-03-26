@@ -16,16 +16,24 @@ package rafthttp
 
 import (
 	"net/http"
+	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/xiang90/probing"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/pkg/testutil"
 	"github.com/youzan/ZanRedisDB/pkg/types"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/stats"
-	"github.com/xiang90/probing"
 )
+
+func TestMain(m *testing.M) {
+	common.InitDefaultForGLogger("")
+	ret := m.Run()
+	os.Exit(ret)
+}
 
 // TestTransportSend tests that transport can send messages using correct
 // underlying peer, and drop local or unknown-target messages.

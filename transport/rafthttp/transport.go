@@ -34,8 +34,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-//var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/youzan/ZanRedisDB", "transport/rafthttp"))
-var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("transport/rafthttp")))
+var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewGLogger()))
 
 func SetLogLevel(level int) {
 	plog.SetLevel(int32(level))

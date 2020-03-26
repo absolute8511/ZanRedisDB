@@ -7,7 +7,7 @@ require (
 	github.com/BurntSushi/toml v0.3.0
 	github.com/Jeffail/gabs v1.4.0 // indirect
 	github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6 // indirect
-	github.com/absolute8511/glog v0.0.0-20160725094954-53123a9d31b5
+	github.com/absolute8511/glog v0.3.1
 	github.com/absolute8511/go-hll v0.0.0-20190228064837-043118556d83
 	github.com/absolute8511/hyperloglog v0.0.0-20171127080255-5259284545fc
 	github.com/absolute8511/hyperloglog2 v0.1.1

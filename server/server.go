@@ -38,7 +38,7 @@ const (
 	slowLogTime = time.Millisecond * 100
 )
 
-var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("server"))
+var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 
 func SetLogger(level int32, logger common.Logger) {
 	sLog.SetLevel(level)

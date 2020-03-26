@@ -12,7 +12,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
-var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("node"))
+var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 var syncerOnly int32
 var syncerOnlyChangedTs int64
 

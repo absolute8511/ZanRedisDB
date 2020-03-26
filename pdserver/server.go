@@ -12,7 +12,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
-var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("pdserver"))
+var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 
 func SetLogger(level int32, logger common.Logger) {
 	sLog.SetLevel(level)

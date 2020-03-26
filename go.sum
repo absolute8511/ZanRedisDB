@@ -8,6 +8,8 @@ github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6 h1:fLjPD/aNc3UIO
 github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6/go.mod h1:3eOhrUMpNV+6aFIbp5/iudMxNCF27Vw2OZgy4xEx0Fg=
 github.com/absolute8511/glog v0.0.0-20160725094954-53123a9d31b5 h1:zoQscIzDIHUaNE/m0Fi0caXmhqyoyuIbSdibDga/BW8=
 github.com/absolute8511/glog v0.0.0-20160725094954-53123a9d31b5/go.mod h1:T44AH/EtS/Grr3Ujq6U0Lhk1y4960FC9i06pxXblZ2I=
+github.com/absolute8511/glog v0.3.1 h1:oTuACTGSouUxi7CWuya5azGQ9s7WnsAxrAxAZPKevRk=
+github.com/absolute8511/glog v0.3.1/go.mod h1:T44AH/EtS/Grr3Ujq6U0Lhk1y4960FC9i06pxXblZ2I=
 github.com/absolute8511/go-hll v0.0.0-20190228064837-043118556d83 h1:+pnNO4ZB8LTIUuOSw+n//LPHp1y6etaPxKclS4nCbIY=
 github.com/absolute8511/go-hll v0.0.0-20190228064837-043118556d83/go.mod h1:QMvi1rdckY14QqBq5tccirZ1v/aDGOt2cS1bjccZLnU=
 github.com/absolute8511/hyperloglog v0.0.0-20171127080255-5259284545fc h1:i/ihfp9MP/tpc9SP8sLPof1On9INZcMWrUbylsTbkb0=

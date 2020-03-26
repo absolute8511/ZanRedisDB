@@ -17,15 +17,23 @@ package raft
 import (
 	"bytes"
 	"math"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/pkg/testutil"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
 )
+
+func TestMain(m *testing.M) {
+	common.InitDefaultForGLogger("")
+	ret := m.Run()
+	os.Exit(ret)
+}
 
 type ignoreSizeHintMemStorage struct {
 	*MemoryStorage

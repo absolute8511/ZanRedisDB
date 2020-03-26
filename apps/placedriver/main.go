@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/pdserver"
@@ -85,10 +84,7 @@ func (p *program) Start() error {
 
 	opts := pdserver.NewServerConfig()
 	options.Resolve(opts, flagSet, cfg)
-	if opts.LogDir != "" {
-		glog.SetGLogDir(opts.LogDir)
-	}
-	glog.StartWorker(time.Second * 2)
+	common.InitDefaultForGLogger(opts.LogDir)
 	daemon := pdserver.NewServer(opts)
 
 	daemon.Start()
