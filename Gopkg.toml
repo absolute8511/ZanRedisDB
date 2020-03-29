@@ -39,7 +39,7 @@ required = [
   version = "0.3.0"
 
 [[constraint]]
-  branch = "master"
+  version = "0.3.1"
   name = "github.com/absolute8511/glog"
 
 [[constraint]]
