@@ -23,6 +23,10 @@ import (
 )
 
 func getTestKVNode(t *testing.T) (*KVNode, string, chan struct{}) {
+	return getTestKVNodeWith(t, false)
+}
+
+func getTestKVNodeWith(t *testing.T, mustNoLeader bool) (*KVNode, string, chan struct{}) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("kvnode-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
 	t.Logf("dir:%v\n", tmpDir)
@@ -54,8 +58,20 @@ func getTestKVNode(t *testing.T) (*KVNode, string, chan struct{}) {
 	nsConf.EngType = rockredis.EngType
 	nsConf.PartitionNum = 1
 	nsConf.Replicator = 1
+	if mustNoLeader {
+		nsConf.Replicator = 2
+	}
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	if mustNoLeader {
+		// add a not started node to make leader can not be elected
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(int(rport+1))
+		var replica2 ReplicaInfo
+		replica2.NodeID = 2
+		replica2.ReplicaID = 2
+		replica2.RaftAddr = raftAddr
+		nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica2)
+	}
 	nsConf.ExpirationPolicy = common.DefaultExpirationPolicy
 
 	mconf := &MachineConfig{
@@ -210,6 +226,68 @@ func TestKVNode_kvCommand(t *testing.T) {
 				handler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
 				_, err := handler(cmd.args)
 				assert.Nil(t, err)
+			}
+		}
+		t.Logf("handler response: %v", c.rsp)
+		assert.Nil(t, c.GetError())
+	}
+}
+
+func TestKVNode_kvCommandWhileNoLeader(t *testing.T) {
+	nd, dataDir, stopC := getTestKVNodeWith(t, true)
+	testKey := []byte("default:test:noleader1")
+	testKeyValue := []byte("1")
+	testKey2 := []byte("default:test:noleader2")
+	testKey2Value := []byte("2")
+	testPFKey := []byte("default:test:noleaderpf1")
+	testBitKey := []byte("default:test:noleaderbit1")
+	tests := []struct {
+		name string
+		args redcon.Command
+	}{
+		{"get", buildCommand([][]byte{[]byte("get"), testKey})},
+		{"mget", buildCommand([][]byte{[]byte("mget"), testKey, testKey2})},
+		{"exists", buildCommand([][]byte{[]byte("exists"), testKey, testKey2})},
+		{"set", buildCommand([][]byte{[]byte("set"), testKey, testKeyValue})},
+		{"getset", buildCommand([][]byte{[]byte("getset"), testKey, testKeyValue})},
+		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey, testKeyValue})},
+		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey2, testKey2Value})},
+		{"del", buildCommand([][]byte{[]byte("del"), testKey, testKey2})},
+		{"incr", buildCommand([][]byte{[]byte("incr"), testKey})},
+		{"incrby", buildCommand([][]byte{[]byte("incrby"), testKey, testKey2Value})},
+		{"get", buildCommand([][]byte{[]byte("get"), testKey})},
+		{"mget", buildCommand([][]byte{[]byte("mget"), testKey, testKey2})},
+		{"exists", buildCommand([][]byte{[]byte("exists"), testKey})},
+		{"pfadd", buildCommand([][]byte{[]byte("pfadd"), testPFKey, testKeyValue})},
+		{"pfcount", buildCommand([][]byte{[]byte("pfcount"), testPFKey})},
+		{"setbit", buildCommand([][]byte{[]byte("setbit"), testBitKey, []byte("1"), []byte("1")})},
+		{"getbit", buildCommand([][]byte{[]byte("getbit"), testBitKey, []byte("1")})},
+		{"bitcount", buildCommand([][]byte{[]byte("bitcount"), testBitKey, []byte("1"), []byte("2")})},
+	}
+	defer os.RemoveAll(dataDir)
+	defer nd.Stop()
+	defer close(stopC)
+	c := &fakeRedisConn{}
+	defer c.Close()
+	defer c.Reset()
+	for _, cmd := range tests {
+		c.Reset()
+		handler, _ := nd.router.GetCmdHandler(cmd.name)
+		if handler != nil {
+			handler(c, cmd.args)
+		} else {
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			if whandler != nil {
+				_, err := whandler(cmd.args)
+				assert.Equal(t, ErrNodeNoLeader, err)
+			} else {
+				handler, isWrite, _ := nd.router.GetMergeCmdHandler(cmd.name)
+				_, err := handler(cmd.args)
+				if isWrite {
+					assert.Equal(t, ErrNodeNoLeader, err)
+				} else {
+					assert.Nil(t, err)
+				}
 			}
 		}
 		t.Logf("handler response: %v", c.rsp)

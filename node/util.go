@@ -75,7 +75,8 @@ func rebuildFirstKeyAndPropose(kvn *KVNode, cmd redcon.Command, f common.Command
 	var rsp *FutureRsp
 	var err error
 	if !UseRedisV2 {
-		key, err := common.CutNamesapce(cmd.Args[1])
+		var key []byte
+		key, err = common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			return cmd, nil, err
 		}
