@@ -503,11 +503,11 @@ func TestRecoveryNewerSnapReplaying(t *testing.T) {
 }
 
 func TestRestartFollower(t *testing.T) {
-	if testing.Verbose() {
-		SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
-		rockredis.SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
-		node.SetLogger(int32(common.LOG_DEBUG), newTestLogger(t))
-	}
+	//if testing.Verbose() {
+	//	SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
+	//	rockredis.SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
+	//	node.SetLogger(int32(common.LOG_DEBUG), newTestLogger(t))
+	//}
 	c := getTestClusterConn(t, true)
 	defer c.Close()
 

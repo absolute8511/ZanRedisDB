@@ -65,7 +65,7 @@ func enableAutoBalance(t *testing.T, pduri string, enable bool) {
 func waitForLeader(t *testing.T, ns string, part int) (dataNodeWrapper, *node.NamespaceNode) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute {
+		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting leader")
 			break
 		}
@@ -87,7 +87,7 @@ func waitForLeader(t *testing.T, ns string, part int) (dataNodeWrapper, *node.Na
 func waitForAllFullReady(t *testing.T, ns string, part int) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute {
+		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting full ready")
 			break
 		}
@@ -110,7 +110,7 @@ func waitForAllFullReady(t *testing.T, ns string, part int) {
 func waitMarkAsRemoving(t *testing.T, ns string, part int, leaderID string) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute {
+		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting mark removing")
 			break
 		}
@@ -156,7 +156,7 @@ func waitMarkAsRemovingUntilTimeout(t *testing.T, ns string, part int, until tim
 func waitRemoveFromRemoving(t *testing.T, ns string, part int) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute {
+		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting remove removing node")
 			break
 		}
@@ -177,7 +177,7 @@ func waitRemoveFromRemoving(t *testing.T, ns string, part int) {
 func waitEnoughReplica(t *testing.T, ns string, part int) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute {
+		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting enough replicas")
 			break
 		}
@@ -208,7 +208,7 @@ func getNsInfo(t *testing.T, ns string, part int) cluster.PartitionMetaInfo {
 func waitBalancedLeader(t *testing.T, ns string, part int) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute {
+		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting balanced leader become real leader")
 			break
 		}
@@ -229,7 +229,7 @@ func waitBalancedLeader(t *testing.T, ns string, part int) {
 func waitBalancedAndExpectedLeader(t *testing.T, ns string, part int, expected string) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute {
+		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting expected leader become real leader ")
 			break
 		}
@@ -323,6 +323,7 @@ func TestRWMultiPartOnDifferentNodes(t *testing.T) {
 	// test should write to different parts
 	table := "test_set_kv_multi"
 	zanClient := getTestClient(t, ns)
+	defer zanClient.Stop()
 	for i := 0; i < 20; i++ {
 		k := []byte(fmt.Sprintf("kv%d", i))
 		err := zanClient.KVSet(table, k, k)
@@ -1042,7 +1043,7 @@ func TestClusterRestartNodeCatchup(t *testing.T) {
 		followerConn := getTestRedisConn(t, gkvList[i].redisPort)
 		for i := 0; i < 10; i++ {
 			getV, err := goredis.String(followerConn.Do("get", key))
-			assert.Nil(t, err)
+			assert.True(t, err == nil || err == goredis.ErrNil)
 			t.Logf("read follower : %v", getV)
 			assert.True(t, getV == "1234")
 		}
@@ -1625,7 +1626,7 @@ func TestInstallSnapshotTransferFailed(t *testing.T) {
 		nsNode.Node.OptimizeDB("")
 	}
 	leaderV, err := goredis.String(c.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", leaderV)
 
 	foWrap.s.Start()
@@ -1648,7 +1649,7 @@ func TestInstallSnapshotTransferFailed(t *testing.T) {
 	time.Sleep(time.Second * 3)
 
 	getV, err := goredis.String(followerConn.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", getV)
 	enableStaleRead(t, addr, false)
 }
@@ -1701,7 +1702,7 @@ func TestInstallSnapshotSaveRaftFailed(t *testing.T) {
 		nsNode.Node.OptimizeDB("")
 	}
 	leaderV, err := goredis.String(c.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", leaderV)
 	time.Sleep(time.Second * 5)
 
@@ -1726,7 +1727,7 @@ func TestInstallSnapshotSaveRaftFailed(t *testing.T) {
 	time.Sleep(time.Second * 3)
 
 	getV, err := goredis.String(followerConn.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", getV)
 	enableStaleRead(t, addr, false)
 }
@@ -1776,7 +1777,7 @@ func TestInstallSnapshotApplyFailed(t *testing.T) {
 		nsNode.Node.OptimizeDB("")
 	}
 	leaderV, err := goredis.String(c.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", leaderV)
 	time.Sleep(time.Second * 5)
 
@@ -1791,7 +1792,7 @@ func TestInstallSnapshotApplyFailed(t *testing.T) {
 	defer followerConn.Close()
 
 	getV, err := goredis.String(followerConn.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", getV)
 	enableStaleRead(t, addr, false)
 }
@@ -1840,7 +1841,7 @@ func TestInstallSnapshotApplyRestoreFailed(t *testing.T) {
 		nsNode.Node.OptimizeDB("")
 	}
 	leaderV, err := goredis.String(c.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", leaderV)
 	time.Sleep(time.Second * 5)
 
@@ -1867,7 +1868,7 @@ func TestInstallSnapshotApplyRestoreFailed(t *testing.T) {
 	time.Sleep(time.Second * 5)
 
 	getV, err := goredis.String(followerConn.Do("get", key))
-	assert.Nil(t, err)
+	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", getV)
 	enableStaleRead(t, addr, false)
 }
