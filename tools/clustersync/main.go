@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 )
 
 var ip = flag.String("ip", "127.0.0.1", "server ip")
@@ -39,10 +40,10 @@ type CustomRaftStatus struct {
 }
 
 type LogSyncStats struct {
-	SyncRecvLatency *common.WriteStats          `json:"sync_net_latency"`
-	SyncAllLatency  *common.WriteStats          `json:"sync_all_latency"`
-	LogReceived     []common.LogSyncStats       `json:"log_received,omitempty"`
-	LogSynced       []common.LogSyncStats       `json:"log_synced,omitempty"`
+	SyncRecvLatency *metric.WriteStats          `json:"sync_net_latency"`
+	SyncAllLatency  *metric.WriteStats          `json:"sync_all_latency"`
+	LogReceived     []metric.LogSyncStats       `json:"log_received,omitempty"`
+	LogSynced       []metric.LogSyncStats       `json:"log_synced,omitempty"`
 	LeaderRaftStats map[string]CustomRaftStatus `json:"leader_raft_stats,omitempty"`
 }
 

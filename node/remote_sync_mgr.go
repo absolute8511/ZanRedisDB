@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 )
 
 const syncStateTimeout = time.Minute * 5
@@ -267,7 +267,7 @@ func (nd *KVNode) GetRemoteClusterSyncedRaft(name string) (uint64, uint64, int64
 	return state.SyncedTerm, state.SyncedIndex, state.Timestamp
 }
 
-func (nd *KVNode) GetLogSyncStatsInSyncLearner() (*common.LogSyncStats, *common.LogSyncStats) {
+func (nd *KVNode) GetLogSyncStatsInSyncLearner() (*metric.LogSyncStats, *metric.LogSyncStats) {
 	logSyncer, ok := nd.sm.(*logSyncerSM)
 	if !ok {
 		return nil, nil

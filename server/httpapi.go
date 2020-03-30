@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/rockredis"
 
 	"github.com/julienschmidt/httprouter"
@@ -528,7 +529,7 @@ func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps h
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	var ss []common.LogSyncStats
+	var ss []metric.LogSyncStats
 	err = json.Unmarshal(data, &ss)
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
@@ -617,7 +618,7 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	return struct {
 		Version string             `json:"version"`
 		UpTime  int64              `json:"up_time"`
-		Stats   common.ServerStats `json:"stats"`
+		Stats   metric.ServerStats `json:"stats"`
 	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
@@ -639,7 +640,7 @@ func (s *Server) doTableStats(w http.ResponseWriter, req *http.Request, ps httpr
 	ss := s.GetTableStats(leaderOnly, table)
 
 	return struct {
-		TableStats map[string]common.TableStats `json:"table_stats"`
+		TableStats map[string]metric.TableStats `json:"table_stats"`
 	}{ss}, nil
 }
 
@@ -683,10 +684,10 @@ func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps htt
 		}
 		// get leader raft log stats
 		return struct {
-			SyncRecvLatency *common.WriteStats          `json:"sync_net_latency"`
-			SyncAllLatency  *common.WriteStats          `json:"sync_all_latency"`
-			LogReceived     []common.LogSyncStats       `json:"log_received,omitempty"`
-			LogSynced       []common.LogSyncStats       `json:"log_synced,omitempty"`
+			SyncRecvLatency *metric.WriteStats          `json:"sync_net_latency"`
+			SyncAllLatency  *metric.WriteStats          `json:"sync_all_latency"`
+			LogReceived     []metric.LogSyncStats       `json:"log_received,omitempty"`
+			LogSynced       []metric.LogSyncStats       `json:"log_synced,omitempty"`
 			LeaderRaftStats map[string]CustomRaftStatus `json:"leader_raft_stats,omitempty"`
 		}{recvLatency, syncLatency, recvStats, syncStats, allRaftStats}, nil
 	}
@@ -705,9 +706,9 @@ func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps htt
 	}
 	logSyncedStats := s.GetLogSyncStats(leaderOnly, reqParams.Get("cluster"))
 	return struct {
-		SyncNetLatency *common.WriteStats    `json:"sync_net_latency"`
-		SyncAllLatency *common.WriteStats    `json:"sync_all_latency"`
-		LogSynced      []common.LogSyncStats `json:"log_synced,omitempty"`
+		SyncNetLatency *metric.WriteStats    `json:"sync_net_latency"`
+		SyncAllLatency *metric.WriteStats    `json:"sync_all_latency"`
+		LogSynced      []metric.LogSyncStats `json:"log_synced,omitempty"`
 	}{netStat, totalStat, logSyncedStats}, nil
 }
 

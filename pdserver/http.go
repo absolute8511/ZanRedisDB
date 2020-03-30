@@ -15,6 +15,7 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 )
 
 type nodeInfo struct {
@@ -185,10 +186,10 @@ func (s *Server) doQueryTableStats(w http.ResponseWriter, req *http.Request, ps 
 	leaderOnly := reqParams.Get("leader_only")
 
 	dns, _ := s.pdCoord.GetAllDataNodes()
-	nodeTableStats := make(map[string]map[string]common.TableStats)
-	totalTableStats := make(map[string]common.TableStats)
+	nodeTableStats := make(map[string]map[string]metric.TableStats)
+	totalTableStats := make(map[string]metric.TableStats)
 	type TableStatsType struct {
-		TableStats map[string]common.TableStats `json:"table_stats"`
+		TableStats map[string]metric.TableStats `json:"table_stats"`
 	}
 	for _, n := range dns {
 		uri := fmt.Sprintf("http://%s:%v%v?leader_only=%v&table=%v", n.Hostname, n.HttpPort, common.APITableStats, leaderOnly, table)
@@ -207,7 +208,7 @@ func (s *Server) doQueryTableStats(w http.ResponseWriter, req *http.Request, ps 
 			if tbs.Name != table {
 				continue
 			}
-			var tmp common.TableStats
+			var tmp metric.TableStats
 			tmp.Name = table
 			if t, ok := totalTableStats[ns]; ok {
 				tmp = t

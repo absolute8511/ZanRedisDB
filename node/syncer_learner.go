@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/pkg/wait"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/syncerpb"
@@ -33,8 +34,8 @@ func SetSyncerNormalInit() {
 	syncerNormalInit = true
 }
 
-var syncLearnerRecvStats common.WriteStats
-var syncLearnerDoneStats common.WriteStats
+var syncLearnerRecvStats metric.WriteStats
+var syncLearnerDoneStats metric.WriteStats
 
 type logSyncerSM struct {
 	clusterInfo    common.IClusterInfo
@@ -103,13 +104,13 @@ func (sm *logSyncerSM) GetDBInternalStats() string {
 	return ""
 }
 
-func GetLogLatencyStats() (*common.WriteStats, *common.WriteStats) {
+func GetLogLatencyStats() (*metric.WriteStats, *metric.WriteStats) {
 	return syncLearnerRecvStats.Copy(), syncLearnerDoneStats.Copy()
 }
 
-func (sm *logSyncerSM) GetLogSyncStats() (common.LogSyncStats, common.LogSyncStats) {
-	var recvStats common.LogSyncStats
-	var syncStats common.LogSyncStats
+func (sm *logSyncerSM) GetLogSyncStats() (metric.LogSyncStats, metric.LogSyncStats) {
+	var recvStats metric.LogSyncStats
+	var syncStats metric.LogSyncStats
 	syncStats.Name = sm.fullNS
 	syncStats.Term, syncStats.Index, syncStats.Timestamp = sm.getSyncedState()
 	recvStats.Term = atomic.LoadUint64(&sm.receivedState.SyncedTerm)
@@ -119,8 +120,8 @@ func (sm *logSyncerSM) GetLogSyncStats() (common.LogSyncStats, common.LogSyncSta
 	return recvStats, syncStats
 }
 
-func (sm *logSyncerSM) GetStats(table string) common.NamespaceStats {
-	var ns common.NamespaceStats
+func (sm *logSyncerSM) GetStats(table string) metric.NamespaceStats {
+	var ns metric.NamespaceStats
 	stat := make(map[string]interface{})
 	stat["role"] = sm.machineConfig.LearnerRole
 	stat["synced"] = atomic.LoadInt64(&sm.syncedCnt)

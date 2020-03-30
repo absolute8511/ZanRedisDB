@@ -16,6 +16,7 @@ import (
 	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/rockredis"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"golang.org/x/net/context"
@@ -644,10 +645,10 @@ func (nsm *NamespaceMgr) GetDBStats(leaderOnly bool) map[string]string {
 	return nsStats
 }
 
-func (nsm *NamespaceMgr) GetLogSyncStatsInSyncer() ([]common.LogSyncStats, []common.LogSyncStats) {
+func (nsm *NamespaceMgr) GetLogSyncStatsInSyncer() ([]metric.LogSyncStats, []metric.LogSyncStats) {
 	nsm.mutex.RLock()
-	nsRecvStats := make([]common.LogSyncStats, 0, len(nsm.kvNodes))
-	nsSyncStats := make([]common.LogSyncStats, 0, len(nsm.kvNodes))
+	nsRecvStats := make([]metric.LogSyncStats, 0, len(nsm.kvNodes))
+	nsSyncStats := make([]metric.LogSyncStats, 0, len(nsm.kvNodes))
 	for k, n := range nsm.kvNodes {
 		if !n.IsReady() {
 			continue
@@ -665,12 +666,12 @@ func (nsm *NamespaceMgr) GetLogSyncStatsInSyncer() ([]common.LogSyncStats, []com
 	return nsRecvStats, nsSyncStats
 }
 
-func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string) []common.LogSyncStats {
+func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string) []metric.LogSyncStats {
 	if srcClusterName == "" {
 		return nil
 	}
 	nsm.mutex.RLock()
-	nsStats := make([]common.LogSyncStats, 0, len(nsm.kvNodes))
+	nsStats := make([]metric.LogSyncStats, 0, len(nsm.kvNodes))
 	for k, n := range nsm.kvNodes {
 		if !n.IsReady() {
 			continue
@@ -682,7 +683,7 @@ func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string)
 		if term == 0 && index == 0 {
 			continue
 		}
-		var s common.LogSyncStats
+		var s metric.LogSyncStats
 		s.Name = k
 		s.IsLeader = n.Node.IsLead()
 		s.Term = term
@@ -694,9 +695,9 @@ func (nsm *NamespaceMgr) GetLogSyncStats(leaderOnly bool, srcClusterName string)
 	return nsStats
 }
 
-func (nsm *NamespaceMgr) GetStats(leaderOnly bool, table string) []common.NamespaceStats {
+func (nsm *NamespaceMgr) GetStats(leaderOnly bool, table string) []metric.NamespaceStats {
 	nsm.mutex.RLock()
-	nsStats := make([]common.NamespaceStats, 0, len(nsm.kvNodes))
+	nsStats := make([]metric.NamespaceStats, 0, len(nsm.kvNodes))
 	for k, n := range nsm.kvNodes {
 		if !n.IsReady() {
 			continue

@@ -18,6 +18,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/pkg/wait"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
@@ -188,7 +189,7 @@ type KVNode struct {
 	w                  wait.Wait
 	router             *common.CmdRouter
 	deleteCb           func()
-	clusterWriteStats  common.WriteStats
+	clusterWriteStats  metric.WriteStats
 	ns                 string
 	machineConfig      *MachineConfig
 	wg                 sync.WaitGroup
@@ -479,7 +480,7 @@ func (nd *KVNode) GetWALDBInternalStats() map[string]interface{} {
 	return eng.GetInternalStatus()
 }
 
-func (nd *KVNode) GetStats(table string) common.NamespaceStats {
+func (nd *KVNode) GetStats(table string) metric.NamespaceStats {
 	ns := nd.sm.GetStats(table)
 	ns.ClusterWriteStats = nd.clusterWriteStats.Copy()
 	return ns
