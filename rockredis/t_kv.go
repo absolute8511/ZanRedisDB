@@ -258,7 +258,6 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 			return 0, err
 		}
 	}
-	db.wb.Clear()
 	n += delta
 	buf := FormatInt64ToSlice(n)
 	buf = db.encodeRealValueToDBRawValue(ts, keyInfo.OldHeader, buf)
@@ -267,7 +266,7 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 		db.IncrTableKeyCount(keyInfo.Table, 1, db.wb)
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return n, err
 }
 
@@ -279,7 +278,6 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	db.MaybeClearBatch()
 	delCnt := int64(1)
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
@@ -343,7 +341,6 @@ func (db *RockDB) DelKeys(keys ...[]byte) (int64, error) {
 	}
 
 	//clear all the expire meta data related to the keys
-	db.MaybeClearBatch()
 	for _, k := range keys {
 		db.delExpire(KVType, k, nil, false, db.wb)
 	}
@@ -495,8 +492,6 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		return errTooMuchBatchSize
 	}
 
-	db.MaybeClearBatch()
-
 	var err error
 	var key []byte
 	var value []byte
@@ -544,7 +539,6 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	} else if err = checkValueSize(value); err != nil {
 		return err
 	}
-	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
 		found := false
 		if !db.cfg.EstimateTableCounter {
@@ -568,7 +562,6 @@ func (db *RockDB) KVGetSet(ts int64, rawKey []byte, value []byte) ([]byte, error
 	if err := checkValueSize(value); err != nil {
 		return nil, err
 	}
-	db.MaybeClearBatch()
 	keyInfo, realOldV, err := db.getDBKVRealValueAndHeader(ts, rawKey, false)
 	if err != nil {
 		return nil, err
@@ -596,7 +589,6 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	} else if err = checkValueSize(value); err != nil {
 		return err
 	}
-	db.MaybeClearBatch()
 	if db.cfg.EnableTableCounter {
 		vok := false
 		if !db.cfg.EstimateTableCounter {
@@ -620,7 +612,6 @@ func (db *RockDB) SetNX(ts int64, rawKey []byte, value []byte) (int64, error) {
 	if err := checkValueSize(value); err != nil {
 		return 0, err
 	}
-	db.wb.Clear()
 	keyInfo, realV, err := db.prepareKVValueForWrite(ts, rawKey, false)
 	if err != nil {
 		return 0, err
@@ -638,7 +629,7 @@ func (db *RockDB) SetNX(ts int64, rawKey []byte, value []byte) (int64, error) {
 		// expire meta data in different place under different expire policy.
 		value, err = db.resetWithNewKVValue(ts, rawKey, value, 0, db.wb)
 		db.wb.Put(keyInfo.VerKey, value)
-		err = db.eng.Write(db.defaultWriteOpts, db.wb)
+		err = db.MaybeCommitBatch()
 	}
 	return n, err
 }
@@ -655,7 +646,6 @@ func (db *RockDB) SetRange(ts int64, rawKey []byte, offset int, value []byte) (i
 		return 0, err
 	}
 
-	db.wb.Clear()
 	if realV == nil && !keyInfo.Expired {
 		db.IncrTableKeyCount(keyInfo.Table, 1, db.wb)
 	}
@@ -669,7 +659,7 @@ func (db *RockDB) SetRange(ts int64, rawKey []byte, offset int, value []byte) (i
 	realV = db.encodeRealValueToDBRawValue(ts, keyInfo.OldHeader, realV)
 	db.wb.Put(keyInfo.VerKey, realV)
 
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 
 	if err != nil {
 		return 0, err
@@ -738,7 +728,6 @@ func (db *RockDB) Append(ts int64, rawKey []byte, value []byte) (int64, error) {
 	if len(realV)+len(value) > MaxValueSize {
 		return 0, errValueSize
 	}
-	db.wb.Clear()
 	if realV == nil && !keyInfo.Expired {
 		db.IncrTableKeyCount(keyInfo.Table, 1, db.wb)
 	}
@@ -749,7 +738,7 @@ func (db *RockDB) Append(ts int64, rawKey []byte, value []byte) (int64, error) {
 	// TODO: do we need make sure delete the old expire meta to avoid expire the rewritten new data?
 
 	db.wb.Put(keyInfo.VerKey, dbv)
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	if err != nil {
 		return 0, err
 	}
@@ -771,7 +760,6 @@ func (db *RockDB) BitSetOld(ts int64, key []byte, offset int64, on int) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	db.wb.Clear()
 	if realV == nil && !keyInfo.Expired {
 		db.IncrTableKeyCount(keyInfo.Table, 1, db.wb)
 	}
@@ -798,7 +786,7 @@ func (db *RockDB) BitSetOld(ts int64, key []byte, offset int64, on int) (int64, 
 
 	realV = db.encodeRealValueToDBRawValue(ts, keyInfo.OldHeader, realV)
 	db.wb.Put(keyInfo.VerKey, realV)
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	if err != nil {
 		return 0, err
 	}

@@ -66,6 +66,7 @@ func TestMain(m *testing.M) {
 	node.EnableForTest()
 	flag.Parse()
 
+	common.InitDefaultForGLogger("")
 	if testing.Verbose() {
 		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
 		node.SetLogLevel(int(common.LOG_DETAIL))

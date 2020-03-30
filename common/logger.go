@@ -46,22 +46,42 @@ func (dl *defaultLogger) OutputWarning(maxdepth int, s string) error {
 	return nil
 }
 
-type GLogger struct {
+type gLogger struct {
 }
 
-func (gl *GLogger) Output(maxdepth int, s string) error {
+func NewGLogger() *gLogger {
+	return &gLogger{}
+}
+
+func (gl *gLogger) Flush() {
+	glog.Flush()
+}
+
+func (gl *gLogger) Output(maxdepth int, s string) error {
 	glog.InfoDepth(maxdepth, s)
 	return nil
 }
 
-func (gl *GLogger) OutputErr(maxdepth int, s string) error {
+func (gl *gLogger) OutputErr(maxdepth int, s string) error {
 	glog.ErrorDepth(maxdepth, s)
 	return nil
 }
 
-func (gl *GLogger) OutputWarning(maxdepth int, s string) error {
+func (gl *gLogger) OutputWarning(maxdepth int, s string) error {
 	glog.WarningDepth(maxdepth, s)
 	return nil
+}
+
+// should call once at the app entrance after flag parsed
+func InitDefaultForGLogger(dir string) {
+	if dir != "" {
+		glog.SetGLogDir(dir)
+	}
+	glog.SetLogExitFunc(func(err error) {
+		fmt.Printf("glog error: %v\n", err)
+	})
+
+	glog.StartWorker(time.Second * 2)
 }
 
 const (

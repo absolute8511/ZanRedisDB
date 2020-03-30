@@ -104,12 +104,12 @@ func (s *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprou
 
 func (s *Server) doBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	s.nsMgr.BackupDB(ns)
+	s.nsMgr.BackupDB(ns, false)
 	return nil, nil
 }
 
 func (s *Server) doBackupAll(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	s.nsMgr.BackupDB("")
+	s.nsMgr.BackupDB("", false)
 	return nil, nil
 }
 

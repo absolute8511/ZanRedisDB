@@ -12,10 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/absolute8511/glog"
+	"github.com/judwhite/go-svc/svc"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/server"
-	"github.com/judwhite/go-svc/svc"
 )
 
 var (
@@ -30,6 +31,7 @@ type program struct {
 
 func main() {
 	defer log.Printf("main exit")
+	defer glog.Flush()
 	prg := &program{}
 	if err := svc.Run(prg, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGINT); err != nil {
 		log.Panic(err)
@@ -45,6 +47,7 @@ func (p *program) Init(env svc.Environment) error {
 }
 
 func (p *program) Start() error {
+	glog.InitWithFlag(flagSet)
 	flagSet.Parse(os.Args[1:])
 
 	fmt.Println(common.VerString("ZanRedisDB"))
@@ -72,6 +75,7 @@ func (p *program) Start() error {
 	}
 
 	serverConf := configFile.ServerConf
+	common.InitDefaultForGLogger(serverConf.LogDir)
 
 	loadConf, _ := json.MarshalIndent(configFile, "", " ")
 	fmt.Printf("loading with conf:%v\n", string(loadConf))

@@ -12,7 +12,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
-var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("node"))
+var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 var syncerOnly int32
 var syncerOnlyChangedTs int64
 
@@ -75,7 +75,8 @@ func rebuildFirstKeyAndPropose(kvn *KVNode, cmd redcon.Command, f common.Command
 	var rsp *FutureRsp
 	var err error
 	if !UseRedisV2 {
-		key, err := common.CutNamesapce(cmd.Args[1])
+		var key []byte
+		key, err = common.CutNamesapce(cmd.Args[1])
 		if err != nil {
 			return cmd, nil, err
 		}

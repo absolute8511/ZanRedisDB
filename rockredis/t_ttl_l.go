@@ -74,7 +74,7 @@ func (exp *localExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte,
 		return 0, errChangeTTLNotSupported
 	}
 	wb := exp.db.wb
-	wb.Clear()
+	defer wb.Clear()
 	_, err := exp.rawExpireAt(dataType, key, rawValue, when, wb)
 	if err != nil {
 		return 0, err

@@ -13,6 +13,7 @@ import (
 	"github.com/siddontang/goredis"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/internal/test"
 	zanredisdb "github.com/youzan/go-zanredisdb"
 
@@ -24,6 +25,7 @@ import (
 func TestMain(m *testing.M) {
 	pdnode_coord.ChangeIntervalForTest()
 	datanode_coord.ChangeIntervalForTest()
+	common.InitDefaultForGLogger("")
 
 	ret := m.Run()
 
@@ -605,7 +607,7 @@ func TestRemoteClusterLearnerContinueAfterSrcRestart(t *testing.T) {
 	ensureClusterReady(t, 3)
 
 	time.Sleep(time.Second)
-	ns := "test_learner_continue"
+	ns := "test_learner_continue_after_restart"
 	partNum := 1
 
 	pduri := "http://127.0.0.1:" + pdHttpPort

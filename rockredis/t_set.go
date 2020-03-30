@@ -232,7 +232,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 	}
 
 	wb := db.wb
-	wb.Clear()
+	defer wb.Clear()
 
 	keyInfo, err := db.prepareCollKeyForWrite(ts, SetType, key, nil)
 	if err != nil {
@@ -308,6 +308,9 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 		return nil, err
 	}
 
+	if num == 0 {
+		return nil, nil
+	}
 	return db.sMembersN(key, int(num))
 }
 
@@ -320,16 +323,31 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 	if num > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
+	if num <= 0 {
+		return nil, common.ErrInvalidArgs
+	}
 
 	tn := time.Now().UnixNano()
 	keyInfo, err := db.getCollVerKeyForRange(tn, SetType, key, true)
 	if err != nil {
 		return nil, err
 	}
-	v := make([][]byte, 0, num)
 	if keyInfo.IsNotExistOrExpired() {
-		return v, nil
+		return [][]byte{}, nil
 	}
+	preAlloc := num
+	oldh := keyInfo.OldHeader
+	if len(oldh.UserData) < 8 {
+		return nil, errIntNumber
+	}
+	n, err := Int64(oldh.UserData[:8], nil)
+	if err != nil {
+		return nil, err
+	}
+	if n > 0 && n < int64(preAlloc) {
+		preAlloc = int(n)
+	}
+	v := make([][]byte, 0, preAlloc)
 
 	start := keyInfo.RangeStart
 	stop := keyInfo.RangeEnd
@@ -364,7 +382,7 @@ func (db *RockDB) SPop(ts int64, key []byte, count int) ([][]byte, error) {
 
 func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	wb := db.wb
-	wb.Clear()
+	defer wb.Clear()
 	keyInfo, err := db.GetCollVersionKey(ts, SetType, key, false)
 	if err != nil {
 		return 0, err
@@ -411,10 +429,8 @@ func (db *RockDB) SClear(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	wb := db.wb
-	wb.Clear()
-	num := db.sDelete(key, wb)
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	num := db.sDelete(key, db.wb)
+	err := db.CommitBatchWrite()
 	return num, err
 }
 

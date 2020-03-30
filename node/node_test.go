@@ -1,11 +1,19 @@
 package node
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 )
+
+func TestMain(m *testing.M) {
+	common.InitDefaultForGLogger("")
+	ret := m.Run()
+	os.Exit(ret)
+}
 
 func TestWaitReqPools(t *testing.T) {
 	wrPools := newWaitReqPoolArray()

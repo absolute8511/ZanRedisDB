@@ -49,7 +49,7 @@ func defaultSoftSettings() soft {
 		MaxInFlightMsgSnap: 16,
 		MaxSizePerMsg:      512 * 1024,
 		MaxInflightMsgs:    256,
-		CommitBufferLen:    5000,
+		CommitBufferLen:    1024 * 8,
 		ProposalQueueLen:   1024 * 4,
 		ProposalQueueNum:   uint64(runtime.NumCPU()),
 	}

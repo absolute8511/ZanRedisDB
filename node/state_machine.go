@@ -88,6 +88,7 @@ type IBatchOperator interface {
 	AddBatchRsp(uint64, interface{})
 	IsBatchable(string, string, [][]byte) bool
 	CommitBatch()
+	AbortBatchForError(err error)
 }
 
 type kvbatchOperator struct {
@@ -140,6 +141,27 @@ func (bo *kvbatchOperator) IsBatchable(cmdName string, pk string, args [][]byte)
 		return true
 	}
 	return false
+}
+
+func (bo *kvbatchOperator) AbortBatchForError(err error) {
+	// we need clean write batch even no batched
+	bo.kvsm.store.AbortBatch()
+	if !bo.IsBatched() {
+		return
+	}
+	bo.SetBatched(false)
+	bo.dupCheckMap = make(map[string]bool)
+	batchCost := time.Since(bo.batchStart)
+	// write the future response or error
+	for _, rid := range bo.batchReqIDList {
+		bo.kvsm.w.Trigger(rid, err)
+	}
+	if batchCost > dbWriteSlow/2 {
+		bo.kvsm.Infof("aborted slow batch write db, batch: %v, cost: %v",
+			len(bo.batchReqIDList), batchCost)
+	}
+	bo.batchReqIDList = bo.batchReqIDList[:0]
+	bo.batchReqRspList = bo.batchReqRspList[:0]
 }
 
 func (bo *kvbatchOperator) CommitBatch() {
@@ -678,6 +700,9 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 						kvsm.w.Trigger(reqID, err)
 						if isUnrecoveryError(err) {
 							panic(err)
+						}
+						if rockredis.IsNeedAbortError(err) {
+							batch.AbortBatchForError(err)
 						}
 					} else {
 						if batch.IsBatched() {

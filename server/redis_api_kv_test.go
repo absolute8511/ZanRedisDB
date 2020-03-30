@@ -47,7 +47,7 @@ func TestKV(t *testing.T) {
 		t.Fatal(n)
 	}
 
-	if ok, err := goredis.String(c.Do("setex", keyExpire, 1, "hello world")); err != nil {
+	if ok, err := goredis.String(c.Do("setex", keyExpire, 2, "hello world")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
 		t.Fatal(ok)

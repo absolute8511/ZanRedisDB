@@ -38,7 +38,7 @@ const (
 	slowLogTime = time.Millisecond * 100
 )
 
-var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("server"))
+var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 
 func SetLogger(level int32, logger common.Logger) {
 	sLog.SetLevel(level)
@@ -221,7 +221,7 @@ func NewServer(conf ServerConfig) *Server {
 
 func (s *Server) Stop() {
 	sLog.Infof("server begin stopping")
-	s.nsMgr.BackupDB("")
+	s.nsMgr.BackupDB("", true)
 	// wait backup done
 	time.Sleep(time.Second * 3)
 	if s.dataCoord != nil {

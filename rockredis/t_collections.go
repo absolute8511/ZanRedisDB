@@ -106,6 +106,7 @@ func (db *RockDB) GetCollVersionKey(ts int64, dt byte, key []byte, useLock bool)
 	return keyInfo, nil
 }
 
+// note this may use write batch in db
 func (db *RockDB) prepareCollKeyForWrite(ts int64, dt byte, key []byte, field []byte) (collVerKeyInfo, error) {
 	var keyInfo collVerKeyInfo
 	table, rk, err := extractTableFromRedisKey(key)

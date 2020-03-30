@@ -229,7 +229,7 @@ func (exp *compactExpiration) ExpireAt(dataType byte, key []byte, rawValue []byt
 	switch dataType {
 	case HashType, KVType, SetType, BitmapType, ListType, ZSetType:
 		wb := exp.db.wb
-		wb.Clear()
+		defer wb.Clear()
 		if rawValue == nil {
 			// key not exist
 			return 0, nil

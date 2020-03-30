@@ -32,7 +32,7 @@ const (
 	writeTmpSize           = 1024 * 512
 )
 
-var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("db"))
+var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 
 func SetLogLevel(level int32) {
 	dbLog.SetLevel(level)
@@ -968,24 +968,18 @@ func (r *RockDB) UpdateHsetIndexState(table string, hindex *common.HsetIndexSche
 
 func (r *RockDB) BeginBatchWrite() error {
 	if atomic.CompareAndSwapInt32(&r.isBatching, 0, 1) {
-		r.wb.Clear()
 		return nil
 	}
 	return errors.New("another batching is waiting")
-}
-
-func (r *RockDB) MaybeClearBatch() {
-	if atomic.LoadInt32(&r.isBatching) == 1 {
-		return
-	}
-	r.wb.Clear()
 }
 
 func (r *RockDB) MaybeCommitBatch() error {
 	if atomic.LoadInt32(&r.isBatching) == 1 {
 		return nil
 	}
-	return r.eng.Write(r.defaultWriteOpts, r.wb)
+	err := r.eng.Write(r.defaultWriteOpts, r.wb)
+	r.wb.Clear()
+	return err
 }
 
 func (r *RockDB) CommitBatchWrite() error {
@@ -993,8 +987,23 @@ func (r *RockDB) CommitBatchWrite() error {
 	if err != nil {
 		dbLog.Infof("commit write error: %v", err)
 	}
+	r.wb.Clear()
 	atomic.StoreInt32(&r.isBatching, 0)
 	return err
+}
+
+func (r *RockDB) AbortBatch() {
+	r.wb.Clear()
+	atomic.StoreInt32(&r.isBatching, 0)
+}
+
+func IsNeedAbortError(err error) bool {
+	// for the error which will not touch write batch no need abort
+	// since it will not affect the write buffer in batch
+	if err == errTooMuchBatchSize {
+		return false
+	}
+	return true
 }
 
 func IsBatchableWrite(cmd string) bool {

@@ -29,7 +29,7 @@ const (
 	SnapshotFinish   SnapshotStatus = 1
 	SnapshotFailure  SnapshotStatus = 2
 	queueWaitTime                   = time.Millisecond * 10
-	recvQueueLen                    = 1024 * 8
+	recvQueueLen                    = 1024 * 16
 	proposalQueueLen                = 1024 * 4
 )
 

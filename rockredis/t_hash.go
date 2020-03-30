@@ -192,7 +192,6 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, ovalue 
 		defer tableIndexes.Unlock()
 		hindex = tableIndexes.GetHIndexNoLock(string(field))
 	}
-	db.MaybeClearBatch()
 
 	var value []byte
 	if len(ovalue) > len(db.writeTmpBuf) {
@@ -223,7 +222,6 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 	if len(args) == 0 {
 		return nil
 	}
-	db.MaybeClearBatch()
 
 	c1 := time.Since(s)
 	// get old header for this hash key
@@ -423,7 +421,6 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		defer tableIndexes.Unlock()
 	}
 
-	db.wb.Clear()
 	wb := db.wb
 	var ek []byte
 	var oldV []byte
@@ -464,7 +461,7 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 		db.delExpire(HashType, key, nil, false, wb)
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.MaybeCommitBatch()
 	return num, err
 }
 
@@ -533,7 +530,6 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	}
 
 	wb := db.wb
-	wb.Clear()
 	err = db.hDeleteAll(hkey, wb, tableIndexes)
 	if err != nil {
 		return 0, err
@@ -543,7 +539,7 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	}
 	db.delExpire(HashType, hkey, nil, false, wb)
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.MaybeCommitBatch()
 	return hlen, err
 }
 
@@ -606,7 +602,6 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 		hindex = tableIndexes.GetHIndexNoLock(string(field))
 	}
 	wb := db.wb
-	wb.Clear()
 
 	var n int64
 	if fv != nil {
@@ -625,7 +620,7 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 		return 0, err
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.MaybeCommitBatch()
 	return n, err
 }
 

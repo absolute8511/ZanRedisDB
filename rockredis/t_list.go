@@ -119,7 +119,7 @@ func (db *RockDB) fixListKey(ts int64, key []byte) {
 	}
 	table := keyInfo.Table
 	rk := keyInfo.VerKey
-	db.wb.Clear()
+	defer db.wb.Clear()
 	dbLog.Infof("list %v before fix: meta: %v, %v", string(key), headSeq, tailSeq)
 	startKey := lEncodeListKey(table, rk, listMinSeq)
 	stopKey := lEncodeListKey(table, rk, listMaxSeq)
@@ -178,6 +178,8 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		return 0, err
 	}
 
+	wb := db.wb
+	defer wb.Clear()
 	keyInfo, err := db.prepareCollKeyForWrite(ts, ListType, key, nil)
 	if err != nil {
 		return 0, err
@@ -198,8 +200,6 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		return int64(size), nil
 	}
 
-	wb := db.wb
-	wb.Clear()
 	seq := headSeq
 	var delta int64 = -1
 	if whereSeq == listTailSeq {
@@ -275,7 +275,7 @@ func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {
 	}
 
 	wb := db.wb
-	wb.Clear()
+	defer wb.Clear()
 	var value []byte
 
 	var seq int64 = headSeq
@@ -335,7 +335,7 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 	table := keyInfo.Table
 	rk := keyInfo.VerKey
 	wb := db.wb
-	wb.Clear()
+	defer wb.Clear()
 
 	start := int64(startP)
 	stop := int64(stopP)
@@ -412,8 +412,6 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 	}
 	table := keyInfo.Table
 	rk := keyInfo.VerKey
-	wb := db.wb
-	wb.Clear()
 
 	if size == 0 {
 		return 0, nil
@@ -434,6 +432,8 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 		tailSeq = trimStartSeq - 1
 	}
 
+	wb := db.wb
+	defer wb.Clear()
 	if trimEndSeq-trimStartSeq > RangeDeleteNum {
 		itemStartKey := lEncodeListKey(table, rk, trimStartSeq)
 		itemEndKey := lEncodeListKey(table, rk, trimEndSeq)
@@ -646,8 +646,6 @@ func (db *RockDB) LSet(ts int64, key []byte, index int64, value []byte) error {
 	if size == 0 {
 		return errListIndex
 	}
-	db.wb.Clear()
-	wb := db.wb
 
 	var seq int64
 	if index >= 0 {
@@ -658,10 +656,11 @@ func (db *RockDB) LSet(ts int64, key []byte, index int64, value []byte) error {
 	if seq < headSeq || seq > tailSeq {
 		return errListIndex
 	}
+	wb := db.wb
 	sk := lEncodeListKey(table, rk, seq)
 	db.lSetMeta(key, keyInfo.OldHeader, headSeq, tailSeq, ts, wb)
 	wb.Put(sk, value)
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.CommitBatchWrite()
 	return err
 }
 
@@ -735,13 +734,12 @@ func (db *RockDB) LClear(key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	db.wb.Clear()
 	num := db.lDelete(key, db.wb)
 	if num > 0 {
 		//delete the expire data related to the list key
 		db.delExpire(ListType, key, nil, false, db.wb)
 	}
-	err := db.eng.Write(db.defaultWriteOpts, db.wb)
+	err := db.CommitBatchWrite()
 	return num, err
 }
 
@@ -750,7 +748,6 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 		return 0, errTooMuchBatchSize
 	}
 
-	db.wb.Clear()
 	for _, key := range keys {
 		if err := checkKeySize(key); err != nil {
 			return 0, err
@@ -758,7 +755,7 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 		db.lDelete(key, db.wb)
 		db.delExpire(ListType, key, nil, false, db.wb)
 	}
-	err := db.eng.Write(db.defaultWriteOpts, db.wb)
+	err := db.CommitBatchWrite()
 	if err != nil {
 		// TODO: log here , the list maybe corrupt
 	}
