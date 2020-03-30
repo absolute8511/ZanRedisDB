@@ -16,6 +16,7 @@ import (
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/pkg/wait"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/rockredis"
@@ -49,7 +50,7 @@ type StateMachine interface {
 	Destroy()
 	CleanData() error
 	Optimize(string)
-	GetStats(table string) common.NamespaceStats
+	GetStats(table string) metric.NamespaceStats
 	Start() error
 	Close()
 	GetBatchOperator() IBatchOperator
@@ -250,8 +251,8 @@ func (esm *emptySM) CleanData() error {
 func (esm *emptySM) Optimize(t string) {
 
 }
-func (esm *emptySM) GetStats(table string) common.NamespaceStats {
-	return common.NamespaceStats{}
+func (esm *emptySM) GetStats(table string) metric.NamespaceStats {
+	return metric.NamespaceStats{}
 }
 func (esm *emptySM) Start() error {
 	return nil
@@ -270,7 +271,7 @@ type kvStoreSM struct {
 	fullNS        string
 	machineConfig MachineConfig
 	ID            uint64
-	dbWriteStats  common.WriteStats
+	dbWriteStats  metric.WriteStats
 	w             wait.Wait
 	router        *common.SMCmdRouter
 	stopping      int32
@@ -342,20 +343,20 @@ func (kvsm *kvStoreSM) GetDBInternalStats() string {
 	return kvsm.store.GetStatistics()
 }
 
-func (kvsm *kvStoreSM) GetStats(table string) common.NamespaceStats {
+func (kvsm *kvStoreSM) GetStats(table string) metric.NamespaceStats {
 	var tbs [][]byte
 	if len(table) > 0 {
 		tbs = [][]byte{[]byte(table)}
 	} else {
 		tbs = kvsm.store.GetTables()
 	}
-	var ns common.NamespaceStats
+	var ns metric.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
 	diskUsages := kvsm.store.GetBTablesSizes(tbs)
 	for i, t := range tbs {
 		cnt, _ := kvsm.store.GetTableKeyCount(t)
-		var ts common.TableStats
+		var ts metric.TableStats
 		ts.ApproximateKeyNum = kvsm.store.GetTableApproximateNumInRange(string(t), nil, nil)
 		if cnt <= 0 {
 			cnt = ts.ApproximateKeyNum

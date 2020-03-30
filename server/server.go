@@ -21,6 +21,7 @@ import (
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/pkg/types"
 	"github.com/youzan/ZanRedisDB/raft"
@@ -74,7 +75,7 @@ type Server struct {
 	nsMgr         *node.NamespaceMgr
 	startTime     time.Time
 	maxScanJob    int32
-	scanStats     common.ScanStats
+	scanStats     metric.ScanStats
 	writeQs       []*writeQ
 }
 
@@ -255,21 +256,21 @@ func (s *Server) GetNamespaceFromFullName(ns string) *node.NamespaceNode {
 	return s.nsMgr.GetNamespaceNode(ns)
 }
 
-func (s *Server) GetLogSyncStatsInSyncLearner() ([]common.LogSyncStats, []common.LogSyncStats) {
+func (s *Server) GetLogSyncStatsInSyncLearner() ([]metric.LogSyncStats, []metric.LogSyncStats) {
 	return s.nsMgr.GetLogSyncStatsInSyncer()
 }
 
-func (s *Server) GetLogSyncStats(leaderOnly bool, srcClusterName string) []common.LogSyncStats {
+func (s *Server) GetLogSyncStats(leaderOnly bool, srcClusterName string) []metric.LogSyncStats {
 	return s.nsMgr.GetLogSyncStats(leaderOnly, srcClusterName)
 }
 
-func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]common.TableStats {
-	var ss common.ServerStats
+func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]metric.TableStats {
+	var ss metric.ServerStats
 	ss.NSStats = s.nsMgr.GetStats(leaderOnly, table)
-	allTbs := make(map[string]common.TableStats)
+	allTbs := make(map[string]metric.TableStats)
 	for _, s := range ss.NSStats {
 		ns, _ := common.GetNamespaceAndPartition(s.Name)
-		var tbs common.TableStats
+		var tbs metric.TableStats
 		tbs.Name = table
 		if t, ok := allTbs[ns]; ok {
 			tbs = t
@@ -289,8 +290,8 @@ func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]common.
 	return allTbs
 }
 
-func (s *Server) GetStats(leaderOnly bool) common.ServerStats {
-	var ss common.ServerStats
+func (s *Server) GetStats(leaderOnly bool) metric.ServerStats {
+	var ss metric.ServerStats
 	ss.NSStats = s.nsMgr.GetStats(leaderOnly, "")
 	ss.ScanStats = s.scanStats.Copy()
 	return ss

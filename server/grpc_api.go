@@ -11,6 +11,7 @@ import (
 	context "golang.org/x/net/context"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/syncerpb"
 	"google.golang.org/grpc"
@@ -21,8 +22,8 @@ var (
 	errRemoteSyncOutOfOrder = errors.New("remote sync index out of order")
 )
 
-var syncClusterNetStats common.WriteStats
-var syncClusterTotalStats common.WriteStats
+var syncClusterNetStats metric.WriteStats
+var syncClusterTotalStats metric.WriteStats
 
 var applyStatusMapping = map[int]syncerpb.RaftApplySnapStatus{
 	0: syncerpb.ApplyUnknown,
