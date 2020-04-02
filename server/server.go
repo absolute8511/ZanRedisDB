@@ -266,7 +266,7 @@ func (s *Server) GetLogSyncStats(leaderOnly bool, srcClusterName string) []metri
 
 func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]metric.TableStats {
 	var ss metric.ServerStats
-	ss.NSStats = s.nsMgr.GetStats(leaderOnly, table)
+	ss.NSStats = s.nsMgr.GetStats(leaderOnly, table, true)
 	allTbs := make(map[string]metric.TableStats)
 	for _, s := range ss.NSStats {
 		ns, _ := common.GetNamespaceAndPartition(s.Name)
@@ -290,9 +290,9 @@ func (s *Server) GetTableStats(leaderOnly bool, table string) map[string]metric.
 	return allTbs
 }
 
-func (s *Server) GetStats(leaderOnly bool) metric.ServerStats {
+func (s *Server) GetStats(leaderOnly bool, tableDetail bool) metric.ServerStats {
 	var ss metric.ServerStats
-	ss.NSStats = s.nsMgr.GetStats(leaderOnly, "")
+	ss.NSStats = s.nsMgr.GetStats(leaderOnly, "", tableDetail)
 	ss.ScanStats = s.scanStats.Copy()
 	return ss
 }

@@ -480,8 +480,8 @@ func (nd *KVNode) GetWALDBInternalStats() map[string]interface{} {
 	return eng.GetInternalStatus()
 }
 
-func (nd *KVNode) GetStats(table string) metric.NamespaceStats {
-	ns := nd.sm.GetStats(table)
+func (nd *KVNode) GetStats(table string, needTableDetail bool) metric.NamespaceStats {
+	ns := nd.sm.GetStats(table, needTableDetail)
 	ns.ClusterWriteStats = nd.clusterWriteStats.Copy()
 	return ns
 }
