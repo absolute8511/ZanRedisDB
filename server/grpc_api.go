@@ -100,12 +100,10 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 			return &rpcErr, nil
 		}
 		if len(reqList.Reqs) == 0 {
-			// some events (such as leader transfer) no need send to local cluster, just update term/index
-			kv.Node.SetRemoteClusterSyncedRaft(r.ClusterName, r.Term, r.Index, r.RaftTimestamp)
+			// some events (such as leader transfer) has no reqs,
+			// however, we need to send to raft so we will not lost the event while this leader changed
 			sLog.Infof("%v raft log commit synced without proposal: %v-%v, last: %v",
 				r.RaftGroupName, r.Term, r.Index, r.String())
-			lastIndex = r.Index
-			continue
 		}
 		fu, origReqs, err := kv.Node.ProposeRawAsyncFromSyncer(r.Data, &reqList, r.Term, r.Index, r.RaftTimestamp)
 		if err != nil {
