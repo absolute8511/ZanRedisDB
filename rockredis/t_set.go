@@ -344,9 +344,13 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if n == 0 {
+		return [][]byte{}, nil
+	}
 	if n > 0 && n < int64(preAlloc) {
 		preAlloc = int(n)
 	}
+	// TODO: use pool for large alloc
 	v := make([][]byte, 0, preAlloc)
 
 	start := keyInfo.RangeStart
