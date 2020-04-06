@@ -97,7 +97,7 @@ func sEncodeStopKey(table []byte, key []byte) []byte {
 	return k
 }
 
-func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
+func (db *RockDB) sDelete(tn int64, key []byte, wb *gorocksdb.WriteBatch) int64 {
 	sk := sEncodeSizeKey(key)
 	keyInfo, err := db.getCollVerKeyForRange(0, SetType, key, false)
 	if err != nil {
@@ -107,7 +107,7 @@ func (db *RockDB) sDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	start := keyInfo.RangeStart
 	stop := keyInfo.RangeEnd
 
-	num, err := db.sGetSize(key, false)
+	num, err := db.sGetSize(tn, key, false)
 	if err != nil {
 		return 0
 	}
@@ -169,11 +169,11 @@ func (db *RockDB) sIncrSize(ts int64, key []byte, oldh *headerMetaValue, delta i
 	return size, nil
 }
 
-func (db *RockDB) sGetSize(key []byte, useLock bool) (int64, error) {
+func (db *RockDB) sGetSize(tn int64, key []byte, useLock bool) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	oldh, expired, err := db.collHeaderMeta(time.Now().UnixNano(), SetType, key, useLock)
+	oldh, expired, err := db.collHeaderMeta(tn, SetType, key, useLock)
 	if err != nil {
 		return 0, err
 	}
@@ -274,7 +274,8 @@ func (db *RockDB) SGetVer(key []byte) (int64, error) {
 }
 
 func (db *RockDB) SCard(key []byte) (int64, error) {
-	return db.sGetSize(key, true)
+	tn := time.Now().UnixNano()
+	return db.sGetSize(tn, key, true)
 }
 
 func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
@@ -303,7 +304,8 @@ func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
 }
 
 func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
-	num, err := db.sGetSize(key, true)
+	tn := time.Now().UnixNano()
+	num, err := db.sGetSize(tn, key, true)
 	if err != nil {
 		return nil, err
 	}
@@ -311,15 +313,16 @@ func (db *RockDB) SMembers(key []byte) ([][]byte, error) {
 	if num == 0 {
 		return nil, nil
 	}
-	return db.sMembersN(key, int(num))
+	return db.sMembersN(tn, key, int(num))
 }
 
 // we do not use rand here
 func (db *RockDB) SRandMembers(key []byte, count int64) ([][]byte, error) {
-	return db.sMembersN(key, int(count))
+	tn := time.Now().UnixNano()
+	return db.sMembersN(tn, key, int(count))
 }
 
-func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
+func (db *RockDB) sMembersN(tn int64, key []byte, num int) ([][]byte, error) {
 	if num > MAX_BATCH_NUM {
 		return nil, errTooMuchBatchSize
 	}
@@ -327,7 +330,6 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 		return nil, common.ErrInvalidArgs
 	}
 
-	tn := time.Now().UnixNano()
 	keyInfo, err := db.getCollVerKeyForRange(tn, SetType, key, true)
 	if err != nil {
 		return nil, err
@@ -347,11 +349,16 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 	if n == 0 {
 		return [][]byte{}, nil
 	}
+	startTs := time.Now()
 	if n > 0 && n < int64(preAlloc) {
 		preAlloc = int(n)
 	}
+	if preAlloc > 4 {
+		dbLog.Debugf("smember prealloc: %v", preAlloc)
+	}
 	// TODO: use pool for large alloc
 	v := make([][]byte, 0, preAlloc)
+	cost1 := time.Since(startTs)
 
 	start := keyInfo.RangeStart
 	stop := keyInfo.RangeEnd
@@ -371,11 +378,15 @@ func (db *RockDB) sMembersN(key []byte, num int) ([][]byte, error) {
 			break
 		}
 	}
+	cost2 := time.Since(startTs)
+	if cost2 > time.Millisecond*5 {
+		dbLog.Debugf("smember prealloc: %v, cost: %s, %s", preAlloc, cost1, cost2)
+	}
 	return v, nil
 }
 
 func (db *RockDB) SPop(ts int64, key []byte, count int) ([][]byte, error) {
-	vals, err := db.sMembersN(key, count)
+	vals, err := db.sMembersN(ts, key, count)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +396,9 @@ func (db *RockDB) SPop(ts int64, key []byte, count int) ([][]byte, error) {
 }
 
 func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
+	if len(args) == 0 {
+		return 0, nil
+	}
 	wb := db.wb
 	defer wb.Clear()
 	keyInfo, err := db.GetCollVersionKey(ts, SetType, key, false)
@@ -433,7 +447,7 @@ func (db *RockDB) SClear(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	num := db.sDelete(key, db.wb)
+	num := db.sDelete(0, key, db.wb)
 	err := db.CommitBatchWrite()
 	return num, err
 }
@@ -448,7 +462,7 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 		if err := checkKeySize(key); err != nil {
 			return 0, err
 		}
-		db.sDelete(key, wb)
+		db.sDelete(0, key, wb)
 	}
 
 	err := db.eng.Write(db.defaultWriteOpts, wb)
@@ -463,7 +477,7 @@ func (db *RockDB) sMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) err
 		if err := checkKeySize(key); err != nil {
 			return err
 		}
-		db.sDelete(key, wb)
+		db.sDelete(0, key, wb)
 	}
 	return nil
 }

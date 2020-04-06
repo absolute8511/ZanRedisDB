@@ -356,7 +356,7 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 }
 
 func (db *RockDB) ZFixKey(ts int64, key []byte) error {
-	oldh, n, err := db.zGetSize(key, false)
+	oldh, n, err := db.zGetSize(ts, key, false)
 	if err != nil {
 		dbLog.Infof("get zset card failed: %v", err.Error())
 		return err
@@ -395,8 +395,8 @@ func (db *RockDB) zIncrSize(ts int64, key []byte, oldh *headerMetaValue, delta i
 	return size, nil
 }
 
-func (db *RockDB) zGetSize(key []byte, useLock bool) (*headerMetaValue, int64, error) {
-	oldh, expired, err := db.collHeaderMeta(time.Now().UnixNano(), ZSetType, key, useLock)
+func (db *RockDB) zGetSize(tn int64, key []byte, useLock bool) (*headerMetaValue, int64, error) {
+	oldh, expired, err := db.collHeaderMeta(tn, ZSetType, key, useLock)
 	if err != nil {
 		return oldh, 0, err
 	}
@@ -430,7 +430,8 @@ func (db *RockDB) ZGetVer(key []byte) (int64, error) {
 }
 
 func (db *RockDB) ZCard(key []byte) (int64, error) {
-	_, s, err := db.zGetSize(key, true)
+	ts := time.Now().UnixNano()
+	_, s, err := db.zGetSize(ts, key, true)
 	return s, err
 }
 
@@ -746,7 +747,7 @@ func (db *RockDB) zRemRange(ts int64, key []byte, min float64, max float64, offs
 	return db.zRemRangeBytes(ts, key, keyInfo, offset, count, wb, false)
 }
 
-func (db *RockDB) zRangeBytes(preCheckCnt bool, key []byte, minKey []byte, maxKey []byte, offset int, count int, reverse bool) ([]common.ScorePair, error) {
+func (db *RockDB) zRangeBytes(ts int64, preCheckCnt bool, key []byte, minKey []byte, maxKey []byte, offset int, count int, reverse bool) ([]common.ScorePair, error) {
 	if len(key) > MaxKeySize {
 		return nil, errKeySize
 	}
@@ -759,7 +760,7 @@ func (db *RockDB) zRangeBytes(preCheckCnt bool, key []byte, minKey []byte, maxKe
 	}
 	// if count == -1, check if we may get too much data
 	if count < 0 && preCheckCnt {
-		_, total, _ := db.zGetSize(key, true)
+		_, total, _ := db.zGetSize(ts, key, true)
 		if total-int64(offset) > MAX_BATCH_NUM {
 			return nil, errTooMuchBatchSize
 		}
@@ -778,6 +779,7 @@ func (db *RockDB) zRangeBytes(preCheckCnt bool, key []byte, minKey []byte, maxKe
 	if count > 0 && count < preAlloc {
 		preAlloc = count
 	}
+	// TODO: use pool for large alloc
 	v := make([]common.ScorePair, 0, preAlloc)
 
 	var err error
@@ -836,7 +838,7 @@ func (db *RockDB) zRange(key []byte, min float64, max float64, offset int, count
 	if min == common.MinScore && max == common.MaxScore {
 		preCheckCnt = true
 	}
-	return db.zRangeBytes(preCheckCnt, key, minKey, maxKey, offset, count, reverse)
+	return db.zRangeBytes(tn, preCheckCnt, key, minKey, maxKey, offset, count, reverse)
 }
 
 func (db *RockDB) zParseLimit(total int64, start int, stop int) (offset int, count int, err error) {
@@ -1001,7 +1003,7 @@ func (db *RockDB) ZRangeGeneric(key []byte, start int, stop int, reverse bool) (
 	if err != nil {
 		return nil, err
 	}
-	return db.zRangeBytes(true, key, keyInfo.RangeStart, keyInfo.RangeEnd, offset, count, reverse)
+	return db.zRangeBytes(tn, true, key, keyInfo.RangeStart, keyInfo.RangeEnd, offset, count, reverse)
 }
 
 //min and max must be inclusive
@@ -1068,6 +1070,7 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	if count > 0 && count < preAlloc {
 		preAlloc = count
 	}
+	// TODO: use pool for large alloc
 	ay := make([][]byte, 0, preAlloc)
 	for ; it.Valid(); it.Next() {
 		rawk := it.Key()
