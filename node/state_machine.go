@@ -629,7 +629,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 	}
 	if ts > 0 {
 		cost := start.UnixNano() - ts
-		if cost > raftSlow.Nanoseconds()/2 {
+		if cost > raftSlow.Nanoseconds()/2 && nodeLog.Level() >= common.LOG_DETAIL {
 			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
 		}
 	}
