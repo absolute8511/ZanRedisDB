@@ -354,7 +354,6 @@ func (db *RockDB) sMembersN(tn int64, key []byte, num int) ([][]byte, error) {
 	}
 	// TODO: use pool for large alloc
 	v := make([][]byte, 0, preAlloc)
-	startTs := time.Now()
 
 	start := keyInfo.RangeStart
 	stop := keyInfo.RangeEnd
@@ -364,7 +363,6 @@ func (db *RockDB) sMembersN(tn int64, key []byte, num int) ([][]byte, error) {
 		return nil, err
 	}
 	defer it.Close()
-	cost1 := time.Since(startTs)
 	for ; it.Valid(); it.Next() {
 		_, _, m, err := sDecodeSetKey(it.Key())
 		if err != nil {
@@ -374,10 +372,6 @@ func (db *RockDB) sMembersN(tn int64, key []byte, num int) ([][]byte, error) {
 		if len(v) >= num {
 			break
 		}
-	}
-	cost2 := time.Since(startTs)
-	if cost2 > time.Millisecond*5 {
-		dbLog.Debugf("smember %s prealloc: %v, cost: %s, %s, len: %v", key, preAlloc, cost1, cost2, len(v))
 	}
 	return v, nil
 }
