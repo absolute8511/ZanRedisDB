@@ -655,6 +655,9 @@ func (db *RockDB) zRemAll(ts int64, key []byte, wb *gorocksdb.WriteBatch) (int64
 	if err != nil {
 		return 0, err
 	}
+	if num == 0 {
+		return 0, nil
+	}
 
 	minKey := keyInfo.RangeStart
 	maxKey := keyInfo.RangeEnd
@@ -683,9 +686,16 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, keyInfo collVerKeyInfo, o
 	if len(key) > MaxKeySize {
 		return 0, errKeySize
 	}
+	total, err := parseZMetaSize(keyInfo.OldHeader.UserData)
+	if err != nil {
+		return 0, err
+	}
+	if total == 0 {
+		// no data to be deleted, avoid iterator data
+		return 0, nil
+	}
 	// if count >= total size , remove all
 	if offset == 0 {
-		total, err := parseZMetaSize(keyInfo.OldHeader.UserData)
 		if err == nil && int64(count) >= total {
 			return db.zRemAll(ts, key, wb)
 		}
