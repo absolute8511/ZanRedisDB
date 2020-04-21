@@ -348,6 +348,7 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 		return nil, err
 	}
 
+	// TODO: use pool for large alloc
 	v := make([][]byte, 0, count)
 	tn := time.Now().UnixNano()
 	keyInfo, err := db.GetCollVersionKey(tn, SetType, key, true)
@@ -395,6 +396,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 	if err != nil {
 		return nil, err
 	}
+	// TODO: use pool for large alloc
 	v := make([]common.ScorePair, 0, count)
 	if keyInfo.IsNotExistOrExpired() {
 		return v, nil

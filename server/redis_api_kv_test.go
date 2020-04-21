@@ -9,9 +9,7 @@ import (
 
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
-	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 func TestKV(t *testing.T) {
@@ -823,9 +821,6 @@ func TestKVErrorParams(t *testing.T) {
 }
 
 func TestPFOp(t *testing.T) {
-	if testing.Verbose() {
-		rockredis.SetLogger(int32(common.LOG_DETAIL), newTestLogger(t))
-	}
 	c := getTestConn(t)
 	defer c.Close()
 

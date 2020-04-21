@@ -703,6 +703,7 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	}
 	headSeq += start
 
+	// TODO: use pool for large alloc
 	v := make([][]byte, 0, limit)
 
 	startKey := lEncodeListKey(table, rk, headSeq)

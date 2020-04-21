@@ -888,7 +888,7 @@ func (rc *raftNode) serveChannels() {
 				}
 			}
 			if !moreEntriesToApply && !busy {
-				rc.Infof("apply buffer nearly full, slow down: %v", len(rc.commitC))
+				rc.Debugf("apply buffer nearly full, slow down: %v", len(rc.commitC))
 			}
 			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, busy)
 			if !hasUpdate {

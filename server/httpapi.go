@@ -610,7 +610,12 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	if leaderOnlyStr == "" {
 		leaderOnly = true
 	}
-	ss := s.GetStats(leaderOnly)
+	detailStr := reqParams.Get("table_detail")
+	detail, _ := strconv.ParseBool(detailStr)
+	if detailStr == "" {
+		detail = false
+	}
+	ss := s.GetStats(leaderOnly, detail)
 
 	startTime := s.startTime
 	uptime := time.Since(startTime)

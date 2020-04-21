@@ -740,6 +740,7 @@ func (db *RockDB) HValues(key []byte) (int64, []common.KVRecordRet, error) {
 		return 0, nil, err
 	}
 	it.NoTimestamp(HashType)
+	// TODO: use pool for large alloc
 	vals := make([]common.KVRecordRet, 0, length)
 	defer it.Close()
 	for ; it.Valid(); it.Next() {

@@ -301,7 +301,7 @@ func waitForLeaderForClusters(w time.Duration, kvs []testClusterInfo) (*node.Nam
 func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *node.NamespaceNode, logSyncer bool) {
 	start := time.Now()
 	for {
-		nsStats := node.Node.GetStats("")
+		nsStats := node.Node.GetStats("", true)
 		ci := node.Node.GetAppliedIndex()
 		if ci >= leaderci {
 			assert.Equal(t, leaderci, ci)
@@ -356,7 +356,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	learnerNode := learnerServers[0].GetNamespaceFromFullName("default-0")
 	assert.NotNil(t, learnerNode)
 	m := learnerNode.Node.GetLocalMemberInfo()
-	nsStats := learnerNode.Node.GetStats("")
+	nsStats := learnerNode.Node.GetStats("", true)
 	assert.Equal(t, common.LearnerRoleLogSyncer, nsStats.InternalStats["role"])
 
 	raftStats := leaderNode.Node.GetRaftStatus()

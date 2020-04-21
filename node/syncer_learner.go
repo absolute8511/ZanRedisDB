@@ -120,7 +120,7 @@ func (sm *logSyncerSM) GetLogSyncStats() (metric.LogSyncStats, metric.LogSyncSta
 	return recvStats, syncStats
 }
 
-func (sm *logSyncerSM) GetStats(table string) metric.NamespaceStats {
+func (sm *logSyncerSM) GetStats(table string, needTableDetail bool) metric.NamespaceStats {
 	var ns metric.NamespaceStats
 	stat := make(map[string]interface{})
 	stat["role"] = sm.machineConfig.LearnerRole

@@ -50,7 +50,7 @@ type StateMachine interface {
 	Destroy()
 	CleanData() error
 	Optimize(string)
-	GetStats(table string) metric.NamespaceStats
+	GetStats(table string, needTableDetail bool) metric.NamespaceStats
 	Start() error
 	Close()
 	GetBatchOperator() IBatchOperator
@@ -251,7 +251,7 @@ func (esm *emptySM) CleanData() error {
 func (esm *emptySM) Optimize(t string) {
 
 }
-func (esm *emptySM) GetStats(table string) metric.NamespaceStats {
+func (esm *emptySM) GetStats(table string, needTableDetail bool) metric.NamespaceStats {
 	return metric.NamespaceStats{}
 }
 func (esm *emptySM) Start() error {
@@ -343,30 +343,31 @@ func (kvsm *kvStoreSM) GetDBInternalStats() string {
 	return kvsm.store.GetStatistics()
 }
 
-func (kvsm *kvStoreSM) GetStats(table string) metric.NamespaceStats {
-	var tbs [][]byte
-	if len(table) > 0 {
-		tbs = [][]byte{[]byte(table)}
-	} else {
-		tbs = kvsm.store.GetTables()
-	}
+func (kvsm *kvStoreSM) GetStats(table string, needTableDetail bool) metric.NamespaceStats {
 	var ns metric.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
-	diskUsages := kvsm.store.GetBTablesSizes(tbs)
-	for i, t := range tbs {
-		cnt, _ := kvsm.store.GetTableKeyCount(t)
-		var ts metric.TableStats
-		ts.ApproximateKeyNum = kvsm.store.GetTableApproximateNumInRange(string(t), nil, nil)
-		if cnt <= 0 {
-			cnt = ts.ApproximateKeyNum
+	if needTableDetail || len(table) > 0 {
+		var tbs [][]byte
+		if len(table) > 0 {
+			tbs = [][]byte{[]byte(table)}
+		} else {
+			tbs = kvsm.store.GetTables()
 		}
-		ts.Name = string(t)
-		ts.KeyNum = cnt
-		ts.DiskBytesUsage = diskUsages[i]
-		ns.TStats = append(ns.TStats, ts)
+		diskUsages := kvsm.store.GetBTablesSizes(tbs)
+		for i, t := range tbs {
+			cnt, _ := kvsm.store.GetTableKeyCount(t)
+			var ts metric.TableStats
+			ts.ApproximateKeyNum = kvsm.store.GetTableApproximateNumInRange(string(t), nil, nil)
+			if cnt <= 0 {
+				cnt = ts.ApproximateKeyNum
+			}
+			ts.Name = string(t)
+			ts.KeyNum = cnt
+			ts.DiskBytesUsage = diskUsages[i]
+			ns.TStats = append(ns.TStats, ts)
+		}
 	}
-
 	return ns
 }
 
@@ -628,7 +629,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 	}
 	if ts > 0 {
 		cost := start.UnixNano() - ts
-		if cost > raftSlow.Nanoseconds()/2 {
+		if cost > raftSlow.Nanoseconds()/2 && nodeLog.Level() >= common.LOG_DETAIL {
 			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
 		}
 	}
