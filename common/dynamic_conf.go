@@ -14,10 +14,14 @@ const (
 	ConfIgnoreStartupNoBackup = "ignore_startup_nobackup"
 	ConfIgnoreRemoteFileSync  = "ignore_remote_file_sync"
 	ConfMaxRemoteRecover      = "max_remote_recover"
+	ConfSlowLimiterSwitch     = "slow_limiter_switch"
 )
 
 var intConfMap map[string]*int64
 var strConfMap sync.Map
+var changedHandler sync.Map
+
+type KeyChangedHandler func(newV interface{})
 
 func init() {
 	intConfMap = make(map[string]*int64)
@@ -29,8 +33,14 @@ func init() {
 	intConfMap["empty_int"] = &emptyInt
 	maxRemoteRecover := int64(2)
 	intConfMap[ConfMaxRemoteRecover] = &maxRemoteRecover
+	slowSwitch := int64(1)
+	intConfMap[ConfSlowLimiterSwitch] = &slowSwitch
 
 	strConfMap.Store("test_str", "test_str")
+}
+
+func RegisterConfChangedHandler(key string, h KeyChangedHandler) {
+	changedHandler.Store(key, h)
 }
 
 func DumpDynamicConf() []string {
@@ -51,6 +61,13 @@ func SetIntDynamicConf(k string, newV int) {
 	v, ok := intConfMap[k]
 	if ok {
 		atomic.StoreInt64(v, int64(newV))
+		v, ok := changedHandler.Load(k)
+		if ok {
+			hd, ok := v.(KeyChangedHandler)
+			if ok {
+				hd(newV)
+			}
+		}
 	}
 }
 
@@ -76,6 +93,13 @@ func GetIntDynamicConf(k string) int {
 
 func SetStrDynamicConf(k string, newV string) {
 	strConfMap.Store(k, newV)
+	v, ok := changedHandler.Load(k)
+	if ok {
+		hd, ok := v.(KeyChangedHandler)
+		if ok {
+			hd(newV)
+		}
+	}
 }
 
 func GetStrDynamicConf(k string) string {

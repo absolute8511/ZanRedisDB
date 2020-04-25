@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/net/context"
 
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/pkg/wait"
@@ -205,6 +206,7 @@ type KVNode struct {
 	readWaitC    chan struct{}
 	readNotifier *notifier
 	wrPools      waitReqPoolArray
+	slowLimiter  *SlowLimiter
 }
 
 type KVSnapInfo struct {
@@ -237,7 +239,8 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 
 	stopChan := make(chan struct{})
 	w := wait.New()
-	sm, err := NewStateMachine(kvopts, *config.nodeConfig, config.ID, config.GroupName, clusterInfo, w)
+	sl := NewSlowLimiter()
+	sm, err := NewStateMachine(kvopts, *config.nodeConfig, config.ID, config.GroupName, clusterInfo, w, sl)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +261,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		readWaitC:          make(chan struct{}, 1),
 		readNotifier:       newNotifier(),
 		wrPools:            newWaitReqPoolArray(),
+		slowLimiter:        sl,
 	}
 	if kvsm, ok := sm.(*kvStoreSM); ok {
 		s.store = kvsm.store
@@ -282,9 +286,14 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	if err != nil {
 		return nil, err
 	}
+	raftNode.slowLimiter = s.slowLimiter
 	s.rn = raftNode
 	s.commitC = commitC
 	return s, nil
+}
+
+func (nd *KVNode) GetFullName() string {
+	return nd.ns
 }
 
 func (nd *KVNode) Start(standalone bool) error {
@@ -314,6 +323,7 @@ func (nd *KVNode) Start(standalone bool) error {
 		nd.readIndexLoop()
 	}()
 
+	nd.slowLimiter.Start()
 	return nil
 }
 
@@ -337,6 +347,7 @@ func (nd *KVNode) Stop() {
 	// deleted cb should be called after stopped, otherwise it
 	// may init the same node after deleted while the node is stopping.
 	go nd.deleteCb()
+	nd.slowLimiter.Stop()
 	nd.rn.Infof("node %v stopped", nd.ns)
 }
 
@@ -675,6 +686,10 @@ func (nd *KVNode) ProposeRawAndWaitFromSyncer(reqList *BatchInternalRaftRequest,
 
 func (nd *KVNode) UpdateWriteStats(vSize int64, latencyUs int64) {
 	nd.clusterWriteStats.UpdateWriteStats(vSize, latencyUs)
+
+	metric.ClusterWriteLatency.With(ps.Labels{
+		"namespace": nd.GetFullName(),
+	}).Observe(float64(latencyUs))
 }
 
 type FutureRsp struct {
@@ -780,19 +795,7 @@ func (nd *KVNode) RedisPropose(buf []byte) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	rsp, err := fr.WaitRsp()
-	cost := time.Since(start)
-	nd.UpdateWriteStats(int64(len(raftReq.Data)), cost.Nanoseconds()/1000)
-	if err == nil && !nd.IsWriteReady() {
-		nd.rn.Infof("write request %v on raft success but raft member is less than replicator",
-			raftReq.String())
-		return nil, errRaftNotReadyForWrite
-	}
-	if cost >= time.Second {
-		nd.rn.Infof("write request %v slow cost: %v",
-			raftReq.String(), cost)
-	}
-	return rsp, err
+	return fr.WaitRsp()
 }
 
 func (nd *KVNode) CustomPropose(buf []byte) (interface{}, error) {
@@ -1516,3 +1519,10 @@ func (nd *KVNode) SaveDBFrom(r io.Reader, msg raftpb.Message) (int64, error) {
 }
 
 func (nd *KVNode) IsPeerRemoved(peerID uint64) bool { return false }
+
+func (nd *KVNode) CanPass(ts int64, cmd string, table string) bool {
+	return nd.slowLimiter.CanPass(ts, cmd, table)
+}
+func (nd *KVNode) MaybeAddSlow(ts int64, cost time.Duration) {
+	nd.slowLimiter.MaybeAddSlow(ts, cost)
+}

@@ -192,6 +192,8 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 	} else if regID > 0 {
 		ns.machineConf.NodeID = regID
 	}
+	common.RegisterConfChangedHandler(common.ConfSlowLimiterSwitch, ns.HandleSlowLimiterSwitchChanged)
+
 	return ns
 }
 
@@ -917,6 +919,26 @@ func (nsm *NamespaceMgr) clearUnusedRaftPeer() {
 			return
 		}
 	}
+}
+
+func (nsm *NamespaceMgr) HandleSlowLimiterSwitchChanged(v interface{}) {
+	nodeLog.Infof("config for slow limiter changed to : %v", v)
+	on, ok := v.(int)
+	if !ok {
+		return
+	}
+	nsm.mutex.RLock()
+	for _, n := range nsm.kvNodes {
+		if !n.IsReady() || n.Node == nil {
+			continue
+		}
+		if on > 0 {
+			n.Node.slowLimiter.TurnOn()
+		} else {
+			n.Node.slowLimiter.TurnOff()
+		}
+	}
+	nsm.mutex.RUnlock()
 }
 
 func SetPerfLevel(level int) {

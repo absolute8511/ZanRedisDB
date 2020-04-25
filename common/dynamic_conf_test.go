@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDumpDynamicConf(t *testing.T) {
@@ -16,6 +18,7 @@ func TestDumpDynamicConf(t *testing.T) {
 		{"dump", []string{"check_raft_timeout:5", "check_snap_timeout:60",
 			"empty_int:0",
 			"max_remote_recover:2",
+			"slow_limiter_switch:1",
 			"test_str:test_str"}},
 	}
 	for _, tt := range tests {
@@ -42,13 +45,20 @@ func TestGetIntDynamicConf(t *testing.T) {
 		{"get non exist", args{"noexist"}, 0},
 		{"get after set non exist", args{"noexist-set"}, 0},
 	}
+	changedCalled := 0
+	RegisterConfChangedHandler(ConfCheckSnapTimeout, func(nv interface{}) {
+		_, ok := nv.(int)
+		assert.True(t, ok)
+		changedCalled++
+	})
 	SetIntDynamicConf("noexist-set", 2)
-	for _, tt := range tests {
+	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := GetIntDynamicConf(tt.args.k); got != tt.want {
 				t.Errorf("GetIntDynamicConf() = %v, want %v", got, tt.want)
 			}
 			SetIntDynamicConf(ConfCheckSnapTimeout, 2)
+			assert.Equal(t, i+1, changedCalled)
 		})
 	}
 }
@@ -67,13 +77,20 @@ func TestGetStrDynamicConf(t *testing.T) {
 		{"get non exist", args{"noexist"}, ""},
 		{"get after set non exist", args{"noexist-set"}, "set-noexist"},
 	}
+	changedCalled := 0
+	RegisterConfChangedHandler("test_str", func(nv interface{}) {
+		_, ok := nv.(string)
+		assert.True(t, ok)
+		changedCalled++
+	})
 	SetStrDynamicConf("noexist-set", "set-noexist")
-	for _, tt := range tests {
+	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := GetStrDynamicConf(tt.args.k); got != tt.want {
 				t.Errorf("GetStrDynamicConf() = %v, want %v", got, tt.want)
 			}
 			SetStrDynamicConf("test_str", "test_str_changed")
+			assert.Equal(t, i+1, changedCalled)
 		})
 	}
 }
