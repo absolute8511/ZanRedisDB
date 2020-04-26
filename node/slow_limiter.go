@@ -221,21 +221,21 @@ func (sl *SlowLimiter) RecordSlowCmd(cmd string, prefix string, cost time.Durati
 	if prefix == "" || cmd == "" {
 		return
 	}
-	var slow map[string]int64
+	slowKind := 0
 	if cost >= time.Millisecond*100 {
-		slow = sl.slow100s
+		slowKind = 100
 		metric.SlowWrite100msCnt.With(ps.Labels{
 			"table": prefix,
 			"cmd":   cmd,
 		}).Inc()
 	} else if cost >= time.Millisecond*50 {
-		slow = sl.slow50s
+		slowKind = 50
 		metric.SlowWrite50msCnt.With(ps.Labels{
 			"table": prefix,
 			"cmd":   cmd,
 		}).Inc()
 	} else if cost >= time.Millisecond*10 {
-		slow = sl.slow10s
+		slowKind = 10
 		metric.SlowWrite10msCnt.With(ps.Labels{
 			"table": prefix,
 			"cmd":   cmd,
@@ -252,6 +252,12 @@ func (sl *SlowLimiter) RecordSlowCmd(cmd string, prefix string, cost time.Durati
 	}
 	feat := cmd + " " + prefix
 	sl.mutex.Lock()
+	slow := sl.slow100s
+	if slowKind == 50 {
+		slow = sl.slow50s
+	} else if slowKind == 10 {
+		slow = sl.slow10s
+	}
 	old, ok := slow[feat]
 	if !ok {
 		old = 0
