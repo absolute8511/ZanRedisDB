@@ -423,6 +423,14 @@ func TestListLPushRPop(t *testing.T) {
 	poped := make([]int32, len(klist))
 	connPushList := make([]*goredis.PoolConn, len(klist))
 	connPopList := make([]*goredis.PoolConn, len(klist))
+	defer func() {
+		for _, c := range connPushList {
+			c.Close()
+		}
+		for _, c := range connPopList {
+			c.Close()
+		}
+	}()
 
 	start := time.Now()
 	var wg sync.WaitGroup

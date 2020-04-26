@@ -15,7 +15,6 @@ import (
 
 	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
-	"github.com/youzan/ZanRedisDB/settings"
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/cluster"
@@ -76,7 +75,6 @@ type Server struct {
 	startTime     time.Time
 	maxScanJob    int32
 	scanStats     metric.ScanStats
-	writeQs       []*writeQ
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -237,9 +235,7 @@ func (s *Server) Stop() {
 	default:
 	}
 	close(s.stopC)
-	for _, wq := range s.writeQs {
-		close(wq.stopC)
-	}
+
 	s.raftTransport.Stop()
 	s.wg.Wait()
 	sLog.Infof("server stopped")
@@ -328,21 +324,10 @@ func (s *Server) Start() {
 	s.raftTransport.Start()
 	s.stopC = make(chan struct{})
 
-	writeQs := make([]*writeQ, settings.Soft.ProposalQueueNum)
-	for i := 0; i < int(settings.Soft.ProposalQueueNum); i++ {
-		writeQs[i] = newWriteQ(settings.Soft.ProposalQueueLen)
-	}
-	s.writeQs = writeQs
-
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.serveRaft(s.stopC)
-	}()
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.handleRedisWriteLoop()
 	}()
 
 	if s.conf.ProfilePort >= 0 {
@@ -632,26 +617,4 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 		// Do we have any other resp arrays for write command which is not [][]byte?
 		conn.WriteError("Invalid response type")
 	}
-}
-
-func (s *Server) handleRedisWriteLoop() {
-	var wg sync.WaitGroup
-	for i := 0; i < len(s.writeQs); i++ {
-		wg.Add(1)
-		go func(wq *writeQ) {
-			defer wg.Done()
-			for {
-				select {
-				case <-wq.readyC:
-					elems := wq.q.get(false)
-					for _, e := range elems {
-						e.Func()()
-					}
-				case <-wq.stopC:
-					return
-				}
-			}
-		}(s.writeQs[i])
-	}
-	wg.Wait()
 }

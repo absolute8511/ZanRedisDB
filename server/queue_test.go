@@ -258,6 +258,9 @@ func TestEntryQueueAllowEntriesToBeAddedAndWait(t *testing.T) {
 	go func() {
 		for {
 			time.Sleep(time.Second / 100)
+			if q.closed() {
+				return
+			}
 			q.get(false)
 		}
 	}()
@@ -288,6 +291,7 @@ func TestEntryQueueAllowEntriesToBeAddedAndWait(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	q.close()
 }
 
 func TestClusterCanBeSetAsReady(t *testing.T) {

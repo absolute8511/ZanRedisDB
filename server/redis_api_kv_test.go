@@ -956,8 +956,6 @@ func TestSyncerOnlyWrite(t *testing.T) {
 }
 
 func TestSlowLimiterCommand(t *testing.T) {
-	node.EnableSlowLimiterTest(true)
-	defer node.EnableSlowLimiterTest(false)
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -1011,6 +1009,7 @@ func TestSlowLimiterCommand(t *testing.T) {
 			break
 		}
 		loop++
+		c.SetReadDeadline(time.Now().Add(time.Second * 10))
 		_, err := goredis.String(c.Do("slowwrite1s_test", key1, "12345"))
 		if err != nil && err.Error() == node.ErrSlowLimiterRefused.Error() {
 			refused++
@@ -1032,10 +1031,17 @@ func TestSlowLimiterCommand(t *testing.T) {
 	time.Sleep(node.SlowHalfOpen)
 	refused = 0
 	passedAfterRefused = 0
+	c2 := getTestConn(t)
+	defer c2.Close()
 	// wait until we become no slow to test clear history recorded slow
+	start = time.Now()
 	for {
+		if time.Since(start) > node.SlowHalfOpen*2 {
+			break
+		}
 		loop++
-		_, err := goredis.String(c.Do("slowwrite1s_test", key1, "12345"))
+		c2.SetReadDeadline(time.Now().Add(time.Second * 10))
+		_, err := goredis.String(c2.Do("slowwrite1s_test", key1, "12345"))
 		if err != nil && err.Error() == node.ErrSlowLimiterRefused.Error() {
 			refused++
 			time.Sleep(time.Millisecond)
