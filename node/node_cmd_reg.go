@@ -74,6 +74,13 @@ func (kvsm *kvStoreSM) registerHandlers() {
 	kvsm.router.RegisterInternal("spersist", kvsm.localSetPersistCommand)
 	kvsm.router.RegisterInternal("zpersist", kvsm.localZSetPersistCommand)
 	kvsm.router.RegisterInternal("bpersist", kvsm.localBitPersistCommand)
+
+	if enableSlowLimiterTest && kvsm.slowLimiter != nil {
+		kvsm.router.RegisterInternal("slowwrite1s_test", kvsm.slowLimiter.testSlowWrite1s)
+		kvsm.router.RegisterInternal("slowwrite100ms_test", kvsm.slowLimiter.testSlowWrite100ms)
+		kvsm.router.RegisterInternal("slowwrite50ms_test", kvsm.slowLimiter.testSlowWrite50ms)
+		kvsm.router.RegisterInternal("slowwrite5ms_test", kvsm.slowLimiter.testSlowWrite5ms)
+	}
 }
 
 func (nd *KVNode) registerHandler() {
@@ -228,6 +235,12 @@ func (nd *KVNode) registerHandler() {
 	//nd.router.RegisterWriteMerge("mset", nd.msetCommand)
 	nd.router.RegisterWriteMerge("plset", wrapWriteMergeCommandKVKV(nd, nil))
 
+	if enableSlowLimiterTest {
+		nd.router.RegisterWrite("slowwrite1s_test", wrapWriteCommandKV(nd, checkOKRsp))
+		nd.router.RegisterWrite("slowwrite100ms_test", wrapWriteCommandKV(nd, checkOKRsp))
+		nd.router.RegisterWrite("slowwrite50ms_test", wrapWriteCommandKV(nd, checkOKRsp))
+		nd.router.RegisterWrite("slowwrite5ms_test", wrapWriteCommandKV(nd, checkOKRsp))
+	}
 }
 
 func (kvsm *kvStoreSM) registerConflictHandlers() {

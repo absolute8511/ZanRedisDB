@@ -81,12 +81,19 @@ func newEntryQueue(size uint64, lazyFreeCycle uint64) *entryQueue {
 	return e
 }
 
+func (q *entryQueue) closed() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.stopped
+}
+
 func (q *entryQueue) close() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.stopped = true
 	if q.waitC != nil {
 		close(q.waitC)
+		q.waitC = nil
 	}
 }
 
@@ -185,7 +192,9 @@ func (q *entryQueue) get(paused bool) []elemT {
 	q.gc()
 	q.oldIdx = sz
 	if needNotify {
-		close(q.waitC)
+		if q.waitC != nil {
+			close(q.waitC)
+		}
 		q.waitC = make(chan struct{}, 1)
 	}
 	return t[:sz]

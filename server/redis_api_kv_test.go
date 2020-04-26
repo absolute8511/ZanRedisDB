@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -952,4 +953,110 @@ func TestSyncerOnlyWrite(t *testing.T) {
 	} else if n != 2 {
 		t.Fatal(n)
 	}
+}
+
+func TestSlowLimiterCommand(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key1 := "default:test:slowa"
+
+	_, err := goredis.String(c.Do("slowwrite1s_test", key1, "12345"))
+	assert.Nil(t, err)
+	_, err = goredis.String(c.Do("slowwrite100ms_test", key1, "12345"))
+	assert.Nil(t, err)
+	_, err = goredis.String(c.Do("slowwrite50ms_test", key1, "12345"))
+	assert.Nil(t, err)
+	_, err = goredis.String(c.Do("slowwrite5ms_test", key1, "12345"))
+	assert.Nil(t, err)
+	start := time.Now()
+	done := make(chan bool)
+	slowed := int64(0)
+	total := int64(0)
+	var wg sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cc := getTestConn(t)
+			defer cc.Close()
+			for {
+				c1 := time.Now()
+				_, err := goredis.String(cc.Do("set", key1, "12345"))
+				c2 := time.Since(c1)
+				if c2 > time.Millisecond*500 {
+					atomic.AddInt64(&slowed, 1)
+				}
+				assert.Nil(t, err)
+				atomic.AddInt64(&total, 1)
+				if err != nil {
+					return
+				}
+				select {
+				case <-done:
+					return
+				default:
+					time.Sleep(time.Millisecond)
+				}
+			}
+		}()
+	}
+	loop := 0
+	refused := 0
+	passedAfterRefused := 0
+	for {
+		if time.Since(start) > node.SlowHalfOpen*2 {
+			break
+		}
+		loop++
+		c.SetReadDeadline(time.Now().Add(time.Second * 10))
+		_, err := goredis.String(c.Do("slowwrite1s_test", key1, "12345"))
+		if err != nil && err.Error() == node.ErrSlowLimiterRefused.Error() {
+			refused++
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if refused > 0 {
+			passedAfterRefused++
+		}
+	}
+	close(done)
+	t.Logf("slow loop cnt: %v, refused: %v, %v, total %v, slowed: %v",
+		loop, refused, passedAfterRefused, atomic.LoadInt64(&total), atomic.LoadInt64(&slowed))
+	assert.True(t, refused > loop/2)
+	assert.True(t, atomic.LoadInt64(&slowed) < atomic.LoadInt64(&total)/10)
+	assert.True(t, passedAfterRefused < 3)
+	assert.True(t, passedAfterRefused > 0)
+	wg.Wait()
+	time.Sleep(node.SlowHalfOpen)
+	refused = 0
+	passedAfterRefused = 0
+	c2 := getTestConn(t)
+	defer c2.Close()
+	// wait until we become no slow to test clear history recorded slow
+	start = time.Now()
+	for {
+		if time.Since(start) > node.SlowHalfOpen*2 {
+			break
+		}
+		loop++
+		c2.SetReadDeadline(time.Now().Add(time.Second * 10))
+		_, err := goredis.String(c2.Do("slowwrite1s_test", key1, "12345"))
+		if err != nil && err.Error() == node.ErrSlowLimiterRefused.Error() {
+			refused++
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if refused > 0 {
+			passedAfterRefused++
+			if passedAfterRefused > 2 {
+				break
+			}
+		}
+	}
+	t.Logf("slow loop cnt: %v, refused: %v, %v",
+		loop, refused, passedAfterRefused)
+	assert.True(t, refused > 0)
+	assert.True(t, passedAfterRefused < 5)
+	assert.True(t, passedAfterRefused > 0)
 }

@@ -1,6 +1,5 @@
 language: go
 go:
-  - 1.10.x
   - 1.13.x
 env:
   - GOARCH=amd64 TEST_RACE=false
@@ -23,12 +22,9 @@ install:
 script:
   - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/youzan/gorocksdb 
   - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go install -race github.com/youzan/gorocksdb 
-  - curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
   - wget -c https://github.com/coreos/etcd/releases/download/v2.3.8/etcd-v2.3.8-linux-amd64.tar.gz
   - tar -xvzf etcd-v2.3.8-linux-amd64.tar.gz
   - ./etcd-v2.3.8-linux-amd64/etcd -name=test-etcd0 -initial-advertise-peer-urls=http://127.0.0.1:2380 -listen-client-urls=http://127.0.0.1:2379 -advertise-client-urls=http://127.0.0.1:2379 -listen-peer-urls=http://127.0.0.1:2380 -initial-cluster="test-etcd0=http://127.0.0.1:2380" -initial-cluster-state=new --data-dir ./test-etcd > etcd.log 2>&1 &
-  - go get -u golang.org/x/sys/... || true
-  - dep ensure
   - ROCKSDB=/tmp/rocksdb ./test.sh
 notifications:
   email: false

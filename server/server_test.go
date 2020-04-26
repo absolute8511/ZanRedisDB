@@ -64,6 +64,8 @@ func TestMain(m *testing.M) {
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	node.EnableForTest()
+	node.EnableSlowLimiterTest(true)
+
 	flag.Parse()
 
 	common.InitDefaultForGLogger("")

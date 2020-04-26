@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/rockredis"
 
@@ -829,6 +830,7 @@ func (s *Server) initHttpHandler() {
 
 	router.Handle("POST", "/debug/setblockrate", common.Decorate(setBlockRateHandler, log, common.V1))
 	router.Handle("POST", "/debug/setmutexrate", common.Decorate(setMutexProfileHandler, log, common.V1))
+	router.Handler("GET", "/metric", promhttp.Handler())
 	s.router = router
 }
 

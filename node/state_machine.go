@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/redcon"
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/pkg/wait"
@@ -57,13 +58,13 @@ type StateMachine interface {
 }
 
 func NewStateMachine(opts *KVOptions, machineConfig MachineConfig, localID uint64,
-	fullNS string, clusterInfo common.IClusterInfo, w wait.Wait) (StateMachine, error) {
+	fullNS string, clusterInfo common.IClusterInfo, w wait.Wait, sl *SlowLimiter) (StateMachine, error) {
 	if machineConfig.LearnerRole == "" {
 		if machineConfig.StateMachineType == "empty_sm" {
 			nodeLog.Infof("%v using empty sm for test", fullNS)
 			return &emptySM{w: w}, nil
 		}
-		kvsm, err := NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo)
+		kvsm, err := NewKVStoreSM(opts, machineConfig, localID, fullNS, clusterInfo, sl)
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +190,10 @@ func (bo *kvbatchOperator) CommitBatch() {
 			len(bo.batchReqIDList), batchCost)
 	}
 	if len(bo.batchReqIDList) > 0 {
-		bo.kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Nanoseconds()/1000, int64(len(bo.batchReqIDList)))
+		bo.kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Microseconds(), int64(len(bo.batchReqIDList)))
+		metric.DBWriteLatency.With(ps.Labels{
+			"namespace": bo.kvsm.fullNS,
+		}).Observe(float64(batchCost.Microseconds()))
 	}
 	bo.batchReqIDList = bo.batchReqIDList[:0]
 	bo.batchReqRspList = bo.batchReqRspList[:0]
@@ -276,10 +280,11 @@ type kvStoreSM struct {
 	router        *common.SMCmdRouter
 	stopping      int32
 	cRouter       *conflictRouter
+	slowLimiter   *SlowLimiter
 }
 
 func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
-	clusterInfo common.IClusterInfo) (*kvStoreSM, error) {
+	clusterInfo common.IClusterInfo, sl *SlowLimiter) (*kvStoreSM, error) {
 	store, err := NewKVStore(opts)
 	if err != nil {
 		return nil, err
@@ -292,6 +297,7 @@ func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, 
 		store:         store,
 		router:        common.NewSMCmdRouter(),
 		cRouter:       NewConflictRouter(),
+		slowLimiter:   sl,
 	}
 	sm.registerHandlers()
 	sm.registerConflictHandlers()
@@ -707,6 +713,9 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 							batch.AbortBatchForError(err)
 						}
 					} else {
+						metric.WriteByteSize.With(ps.Labels{
+							"namespace": kvsm.fullNS,
+						}).Observe(float64(len(cmd.Raw)))
 						if batch.IsBatched() {
 							batch.AddBatchRsp(reqID, v)
 							if nodeLog.Level() > common.LOG_DETAIL {
@@ -720,7 +729,14 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 								(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
 								kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
 							}
-							kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Nanoseconds()/1000)
+							kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Microseconds())
+							metric.DBWriteLatency.With(ps.Labels{
+								"namespace": kvsm.fullNS,
+							}).Observe(float64(cmdCost.Microseconds()))
+							if kvsm.slowLimiter != nil {
+								table, _, _ := common.ExtractTable(pk)
+								kvsm.slowLimiter.RecordSlowCmd(cmdName, string(table), cmdCost)
+							}
 						}
 					}
 				}

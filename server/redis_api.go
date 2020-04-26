@@ -65,7 +65,7 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 				start = time.Now()
 			}
 			cmdStr := string(cmd.Args[0])
-			ns, pk, pkSum, err := s.GetPKAndHashSum(cmdName, cmd)
+			ns, pk, pkSum, err := GetPKAndHashSum(cmdName, cmd)
 			if err != nil {
 				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
 				break
@@ -80,7 +80,7 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			}
 			kvn, err := s.GetHandleNode(ns, pk, pkSum, cmdName, cmd)
 			if err == nil {
-				err = s.handleRedisSingleCmd(cmdName, pkSum, kvn, conn, cmd)
+				err = s.handleRedisSingleCmd(cmdName, pk, pkSum, kvn, conn, cmd)
 			}
 			if err != nil {
 				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)

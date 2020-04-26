@@ -15,7 +15,6 @@ import (
 
 	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
-	"github.com/youzan/ZanRedisDB/settings"
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/cluster"
@@ -36,7 +35,7 @@ var (
 )
 
 const (
-	slowLogTime = time.Millisecond * 100
+	slowClusterWriteLogTime = time.Millisecond * 500
 )
 
 var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
@@ -76,7 +75,6 @@ type Server struct {
 	startTime     time.Time
 	maxScanJob    int32
 	scanStats     metric.ScanStats
-	writeQs       []*writeQ
 }
 
 func NewServer(conf ServerConfig) *Server {
@@ -237,9 +235,7 @@ func (s *Server) Stop() {
 	default:
 	}
 	close(s.stopC)
-	for _, wq := range s.writeQs {
-		close(wq.stopC)
-	}
+
 	s.raftTransport.Stop()
 	s.wg.Wait()
 	sLog.Infof("server stopped")
@@ -328,21 +324,10 @@ func (s *Server) Start() {
 	s.raftTransport.Start()
 	s.stopC = make(chan struct{})
 
-	writeQs := make([]*writeQ, settings.Soft.ProposalQueueNum)
-	for i := 0; i < int(settings.Soft.ProposalQueueNum); i++ {
-		writeQs[i] = newWriteQ(settings.Soft.ProposalQueueLen)
-	}
-	s.writeQs = writeQs
-
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.serveRaft(s.stopC)
-	}()
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.handleRedisWriteLoop()
 	}()
 
 	if s.conf.ProfilePort >= 0 {
@@ -378,7 +363,7 @@ func (s *Server) Start() {
 	}()
 }
 
-func (s *Server) GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []byte, int, error) {
+func GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []byte, int, error) {
 	if len(cmd.Args) < 2 {
 		return "", nil, 0, common.ErrInvalidArgs
 	}
@@ -541,7 +526,7 @@ func (s *Server) GetNsMgr() *node.NamespaceMgr {
 	return s.nsMgr
 }
 
-func (s *Server) handleRedisSingleCmd(cmdName string, pkSum int, kvn *node.KVNode, conn redcon.Conn, cmd redcon.Command) error {
+func (s *Server) handleRedisSingleCmd(cmdName string, pk []byte, pkSum int, kvn *node.KVNode, conn redcon.Conn, cmd redcon.Command) error {
 	isWrite := false
 	var h common.CommandFunc
 	var wh common.WriteCommandFunc
@@ -558,34 +543,26 @@ func (s *Server) handleRedisSingleCmd(cmdName string, pkSum int, kvn *node.KVNod
 		return fmt.Errorf("The cluster is only allowing syncer write : ERR handle command %s ", cmdName)
 	}
 	if isWrite {
-		s.handleRedisWrite(pkSum, wh, conn, cmd)
+		s.handleRedisWrite(cmdName, kvn, pk, pkSum, wh, conn, cmd)
 	} else {
 		h(conn, cmd)
 	}
 	return nil
 }
 
-func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, conn redcon.Conn, cmd redcon.Command) {
-	// queue and wait
-	//wq := s.writeQs[pkSum%len(s.writeQs)]
-	//e := elemT{}
-	//ret := make(chan interface{}, 1)
-	//e.f = func() {
-	//	rsp, err := h(cmd)
-	//	if err != nil {
-	//		ret <- err
-	//		return
-	//	}
-	//	ret <- rsp
-	//}
-	//wq.q.add(e)
-	//select {
-	//case wq.readyC <- struct{}{}:
-	//default:
-	//}
+func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
+	pk []byte, pkSum int, h common.WriteCommandFunc, conn redcon.Conn, cmd redcon.Command) {
 	start := time.Now()
-	// wait
-	//v := <-ret
+	table, _, _ := common.ExtractTable(pk)
+	// we check if we need slow down proposal if the state machine apply can not catchup with
+	// the raft logs.
+	// only refuse on leader since the follower may fall behind while appling, so it is possible
+	// the apply buffer is full.
+	if kvn.IsLead() && !kvn.CanPass(start.UnixNano(), cmdName, string(table)) {
+		conn.WriteError(node.ErrSlowLimiterRefused.Error())
+		return
+	}
+
 	rsp, err := h(cmd)
 	cost1 := time.Since(start)
 	var v interface{}
@@ -595,18 +572,29 @@ func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, conn red
 	} else {
 		futureRsp, ok := rsp.(*node.FutureRsp)
 		if ok {
-			frsp, err := futureRsp.WaitRsp()
+			// wait and get async response
+			var frsp interface{}
+			frsp, err = futureRsp.WaitRsp()
 			if err != nil {
 				v = err
 			} else {
 				v = frsp
 			}
+		} else {
+			// the command is in sync mode
 		}
 	}
 	cost2 := time.Since(start)
-	if cost2 >= slowLogTime {
-		sLog.Infof("write request slow cost: %v, %v, cmd %s", cost1, cost2, cmd.Args[0])
+	kvn.UpdateWriteStats(int64(len(cmd.Raw)), cost2.Microseconds())
+	if cost2 >= slowClusterWriteLogTime {
+		sLog.Infof("write request slow cost: %v, %v, cmd %s %s", cost1, cost2, cmdName, pk)
 	}
+	kvn.MaybeAddSlow(start.Add(cost2).UnixNano(), cost2)
+	if err == nil && !kvn.IsWriteReady() {
+		sLog.Infof("write request %s on raft success but raft member is less than replicator",
+			cmd.Raw)
+	}
+
 	switch rv := v.(type) {
 	case error:
 		conn.WriteError(rv.Error())
@@ -629,26 +617,4 @@ func (s *Server) handleRedisWrite(pkSum int, h common.WriteCommandFunc, conn red
 		// Do we have any other resp arrays for write command which is not [][]byte?
 		conn.WriteError("Invalid response type")
 	}
-}
-
-func (s *Server) handleRedisWriteLoop() {
-	var wg sync.WaitGroup
-	for i := 0; i < len(s.writeQs); i++ {
-		wg.Add(1)
-		go func(wq *writeQ) {
-			defer wg.Done()
-			for {
-				select {
-				case <-wq.readyC:
-					elems := wq.q.get(false)
-					for _, e := range elems {
-						e.Func()()
-					}
-				case <-wq.stopC:
-					return
-				}
-			}
-		}(s.writeQs[i])
-	}
-	wg.Wait()
 }

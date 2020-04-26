@@ -130,6 +130,8 @@ type raftNode struct {
 	busySnapshot        int32
 	loopServering       int32
 	lastPublished       uint64
+
+	slowLimiter *SlowLimiter
 }
 
 // newRaftNode initiates a raft instance and returns a committed log entry
@@ -889,6 +891,10 @@ func (rc *raftNode) serveChannels() {
 			}
 			if !moreEntriesToApply && !busy {
 				rc.Debugf("apply buffer nearly full, slow down: %v", len(rc.commitC))
+				if rc.slowLimiter != nil {
+					rc.slowLimiter.MarkHeavySlow()
+				}
+			} else if len(rc.commitC) <= 10 {
 			}
 			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, busy)
 			if !hasUpdate {
