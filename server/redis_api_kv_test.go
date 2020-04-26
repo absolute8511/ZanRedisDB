@@ -1024,7 +1024,7 @@ func TestSlowLimiterCommand(t *testing.T) {
 	t.Logf("slow loop cnt: %v, refused: %v, %v, total %v, slowed: %v",
 		loop, refused, passedAfterRefused, atomic.LoadInt64(&total), atomic.LoadInt64(&slowed))
 	assert.True(t, refused > loop/2)
-	assert.True(t, slowed < total/10)
+	assert.True(t, atomic.LoadInt64(&slowed) < atomic.LoadInt64(&total)/10)
 	assert.True(t, passedAfterRefused < 3)
 	assert.True(t, passedAfterRefused > 0)
 	wg.Wait()
