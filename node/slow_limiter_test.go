@@ -1,6 +1,7 @@
 package node
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -74,14 +75,17 @@ func TestSlowLimiter_SlowToNoSlow(t *testing.T) {
 	sl.Start()
 	defer sl.Stop()
 	cnt := 0
-	sl.MarkHeavySlow()
+	atomic.StoreInt64(&sl.slowCounter, midSlowThreshold)
+	oldTs := time.Now().UnixNano()
+	atomic.StoreInt64(&sl.lastSlowTs, oldTs)
 	sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
 	sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
 	sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
 	assert.True(t, !sl.CanPass(time.Now().UnixNano(), "test", "test_table"))
+	// use old ts to check pass to make sure we are passed by the cleared slow record
 	for {
 		cnt++
-		if sl.CanPass(time.Now().UnixNano(), "test", "test_table") {
+		if sl.CanPass(time.Now().UnixNano(), "test", "test_table") && sl.CanPass(oldTs, "test", "test_table") {
 			break
 		}
 		time.Sleep(time.Second)
