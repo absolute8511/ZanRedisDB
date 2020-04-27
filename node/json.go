@@ -135,7 +135,11 @@ func (kvsm *kvStoreSM) localJSONSetCommand(cmd redcon.Command, ts int64) (interf
 }
 
 func (kvsm *kvStoreSM) localJSONDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	n, err := kvsm.store.JDel(ts, cmd.Args[1], cmd.Args[2])
+	path := []byte("")
+	if len(cmd.Args) > 2 {
+		path = cmd.Args[2]
+	}
+	n, err := kvsm.store.JDel(ts, cmd.Args[1], path)
 	if err != nil {
 		return int64(0), err
 	}

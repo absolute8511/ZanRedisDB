@@ -48,6 +48,9 @@ func TestJSON(t *testing.T) {
 	assert.True(t, strRets[0] != "")
 	t.Log(strRets[0])
 	assert.True(t, strRets[0] == `{"a":"str","1":3}` || (strRets[0] == `{"1":3,"a":"str"}`))
+	strRets2, err := goredis.Strings(c.Do("json.get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, strRets, strRets2)
 
 	strRets, err = goredis.Strings(c.Do("json.get", key, "a"))
 	assert.Nil(t, err)
@@ -98,6 +101,32 @@ func TestJSON(t *testing.T) {
 
 	c.Do("json.del", key, "a")
 	strRets, err = goredis.Strings(c.Do("json.get", key, ".a"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "", strRets[0])
+
+	n, err = goredis.Int(c.Do("json.objlen", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, n)
+	strRets, err = goredis.Strings(c.Do("json.objkeys", key))
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(strRets))
+
+	strRet, err = goredis.String(c.Do("json.set", key, "1", "3"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", strRet)
+	strRet, err = goredis.String(c.Do("json.set", key, ".a", `"str"`))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", strRet)
+
+	c.Do("json.del", key)
+
+	strRets, err = goredis.Strings(c.Do("json.get", key, ".a"))
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(strRets))
+	assert.Equal(t, "", strRets[0])
+
+	strRets, err = goredis.Strings(c.Do("json.get", key, ".1"))
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(strRets))
 	assert.Equal(t, "", strRets[0])
@@ -273,11 +302,11 @@ func TestJSONErrorParams(t *testing.T) {
 		t.Fatalf("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("json.get", key); err == nil {
+	if _, err := c.Do("json.get"); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
 
-	if _, err := c.Do("json.del", key); err == nil {
+	if _, err := c.Do("json.del"); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
 

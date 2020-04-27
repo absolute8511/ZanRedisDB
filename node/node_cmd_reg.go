@@ -122,7 +122,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterWrite("hincrby", wrapWriteCommandKSubkeyV(nd, checkAndRewriteIntRsp))
 	nd.router.RegisterWrite("hclear", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	// for json
-	nd.router.RegisterRead("json.get", wrapReadCommandKSubkeySubkey(nd.jsonGetCommand))
+	nd.router.RegisterRead("json.get", wrapReadCommandKAnySubkey(nd.jsonGetCommand))
 	nd.router.RegisterRead("json.keyexists", wrapReadCommandK(nd.jsonKeyExistsCommand))
 	// get the same path from several json keys
 	nd.router.RegisterRead("json.mkget", nd.jsonmkGetCommand)
@@ -131,7 +131,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterRead("json.objkeys", wrapReadCommandKAnySubkey(nd.jsonObjKeysCommand))
 	nd.router.RegisterRead("json.objlen", wrapReadCommandKAnySubkey(nd.jsonObjLenCommand))
 	nd.router.RegisterWrite("json.set", wrapWriteCommandKSubkeyV(nd, checkOKRsp))
-	nd.router.RegisterWrite("json.del", wrapWriteCommandKSubkeySubkey(nd, checkAndRewriteIntRsp))
+	nd.router.RegisterWrite("json.del", wrapWriteCommandKAnySubkey(nd, checkAndRewriteIntRsp, 0))
 	nd.router.RegisterWrite("json.arrappend", wrapWriteCommandKAnySubkey(nd, checkAndRewriteIntRsp, 2))
 	nd.router.RegisterWrite("json.arrpop", wrapWriteCommandKAnySubkey(nd, checkAndRewriteBulkRsp, 0))
 	// for list
