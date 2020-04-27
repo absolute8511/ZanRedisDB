@@ -154,9 +154,26 @@ func (sl *SlowLimiter) clearSlows() {
 	}
 }
 
-func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration) {
+func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration, cmd string, prefix string) {
 	if cost < SlowRefuseCost {
-		return
+		// while we are in some slow down state, slow write will be refused,
+		// while in half open, some history slow write will be passed to allow
+		// slow check again, in this way we need check the history to
+		// identify the possible slow write more fast.
+		if cost < time.Millisecond*100 {
+			return
+		}
+		cnt := atomic.LoadInt64(&sl.slowCounter)
+		if cnt <= smallSlowThreshold {
+			return
+		}
+		feat := cmd + " " + prefix
+		sl.mutex.RLock()
+		cnt, ok := sl.slow100s[feat]
+		sl.mutex.RUnlock()
+		if !ok || cnt <= 1 {
+			return
+		}
 	}
 	sl.AddSlow(ts)
 }

@@ -1535,6 +1535,6 @@ func (nd *KVNode) IsPeerRemoved(peerID uint64) bool { return false }
 func (nd *KVNode) CanPass(ts int64, cmd string, table string) bool {
 	return nd.slowLimiter.CanPass(ts, cmd, table)
 }
-func (nd *KVNode) MaybeAddSlow(ts int64, cost time.Duration) {
-	nd.slowLimiter.MaybeAddSlow(ts, cost)
+func (nd *KVNode) MaybeAddSlow(ts int64, cost time.Duration, cmd, table string) {
+	nd.slowLimiter.MaybeAddSlow(ts, cost, cmd, table)
 }

@@ -589,7 +589,7 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 	if cost2 >= slowClusterWriteLogTime {
 		sLog.Infof("write request slow cost: %v, %v, cmd %s %s", cost1, cost2, cmdName, pk)
 	}
-	kvn.MaybeAddSlow(start.Add(cost2).UnixNano(), cost2)
+	kvn.MaybeAddSlow(start.Add(cost2).UnixNano(), cost2, cmdName, string(table))
 	if err == nil && !kvn.IsWriteReady() {
 		sLog.Infof("write request %s on raft success but raft member is less than replicator",
 			cmd.Raw)

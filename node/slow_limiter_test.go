@@ -113,7 +113,7 @@ func TestSlowLimiter_NoSlowToSlow(t *testing.T) {
 	cnt := 0
 	for {
 		sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
-		sl.MaybeAddSlow(time.Now().UnixNano(), SlowRefuseCost)
+		sl.MaybeAddSlow(time.Now().UnixNano(), SlowRefuseCost, "test", "test_table")
 		cnt++
 		if !sl.CanPass(time.Now().UnixNano(), "test", "test_table") {
 			break
