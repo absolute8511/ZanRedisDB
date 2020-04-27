@@ -193,7 +193,7 @@ func (bo *kvbatchOperator) CommitBatch() {
 		bo.kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Microseconds(), int64(len(bo.batchReqIDList)))
 		metric.DBWriteLatency.With(ps.Labels{
 			"namespace": bo.kvsm.fullNS,
-		}).Observe(float64(batchCost.Microseconds()))
+		}).Observe(float64(batchCost.Milliseconds()))
 	}
 	bo.batchReqIDList = bo.batchReqIDList[:0]
 	bo.batchReqRspList = bo.batchReqRspList[:0]
@@ -638,6 +638,10 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		if cost > raftSlow.Nanoseconds()/2 && nodeLog.Level() >= common.LOG_DETAIL {
 			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
 		}
+		metric.RaftWriteLatency.With(ps.Labels{
+			"namespace": kvsm.fullNS,
+			"step":      "raft_commit_sm_received",
+		}).Observe(float64(cost / time.Millisecond.Nanoseconds()))
 	}
 	// TODO: maybe we can merge the same write with same key and value to avoid too much hot write on the same key-value
 	var retErr error
@@ -670,6 +674,10 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 						kvsm.Infof("conflict sync: %v, %v, %v", string(cmd.Raw), req.String(), reqTs)
 						// just ignore sync, should not return error because the syncer will block retrying for error sync
 						kvsm.w.Trigger(reqID, nil)
+						metric.EventCnt.With(ps.Labels{
+							"namespace":  kvsm.fullNS,
+							"event_name": "cluster_syncer_conflicted",
+						}).Add(1)
 						continue
 					}
 					if reqTs > GetSyncedOnlyChangedTs() {
@@ -732,7 +740,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 							kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Microseconds())
 							metric.DBWriteLatency.With(ps.Labels{
 								"namespace": kvsm.fullNS,
-							}).Observe(float64(cmdCost.Microseconds()))
+							}).Observe(float64(cmdCost.Milliseconds()))
 							if kvsm.slowLimiter != nil {
 								table, _, _ := common.ExtractTable(pk)
 								kvsm.slowLimiter.RecordSlowCmd(cmdName, string(table), cmdCost)
