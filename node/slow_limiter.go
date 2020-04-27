@@ -26,9 +26,9 @@ var ErrSlowLimiterRefused = errors.New("refused by slow limiter")
 const (
 	maxSlowThreshold   = 300
 	heavySlowThreshold = 250
-	midSlowThreshold   = 50
-	smallSlowThreshold = 10
-	SlowRefuseCost     = time.Second
+	midSlowThreshold   = 60
+	smallSlowThreshold = 20
+	SlowRefuseCost     = time.Millisecond * 600
 	SlowHalfOpen       = time.Minute / 2
 )
 

@@ -558,7 +558,7 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 		metric.ErrorCnt.With(ps.Labels{
 			"namespace":  nd.GetFullName(),
 			"error_info": "raft_propose_failed",
-		}).Add(1)
+		}).Inc()
 		nd.w.Trigger(irr.Header.ID, err)
 		wrh.release()
 		return nil, err

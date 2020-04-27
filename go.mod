@@ -37,6 +37,7 @@ require (
 	github.com/mreiferson/go-options v0.0.0-20161229190002-77551d20752b
 	github.com/pquerna/ffjson v0.0.0-20190930134022-aa0246cd15f7 // indirect
 	github.com/prometheus/client_golang v1.3.0
+	github.com/prometheus/client_model v0.1.0
 	github.com/shirou/gopsutil v0.0.0-20180427012116-c95755e4bcd7
 	github.com/siddontang/goredis v0.0.0-20180423163523-0b4019cbd7b7
 	github.com/spaolacci/murmur3 v0.0.0-20170819071325-9f5d223c6079

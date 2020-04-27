@@ -926,7 +926,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 			metric.EventCnt.With(ps.Labels{
 				"namespace":  rc.Descrp(),
 				"event_name": "raft_leader_changed",
-			}).Add(1)
+			}).Inc()
 		}
 		if rd.SoftState.Lead == raft.None && oldLead != raft.None {
 			// TODO: handle proposal drop if leader is lost

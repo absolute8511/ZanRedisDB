@@ -677,7 +677,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 						metric.EventCnt.With(ps.Labels{
 							"namespace":  kvsm.fullNS,
 							"event_name": "cluster_syncer_conflicted",
-						}).Add(1)
+						}).Inc()
 						continue
 					}
 					if reqTs > GetSyncedOnlyChangedTs() {

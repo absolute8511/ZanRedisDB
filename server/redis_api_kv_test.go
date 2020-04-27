@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	ps "github.com/prometheus/client_golang/prometheus"
+	io_prometheus_clients "github.com/prometheus/client_model/go"
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/node"
 )
 
@@ -1028,6 +1031,14 @@ func TestSlowLimiterCommand(t *testing.T) {
 	assert.True(t, passedAfterRefused < 5)
 	assert.True(t, passedAfterRefused > 0)
 	wg.Wait()
+	counter := metric.SlowLimiterRefusedCnt.With(ps.Labels{
+		"table": "test",
+		"cmd":   "slowwrite1s_test",
+	})
+	out := io_prometheus_clients.Metric{}
+	counter.Write(&out)
+	assert.Equal(t, float64(refused), *out.Counter.Value)
+
 	time.Sleep(node.SlowHalfOpen)
 	refused = 0
 	passedAfterRefused = 0
