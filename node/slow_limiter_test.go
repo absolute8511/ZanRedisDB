@@ -28,11 +28,11 @@ func TestSlowLimiter_CanPass(t *testing.T) {
 	slow50s := make(map[string]int64)
 	slow10s := make(map[string]int64)
 	slow100sTestTable := make(map[string]int64)
-	slow100sTestTable["set test_table"] = 20
+	slow100sTestTable["set test_table"] = 10
 	slow50sTestTable := make(map[string]int64)
 	slow50sTestTable["set test_table"] = 20
 	slow10sTestTable := make(map[string]int64)
-	slow10sTestTable["set test_table"] = 20
+	slow10sTestTable["set test_table"] = 30
 	tn := time.Now()
 	tests := []struct {
 		name   string

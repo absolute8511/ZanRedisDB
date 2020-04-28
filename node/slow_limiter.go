@@ -157,29 +157,52 @@ func (sl *SlowLimiter) clearSlows() {
 func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration, cmd string, prefix string) {
 	if cost < SlowRefuseCost {
 		// while we are in some slow down state, slow write will be refused,
-		// while in half open, some history slow write will be passed to allow
+		// while in half open, some history slow write will be passed to do
 		// slow check again, in this way we need check the history to
 		// identify the possible slow write more fast.
 		if cost < time.Millisecond*100 {
 			return
 		}
 		cnt := atomic.LoadInt64(&sl.slowCounter)
-		if cnt <= smallSlowThreshold {
+		if cnt < smallSlowThreshold {
 			return
 		}
-		feat := cmd + " " + prefix
-		sl.mutex.RLock()
-		cnt, ok := sl.slow100s[feat]
-		sl.mutex.RUnlock()
-		if !ok || cnt <= 1 {
+		if !sl.isHistorySlow(cmd, prefix, cnt, true) {
 			return
 		}
 	}
 	sl.AddSlow(ts)
 }
 
+func (sl *SlowLimiter) isHistorySlow(cmd, prefix string, sc int64, ignore10ms bool) bool {
+	feat := cmd + " " + prefix
+	sl.mutex.RLock()
+	defer sl.mutex.RUnlock()
+	cnt, ok := sl.slow100s[feat]
+	if ok && cnt > 2 {
+		return true
+	}
+	if sc >= midSlowThreshold {
+		cnt, ok := sl.slow50s[feat]
+		if ok && cnt > 4 {
+			return true
+		}
+	}
+	if !ignore10ms && sc >= heavySlowThreshold {
+		cnt, ok := sl.slow10s[feat]
+		if ok && cnt > 20 {
+			return true
+		}
+	}
+	return false
+}
+
 func (sl *SlowLimiter) AddSlow(ts int64) {
 	atomic.StoreInt64(&sl.lastSlowTs, ts)
+	sl.addCounterOnly()
+}
+
+func (sl *SlowLimiter) addCounterOnly() {
 	cnt := atomic.AddInt64(&sl.slowCounter, 1)
 	if cnt > maxSlowThreshold {
 		atomic.AddInt64(&sl.slowCounter, -1)
@@ -200,38 +223,19 @@ func (sl *SlowLimiter) CanPass(ts int64, cmd string, prefix string) bool {
 	if ts > atomic.LoadInt64(&sl.lastSlowTs)+SlowHalfOpen.Nanoseconds() {
 		return true
 	}
-	feat := cmd + " " + prefix
-	sl.mutex.RLock()
-	defer sl.mutex.RUnlock()
-	passed := true
-	defer func() {
-		if !passed {
-			metric.SlowLimiterRefusedCnt.With(ps.Labels{
-				"table": prefix,
-				"cmd":   cmd,
-			}).Inc()
-		}
-	}()
-	cnt, ok := sl.slow100s[feat]
-	if ok && cnt > 1 {
-		passed = false
-		return passed
+	if sl.isHistorySlow(cmd, prefix, sc, false) {
+		// the write is refused, means it may slow down the raft loop if we passed,
+		// so we need add counter here even we refused it.
+		// However, we do not update timestamp for slow, so we can clear it if it become
+		// no slow while in half open state.
+		sl.addCounterOnly()
+		metric.SlowLimiterRefusedCnt.With(ps.Labels{
+			"table": prefix,
+			"cmd":   cmd,
+		}).Inc()
+		return false
 	}
-	if sc >= midSlowThreshold {
-		cnt, ok := sl.slow50s[feat]
-		if ok && cnt > 2 {
-			passed = false
-			return passed
-		}
-	}
-	if sc >= heavySlowThreshold {
-		cnt, ok := sl.slow10s[feat]
-		if ok && cnt > 10 {
-			passed = false
-			return passed
-		}
-	}
-	return passed
+	return true
 }
 
 func (sl *SlowLimiter) RecordSlowCmd(cmd string, prefix string, cost time.Duration) {
