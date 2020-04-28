@@ -29,7 +29,7 @@ const (
 	midSlowThreshold   = 60
 	smallSlowThreshold = 20
 	SlowRefuseCost     = time.Millisecond * 600
-	SlowHalfOpen       = time.Minute / 2
+	SlowHalfOpen       = time.Second * 15
 )
 
 // SlowLimiter is used to limit some slow write command to avoid raft blocking
@@ -71,7 +71,11 @@ func (sl *SlowLimiter) Stop() {
 
 func (sl *SlowLimiter) run(stopC chan struct{}) {
 	defer sl.wg.Done()
-	ticker := time.NewTicker(time.Second * 2)
+	checkInterval := time.Second * 2
+	if enableSlowLimiterTest {
+		checkInterval = checkInterval / 4
+	}
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -86,6 +90,10 @@ func (sl *SlowLimiter) run(stopC chan struct{}) {
 				decr = -10
 			} else if old >= midSlowThreshold {
 				decr = -2
+			}
+			// speed up for test
+			if enableSlowLimiterTest && old > 10 {
+				decr *= 3
 			}
 			n := atomic.AddInt64(&sl.slowCounter, int64(decr))
 			if old >= smallSlowThreshold && n < smallSlowThreshold {
@@ -167,34 +175,36 @@ func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration, cmd string, pr
 		if cnt < smallSlowThreshold {
 			return
 		}
-		if !sl.isHistorySlow(cmd, prefix, cnt, true) {
+		isSlow, _ := sl.isHistorySlow(cmd, prefix, cnt, true)
+		if !isSlow {
 			return
 		}
 	}
 	sl.AddSlow(ts)
 }
 
-func (sl *SlowLimiter) isHistorySlow(cmd, prefix string, sc int64, ignore10ms bool) bool {
+// return isslow and issmallslow
+func (sl *SlowLimiter) isHistorySlow(cmd, prefix string, sc int64, ignore10ms bool) (bool, bool) {
 	feat := cmd + " " + prefix
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
 	cnt, ok := sl.slow100s[feat]
 	if ok && cnt > 2 {
-		return true
+		return true, false
 	}
 	if sc >= midSlowThreshold {
 		cnt, ok := sl.slow50s[feat]
 		if ok && cnt > 4 {
-			return true
+			return true, true
 		}
 	}
 	if !ignore10ms && sc >= heavySlowThreshold {
 		cnt, ok := sl.slow10s[feat]
 		if ok && cnt > 20 {
-			return true
+			return true, true
 		}
 	}
-	return false
+	return false, false
 }
 
 func (sl *SlowLimiter) AddSlow(ts int64) {
@@ -223,7 +233,7 @@ func (sl *SlowLimiter) CanPass(ts int64, cmd string, prefix string) bool {
 	if ts > atomic.LoadInt64(&sl.lastSlowTs)+SlowHalfOpen.Nanoseconds() {
 		return true
 	}
-	if sl.isHistorySlow(cmd, prefix, sc, false) {
+	if isSlow, _ := sl.isHistorySlow(cmd, prefix, sc, false); isSlow {
 		// the write is refused, means it may slow down the raft loop if we passed,
 		// so we need add counter here even we refused it.
 		// However, we do not update timestamp for slow, so we can clear it if it become
