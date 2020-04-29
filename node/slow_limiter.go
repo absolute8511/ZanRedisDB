@@ -168,7 +168,7 @@ func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration, cmd string, pr
 		// while in half open, some history slow write will be passed to do
 		// slow check again, in this way we need check the history to
 		// identify the possible slow write more fast.
-		if cost < time.Millisecond*100 {
+		if cost < time.Millisecond*50 {
 			return
 		}
 		cnt := atomic.LoadInt64(&sl.slowCounter)

@@ -82,6 +82,10 @@ func TestSlowLimiter_CanPass(t *testing.T) {
 }
 
 func TestSlowLimiter_SlowToNoSlow(t *testing.T) {
+	enableSlowLimiterTest = true
+	defer func() {
+		enableSlowLimiterTest = false
+	}()
 	sl := NewSlowLimiter()
 	sl.Start()
 	defer sl.Stop()
@@ -99,10 +103,13 @@ func TestSlowLimiter_SlowToNoSlow(t *testing.T) {
 		if sl.CanPass(time.Now().UnixNano(), "test", "test_table") && sl.CanPass(oldTs, "test", "test_table") {
 			break
 		}
+		// should sleep more than ticker
+		// in test the slow down ticker is more faster
 		time.Sleep(time.Second)
 	}
 	t.Logf("slow to noslow cnt : %v", cnt)
-	assert.True(t, cnt >= smallSlowThreshold)
+	// in test the slow down ticker is more faster
+	assert.True(t, cnt >= smallSlowThreshold/4)
 	assert.True(t, cnt < heavySlowThreshold)
 }
 
