@@ -18,6 +18,8 @@ func TestDumpDynamicConf(t *testing.T) {
 		{"dump", []string{"check_raft_timeout:5", "check_snap_timeout:60",
 			"empty_int:0",
 			"max_remote_recover:2",
+			"slow_limiter_half_open_sec:15",
+			"slow_limiter_refuse_cost_ms:600",
 			"slow_limiter_switch:1",
 			"test_str:test_str"}},
 	}

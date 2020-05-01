@@ -9,12 +9,14 @@ import (
 )
 
 const (
-	ConfCheckSnapTimeout      = "check_snap_timeout"
-	ConfCheckRaftTimeout      = "check_raft_timeout"
-	ConfIgnoreStartupNoBackup = "ignore_startup_nobackup"
-	ConfIgnoreRemoteFileSync  = "ignore_remote_file_sync"
-	ConfMaxRemoteRecover      = "max_remote_recover"
-	ConfSlowLimiterSwitch     = "slow_limiter_switch"
+	ConfCheckSnapTimeout        = "check_snap_timeout"
+	ConfCheckRaftTimeout        = "check_raft_timeout"
+	ConfIgnoreStartupNoBackup   = "ignore_startup_nobackup"
+	ConfIgnoreRemoteFileSync    = "ignore_remote_file_sync"
+	ConfMaxRemoteRecover        = "max_remote_recover"
+	ConfSlowLimiterSwitch       = "slow_limiter_switch"
+	ConfSlowLimiterRefuseCostMs = "slow_limiter_refuse_cost_ms"
+	ConfSlowLimiterHalfOpenSec  = "slow_limiter_half_open_sec"
 )
 
 var intConfMap map[string]*int64
@@ -35,6 +37,10 @@ func init() {
 	intConfMap[ConfMaxRemoteRecover] = &maxRemoteRecover
 	slowSwitch := int64(1)
 	intConfMap[ConfSlowLimiterSwitch] = &slowSwitch
+	slowRefuceCostMs := int64(600)
+	intConfMap[ConfSlowLimiterRefuseCostMs] = &slowRefuceCostMs
+	slowHalfOpenSec := int64(15)
+	intConfMap[ConfSlowLimiterHalfOpenSec] = &slowHalfOpenSec
 
 	strConfMap.Store("test_str", "test_str")
 }

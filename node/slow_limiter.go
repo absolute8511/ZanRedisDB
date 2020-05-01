@@ -28,9 +28,25 @@ const (
 	heavySlowThreshold = 250
 	midSlowThreshold   = 60
 	smallSlowThreshold = 20
-	SlowRefuseCost     = time.Millisecond * 600
-	SlowHalfOpen       = time.Second * 15
 )
+
+var SlowRefuseCostMs = int64(600)
+var SlowHalfOpenSec = int64(15)
+
+func RegisterSlowConfChanged() {
+	common.RegisterConfChangedHandler(common.ConfSlowLimiterRefuseCostMs, func(v interface{}) {
+		iv, ok := v.(int)
+		if ok {
+			atomic.StoreInt64(&SlowRefuseCostMs, int64(iv))
+		}
+	})
+	common.RegisterConfChangedHandler(common.ConfSlowLimiterHalfOpenSec, func(v interface{}) {
+		iv, ok := v.(int)
+		if ok {
+			atomic.StoreInt64(&SlowHalfOpenSec, int64(iv))
+		}
+	})
+}
 
 // SlowLimiter is used to limit some slow write command to avoid raft blocking
 type SlowLimiter struct {
@@ -163,7 +179,7 @@ func (sl *SlowLimiter) clearSlows() {
 }
 
 func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration, cmd string, prefix string) {
-	if cost < SlowRefuseCost {
+	if cost < time.Millisecond*time.Duration(atomic.LoadInt64(&SlowRefuseCostMs)) {
 		// while we are in some slow down state, slow write will be refused,
 		// while in half open, some history slow write will be passed to do
 		// slow check again, in this way we need check the history to
@@ -230,7 +246,7 @@ func (sl *SlowLimiter) CanPass(ts int64, cmd string, prefix string) bool {
 	if sc < smallSlowThreshold {
 		return true
 	}
-	if ts > atomic.LoadInt64(&sl.lastSlowTs)+SlowHalfOpen.Nanoseconds() {
+	if ts > atomic.LoadInt64(&sl.lastSlowTs)+time.Second.Nanoseconds()*SlowHalfOpenSec {
 		return true
 	}
 	if isSlow, _ := sl.isHistorySlow(cmd, prefix, sc, false); isSlow {

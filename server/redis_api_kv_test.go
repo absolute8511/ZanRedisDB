@@ -12,6 +12,7 @@ import (
 	io_prometheus_clients "github.com/prometheus/client_model/go"
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/node"
 )
@@ -1007,8 +1008,9 @@ func TestSlowLimiterCommand(t *testing.T) {
 	loop := 0
 	refused := 0
 	passedAfterRefused := 0
+	slowHalfOpen := time.Second * time.Duration(node.SlowHalfOpenSec)
 	for {
-		if time.Since(start) > node.SlowHalfOpen*2 {
+		if time.Since(start) > slowHalfOpen*2 {
 			break
 		}
 		loop++
@@ -1049,7 +1051,7 @@ func TestSlowLimiterCommand(t *testing.T) {
 	start = time.Now()
 	// wait until we become no slow to test clear history recorded slow
 	for {
-		if time.Since(start) > node.SlowHalfOpen*2 {
+		if time.Since(start) > slowHalfOpen*2 {
 			break
 		}
 		loop++
@@ -1082,4 +1084,10 @@ func TestSlowLimiterCommand(t *testing.T) {
 	assert.Nil(t, err)
 	_, err = goredis.String(c2.Do("slowwrite1s_test", key1, "12345"))
 	assert.Nil(t, err)
+
+	// check changed conf
+	common.SetIntDynamicConf(common.ConfSlowLimiterRefuseCostMs, 601)
+	common.SetIntDynamicConf(common.ConfSlowLimiterHalfOpenSec, 18)
+	assert.Equal(t, int64(601), atomic.LoadInt64(&node.SlowRefuseCostMs))
+	assert.Equal(t, int64(18), atomic.LoadInt64(&node.SlowHalfOpenSec))
 }

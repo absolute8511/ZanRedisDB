@@ -193,6 +193,7 @@ func NewNamespaceMgr(transport *rafthttp.Transport, conf *MachineConfig) *Namesp
 		ns.machineConf.NodeID = regID
 	}
 	common.RegisterConfChangedHandler(common.ConfSlowLimiterSwitch, ns.HandleSlowLimiterSwitchChanged)
+	RegisterSlowConfChanged()
 
 	return ns
 }

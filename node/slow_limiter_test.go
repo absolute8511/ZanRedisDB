@@ -11,6 +11,8 @@ import (
 	"github.com/youzan/ZanRedisDB/metric"
 )
 
+var slowRefuseCost = time.Millisecond * time.Duration(SlowRefuseCostMs)
+
 func TestSlowLimiter_CanPass(t *testing.T) {
 	type fields struct {
 		slowCounter int64
@@ -93,9 +95,9 @@ func TestSlowLimiter_SlowToNoSlow(t *testing.T) {
 	atomic.StoreInt64(&sl.slowCounter, midSlowThreshold)
 	oldTs := time.Now().UnixNano()
 	atomic.StoreInt64(&sl.lastSlowTs, oldTs)
-	sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
-	sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
-	sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
+	sl.RecordSlowCmd("test", "test_table", slowRefuseCost)
+	sl.RecordSlowCmd("test", "test_table", slowRefuseCost)
+	sl.RecordSlowCmd("test", "test_table", slowRefuseCost)
 	assert.True(t, !sl.CanPass(time.Now().UnixNano(), "test", "test_table"))
 	// use old ts to check pass to make sure we are passed by the cleared slow record
 	for {
@@ -119,8 +121,8 @@ func TestSlowLimiter_NoSlowToSlow(t *testing.T) {
 	defer sl.Stop()
 	cnt := 0
 	for {
-		sl.RecordSlowCmd("test", "test_table", SlowRefuseCost)
-		sl.MaybeAddSlow(time.Now().UnixNano(), SlowRefuseCost, "test", "test_table")
+		sl.RecordSlowCmd("test", "test_table", slowRefuseCost)
+		sl.MaybeAddSlow(time.Now().UnixNano(), slowRefuseCost, "test", "test_table")
 		cnt++
 		if !sl.CanPass(time.Now().UnixNano(), "test", "test_table") {
 			break
