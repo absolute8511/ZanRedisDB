@@ -62,4 +62,9 @@ var (
 		Name: "event_cnt",
 		Help: "the important event counter for internal event",
 	}, []string{"namespace", "event_name"})
+
+	ReadCmdCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "read_cmd_total",
+		Help: "redis read command total counter",
+	})
 )

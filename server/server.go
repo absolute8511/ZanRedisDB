@@ -545,6 +545,7 @@ func (s *Server) handleRedisSingleCmd(cmdName string, pk []byte, pkSum int, kvn 
 	if isWrite {
 		s.handleRedisWrite(cmdName, kvn, pk, pkSum, wh, conn, cmd)
 	} else {
+		metric.ReadCmdCounter.Inc()
 		h(conn, cmd)
 	}
 	return nil
