@@ -378,26 +378,26 @@ func (db *RockDB) BitClear(ts int64, key []byte) (int64, error) {
 	}
 	if db.cfg.ExpirationPolicy == common.WaitCompact {
 		// for compact ttl , we can just delete the meta
-		return 1, nil
-	}
-	rk = db.expiration.encodeToVersionKey(BitmapType, oldh, rk)
-	iterStart, _ := encodeBitmapStartKey(table, rk, 0)
-	iterStop, _ := encodeBitmapStopKey(table, rk)
-	if bmSize/bitmapSegBytes > RangeDeleteNum {
-		wb.DeleteRange(iterStart, iterStop)
 	} else {
-		it, err := engine.NewDBRangeIterator(db.eng, iterStart, iterStop, common.RangeROpen, false)
-		if err != nil {
-			return 0, err
+		rk = db.expiration.encodeToVersionKey(BitmapType, oldh, rk)
+		iterStart, _ := encodeBitmapStartKey(table, rk, 0)
+		iterStop, _ := encodeBitmapStopKey(table, rk)
+		if bmSize/bitmapSegBytes > RangeDeleteNum {
+			wb.DeleteRange(iterStart, iterStop)
+		} else {
+			it, err := engine.NewDBRangeIterator(db.eng, iterStart, iterStop, common.RangeROpen, false)
+			if err != nil {
+				return 0, err
+			}
+			defer it.Close()
+			for ; it.Valid(); it.Next() {
+				rawk := it.RefKey()
+				wb.Delete(rawk)
+			}
 		}
-		defer it.Close()
-		for ; it.Valid(); it.Next() {
-			rawk := it.RefKey()
-			wb.Delete(rawk)
-		}
-	}
 
-	db.delExpire(BitmapType, key, nil, false, wb)
+		db.delExpire(BitmapType, key, nil, false, wb)
+	}
 	err = db.MaybeCommitBatch()
 	return 1, err
 }

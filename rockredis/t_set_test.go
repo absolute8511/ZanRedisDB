@@ -166,7 +166,7 @@ func TestDBSet(t *testing.T) {
 	db.SAdd(0, key2, member1, member2)
 }
 
-func TestDBSetClearInWaitCompactExpire(t *testing.T) {
+func TestDBSetClearInCompactTTL(t *testing.T) {
 	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()

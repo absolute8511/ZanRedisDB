@@ -973,3 +973,92 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-2, int(cnt))
 }
+
+func TestDBHashClearInCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_hash_clear_compact_a")
+	member := []byte("member")
+	memberNew := []byte("memberNew")
+
+	ts := time.Now().UnixNano()
+	db.HSet(ts, false, key, member, member)
+
+	n, err := db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	ts = time.Now().UnixNano()
+	n, err = db.HClear(ts, key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	v, err := db.HGet(key, member)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+
+	vlist, err := db.HMget(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(vlist))
+	assert.Nil(t, vlist[0])
+
+	n, rets, err := db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int(n), len(rets))
+	assert.Equal(t, int(0), len(rets))
+
+	n, err = db.HKeyExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, rets, err = db.HKeys(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, int(0), len(rets))
+	n, rets, err = db.HValues(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, int(0), len(rets))
+
+	// renew
+	ts = time.Now().UnixNano()
+	db.HSet(ts, false, key, memberNew, memberNew)
+
+	n, err = db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	v, err = db.HGet(key, member)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	v, err = db.HGet(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, memberNew, v)
+
+	vlist, err = db.HMget(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, int(n), len(vlist))
+	assert.Equal(t, memberNew, vlist[0])
+
+	n, rets, err = db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int(n), len(rets))
+	assert.Equal(t, int(1), len(rets))
+
+	n, err = db.HKeyExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, rets, err = db.HKeys(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.Equal(t, int(1), len(rets))
+	n, rets, err = db.HValues(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.Equal(t, int(1), len(rets))
+}

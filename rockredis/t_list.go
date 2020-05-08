@@ -592,7 +592,9 @@ func (db *RockDB) LIndex(key []byte, index int64) ([]byte, error) {
 	} else {
 		seq = tailSeq + index + 1
 	}
-
+	if seq < headSeq || seq > tailSeq {
+		return nil, nil
+	}
 	sk := lEncodeListKey(table, rk, seq)
 	return db.eng.GetBytes(db.defaultReadOpts, sk)
 }

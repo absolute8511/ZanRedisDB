@@ -217,6 +217,57 @@ func TestBitmapV2Clear(t *testing.T) {
 	assert.Equal(t, int64(1), n)
 }
 
+func TestDBBitClearInCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_bit_clear_compact_a")
+
+	ts := time.Now().UnixNano()
+	db.BitSetV2(ts, key, 1, 1)
+
+	n, err := db.BitCountV2(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	ts = time.Now().UnixNano()
+	n, err = db.BitClear(ts, key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.BitCountV2(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.BitGetV2(key, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.BitKeyExist(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	// renew
+	ts = time.Now().UnixNano()
+	db.BitSetV2(ts, key, 2, 1)
+
+	n, err = db.BitCountV2(key, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.BitGetV2(key, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.BitGetV2(key, 2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.BitKeyExist(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+}
+
 func TestBitmapV2FromOld(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
