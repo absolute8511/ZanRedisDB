@@ -126,7 +126,41 @@ func TestListTrim(t *testing.T) {
 	if string(v) != "97" {
 		t.Fatal("wrong value", string(v))
 	}
-	// TODO: LTrimFront, LTrimBack
+	err = db.LTrim(0, key, 10, 1)
+	assert.Nil(t, err)
+	n, err := db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err := db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), len(vlist))
+	init()
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(100), n)
+
+	err = db.LTrim(0, key, 1000, 10000)
+	assert.Nil(t, err)
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err = db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), len(vlist))
+
+	init()
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(100), n)
+
+	err = db.LTrim(0, key, 2, 1)
+	assert.Nil(t, err)
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err = db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), len(vlist))
 }
 
 func TestDBList(t *testing.T) {

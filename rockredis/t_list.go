@@ -354,41 +354,43 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 	if stop < 0 {
 		stop = llen + stop
 	}
+	newLen := int64(0)
+	// whole list deleted
 	if start >= llen || start > stop {
-		return errors.New("trim invalid")
-	}
+		db.lDelete(ts, key, db.wb)
+	} else {
+		if start < 0 {
+			start = 0
+		}
+		if stop >= llen {
+			stop = llen - 1
+		}
 
-	if start < 0 {
-		start = 0
-	}
-	if stop >= llen {
-		stop = llen - 1
-	}
-
-	if start > 0 {
-		if start > RangeDeleteNum {
-			wb.DeleteRange(lEncodeListKey(table, rk, headSeq), lEncodeListKey(table, rk, headSeq+start))
-		} else {
-			for i := int64(0); i < start; i++ {
-				wb.Delete(lEncodeListKey(table, rk, headSeq+i))
+		if start > 0 {
+			if start > RangeDeleteNum {
+				wb.DeleteRange(lEncodeListKey(table, rk, headSeq), lEncodeListKey(table, rk, headSeq+start))
+			} else {
+				for i := int64(0); i < start; i++ {
+					wb.Delete(lEncodeListKey(table, rk, headSeq+i))
+				}
 			}
 		}
-	}
-	if stop < int64(llen-1) {
-		if llen-stop > RangeDeleteNum {
-			wb.DeleteRange(lEncodeListKey(table, rk, headSeq+int64(stop+1)),
-				lEncodeListKey(table, rk, headSeq+llen))
-		} else {
-			for i := int64(stop + 1); i < llen; i++ {
-				wb.Delete(lEncodeListKey(table, rk, headSeq+i))
+		if stop < int64(llen-1) {
+			if llen-stop > RangeDeleteNum {
+				wb.DeleteRange(lEncodeListKey(table, rk, headSeq+int64(stop+1)),
+					lEncodeListKey(table, rk, headSeq+llen))
+			} else {
+				for i := int64(stop + 1); i < llen; i++ {
+					wb.Delete(lEncodeListKey(table, rk, headSeq+i))
+				}
 			}
 		}
-	}
 
-	newLen, err := db.lSetMeta(key, keyInfo.OldHeader, headSeq+start, headSeq+stop, ts, wb)
-	if err != nil {
-		db.fixListKey(ts, key)
-		return err
+		newLen, err = db.lSetMeta(key, keyInfo.OldHeader, headSeq+start, headSeq+stop, ts, wb)
+		if err != nil {
+			db.fixListKey(ts, key)
+			return err
+		}
 	}
 	if llen > 0 && newLen == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
@@ -753,10 +755,8 @@ func (db *RockDB) LClear(ts int64, key []byte) (int64, error) {
 		return 0, err
 	}
 	num := db.lDelete(ts, key, db.wb)
-	if num > 0 {
-		//delete the expire data related to the list key
-		db.delExpire(ListType, key, nil, false, db.wb)
-	}
+	//delete the expire data related to the list key
+	db.delExpire(ListType, key, nil, false, db.wb)
 	err := db.CommitBatchWrite()
 	// num should be the deleted key number
 	if num > 0 {
