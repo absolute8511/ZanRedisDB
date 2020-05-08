@@ -99,18 +99,33 @@ func sEncodeStopKey(table []byte, key []byte) []byte {
 
 func (db *RockDB) sDelete(tn int64, key []byte, wb *gorocksdb.WriteBatch) int64 {
 	sk := sEncodeSizeKey(key)
-	keyInfo, err := db.getCollVerKeyForRange(0, SetType, key, false)
+	keyInfo, err := db.getCollVerKeyForRange(tn, SetType, key, false)
 	if err != nil {
 		return 0
 	}
-
-	start := keyInfo.RangeStart
-	stop := keyInfo.RangeEnd
-
+	// no need delete if expired
+	if keyInfo.IsNotExistOrExpired() {
+		return 0
+	}
 	num, err := db.sGetSize(tn, key, false)
 	if err != nil {
 		return 0
 	}
+	if num == 0 {
+		return 0
+	}
+	if num > 0 {
+		db.IncrTableKeyCount(keyInfo.Table, -1, wb)
+	}
+	wb.Delete(sk)
+
+	if db.cfg.ExpirationPolicy == common.WaitCompact {
+		// for compact ttl , we can just delete the meta
+		return num
+	}
+	start := keyInfo.RangeStart
+	stop := keyInfo.RangeEnd
+
 	if num > RangeDeleteNum {
 		wb.DeleteRange(start, stop)
 	} else {
@@ -128,12 +143,9 @@ func (db *RockDB) sDelete(tn int64, key []byte, wb *gorocksdb.WriteBatch) int64 
 		}
 		it.Close()
 	}
-	if num > 0 {
-		db.IncrTableKeyCount(keyInfo.Table, -1, wb)
-	}
+
 	db.delExpire(SetType, key, nil, false, wb)
 
-	wb.Delete(sk)
 	return num
 }
 
@@ -433,14 +445,17 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	return num, err
 }
 
-func (db *RockDB) SClear(key []byte) (int64, error) {
+func (db *RockDB) SClear(ts int64, key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
 
-	num := db.sDelete(0, key, db.wb)
+	num := db.sDelete(ts, key, db.wb)
 	err := db.CommitBatchWrite()
-	return num, err
+	if num > 0 {
+		return 1, err
+	}
+	return 0, err
 }
 
 func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {

@@ -129,7 +129,7 @@ func (kvsm *kvStoreSM) localHIncrbyCommand(cmd redcon.Command, ts int64) (interf
 func (kvsm *kvStoreSM) localHDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	// TODO: delete should only handled on the old value, if the value is newer than the timestamp proposal
 	// we should ignore delete
-	n, err := kvsm.store.HDel(cmd.Args[1], cmd.Args[2:]...)
+	n, err := kvsm.store.HDel(ts, cmd.Args[1], cmd.Args[2:]...)
 	if err != nil {
 		// leader write need response
 		return int64(0), err
@@ -138,13 +138,13 @@ func (kvsm *kvStoreSM) localHDelCommand(cmd redcon.Command, ts int64) (interface
 }
 
 func (kvsm *kvStoreSM) localHclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.HClear(cmd.Args[1])
+	return kvsm.store.HClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localHMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, hkey := range cmd.Args[1:] {
-		if _, err := kvsm.store.HClear(hkey); err == nil {
+		if _, err := kvsm.store.HClear(ts, hkey); err == nil {
 			count++
 		} else {
 			return count, err

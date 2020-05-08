@@ -103,9 +103,9 @@ func TestDBZSetWithEmptyMember(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(2), n)
 
-	n, err = db.ZClear(key)
+	n, err = db.ZClear(0, key)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(2), n)
+	assert.Equal(t, int64(1), n)
 
 	n, err = db.ZCount(key, 0, 0xFF)
 	assert.Nil(t, err)
@@ -176,9 +176,9 @@ func TestDBZSet(t *testing.T) {
 	}
 
 	// {}
-	if n, err := db.ZClear(key); err != nil {
+	if n, err := db.ZClear(0, key); err != nil {
 		t.Fatal(err)
-	} else if n != 2 {
+	} else if n != 1 {
 		t.Fatal(n)
 	}
 
@@ -416,7 +416,7 @@ func TestZRemRange(t *testing.T) {
 	assert.Equal(t, total, len(vlist))
 	assert.Equal(t, mems[5:], vlist)
 
-	n, err = db.ZClear(key)
+	n, err = db.ZClear(0, key)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 

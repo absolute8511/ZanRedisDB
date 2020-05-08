@@ -521,13 +521,13 @@ func (kvsm *kvStoreSM) localZclearCommand(cmd redcon.Command, ts int64) (interfa
 	if len(cmd.Args) != 2 {
 		return nil, common.ErrInvalidArgs
 	}
-	return kvsm.store.ZClear(cmd.Args[1])
+	return kvsm.store.ZClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localZMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, zkey := range cmd.Args[1:] {
-		if _, err := kvsm.store.ZClear(zkey); err != nil {
+		if _, err := kvsm.store.ZClear(ts, zkey); err != nil {
 			return count, err
 		} else {
 			count++

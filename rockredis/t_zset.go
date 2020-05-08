@@ -658,6 +658,19 @@ func (db *RockDB) zRemAll(ts int64, key []byte, wb *gorocksdb.WriteBatch) (int64
 	if num == 0 {
 		return 0, nil
 	}
+	// no need delete if expired
+	if keyInfo.IsNotExistOrExpired() {
+		return 0, nil
+	}
+	if db.cfg.ExpirationPolicy == common.WaitCompact {
+		// for compact ttl , we can just delete the meta
+		sk := zEncodeSizeKey(key)
+		wb.Delete(sk)
+		if num > 0 {
+			db.IncrTableKeyCount(table, -1, wb)
+		}
+		return num, nil
+	}
 
 	minKey := keyInfo.RangeStart
 	maxKey := keyInfo.RangeEnd
@@ -885,14 +898,17 @@ func (db *RockDB) zParseLimit(total int64, start int, stop int) (offset int, cou
 	return
 }
 
-func (db *RockDB) ZClear(key []byte) (int64, error) {
+func (db *RockDB) ZClear(ts int64, key []byte) (int64, error) {
 	defer db.wb.Clear()
 
-	rmCnt, err := db.zRemAll(0, key, db.wb)
+	rmCnt, err := db.zRemAll(ts, key, db.wb)
 	if err == nil {
 		err = db.eng.Write(db.defaultWriteOpts, db.wb)
 	}
-	return rmCnt, err
+	if rmCnt > 0 {
+		return 1, err
+	}
+	return 0, err
 }
 
 func (db *RockDB) ZMclear(keys ...[]byte) (int64, error) {

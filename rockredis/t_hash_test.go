@@ -167,7 +167,7 @@ func TestHashKeyExists(t *testing.T) {
 	if _, err := db.HSet(0, false, key, []byte("hello2"), []byte("world2")); err != nil {
 		t.Fatal(err.Error())
 	}
-	db.HDel(key, []byte("hello"))
+	db.HDel(0, key, []byte("hello"))
 	v, err = db.HKeyExists(key)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -175,7 +175,7 @@ func TestHashKeyExists(t *testing.T) {
 	if v != 1 {
 		t.Fatal("invalid value ", v)
 	}
-	db.HClear(key)
+	db.HClear(0, key)
 	v, err = db.HKeyExists(key)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -954,7 +954,7 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Equal(t, 1, len(pkList))
 	assert.Equal(t, inputPKList[0], pkList[0].PKey)
 
-	db.HDel(inputPKList[0], stringIndex.IndexField)
+	db.HDel(0, inputPKList[0], stringIndex.IndexField)
 	_, cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condEqual0, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
@@ -963,7 +963,7 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 
-	db.HClear(inputPKList[1])
+	db.HClear(0, inputPKList[1])
 
 	_, cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condAll, false)
 	assert.Nil(t, err)

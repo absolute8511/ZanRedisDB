@@ -291,7 +291,7 @@ func TestPop(t *testing.T) {
 
 	if n, err := goredis.Int(c.Do("lclear", key)); err != nil {
 		t.Fatal(err)
-	} else if n != 5 {
+	} else if n <= 0 {
 		t.Fatal(n)
 	}
 
@@ -674,7 +674,7 @@ func TestSet(t *testing.T) {
 	}
 	if n, err := goredis.Int(c.Do("sclear", key2)); err != nil {
 		t.Fatal(err)
-	} else if n != 4 {
+	} else if n <= 0 {
 		t.Fatal(n)
 	}
 }
@@ -1525,7 +1525,7 @@ func TestZSetRange(t *testing.T) {
 
 	if n, err := goredis.Int(c.Do("zclear", key)); err != nil {
 		t.Fatal(err)
-	} else if n != 2 {
+	} else if n <= 0 {
 		t.Fatal(n)
 	}
 

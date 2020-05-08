@@ -166,7 +166,7 @@ func (kvsm *kvStoreSM) localSpop(cmd redcon.Command, ts int64) (interface{}, err
 }
 
 func (kvsm *kvStoreSM) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.SClear(cmd.Args[1])
+	return kvsm.store.SClear(ts, cmd.Args[1])
 }
 func (kvsm *kvStoreSM) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
 	return kvsm.store.SMclear(cmd.Args[1:]...)

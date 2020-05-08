@@ -400,14 +400,14 @@ func (db *RockDB) HMget(key []byte, args ...[]byte) ([][]byte, error) {
 	return r, nil
 }
 
-func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
+func (db *RockDB) HDel(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
 	if len(args) == 0 {
 		return 0, nil
 	}
-	keyInfo, err := db.GetCollVersionKey(0, HashType, key, false)
+	keyInfo, err := db.GetCollVersionKey(ts, HashType, key, false)
 	if err != nil {
 		return 0, err
 	}
@@ -465,14 +465,20 @@ func (db *RockDB) HDel(key []byte, args ...[]byte) (int64, error) {
 	return num, err
 }
 
-func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes *TableIndexContainer) error {
-	keyInfo, err := db.getCollVerKeyForRange(0, HashType, hkey, false)
+func (db *RockDB) hDeleteAll(ts int64, hkey []byte, hlen int64, wb *gorocksdb.WriteBatch, tableIndexes *TableIndexContainer) error {
+	keyInfo, err := db.getCollVerKeyForRange(ts, HashType, hkey, false)
 	if err != nil {
 		return err
 	}
-	hlen, err := db.HLen(hkey)
-	if err != nil {
-		return err
+	// no need delete if expired
+	if keyInfo.IsNotExistOrExpired() {
+		return nil
+	}
+	sk := hEncodeSizeKey(hkey)
+	wb.Delete(sk)
+	if db.cfg.ExpirationPolicy == common.WaitCompact && tableIndexes == nil {
+		// for compact ttl , we can just delete the meta
+		return nil
 	}
 	start := keyInfo.RangeStart
 	stop := keyInfo.RangeEnd
@@ -504,12 +510,10 @@ func (db *RockDB) hDeleteAll(hkey []byte, wb *gorocksdb.WriteBatch, tableIndexes
 	if hlen > RangeDeleteNum {
 		wb.DeleteRange(start, stop)
 	}
-	sk := hEncodeSizeKey(hkey)
-	wb.Delete(sk)
 	return nil
 }
 
-func (db *RockDB) HClear(hkey []byte) (int64, error) {
+func (db *RockDB) HClear(ts int64, hkey []byte) (int64, error) {
 	if err := checkKeySize(hkey); err != nil {
 		return 0, err
 	}
@@ -528,9 +532,12 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if hlen == 0 {
+		return 0, nil
+	}
 
 	wb := db.wb
-	err = db.hDeleteAll(hkey, wb, tableIndexes)
+	err = db.hDeleteAll(ts, hkey, hlen, wb, tableIndexes)
 	if err != nil {
 		return 0, err
 	}
@@ -540,7 +547,10 @@ func (db *RockDB) HClear(hkey []byte) (int64, error) {
 	db.delExpire(HashType, hkey, nil, false, wb)
 
 	err = db.MaybeCommitBatch()
-	return hlen, err
+	if hlen > 0 {
+		return 1, err
+	}
+	return 0, err
 }
 
 func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
@@ -562,7 +572,7 @@ func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
 		defer tableIndexes.Unlock()
 	}
 
-	err = db.hDeleteAll(hkey, wb, tableIndexes)
+	err = db.hDeleteAll(0, hkey, hlen, wb, tableIndexes)
 	if err != nil {
 		return err
 	}
@@ -576,7 +586,7 @@ func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
 
 func (db *RockDB) HMclear(keys ...[]byte) {
 	for _, key := range keys {
-		db.HClear(key)
+		db.HClear(0, key)
 	}
 }
 

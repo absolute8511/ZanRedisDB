@@ -46,7 +46,7 @@ func TestListTrim(t *testing.T) {
 	key := []byte("test:test_list_trim")
 
 	init := func() {
-		db.LClear(key)
+		db.LClear(0, key)
 		for i := 0; i < 100; i++ {
 			n, err := db.RPush(0, key, []byte(strconv.Itoa(i)))
 			if err != nil {
@@ -172,7 +172,7 @@ func TestDBList(t *testing.T) {
 		t.Fatal(llen)
 	}
 
-	if num, err := db.LClear(key); err != nil {
+	if num, err := db.LClear(0, key); err != nil {
 		t.Fatal(err)
 	} else if num != 1 {
 		t.Error(num)

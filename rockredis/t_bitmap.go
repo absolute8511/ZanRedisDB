@@ -352,8 +352,8 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 	return total, nil
 }
 
-func (db *RockDB) BitClear(key []byte) (int64, error) {
-	oldh, _, err := db.collHeaderMeta(0, BitmapType, key, false)
+func (db *RockDB) BitClear(ts int64, key []byte) (int64, error) {
+	oldh, isExpired, err := db.collHeaderMeta(ts, BitmapType, key, false)
 	if err != nil {
 		return 0, err
 	}
@@ -366,6 +366,19 @@ func (db *RockDB) BitClear(key []byte) (int64, error) {
 	table, rk, err := extractTableFromRedisKey(key)
 	if err != nil {
 		return 0, err
+	}
+	// no need delete if expired
+	if isExpired || bmSize == 0 {
+		return 0, nil
+	}
+	metaKey := bitEncodeMetaKey(key)
+	wb.Delete(metaKey)
+	if bmSize > 0 {
+		db.IncrTableKeyCount(table, -1, wb)
+	}
+	if db.cfg.ExpirationPolicy == common.WaitCompact {
+		// for compact ttl , we can just delete the meta
+		return 1, nil
 	}
 	rk = db.expiration.encodeToVersionKey(BitmapType, oldh, rk)
 	iterStart, _ := encodeBitmapStartKey(table, rk, 0)
@@ -384,9 +397,7 @@ func (db *RockDB) BitClear(key []byte) (int64, error) {
 		}
 	}
 
-	metaKey := bitEncodeMetaKey(key)
 	db.delExpire(BitmapType, key, nil, false, wb)
-	wb.Delete(metaKey)
 	err = db.MaybeCommitBatch()
 	return 1, err
 }

@@ -280,7 +280,7 @@ func (kvsm *kvStoreSM) localBitSetV2Command(cmd redcon.Command, ts int64) (inter
 }
 
 func (kvsm *kvStoreSM) localBitClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.BitClear(cmd.Args[1])
+	return kvsm.store.BitClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localAppendCommand(cmd redcon.Command, ts int64) (interface{}, error) {

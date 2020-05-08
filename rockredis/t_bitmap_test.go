@@ -186,7 +186,7 @@ func TestBitmapV2Clear(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(bitsForOne)), n)
 
-	db.BitClear(key)
+	db.BitClear(0, key)
 	n, err = db.BitCountV2(key, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)

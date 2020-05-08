@@ -178,6 +178,7 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		return 0, err
 	}
 
+	startTs := time.Now()
 	wb := db.wb
 	defer wb.Clear()
 	keyInfo, err := db.prepareCollKeyForWrite(ts, ListType, key, nil)
@@ -216,8 +217,10 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 	if checkSeq <= listMinSeq || checkSeq >= listMaxSeq {
 		return 0, errListSeq
 	}
+	cost1 := time.Since(startTs)
 	for i := 0; i < pushCnt; i++ {
 		ek := lEncodeListKey(table, rk, seq+int64(i)*delta)
+		// we assume there is no bug, so it must not override
 		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
 		if v != nil {
 			dbLog.Warningf("list %v should not override the old value: %v, meta: %v, %v,%v", string(key),
@@ -227,6 +230,7 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		}
 		wb.Put(ek, args[i])
 	}
+	cost2 := time.Since(startTs)
 	// rewrite old expired value should keep table counter unchanged
 	if size == 0 && pushCnt > 0 && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
@@ -248,7 +252,11 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		db.fixListKey(ts, key)
 		return 0, err
 	}
+	cost3 := time.Since(startTs)
 	err = db.eng.Write(db.defaultWriteOpts, wb)
+	if time.Since(startTs) > time.Second {
+		dbLog.Infof("lpush slow: %v, %v, %v", cost1, cost2, cost3)
+	}
 	return int64(size) + int64(pushCnt), err
 }
 
@@ -347,7 +355,6 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 		stop = llen + stop
 	}
 	if start >= llen || start > stop {
-		//db.lDelete(key, wb)
 		return errors.New("trim invalid")
 	}
 
@@ -464,12 +471,26 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 
 //	ps : here just focus on deleting the list data,
 //		 any other likes expire is ignore.
-func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
-	keyInfo, headSeq, tailSeq, size, _, err := db.lHeaderAndMeta(0, key, false)
+func (db *RockDB) lDelete(ts int64, key []byte, wb *gorocksdb.WriteBatch) int64 {
+	keyInfo, headSeq, tailSeq, size, _, err := db.lHeaderAndMeta(ts, key, false)
 	if err != nil {
 		return 0
 	}
+	// no need delete if expired
+	if keyInfo.IsNotExistOrExpired() || size == 0 {
+		return 0
+	}
+
 	table := keyInfo.Table
+	mk := lEncodeMetaKey(key)
+	wb.Delete(mk)
+	if size > 0 {
+		db.IncrTableKeyCount(table, -1, wb)
+	}
+	if db.cfg.ExpirationPolicy == common.WaitCompact {
+		// for compact ttl , we can just delete the meta
+		return size
+	}
 	rk := keyInfo.VerKey
 
 	startKey := lEncodeListKey(table, rk, headSeq)
@@ -495,12 +516,6 @@ func (db *RockDB) lDelete(key []byte, wb *gorocksdb.WriteBatch) int64 {
 	// delete range is [left, right), so we need delete end
 
 	wb.Delete(stopKey)
-	if size > 0 {
-		db.IncrTableKeyCount(table, -1, wb)
-	}
-
-	mk := lEncodeMetaKey(key)
-	wb.Delete(mk)
 	return size
 }
 
@@ -731,17 +746,21 @@ func (db *RockDB) RPush(ts int64, key []byte, args ...[]byte) (int64, error) {
 	return db.lpush(ts, key, listTailSeq, args...)
 }
 
-func (db *RockDB) LClear(key []byte) (int64, error) {
+func (db *RockDB) LClear(ts int64, key []byte) (int64, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, err
 	}
-	num := db.lDelete(key, db.wb)
+	num := db.lDelete(ts, key, db.wb)
 	if num > 0 {
 		//delete the expire data related to the list key
 		db.delExpire(ListType, key, nil, false, db.wb)
 	}
 	err := db.CommitBatchWrite()
-	return num, err
+	// num should be the deleted key number
+	if num > 0 {
+		return 1, err
+	}
+	return 0, err
 }
 
 func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
@@ -753,7 +772,7 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 		if err := checkKeySize(key); err != nil {
 			return 0, err
 		}
-		db.lDelete(key, db.wb)
+		db.lDelete(0, key, db.wb)
 		db.delExpire(ListType, key, nil, false, db.wb)
 	}
 	err := db.CommitBatchWrite()
@@ -773,7 +792,7 @@ func (db *RockDB) lMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) err
 		if err := checkKeySize(key); err != nil {
 			return err
 		}
-		db.lDelete(key, wb)
+		db.lDelete(0, key, wb)
 		db.delExpire(ListType, key, nil, false, wb)
 	}
 	return nil
