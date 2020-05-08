@@ -362,7 +362,7 @@ func (nd *KVNode) zaddCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (nd *KVNode) zincrbyCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
 		rsp, ok := r.(float64)
 		if ok {
 			return []byte(strconv.FormatFloat(rsp, 'g', -1, 64)), nil
@@ -406,7 +406,7 @@ func (nd *KVNode) zremrangebyrankCommand(cmd redcon.Command) (interface{}, error
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +423,7 @@ func (nd *KVNode) zremrangebyscoreCommand(cmd redcon.Command) (interface{}, erro
 	if err != nil {
 		return nil, err
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +440,7 @@ func (nd *KVNode) zremrangebylexCommand(cmd redcon.Command) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}

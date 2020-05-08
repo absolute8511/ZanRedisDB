@@ -66,7 +66,7 @@ func (nd *KVNode) lsetCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
 	if err != nil {
 		return nil, err
 	}

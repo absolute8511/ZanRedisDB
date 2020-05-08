@@ -96,7 +96,7 @@ func (nd *KVNode) saddCommand(cmd redcon.Command) (interface{}, error) {
 	if !needChange {
 		return int64(0), nil
 	}
-	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	return rsp, err
 }
 
@@ -115,7 +115,7 @@ func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 			return nil, errors.New("Invalid count")
 		}
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
 		// without the count argument, it is bulk string
 		if !hasCount {
 			if r == nil {

@@ -192,6 +192,7 @@ func TestKVNode_kvCommand(t *testing.T) {
 		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey, testKeyValue})},
 		{"setnx", buildCommand([][]byte{[]byte("setnx"), testKey2, testKey2Value})},
 		//{"mset", buildCommand([][]byte{[]byte("mset"), testKey, testKeyValue, testKey2, testKey2Value})},
+		{"plset", buildCommand([][]byte{[]byte("mset"), testKey, testKeyValue, testKey2, testKey2Value})},
 		{"del", buildCommand([][]byte{[]byte("del"), testKey, testKey2})},
 		{"incr", buildCommand([][]byte{[]byte("incr"), testKey})},
 		{"incrby", buildCommand([][]byte{[]byte("incrby"), testKey, testKey2Value})},
@@ -210,26 +211,30 @@ func TestKVNode_kvCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	defer c.Close()
 	defer c.Reset()
-	for _, cmd := range tests {
-		c.Reset()
-		handler, _ := nd.router.GetCmdHandler(cmd.name)
-		if handler != nil {
-			handler(c, cmd.args)
-		} else {
-			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
-			if whandler != nil {
-				rsp, err := whandler(cmd.args)
-				assert.Nil(t, err)
-				_, ok := rsp.(error)
-				assert.True(t, !ok)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c.Reset()
+			origCmd := append([]byte{}, tt.args.Raw...)
+			handler, _ := nd.router.GetCmdHandler(tt.name)
+			if handler != nil {
+				handler(c, tt.args)
 			} else {
-				handler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
-				_, err := handler(cmd.args)
-				assert.Nil(t, err)
+				whandler, _ := nd.router.GetWCmdHandler(tt.name)
+				if whandler != nil {
+					rsp, err := whandler(tt.args)
+					assert.Nil(t, err)
+					_, ok := rsp.(error)
+					assert.True(t, !ok)
+				} else {
+					handler, _, _ := nd.router.GetMergeCmdHandler(tt.name)
+					_, err := handler(tt.args)
+					assert.Nil(t, err)
+				}
 			}
-		}
-		t.Logf("handler response: %v", c.rsp)
-		assert.Nil(t, c.GetError())
+			t.Logf("handler response: %v", c.rsp)
+			assert.Nil(t, c.GetError())
+			assert.Equal(t, origCmd, tt.args.Raw)
+		})
 	}
 }
 
@@ -272,6 +277,7 @@ func TestKVNode_kvCommandWhileNoLeader(t *testing.T) {
 	defer c.Reset()
 	for _, cmd := range tests {
 		c.Reset()
+		origCmd := append([]byte{}, cmd.args.Raw...)
 		handler, _ := nd.router.GetCmdHandler(cmd.name)
 		if handler != nil {
 			handler(c, cmd.args)
@@ -292,6 +298,7 @@ func TestKVNode_kvCommandWhileNoLeader(t *testing.T) {
 		}
 		t.Logf("handler response: %v", c.rsp)
 		assert.Nil(t, c.GetError())
+		assert.Equal(t, origCmd, cmd.args.Raw)
 	}
 }
 
@@ -428,6 +435,7 @@ func TestKVNode_bitV2Command(t *testing.T) {
 	defer c.Reset()
 	for _, cmd := range tests {
 		c.Reset()
+		origCmd := append([]byte{}, cmd.args.Raw...)
 		handler, _ := nd.router.GetCmdHandler(cmd.name)
 		if handler != nil {
 			handler(c, cmd.args)
@@ -446,5 +454,6 @@ func TestKVNode_bitV2Command(t *testing.T) {
 		}
 		t.Logf("handler response: %v", c.rsp)
 		assert.Nil(t, c.GetError())
+		assert.Equal(t, origCmd, cmd.args.Raw)
 	}
 }
