@@ -121,7 +121,7 @@ func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 			if r == nil {
 				return nil, nil
 			}
-			if rsp, ok := r.(string); ok {
+			if rsp, ok := r.([]byte); ok {
 				return rsp, nil
 			}
 			return nil, errInvalidResponse
@@ -160,7 +160,7 @@ func (kvsm *kvStoreSM) localSpop(cmd redcon.Command, ts int64) (interface{}, err
 		return vals, nil
 	}
 	if len(vals) > 0 {
-		return string(vals[0]), nil
+		return vals[0], nil
 	}
 	return nil, nil
 }

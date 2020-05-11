@@ -600,6 +600,8 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 	case error:
 		conn.WriteError(rv.Error())
 	case string:
+		// note the simple string should use WriteString, but the binary string should use
+		// WriteBulk or WriteBulkString
 		conn.WriteString(rv)
 	case int64:
 		conn.WriteInt64(rv)
