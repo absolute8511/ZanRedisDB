@@ -1,0 +1,42 @@
+name: Go
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Set up Go 1.x
+      uses: actions/setup-go@v2
+      with:
+        go-version: ^1.13
+      id: go
+      
+    - name: Setup C++ environment
+      uses: kurocha/setup-cpp@v1
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+
+    - name: Get dependencies
+      run: |
+        sudo apt-get install libsnappy1v5 libsnappy-dev libjemalloc1 libjemalloc-dev
+        git clone https://github.com/absolute8511/rocksdb.git /tmp/rocksdb
+        pushd /tmp/rocksdb && git checkout v5.18-patched && USE_SSE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib && popd
+
+    - name: Test
+      run: |
+        wget -c https://github.com/coreos/etcd/releases/download/v2.3.8/etcd-v2.3.8-linux-amd64.tar.gz
+        tar -xvzf etcd-v2.3.8-linux-amd64.tar.gz
+        ./etcd-v2.3.8-linux-amd64/etcd -name=test-etcd0 -initial-advertise-peer-urls=http://127.0.0.1:2380 -listen-client-urls=http://127.0.0.1:2379 -advertise-client-urls=http://127.0.0.1:2379 -listen-peer-urls=http://127.0.0.1:2380 -initial-cluster="test-etcd0=http://127.0.0.1:2380" -initial-cluster-state=new --data-dir ./test-etcd > etcd.log 2>&1 &
+        ROCKSDB=/tmp/rocksdb ./test.sh
+
+    - name: Codecov
+      uses: codecov/codecov-action@v1.0.7
