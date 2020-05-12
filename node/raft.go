@@ -892,6 +892,10 @@ func (rc *raftNode) serveChannels() {
 					fi = fi - 1
 					if last > fi && last-fi >= uint64(rc.config.SnapCatchup+rc.config.SnapCount)*10 {
 						busy = true
+						metric.EventCnt.With(ps.Labels{
+							"namespace":  rc.Descrp(),
+							"event_name": "raft_too_much_logs_unapplied",
+						}).Inc()
 					}
 				}
 			}
@@ -900,6 +904,10 @@ func (rc *raftNode) serveChannels() {
 				if rc.slowLimiter != nil {
 					rc.slowLimiter.MarkHeavySlow()
 				}
+				metric.EventCnt.With(ps.Labels{
+					"namespace":  rc.Descrp(),
+					"event_name": "raft_apply_buffer_full",
+				}).Inc()
 			} else if len(rc.commitC) <= 10 {
 			}
 			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, busy)
