@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	collStartSep byte = ':'
-	collStopSep  byte = collStartSep + 1
+	collStartSep              byte  = ':'
+	collStopSep               byte  = collStartSep + 1
+	collectionLengthForMetric int64 = 128
 )
 
 type collVerKeyInfo struct {

@@ -466,6 +466,11 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 	} else if _, err := common.StringToExpirationPolicy(expPolicy); err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_EXPIRATION_POLICY"}
 	}
+	if expPolicy == common.WaitCompactExpirationPolicy {
+		if dataVersion != common.ValueHeaderV1Str {
+			return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_EXPIRATION_POLICY data version must be v1 in compact ttl"}
+		}
+	}
 
 	tagStr := reqParams.Get("tags")
 	var tagList []string

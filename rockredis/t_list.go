@@ -5,8 +5,10 @@ import (
 	"errors"
 	"time"
 
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -178,7 +180,6 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		return 0, err
 	}
 
-	startTs := time.Now()
 	wb := db.wb
 	defer wb.Clear()
 	keyInfo, err := db.prepareCollKeyForWrite(ts, ListType, key, nil)
@@ -217,7 +218,6 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 	if checkSeq <= listMinSeq || checkSeq >= listMaxSeq {
 		return 0, errListSeq
 	}
-	cost1 := time.Since(startTs)
 	for i := 0; i < pushCnt; i++ {
 		ek := lEncodeListKey(table, rk, seq+int64(i)*delta)
 		// we assume there is no bug, so it must not override
@@ -230,7 +230,6 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		}
 		wb.Put(ek, args[i])
 	}
-	cost2 := time.Since(startTs)
 	// rewrite old expired value should keep table counter unchanged
 	if size == 0 && pushCnt > 0 && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
@@ -252,12 +251,20 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		db.fixListKey(ts, key)
 		return 0, err
 	}
-	cost3 := time.Since(startTs)
 	err = db.eng.Write(db.defaultWriteOpts, wb)
-	if time.Since(startTs) > time.Second {
-		dbLog.Infof("lpush slow: %v, %v, %v", cost1, cost2, cost3)
+
+	newNum := int64(size) + int64(pushCnt)
+	if newNum > collectionLengthForMetric {
+		metric.CollectionLenDist.With(ps.Labels{
+			"table": string(table),
+		}).Observe(float64(newNum))
+		if newNum > MAX_BATCH_NUM {
+			metric.LargeCollectionCnt.With(ps.Labels{
+				"key": string(key),
+			}).Inc()
+		}
 	}
-	return int64(size) + int64(pushCnt), err
+	return newNum, err
 }
 
 func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {

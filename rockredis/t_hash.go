@@ -6,8 +6,10 @@ import (
 	"errors"
 	"time"
 
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -118,10 +120,21 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 			return created, nil
 		}
 	} else {
-		if n, err := db.hIncrSize(hkey, keyInfo.OldHeader, 1, wb); err != nil {
+		newNum, err := db.hIncrSize(hkey, keyInfo.OldHeader, 1, wb)
+		if err != nil {
 			return 0, err
-		} else if n == 1 && !keyInfo.Expired {
+		} else if newNum == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(table, 1, wb)
+		}
+		if newNum > collectionLengthForMetric {
+			metric.CollectionLenDist.With(ps.Labels{
+				"table": string(table),
+			}).Observe(float64(newNum))
+			if newNum > MAX_BATCH_NUM {
+				metric.LargeCollectionCnt.With(ps.Labels{
+					"key": string(hkey),
+				}).Inc()
+			}
 		}
 	}
 
@@ -175,7 +188,6 @@ func (db *RockDB) hIncrSize(hkey []byte, oldh *headerMetaValue, delta int64, wb 
 }
 
 func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, ovalue []byte) (int64, error) {
-	s := time.Now()
 	if err := checkValueSize(ovalue); err != nil {
 		return 0, err
 	}
@@ -204,13 +216,8 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, ovalue 
 	if err != nil {
 		return 0, err
 	}
-	c1 := time.Since(s)
 
 	err = db.MaybeCommitBatch()
-	c2 := time.Since(s)
-	if c2 > time.Second/3 {
-		dbLog.Infof("key %v slow write cost: %v, %v", string(key), c1, c2)
-	}
 	return created, err
 }
 

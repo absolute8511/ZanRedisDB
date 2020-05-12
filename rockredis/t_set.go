@@ -5,8 +5,10 @@ import (
 	"errors"
 	"time"
 
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -271,10 +273,21 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}
 	}
 
-	if newNum, err := db.sIncrSize(ts, key, oldh, num, wb); err != nil {
+	newNum, err := db.sIncrSize(ts, key, oldh, num, wb)
+	if err != nil {
 		return 0, err
 	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
+	}
+	if newNum > collectionLengthForMetric {
+		metric.CollectionLenDist.With(ps.Labels{
+			"table": string(table),
+		}).Observe(float64(newNum))
+		if newNum > MAX_BATCH_NUM {
+			metric.LargeCollectionCnt.With(ps.Labels{
+				"key": string(key),
+			}).Inc()
+		}
 	}
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
@@ -434,6 +447,7 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	if num > 0 && newNum == 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 	}

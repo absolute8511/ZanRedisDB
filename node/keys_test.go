@@ -96,6 +96,9 @@ func getTestKVNodeWith(t *testing.T, mustNoLeader bool) (*KVNode, string, chan s
 	stopC := make(chan struct{})
 	ln, err := common.NewStoppableListener(url.Host, stopC)
 	assert.Nil(t, err)
+	if ln == nil {
+		panic(err)
+	}
 	go func() {
 		(&http.Server{Handler: raftTransport.Handler()}).Serve(ln)
 	}()

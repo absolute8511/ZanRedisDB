@@ -6,8 +6,10 @@ import (
 	"errors"
 	"time"
 
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -345,12 +347,22 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 		}
 	}
 
-	if newNum, err := db.zIncrSize(ts, key, keyInfo.OldHeader, num, wb); err != nil {
+	newNum, err := db.zIncrSize(ts, key, keyInfo.OldHeader, num, wb)
+	if err != nil {
 		return 0, err
 	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
-
+	if newNum > collectionLengthForMetric {
+		metric.CollectionLenDist.With(ps.Labels{
+			"table": string(table),
+		}).Observe(float64(newNum))
+		if newNum > MAX_BATCH_NUM {
+			metric.LargeCollectionCnt.With(ps.Labels{
+				"key": string(key),
+			}).Inc()
+		}
+	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
 }
