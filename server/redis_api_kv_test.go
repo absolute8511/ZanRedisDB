@@ -8,8 +8,12 @@ import (
 	"testing"
 	"time"
 
+	ps "github.com/prometheus/client_golang/prometheus"
+	io_prometheus_clients "github.com/prometheus/client_model/go"
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/node"
 )
 
@@ -1004,8 +1008,9 @@ func TestSlowLimiterCommand(t *testing.T) {
 	loop := 0
 	refused := 0
 	passedAfterRefused := 0
+	slowHalfOpen := time.Second * time.Duration(node.SlowHalfOpenSec)
 	for {
-		if time.Since(start) > node.SlowHalfOpen*2 {
+		if time.Since(start) > slowHalfOpen*2 {
 			break
 		}
 		loop++
@@ -1016,27 +1021,37 @@ func TestSlowLimiterCommand(t *testing.T) {
 			time.Sleep(time.Millisecond)
 			continue
 		}
-		if refused > 0 {
+		if refused > 0 && err == nil {
 			passedAfterRefused++
+			if passedAfterRefused > 3 {
+				break
+			}
 		}
 	}
 	close(done)
-	t.Logf("slow loop cnt: %v, refused: %v, %v, total %v, slowed: %v",
-		loop, refused, passedAfterRefused, atomic.LoadInt64(&total), atomic.LoadInt64(&slowed))
+	t.Logf("slow loop cnt: %v, refused: %v, %v, total %v, slowed: %v at %v",
+		loop, refused, passedAfterRefused, atomic.LoadInt64(&total), atomic.LoadInt64(&slowed), time.Now())
 	assert.True(t, refused > loop/2)
 	assert.True(t, atomic.LoadInt64(&slowed) < atomic.LoadInt64(&total)/10)
-	assert.True(t, passedAfterRefused < 3)
+	assert.True(t, passedAfterRefused < 5)
 	assert.True(t, passedAfterRefused > 0)
 	wg.Wait()
-	time.Sleep(node.SlowHalfOpen)
+	counter := metric.SlowLimiterRefusedCnt.With(ps.Labels{
+		"table": "test",
+		"cmd":   "slowwrite1s_test",
+	})
+	out := io_prometheus_clients.Metric{}
+	counter.Write(&out)
+	assert.Equal(t, float64(refused), *out.Counter.Value)
+
 	refused = 0
 	passedAfterRefused = 0
 	c2 := getTestConn(t)
 	defer c2.Close()
-	// wait until we become no slow to test clear history recorded slow
 	start = time.Now()
+	// wait until we become no slow to test clear history recorded slow
 	for {
-		if time.Since(start) > node.SlowHalfOpen*2 {
+		if time.Since(start) > slowHalfOpen*2 {
 			break
 		}
 		loop++
@@ -1044,19 +1059,35 @@ func TestSlowLimiterCommand(t *testing.T) {
 		_, err := goredis.String(c2.Do("slowwrite1s_test", key1, "12345"))
 		if err != nil && err.Error() == node.ErrSlowLimiterRefused.Error() {
 			refused++
-			time.Sleep(time.Millisecond)
+			// we need sleep longer to allow slow down ticker decr counter to 0
+			time.Sleep(time.Second)
 			continue
 		}
-		if refused > 0 {
+		if refused > 0 && err == nil {
 			passedAfterRefused++
-			if passedAfterRefused > 2 {
+			if passedAfterRefused > 3 {
 				break
 			}
 		}
 	}
-	t.Logf("slow loop cnt: %v, refused: %v, %v",
-		loop, refused, passedAfterRefused)
-	assert.True(t, refused > 0)
+	t.Logf("slow loop cnt: %v, refused: %v, %v at %v",
+		loop, refused, passedAfterRefused, time.Now())
+	assert.True(t, refused > 1)
 	assert.True(t, passedAfterRefused < 5)
-	assert.True(t, passedAfterRefused > 0)
+	assert.True(t, passedAfterRefused > 3)
+	c2.SetReadDeadline(time.Now().Add(time.Second * 10))
+	time.Sleep(time.Second * 5)
+	//  we become no slow, we try 3 times to avoid just half open pass
+	_, err = goredis.String(c2.Do("slowwrite1s_test", key1, "12345"))
+	assert.Nil(t, err)
+	_, err = goredis.String(c2.Do("slowwrite1s_test", key1, "12345"))
+	assert.Nil(t, err)
+	_, err = goredis.String(c2.Do("slowwrite1s_test", key1, "12345"))
+	assert.Nil(t, err)
+
+	// check changed conf
+	common.SetIntDynamicConf(common.ConfSlowLimiterRefuseCostMs, 601)
+	common.SetIntDynamicConf(common.ConfSlowLimiterHalfOpenSec, 18)
+	assert.Equal(t, int64(601), atomic.LoadInt64(&node.SlowRefuseCostMs))
+	assert.Equal(t, int64(18), atomic.LoadInt64(&node.SlowHalfOpenSec))
 }

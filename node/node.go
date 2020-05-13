@@ -56,7 +56,6 @@ const (
 	SchemaChangeReq int8 = 2
 	RedisV2Req      int8 = 3
 	proposeTimeout       = time.Second * 4
-	proposeQueueLen      = 800
 	raftSlow             = time.Millisecond * 200
 	maxPoolIDLen         = 256
 	waitPoolSize         = 6
@@ -528,7 +527,6 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 	if len(wrh.done) != 0 {
 		wrh.done = make(chan struct{}, 1)
 	}
-	poolCost := time.Since(start)
 	var e raftpb.Entry
 	if irr.Header.DataType == int32(RedisV2Req) {
 		e.DataType = irr.Header.DataType
@@ -557,14 +555,24 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 	err := nd.rn.node.ProposeEntryWithDrop(ctx, e, cancel)
 	if err != nil {
 		nd.rn.Infof("propose failed : %v", err.Error())
+		metric.ErrorCnt.With(ps.Labels{
+			"namespace":  nd.GetFullName(),
+			"error_info": "raft_propose_failed",
+		}).Inc()
 		nd.w.Trigger(irr.Header.ID, err)
 		wrh.release()
 		return nil, err
 	}
 	proposalCost := time.Since(start)
-	if proposalCost >= raftSlow/2 {
-		nd.rn.Infof("raft slow for propose buf: %v, cost %v-%v-%v",
-			len(e.Data), poolCost, marshalCost, proposalCost)
+	if proposalCost >= time.Millisecond {
+		metric.RaftWriteLatency.With(ps.Labels{
+			"namespace": nd.GetFullName(),
+			"step":      "marshal_propose",
+		}).Observe(float64(marshalCost.Milliseconds()))
+		metric.RaftWriteLatency.With(ps.Labels{
+			"namespace": nd.GetFullName(),
+			"step":      "propose_to_queue",
+		}).Observe(float64(proposalCost.Milliseconds()))
 	}
 	return wrh, nil
 }
@@ -689,7 +697,7 @@ func (nd *KVNode) UpdateWriteStats(vSize int64, latencyUs int64) {
 
 	metric.ClusterWriteLatency.With(ps.Labels{
 		"namespace": nd.GetFullName(),
-	}).Observe(float64(latencyUs))
+	}).Observe(float64(latencyUs / 1000))
 }
 
 type FutureRsp struct {
@@ -1293,6 +1301,10 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	if cost > raftSlow {
 		nd.rn.Infof("raft apply slow cost: %v, number %v", cost, len(applyEvent.ents))
 	}
+	metric.RaftWriteLatency.With(ps.Labels{
+		"namespace": nd.GetFullName(),
+		"step":      "raft_sm_applyall",
+	}).Observe(float64(cost.Milliseconds()))
 
 	lastIndex := np.appliedi
 	if applyEvent.snapshot.Metadata.Index > lastIndex {
@@ -1523,6 +1535,6 @@ func (nd *KVNode) IsPeerRemoved(peerID uint64) bool { return false }
 func (nd *KVNode) CanPass(ts int64, cmd string, table string) bool {
 	return nd.slowLimiter.CanPass(ts, cmd, table)
 }
-func (nd *KVNode) MaybeAddSlow(ts int64, cost time.Duration) {
-	nd.slowLimiter.MaybeAddSlow(ts, cost)
+func (nd *KVNode) MaybeAddSlow(ts int64, cost time.Duration, cmd, table string) {
+	nd.slowLimiter.MaybeAddSlow(ts, cost, cmd, table)
 }

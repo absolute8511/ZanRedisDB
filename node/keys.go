@@ -149,7 +149,7 @@ func (nd *KVNode) setnxCommand(cmd redcon.Command) (interface{}, error) {
 		return int64(0), nil
 	}
 
-	cmd, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (nd *KVNode) setbitCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, fmt.Errorf("bit should be 0 or 1, got %d", on)
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +280,7 @@ func (kvsm *kvStoreSM) localBitSetV2Command(cmd redcon.Command, ts int64) (inter
 }
 
 func (kvsm *kvStoreSM) localBitClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.BitClear(cmd.Args[1])
+	return kvsm.store.BitClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localAppendCommand(cmd redcon.Command, ts int64) (interface{}, error) {

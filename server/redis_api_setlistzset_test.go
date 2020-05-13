@@ -291,7 +291,7 @@ func TestPop(t *testing.T) {
 
 	if n, err := goredis.Int(c.Do("lclear", key)); err != nil {
 		t.Fatal(err)
-	} else if n != 5 {
+	} else if n <= 0 {
 		t.Fatal(n)
 	}
 
@@ -674,9 +674,40 @@ func TestSet(t *testing.T) {
 	}
 	if n, err := goredis.Int(c.Do("sclear", key2)); err != nil {
 		t.Fatal(err)
-	} else if n != 4 {
+	} else if n <= 0 {
 		t.Fatal(n)
 	}
+}
+
+func TestSetSPopCompatile(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+
+	key1 := "default:test:testdb_cmd_set_spop"
+
+	binaryStr := make([]byte, 10)
+	binaryStr = []byte("binary" + string(binaryStr) + "bb")
+	n, err := goredis.Int(c.Do("sadd", key1, binaryStr))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
+	binaryStr2 := []byte(string(binaryStr) + "2")
+	n, err = goredis.Int(c.Do("sadd", key1, binaryStr2))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int(2), n)
+
+	val, err := c.Do("spop", key1)
+	assert.Nil(t, err)
+	assert.Equal(t, binaryStr, val)
+	_, ok := val.([]byte)
+	assert.Equal(t, true, ok)
+	vals, err := goredis.MultiBulk(c.Do("spop", key1, 1))
+	assert.Nil(t, err)
+	assert.Equal(t, binaryStr2, vals[0])
+	_, ok = vals[0].([]byte)
+	assert.Equal(t, true, ok)
 }
 
 func TestSetExpire(t *testing.T) {
@@ -1525,7 +1556,7 @@ func TestZSetRange(t *testing.T) {
 
 	if n, err := goredis.Int(c.Do("zclear", key)); err != nil {
 		t.Fatal(err)
-	} else if n != 2 {
+	} else if n <= 0 {
 		t.Fatal(n)
 	}
 

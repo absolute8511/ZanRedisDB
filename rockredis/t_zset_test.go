@@ -103,9 +103,9 @@ func TestDBZSetWithEmptyMember(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(2), n)
 
-	n, err = db.ZClear(key)
+	n, err = db.ZClear(0, key)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(2), n)
+	assert.Equal(t, int64(1), n)
 
 	n, err = db.ZCount(key, 0, 0xFF)
 	assert.Nil(t, err)
@@ -176,9 +176,9 @@ func TestDBZSet(t *testing.T) {
 	}
 
 	// {}
-	if n, err := db.ZClear(key); err != nil {
+	if n, err := db.ZClear(0, key); err != nil {
 		t.Fatal(err)
-	} else if n != 2 {
+	} else if n != 1 {
 		t.Fatal(n)
 	}
 
@@ -416,7 +416,7 @@ func TestZRemRange(t *testing.T) {
 	assert.Equal(t, total, len(vlist))
 	assert.Equal(t, mems[5:], vlist)
 
-	n, err = db.ZClear(key)
+	n, err = db.ZClear(0, key)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
@@ -611,4 +611,119 @@ func TestZKeyExists(t *testing.T) {
 	} else if n != 1 {
 		t.Fatal("invalid value ", n)
 	}
+}
+
+func TestDBZClearInCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_zset_clear_compact_a")
+	member := []byte("member")
+	memberNew := []byte("memberNew")
+
+	ts := time.Now().UnixNano()
+	db.ZAdd(ts, key, common.ScorePair{
+		Score:  1,
+		Member: member,
+	})
+
+	n, err := db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	ts = time.Now().UnixNano()
+	n, err = db.ZClear(ts, key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	vlist, err := db.ZRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	vlist, err = db.ZRevRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	mlist, err := db.ZRangeByLex(key, nil, nil, common.RangeClose, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(mlist))
+	vlist, err = db.ZRangeByScore(key, 0, 100, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+	score, err := db.ZScore(key, member)
+	assert.Equal(t, errScoreMiss, err)
+	assert.Equal(t, float64(0), score)
+
+	n, err = db.ZRank(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.ZRevRank(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+
+	n, err = db.ZKeyExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	vlist, err = db.ZScan(key, []byte(""), -1, "", false)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(vlist))
+
+	// renew
+	ts = time.Now().UnixNano()
+	db.ZAdd(ts, key, common.ScorePair{
+		Score:  2,
+		Member: memberNew,
+	})
+
+	n, err = db.ZCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	vlist, err = db.ZRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(vlist))
+	assert.Equal(t, float64(2), vlist[0].Score)
+	assert.Equal(t, memberNew, vlist[0].Member)
+	vlist, err = db.ZRevRange(key, 0, 100)
+	assert.Equal(t, 1, len(vlist))
+	assert.Equal(t, float64(2), vlist[0].Score)
+	assert.Equal(t, memberNew, vlist[0].Member)
+	mlist, err = db.ZRangeByLex(key, nil, nil, common.RangeClose, 0, -1)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(mlist))
+	vlist, err = db.ZRangeByScore(key, 0, 100, 0, -1)
+	assert.Equal(t, 1, len(vlist))
+	assert.Equal(t, float64(2), vlist[0].Score)
+	assert.Equal(t, memberNew, vlist[0].Member)
+	score, err = db.ZScore(key, member)
+	assert.Equal(t, errScoreMiss, err)
+	assert.Equal(t, float64(0), score)
+	score, err = db.ZScore(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, float64(2), score)
+
+	n, err = db.ZRank(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.ZRevRank(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(-1), n)
+	n, err = db.ZRank(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.ZRevRank(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.ZKeyExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	vlist, err = db.ZScan(key, []byte(""), -1, "", false)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(vlist))
 }

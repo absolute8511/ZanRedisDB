@@ -362,7 +362,7 @@ func (nd *KVNode) zaddCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (nd *KVNode) zincrbyCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
 		rsp, ok := r.(float64)
 		if ok {
 			return []byte(strconv.FormatFloat(rsp, 'g', -1, 64)), nil
@@ -406,7 +406,7 @@ func (nd *KVNode) zremrangebyrankCommand(cmd redcon.Command) (interface{}, error
 		return nil, err
 	}
 
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +423,7 @@ func (nd *KVNode) zremrangebyscoreCommand(cmd redcon.Command) (interface{}, erro
 	if err != nil {
 		return nil, err
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +440,7 @@ func (nd *KVNode) zremrangebylexCommand(cmd redcon.Command) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -521,13 +521,13 @@ func (kvsm *kvStoreSM) localZclearCommand(cmd redcon.Command, ts int64) (interfa
 	if len(cmd.Args) != 2 {
 		return nil, common.ErrInvalidArgs
 	}
-	return kvsm.store.ZClear(cmd.Args[1])
+	return kvsm.store.ZClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localZMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, zkey := range cmd.Args[1:] {
-		if _, err := kvsm.store.ZClear(zkey); err != nil {
+		if _, err := kvsm.store.ZClear(ts, zkey); err != nil {
 			return count, err
 		} else {
 			count++

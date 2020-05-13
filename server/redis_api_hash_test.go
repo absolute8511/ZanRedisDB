@@ -244,7 +244,7 @@ func TestHashGetAll(t *testing.T) {
 
 	if n, err := goredis.Int(c.Do("hclear", key)); err != nil {
 		t.Fatal(err)
-	} else if n != 3 {
+	} else if n <= 0 {
 		t.Fatal(n)
 	}
 

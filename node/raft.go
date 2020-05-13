@@ -28,7 +28,9 @@ import (
 	"encoding/json"
 	"sync/atomic"
 
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/pkg/fileutil"
 	"github.com/youzan/ZanRedisDB/pkg/idutil"
 	"github.com/youzan/ZanRedisDB/pkg/types"
@@ -871,6 +873,10 @@ func (rc *raftNode) serveChannels() {
 		case <-rc.stopc:
 			return
 		case <-rc.node.EventNotifyCh():
+			metric.QueueLen.With(ps.Labels{
+				"namespace":  rc.Descrp(),
+				"queue_name": "apply_commit_queue",
+			}).Set(float64(len(rc.commitC)))
 			moreEntriesToApply := cap(rc.commitC)-len(rc.commitC) > 3
 			// we should slow down raft logs receiving while applying is slow, otherwise we
 			// may have too much logs in memory if the applying is slow.
@@ -886,14 +892,22 @@ func (rc *raftNode) serveChannels() {
 					fi = fi - 1
 					if last > fi && last-fi >= uint64(rc.config.SnapCatchup+rc.config.SnapCount)*10 {
 						busy = true
+						metric.EventCnt.With(ps.Labels{
+							"namespace":  rc.Descrp(),
+							"event_name": "raft_too_much_logs_unapplied",
+						}).Inc()
 					}
 				}
 			}
 			if !moreEntriesToApply && !busy {
-				rc.Debugf("apply buffer nearly full, slow down: %v", len(rc.commitC))
+				// apply buffer nearly full, should slow down and refuse some slow write proposal
 				if rc.slowLimiter != nil {
 					rc.slowLimiter.MarkHeavySlow()
 				}
+				metric.EventCnt.With(ps.Labels{
+					"namespace":  rc.Descrp(),
+					"event_name": "raft_apply_buffer_full",
+				}).Inc()
 			} else if len(rc.commitC) <= 10 {
 			}
 			rd, hasUpdate := rc.node.StepNode(moreEntriesToApply, busy)
@@ -917,6 +931,10 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		if rd.SoftState.Lead != raft.None && oldLead != rd.SoftState.Lead {
 			rc.Infof("leader changed from %v to %v", oldLead, rd.SoftState)
 			atomic.StoreInt64(&rc.lastLeaderChangedTs, time.Now().UnixNano())
+			metric.EventCnt.With(ps.Labels{
+				"namespace":  rc.Descrp(),
+				"event_name": "raft_leader_changed",
+			}).Inc()
 		}
 		if rd.SoftState.Lead == raft.None && oldLead != raft.None {
 			// TODO: handle proposal drop if leader is lost
@@ -1013,6 +1031,10 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	if cost >= raftSlow/2 {
 		rc.Infof("raft persist state slow: %v, cost: %v", len(rd.Entries), cost)
 	}
+	metric.RaftWriteLatency.With(ps.Labels{
+		"namespace": rc.Descrp(),
+		"step":      "raft_persist_commit_entries",
+	}).Observe(float64(cost.Milliseconds()))
 
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		// we need to notify to tell that the snapshot has been perisisted onto the disk

@@ -66,7 +66,7 @@ func (nd *KVNode) lsetCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
 		return nil, err
 	}
 
-	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
 	if err != nil {
 		return nil, err
 	}
@@ -141,13 +141,13 @@ func (kvsm *kvStoreSM) localRpushCommand(cmd redcon.Command, ts int64) (interfac
 }
 
 func (kvsm *kvStoreSM) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.LClear(cmd.Args[1])
+	return kvsm.store.LClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localLMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, lkey := range cmd.Args[1:] {
-		if _, err := kvsm.store.LClear(lkey); err != nil {
+		if _, err := kvsm.store.LClear(ts, lkey); err != nil {
 			return count, err
 		} else {
 			count++

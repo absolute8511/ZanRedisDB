@@ -446,7 +446,7 @@ func TestHashTTL_Compact_KeepTTL(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, hashTTL, n)
 	// hdel
-	n, err = db.HDel(hashKey, hash_val[0].Key)
+	n, err = db.HDel(0, hashKey, hash_val[0].Key)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 	n, err = db.HashTtl(hashKey)

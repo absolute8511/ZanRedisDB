@@ -545,6 +545,7 @@ func (s *Server) handleRedisSingleCmd(cmdName string, pk []byte, pkSum int, kvn 
 	if isWrite {
 		s.handleRedisWrite(cmdName, kvn, pk, pkSum, wh, conn, cmd)
 	} else {
+		metric.ReadCmdCounter.Inc()
 		h(conn, cmd)
 	}
 	return nil
@@ -589,7 +590,7 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 	if cost2 >= slowClusterWriteLogTime {
 		sLog.Infof("write request slow cost: %v, %v, cmd %s %s", cost1, cost2, cmdName, pk)
 	}
-	kvn.MaybeAddSlow(start.Add(cost2).UnixNano(), cost2)
+	kvn.MaybeAddSlow(start.Add(cost2).UnixNano(), cost2, cmdName, string(table))
 	if err == nil && !kvn.IsWriteReady() {
 		sLog.Infof("write request %s on raft success but raft member is less than replicator",
 			cmd.Raw)
@@ -599,6 +600,8 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 	case error:
 		conn.WriteError(rv.Error())
 	case string:
+		// note the simple string should use WriteString, but the binary string should use
+		// WriteBulk or WriteBulkString
 		conn.WriteString(rv)
 	case int64:
 		conn.WriteInt64(rv)

@@ -3,6 +3,7 @@ package rockredis
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -144,9 +145,9 @@ func TestDBSet(t *testing.T) {
 
 	db.SAdd(0, key1, member1, member2)
 
-	if n, err := db.SClear(key1); err != nil {
+	if n, err := db.SClear(0, key1); err != nil {
 		t.Fatal(err)
-	} else if n != 2 {
+	} else if n != 1 {
 		t.Fatal(n)
 	}
 
@@ -163,6 +164,114 @@ func TestDBSet(t *testing.T) {
 	}
 
 	db.SAdd(0, key2, member1, member2)
+}
+
+func TestDBSetClearInCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_set_clear_compact_a")
+	member := []byte("member")
+	memberNew := []byte("memberNew")
+	key1 := []byte("test:testdb_set_clear_compact_a1")
+	member1 := []byte("testdb_set_m1")
+	member2 := []byte("testdb_set_m2")
+
+	ts := time.Now().UnixNano()
+	db.SAdd(ts, key, member)
+	db.SAdd(ts, key, member)
+
+	n, err := db.SCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.SIsMember(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	v, err := db.SMembers(key)
+	assert.Nil(t, err)
+	assert.Equal(t, member, v[0])
+
+	ts = time.Now().UnixNano()
+	n, err = db.SClear(ts, key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.SCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.SIsMember(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	v, err = db.SMembers(key)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(v))
+
+	// renew
+	ts = time.Now().UnixNano()
+	db.SAdd(ts, key, memberNew)
+	n, err = db.SCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.SIsMember(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.SIsMember(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	v, err = db.SMembers(key)
+	assert.Nil(t, err)
+	assert.Equal(t, memberNew, v[0])
+
+	ts = time.Now().UnixNano()
+	db.SAdd(ts, key1, member1, member2)
+
+	ts = time.Now().UnixNano()
+	n, err = db.SClear(ts, key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.SCard(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.SIsMember(key1, member1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	v, err = db.SMembers(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(v))
+
+	ts = time.Now().UnixNano()
+	db.SAdd(ts, key1, member, memberNew)
+
+	n, err = db.SCard(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	n, err = db.SIsMember(key1, member1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.SIsMember(key1, member2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.SIsMember(key1, member)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.SIsMember(key1, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	v, err = db.SMembers(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(v))
 }
 
 func TestSKeyExists(t *testing.T) {

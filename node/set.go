@@ -96,7 +96,7 @@ func (nd *KVNode) saddCommand(cmd redcon.Command) (interface{}, error) {
 	if !needChange {
 		return int64(0), nil
 	}
-	_, rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	return rsp, err
 }
 
@@ -115,13 +115,13 @@ func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 			return nil, errors.New("Invalid count")
 		}
 	}
-	_, v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
 		// without the count argument, it is bulk string
 		if !hasCount {
 			if r == nil {
 				return nil, nil
 			}
-			if rsp, ok := r.(string); ok {
+			if rsp, ok := r.([]byte); ok {
 				return rsp, nil
 			}
 			return nil, errInvalidResponse
@@ -160,13 +160,13 @@ func (kvsm *kvStoreSM) localSpop(cmd redcon.Command, ts int64) (interface{}, err
 		return vals, nil
 	}
 	if len(vals) > 0 {
-		return string(vals[0]), nil
+		return vals[0], nil
 	}
 	return nil, nil
 }
 
 func (kvsm *kvStoreSM) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.SClear(cmd.Args[1])
+	return kvsm.store.SClear(ts, cmd.Args[1])
 }
 func (kvsm *kvStoreSM) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
 	return kvsm.store.SMclear(cmd.Args[1:]...)

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/absolute8511/glog"
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
@@ -106,6 +107,7 @@ func TestMain(m *testing.M) {
 			os.RemoveAll(gtmpDir)
 		}
 	}
+	glog.Flush()
 	os.Exit(ret)
 }
 

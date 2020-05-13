@@ -48,6 +48,7 @@ func TestKVNode_hashCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	for _, cmd := range tests {
 		c.Reset()
+		origCmd := append([]byte{}, cmd.args.Raw...)
 		handler, ok := nd.router.GetCmdHandler(cmd.name)
 		if ok {
 			handler(c, cmd.args)
@@ -59,5 +60,6 @@ func TestKVNode_hashCommand(t *testing.T) {
 			_, ok := rsp.(error)
 			assert.True(t, !ok)
 		}
+		assert.Equal(t, origCmd, cmd.args.Raw)
 	}
 }
