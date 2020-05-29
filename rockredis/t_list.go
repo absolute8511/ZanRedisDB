@@ -254,15 +254,11 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 
 	newNum := int64(size) + int64(pushCnt)
+	db.topLargeCollKeys.Update(key, int(newNum))
 	if newNum > collectionLengthForMetric {
 		metric.CollectionLenDist.With(ps.Labels{
 			"table": string(table),
 		}).Observe(float64(newNum))
-		if newNum > MAX_BATCH_NUM {
-			metric.LargeCollectionCnt.With(ps.Labels{
-				"key": string(key),
-			}).Inc()
-		}
 	}
 	return newNum, err
 }

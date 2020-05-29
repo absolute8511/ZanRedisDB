@@ -68,11 +68,6 @@ var (
 		Help: "redis read command total counter",
 	})
 
-	LargeCollectionCnt = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "large_collection_key_counter",
-		Help: "the hit for larger collection key for list/zset/set/hash",
-	}, []string{"key"})
-
 	CollectionLenDist = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "collection_length_dist",
 		Help:    "the length distribute for the large collections",

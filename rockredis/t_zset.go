@@ -353,15 +353,11 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(newNum))
 	if newNum > collectionLengthForMetric {
 		metric.CollectionLenDist.With(ps.Labels{
 			"table": string(table),
 		}).Observe(float64(newNum))
-		if newNum > MAX_BATCH_NUM {
-			metric.LargeCollectionCnt.With(ps.Labels{
-				"key": string(key),
-			}).Inc()
-		}
 	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err

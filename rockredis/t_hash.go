@@ -126,15 +126,11 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 		} else if newNum == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(table, 1, wb)
 		}
+		db.topLargeCollKeys.Update(hkey, int(newNum))
 		if newNum > collectionLengthForMetric {
 			metric.CollectionLenDist.With(ps.Labels{
 				"table": string(table),
 			}).Observe(float64(newNum))
-			if newNum > MAX_BATCH_NUM {
-				metric.LargeCollectionCnt.With(ps.Labels{
-					"key": string(hkey),
-				}).Inc()
-			}
 		}
 	}
 

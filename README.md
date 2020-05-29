@@ -120,14 +120,14 @@ based on this golang sdk if you want use the redis client in other language.
   - [ ] Full text search support
 * Operation
   - [x] Backup and restore for cluster
-  - [ ] More stats for read/write performance and errors.
+  - [x] More stats for read/write performance and errors.
 * Client 
   - [x] High available for redis commands (Retry on fail)
   - [ ] Extand redis commands to support index and search
   - [x] Extand redis commands for advance scan
 * Others (maybe)
   - [ ] Support configure for Column storage friendly for OLAP
-  - [ ] BoltDB as storage engine (read/range optimize)
+  - [ ] Pebble as the storage engine
   - [ ] Lua scripts support
   - [ ] Support export data to other systems
 

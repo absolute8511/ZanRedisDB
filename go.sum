@@ -18,6 +18,8 @@ github.com/absolute8511/redcon v0.9.1 h1:xb2T1znUKyr/oR3DaWmGhyU8t7spNLz1LD4EWrK
 github.com/absolute8511/redcon v0.9.1/go.mod h1:pcezn7cyNCl6Bbics6NRddlZw1GwLqpNFapwKI14N4A=
 github.com/absolute8511/redigo v1.3.2 h1:r2Im4xIGIfvFagzNKtL9edFGt7P5iHUFH74CKCskIk4=
 github.com/absolute8511/redigo v1.3.2/go.mod h1:ncnpDtZTl7oMnWRkyfo8hfwC8+u3HlzK3XEzJ7W/M08=
+github.com/absolute8511/redigo v1.3.3 h1:YZO9+Yh7WnjzmZkJPZWPAXWnrKsRj89vmNCJAFqjMC4=
+github.com/absolute8511/redigo v1.3.3/go.mod h1:ncnpDtZTl7oMnWRkyfo8hfwC8+u3HlzK3XEzJ7W/M08=
 github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
@@ -160,6 +162,8 @@ github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18 h1:MPPkRncZLN9Kh4M
 github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/youzan/go-zanredisdb v0.3.5 h1:g9jWNolOlLUeBeKf+nTnNVIG8rGDmZCYTeDj+GQKMvM=
 github.com/youzan/go-zanredisdb v0.3.5/go.mod h1:oZfjsIA+0oSVktSBsw85LrImRUflqUBl/geac1oPSfw=
+github.com/youzan/go-zanredisdb v0.5.1 h1:apVoAkIx5fh0qvgpLIRyk1hdwxQYpaZn35c2ZV6hkhE=
+github.com/youzan/go-zanredisdb v0.5.1/go.mod h1:0cy2l2EZTC8Cx4dbqlSl6E+BaXcJc+5J+gyVgX0fkKQ=
 github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5 h1:R8YI/Nexm+LWfr6gzP7FHEty1g0j9TOTaUXal2ei1Ig=
 github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5/go.mod h1:Ztkk3nnoEJnQDM1iSS/2oNOj1qCZIUWJHY2lHL5YRJg=
 github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 h1:1b6PAtenNyhsmo/NKXVe34h7JEZKva1YB/ne7K7mqKM=

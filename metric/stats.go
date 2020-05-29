@@ -81,6 +81,8 @@ type NamespaceStats struct {
 	InternalStats     map[string]interface{} `json:"internal_stats"`
 	EngType           string                 `json:"eng_type"`
 	IsLeader          bool                   `json:"is_leader"`
+	TopNWriteKeys     []TopNInfo             `json:"top_n_write_keys,omitempty"`
+	TopNLargeCollKeys []TopNInfo             `json:"top_n_large_coll_keys,omitempty"`
 }
 
 type LogSyncStats struct {

@@ -99,6 +99,10 @@ func (sm *logSyncerSM) Errorf(f string, args ...interface{}) {
 
 func (sm *logSyncerSM) Optimize(t string) {
 }
+func (sm *logSyncerSM) ClearTopn() {
+}
+func (sm *logSyncerSM) EnableTopn(on bool) {
+}
 
 func (sm *logSyncerSM) GetDBInternalStats() string {
 	return ""
