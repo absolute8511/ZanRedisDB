@@ -120,6 +120,24 @@ func (s *Server) doOptimizeAll(w http.ResponseWriter, req *http.Request, ps http
 	return nil, nil
 }
 
+func (s *Server) doEnableTopn(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.EnableTopn(ns, true)
+	return nil, nil
+}
+
+func (s *Server) doDisableTopn(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.EnableTopn(ns, false)
+	return nil, nil
+}
+
+func (s *Server) doClearTopn(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.ClearTopn(ns)
+	return nil, nil
+}
+
 func (s *Server) doDeleteRange(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	table := ps.ByName("table")
@@ -818,6 +836,10 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/conf/get", common.Decorate(s.doGetDynamicConf, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
+
+	router.Handle("POST", "/topn/enable/:namespace", common.Decorate(s.doEnableTopn, log, common.V1))
+	router.Handle("POST", "/topn/disable/:namespace", common.Decorate(s.doDisableTopn, log, common.V1))
+	router.Handle("POST", "/topn/clear/:namespace", common.Decorate(s.doClearTopn, log, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
 	router.Handle("GET", common.APITableStats, common.Decorate(s.doTableStats, common.V1))
