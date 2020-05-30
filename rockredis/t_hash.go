@@ -276,12 +276,14 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 		}
 	}
 	c2 := time.Since(s)
-	if newNum, err := db.hIncrSize(key, keyInfo.OldHeader, num, db.wb); err != nil {
+	newNum, err := db.hIncrSize(key, keyInfo.OldHeader, num, db.wb)
+	if err != nil {
 		return err
 	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
 	c3 := time.Since(s)
+	db.topLargeCollKeys.Update(key, int(newNum))
 
 	err = db.MaybeCommitBatch()
 	c4 := time.Since(s)
@@ -463,6 +465,7 @@ func (db *RockDB) HDel(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if newNum == 0 {
 		db.delExpire(HashType, key, nil, false, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(newNum))
 
 	err = db.MaybeCommitBatch()
 	return num, err
@@ -479,6 +482,7 @@ func (db *RockDB) hDeleteAll(ts int64, hkey []byte, hlen int64, wb *gorocksdb.Wr
 	}
 	sk := hEncodeSizeKey(hkey)
 	wb.Delete(sk)
+	db.topLargeCollKeys.Update(hkey, int(0))
 	if db.cfg.ExpirationPolicy == common.WaitCompact && tableIndexes == nil {
 		// for compact ttl , we can just delete the meta
 		return nil

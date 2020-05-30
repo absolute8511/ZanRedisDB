@@ -313,20 +313,21 @@ func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {
 	}
 
 	wb.Delete(itemKey)
-	size, err = db.lSetMeta(key, keyInfo.OldHeader, headSeq, tailSeq, ts, wb)
+	newNum, err := db.lSetMeta(key, keyInfo.OldHeader, headSeq, tailSeq, ts, wb)
 	if dbLog.Level() >= common.LOG_DETAIL {
-		dbLog.Debugf("pop %v list %v meta updated to: %v, %v, %v", whereSeq, string(key), headSeq, tailSeq, size)
+		dbLog.Debugf("pop %v list %v meta updated to: %v, %v, %v", whereSeq, string(key), headSeq, tailSeq, newNum)
 	}
 	if err != nil {
 		db.fixListKey(ts, key)
 		return nil, err
 	}
-	if size == 0 {
+	if newNum == 0 {
 		// list is empty after delete
 		db.IncrTableKeyCount(table, -1, wb)
 		//delete the expire data related to the list key
 		db.delExpire(ListType, key, nil, false, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(newNum))
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return value, err
 }
@@ -403,6 +404,7 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 		db.delExpire(ListType, key, nil, false, wb)
 	}
 
+	db.topLargeCollKeys.Update(key, int(newLen))
 	return db.eng.Write(db.defaultWriteOpts, wb)
 }
 
@@ -458,18 +460,19 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 		}
 	}
 
-	size, err = db.lSetMeta(key, keyInfo.OldHeader, headSeq, tailSeq, ts, wb)
+	newLen, err := db.lSetMeta(key, keyInfo.OldHeader, headSeq, tailSeq, ts, wb)
 	if err != nil {
 		db.fixListKey(ts, key)
 		return 0, err
 	}
-	if size == 0 {
+	if newLen == 0 {
 		// list is empty after trim
 		db.IncrTableKeyCount(table, -1, wb)
 		//delete the expire data related to the list key
 		db.delExpire(ListType, key, nil, false, wb)
 	}
 
+	db.topLargeCollKeys.Update(key, int(newLen))
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return trimEndSeq - trimStartSeq + 1, err
 }
@@ -492,6 +495,7 @@ func (db *RockDB) lDelete(ts int64, key []byte, wb *gorocksdb.WriteBatch) int64 
 	if size > 0 {
 		db.IncrTableKeyCount(table, -1, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(0))
 	if db.cfg.ExpirationPolicy == common.WaitCompact {
 		// for compact ttl , we can just delete the meta
 		return size

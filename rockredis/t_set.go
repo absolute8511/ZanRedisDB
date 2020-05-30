@@ -121,6 +121,7 @@ func (db *RockDB) sDelete(tn int64, key []byte, wb *gorocksdb.WriteBatch) int64 
 	}
 	wb.Delete(sk)
 
+	db.topLargeCollKeys.Update(key, int(0))
 	if db.cfg.ExpirationPolicy == common.WaitCompact {
 		// for compact ttl , we can just delete the meta
 		return num
@@ -229,12 +230,14 @@ func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.Wr
 	if vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, ek); vok {
 		n = 0
 	} else {
-		if newNum, err := db.sIncrSize(ts, key, keyInfo.OldHeader, 1, wb); err != nil {
+		newNum, err := db.sIncrSize(ts, key, keyInfo.OldHeader, 1, wb)
+		if err != nil {
 			return 0, err
 		} else if newNum == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(keyInfo.Table, 1, wb)
 		}
 		wb.Put(ek, nil)
+		db.topLargeCollKeys.Update(key, int(newNum))
 	}
 
 	return n, nil
@@ -450,6 +453,7 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if newNum == 0 {
 		db.delExpire(SetType, key, nil, false, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(newNum))
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
