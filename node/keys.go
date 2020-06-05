@@ -191,6 +191,10 @@ func (nd *KVNode) delCommand(cmd redcon.Command, v interface{}) (interface{}, er
 	}
 }
 
+func (kvsm *kvStoreSM) localNoOpWriteCommand(cmd redcon.Command, ts int64) (interface{}, error) {
+	return nil, nil
+}
+
 // local write command execute only on follower or on the local commit of leader
 // the return value of follower is ignored, return value of local leader will be
 // return to the future response.

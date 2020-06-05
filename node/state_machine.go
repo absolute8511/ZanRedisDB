@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/youzan/ZanRedisDB/pkg/wait"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/slow"
 )
 
 const (
@@ -160,10 +162,7 @@ func (bo *kvbatchOperator) AbortBatchForError(err error) {
 	for _, rid := range bo.batchReqIDList {
 		bo.kvsm.w.Trigger(rid, err)
 	}
-	if batchCost > dbWriteSlow/2 {
-		bo.kvsm.Infof("aborted slow batch write db, batch: %v, cost: %v",
-			len(bo.batchReqIDList), batchCost)
-	}
+	slow.LogSlowDBWrite(batchCost, slow.NewSlowLogInfo(bo.kvsm.fullNS, "batched", strconv.Itoa(len(bo.batchReqIDList))))
 	bo.batchReqIDList = bo.batchReqIDList[:0]
 	bo.batchReqRspList = bo.batchReqRspList[:0]
 }
@@ -187,11 +186,8 @@ func (bo *kvbatchOperator) CommitBatch() {
 			bo.kvsm.w.Trigger(rid, bo.batchReqRspList[idx])
 		}
 	}
-	if batchCost > dbWriteSlow || (nodeLog.Level() >= common.LOG_DEBUG && batchCost > dbWriteSlow/2) {
-		bo.kvsm.Infof("slow batch write db, batch: %v, cost: %v",
-			len(bo.batchReqIDList), batchCost)
-	}
 	if len(bo.batchReqIDList) > 0 {
+		slow.LogSlowDBWrite(batchCost, slow.NewSlowLogInfo(bo.kvsm.fullNS, "batched", strconv.Itoa(len(bo.batchReqIDList))))
 		bo.kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Microseconds(), int64(len(bo.batchReqIDList)))
 		metric.DBWriteLatency.With(ps.Labels{
 			"namespace": bo.kvsm.fullNS,
@@ -762,10 +758,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 						} else {
 							kvsm.w.Trigger(reqID, v)
 							cmdCost := time.Since(cmdStart)
-							if cmdCost > dbWriteSlow || nodeLog.Level() > common.LOG_DETAIL ||
-								(nodeLog.Level() >= common.LOG_DEBUG && cmdCost > dbWriteSlow/2) {
-								kvsm.Infof("slow write command: %v, cost: %v", string(cmd.Raw), cmdCost)
-							}
+							slow.LogSlowDBWrite(cmdCost, slow.NewSlowLogInfo(kvsm.fullNS, string(cmd.Raw), ""))
 							kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Microseconds())
 							metric.DBWriteLatency.With(ps.Labels{
 								"namespace": kvsm.fullNS,
@@ -816,7 +809,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 
 	cost := time.Since(start)
 	if cost >= raftSlow {
-		kvsm.Infof("slow for batch write db: %v, cost %v", len(reqList.Reqs), cost)
+		slow.LogSlowDBWrite(cost, slow.NewSlowLogInfo(kvsm.fullNS, "batched", strconv.Itoa(len(reqList.Reqs))))
 	}
 	// used for grpc raft proposal, will notify that all the raft logs in this batch is done.
 	if reqList.ReqId > 0 {

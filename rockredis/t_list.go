@@ -9,6 +9,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
+	"github.com/youzan/ZanRedisDB/slow"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -255,6 +256,7 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 
 	newNum := int64(size) + int64(pushCnt)
 	db.topLargeCollKeys.Update(key, int(newNum))
+	slow.LogLargeCollection(int(newNum), slow.NewSlowLogInfo(string(table), string(key), "list"))
 	if newNum > collectionLengthForMetric {
 		metric.CollectionLenDist.With(ps.Labels{
 			"table": string(table),

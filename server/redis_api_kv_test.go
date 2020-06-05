@@ -32,6 +32,12 @@ func TestKV(t *testing.T) {
 		t.Fatal(v)
 	}
 
+	if ok, err := goredis.String(c.Do("noopwrite", key1, "12345")); err != nil {
+		t.Fatal(err)
+	} else if ok != OK {
+		t.Fatal(ok)
+	}
+
 	if ok, err := goredis.String(c.Do("set", key1, "1234")); err != nil {
 		t.Fatal(err)
 	} else if ok != OK {
