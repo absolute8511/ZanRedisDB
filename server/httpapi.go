@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/slow"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/youzan/ZanRedisDB/cluster"
@@ -352,6 +353,23 @@ func (s *Server) checkNodeBackup(w http.ResponseWriter, req *http.Request, ps ht
 
 func (s *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	return "OK", nil
+}
+
+func (s *Server) doChangeSlowLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	levelStr := reqParams.Get("loglevel")
+	if levelStr == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG_LEVEL"}
+	}
+	level, err := strconv.Atoi(levelStr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_LEVEL_STRING"}
+	}
+	slow.ChangeSlowLogLevel(level)
+	return nil, nil
 }
 
 func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
@@ -827,6 +845,7 @@ func (s *Server) initHttpHandler() {
 
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
+	router.Handle("POST", "/slowlog/set", common.Decorate(s.doChangeSlowLogLevel, log, common.V1))
 	router.Handle("POST", "/costlevel/set", common.Decorate(s.doSetCostLevel, log, common.V1))
 	router.Handle("POST", "/rsynclimit", common.Decorate(s.doSetRsyncLimit, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))

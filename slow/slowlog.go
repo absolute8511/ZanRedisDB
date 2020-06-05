@@ -57,8 +57,8 @@ func LogSlowDBWrite(cost time.Duration, si SlowLogInfo) (string, bool) {
 		return "", false
 	}
 
-	if cost > dbWriteSlow || slowLogLv() > common.LOG_DETAIL ||
-		(slowLogLv() >= common.LOG_INFO && cost > dbWriteSlow/2) {
+	if cost >= dbWriteSlow || slowLogLv() > common.LOG_DETAIL ||
+		(slowLogLv() >= common.LOG_INFO && cost >= dbWriteSlow/2) {
 		str := fmt.Sprintf("[SLOW_LOGS] db slow write command in scope %v, cost: %v, key: %v, note: %v",
 			si.Scope, cost, si.Key, si.Note)
 
@@ -72,7 +72,7 @@ func LogDebugSlowWrite(cost time.Duration, thres time.Duration, lvFor int32, si 
 	if slowLogLv() < common.LOG_DEBUG {
 		return "", false
 	}
-	if cost > thres && slowLogLv() >= int32(lvFor) {
+	if cost >= thres && slowLogLv() >= int32(lvFor) {
 		str := fmt.Sprintf("[SLOW_LOGS] debug slow write in scope %v, cost: %v, note: %v",
 			si.Scope, cost, si.Note)
 		sl.InfoDepth(1, str)
@@ -88,7 +88,7 @@ func LogSlowForSteps(thres time.Duration, lvFor int32, si SlowLogInfo, costList 
 	if slowLogLv() < 0 {
 		return "", false
 	}
-	if costList[len(costList)-1] > thres && slowLogLv() >= int32(lvFor) {
+	if costList[len(costList)-1] >= thres && slowLogLv() >= int32(lvFor) {
 		str := fmt.Sprintf("[SLOW_LOGS] steps slow in scope %v, cost list: %v, note: %v",
 			si.Scope, costList, si.Note)
 		sl.InfoDepth(1, str)
@@ -111,8 +111,8 @@ func LogLargeCollection(sz int, si SlowLogInfo) (string, bool) {
 		return str, true
 	}
 	if slowLogLv() >= common.LOG_DETAIL ||
-		(slowLogLv() >= common.LOG_INFO && sz > collectionMinLenForLog*4) ||
-		(slowLogLv() >= common.LOG_DEBUG && sz > collectionMinLenForLog*2) {
+		(slowLogLv() >= common.LOG_INFO && sz >= collectionMinLenForLog*4) ||
+		(slowLogLv() >= common.LOG_DEBUG && sz >= collectionMinLenForLog*2) {
 		str := fmt.Sprintf("[SLOW_LOGS] maybe large collection in scope %v, size: %v, key: %v, note: %v",
 			si.Scope, sz, si.Key, si.Note)
 		sl.InfoDepth(1, str)
