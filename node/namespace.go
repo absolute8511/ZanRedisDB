@@ -744,6 +744,30 @@ func (nsm *NamespaceMgr) BackupDB(ns string, checkLast bool) {
 	}
 }
 
+func (nsm *NamespaceMgr) EnableTopn(ns string, on bool) {
+	nodeList := nsm.getNsNodeList(ns)
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return
+		}
+		if n.IsReady() {
+			n.Node.sm.EnableTopn(on)
+		}
+	}
+}
+
+func (nsm *NamespaceMgr) ClearTopn(ns string) {
+	nodeList := nsm.getNsNodeList(ns)
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return
+		}
+		if n.IsReady() {
+			n.Node.sm.ClearTopn()
+		}
+	}
+}
+
 func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 	nodeList := nsm.getNsNodeList(ns)
 	for _, n := range nodeList {

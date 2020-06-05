@@ -51,7 +51,9 @@ type StateMachine interface {
 	Destroy()
 	CleanData() error
 	Optimize(string)
-	GetStats(table string, needTableDetail bool) metric.NamespaceStats
+	GetStats(table string, needDetail bool) metric.NamespaceStats
+	EnableTopn(on bool)
+	ClearTopn()
 	Start() error
 	Close()
 	GetBatchOperator() IBatchOperator
@@ -255,7 +257,11 @@ func (esm *emptySM) CleanData() error {
 func (esm *emptySM) Optimize(t string) {
 
 }
-func (esm *emptySM) GetStats(table string, needTableDetail bool) metric.NamespaceStats {
+func (esm *emptySM) EnableTopn(on bool) {
+}
+func (esm *emptySM) ClearTopn() {
+}
+func (esm *emptySM) GetStats(table string, needDetail bool) metric.NamespaceStats {
 	return metric.NamespaceStats{}
 }
 func (esm *emptySM) Start() error {
@@ -281,6 +287,7 @@ type kvStoreSM struct {
 	stopping      int32
 	cRouter       *conflictRouter
 	slowLimiter   *SlowLimiter
+	topnWrites    *metric.TopNHot
 }
 
 func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, ns string,
@@ -298,6 +305,7 @@ func NewKVStoreSM(opts *KVOptions, machineConfig MachineConfig, localID uint64, 
 		router:        common.NewSMCmdRouter(),
 		cRouter:       NewConflictRouter(),
 		slowLimiter:   sl,
+		topnWrites:    metric.NewTopNHot(),
 	}
 	sm.registerHandlers()
 	sm.registerConflictHandlers()
@@ -349,11 +357,25 @@ func (kvsm *kvStoreSM) GetDBInternalStats() string {
 	return kvsm.store.GetStatistics()
 }
 
-func (kvsm *kvStoreSM) GetStats(table string, needTableDetail bool) metric.NamespaceStats {
+func (kvsm *kvStoreSM) EnableTopn(on bool) {
+	if kvsm.topnWrites == nil {
+		return
+	}
+	kvsm.topnWrites.Enable(on)
+}
+
+func (kvsm *kvStoreSM) ClearTopn() {
+	if kvsm.topnWrites == nil {
+		return
+	}
+	kvsm.topnWrites.Clear()
+}
+
+func (kvsm *kvStoreSM) GetStats(table string, needDetail bool) metric.NamespaceStats {
 	var ns metric.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
-	if needTableDetail || len(table) > 0 {
+	if needDetail || len(table) > 0 {
 		var tbs [][]byte
 		if len(table) > 0 {
 			tbs = [][]byte{[]byte(table)}
@@ -373,6 +395,10 @@ func (kvsm *kvStoreSM) GetStats(table string, needTableDetail bool) metric.Names
 			ts.DiskBytesUsage = diskUsages[i]
 			ns.TStats = append(ns.TStats, ts)
 		}
+		if kvsm.topnWrites != nil {
+			ns.TopNWriteKeys = kvsm.topnWrites.GetTopNWrites()
+		}
+		ns.TopNLargeCollKeys = kvsm.store.GetTopLargeKeys()
 	}
 	return ns
 }
@@ -710,6 +736,9 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 					if pk != nil && batch.IsBatched() {
 						batch.AddBatchKey(string(pk))
 					}
+					if kvsm.topnWrites != nil {
+						kvsm.topnWrites.HitWrite(pk)
+					}
 					v, err := h(cmd, reqTs)
 					if err != nil {
 						kvsm.Errorf("redis command %v error: %v, cmd: %v", cmdName, err, string(cmd.Raw))
@@ -824,6 +853,9 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		cc.Unmarshal(p.Data)
 		kvsm.Infof("remote config changed: %v, %v ", p, cc.String())
 		kvsm.w.Trigger(reqID, nil)
+		if kvsm.topnWrites != nil {
+			kvsm.topnWrites.Clear()
+		}
 	} else if p.ProposeOp == ProposeOp_TransferRemoteSnap {
 		localPath := kvsm.store.GetBackupDirForRemote()
 		kvsm.Infof("transfer remote snap request: %v to local: %v", p, localPath)

@@ -21,6 +21,7 @@ import (
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -175,6 +176,7 @@ type RockDB struct {
 	stopping          int32
 	engOpened         int32
 	latestSnapIndex   uint64
+	topLargeCollKeys  *metric.CollSizeHeap
 }
 
 func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
@@ -193,6 +195,7 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
 		hasher64:         murmur3.New64(),
+		topLargeCollKeys: metric.NewCollSizeHeap(metric.DefaultHeapCapacity),
 	}
 	db.defaultReadOpts.SetVerifyChecksums(false)
 	if cfg.DisableWAL {
@@ -357,6 +360,10 @@ func (r *RockDB) GetInternalPropertyStatus(p string) string {
 
 func (r *RockDB) GetStatistics() string {
 	return r.rockEng.GetStatistics()
+}
+
+func (r *RockDB) GetTopLargeKeys() []metric.TopNInfo {
+	return r.topLargeCollKeys.TopKeys()
 }
 
 // [start, end)

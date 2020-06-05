@@ -353,15 +353,11 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(newNum))
 	if newNum > collectionLengthForMetric {
 		metric.CollectionLenDist.With(ps.Labels{
 			"table": string(table),
 		}).Observe(float64(newNum))
-		if newNum > MAX_BATCH_NUM {
-			metric.LargeCollectionCnt.With(ps.Labels{
-				"key": string(key),
-			}).Inc()
-		}
 	}
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
@@ -509,6 +505,7 @@ func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 	if newNum == 0 {
 		db.delExpire(ZSetType, key, nil, false, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(newNum))
 
 	err = db.eng.Write(db.defaultWriteOpts, wb)
 	return num, err
@@ -543,6 +540,7 @@ func (db *RockDB) ZIncrBy(ts int64, key []byte, delta float64, member []byte) (f
 		} else if newNum == 1 && !keyInfo.Expired {
 			db.IncrTableKeyCount(table, 1, wb)
 		}
+		db.topLargeCollKeys.Update(key, int(newNum))
 	} else {
 		if oldScore, err = Float64(v, err); err != nil {
 			return score, err
@@ -674,6 +672,7 @@ func (db *RockDB) zRemAll(ts int64, key []byte, wb *gorocksdb.WriteBatch) (int64
 	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil
 	}
+	db.topLargeCollKeys.Update(key, int(0))
 	if db.cfg.ExpirationPolicy == common.WaitCompact {
 		// for compact ttl , we can just delete the meta
 		sk := zEncodeSizeKey(key)
@@ -767,6 +766,7 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, keyInfo collVerKeyInfo, o
 	if newNum == 0 {
 		db.delExpire(ZSetType, key, nil, false, wb)
 	}
+	db.topLargeCollKeys.Update(key, int(newNum))
 
 	return num, nil
 }
@@ -1179,6 +1179,7 @@ func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, r
 		db.delExpire(ZSetType, key, nil, false, wb)
 	}
 
+	db.topLargeCollKeys.Update(key, int(newNum))
 	if err := db.eng.Write(db.defaultWriteOpts, wb); err != nil {
 		return 0, err
 	}

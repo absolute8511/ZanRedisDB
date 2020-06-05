@@ -135,6 +135,7 @@ placedriver has several HTTP APIs to manager the namespace
 - list the placedriver nodes: `GET /listpd`
 - query the namespace meta info: `GET /query/namespace_name`
 - create the namespace (handle only by leader) : `POST /cluster/namespace/create?namespace=test_p16&partition_num=16&replicator=3`
+- create the namespace with the new dynamic ttl support (handle only by leader) : `POST /cluster/namespace/create?namespace=test_p16&partition_num=16&replicator=3&data_version=value_header_v1&expiration_policy=wait_compact`
 - delete the namespace (handle only by leader): `POST /cluster/namespace/delete?namespace=test_p16&partition=**`
 
 storage server HTTP APIs for stats:
