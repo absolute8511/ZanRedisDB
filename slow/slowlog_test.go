@@ -2,6 +2,7 @@ package slow
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
@@ -52,4 +53,22 @@ func TestSlowLogLevel(t *testing.T) {
 	str, logged = LogSlowForSteps(dbWriteSlow, common.LOG_DEBUG, NewSlowLogInfo("test", "testkey", ""), dbWriteSlow/2, dbWriteSlow)
 	t.Log(str)
 	assert.Equal(t, true, logged)
+	ChangeSlowLogLevel(0)
+	// test dump log reduce in second
+	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
+	t.Log(str)
+	assert.Equal(t, true, logged)
+	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
+	t.Log(str)
+	assert.Equal(t, false, logged)
+	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
+	t.Log(str)
+	assert.Equal(t, false, logged)
+	time.Sleep(time.Second)
+	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
+	t.Log(str)
+	assert.Equal(t, true, logged)
+	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
+	t.Log(str)
+	assert.Equal(t, false, logged)
 }
