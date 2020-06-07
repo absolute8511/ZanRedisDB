@@ -72,3 +72,13 @@ func TestSlowLogLevel(t *testing.T) {
 	t.Log(str)
 	assert.Equal(t, false, logged)
 }
+
+func BenchmarkLogLarge(b *testing.B) {
+	SetLogger(common.LOG_INFO, common.NewDefaultLogger("test"))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
+	}
+}

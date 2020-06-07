@@ -130,11 +130,11 @@ func LogSlowForSteps(thres time.Duration, lvFor int32, si SlowLogInfo, costList 
 }
 
 func LogLargeCollection(sz int, si SlowLogInfo) (string, bool) {
-	lv := slowLogLv()
-	if lv < 0 {
+	if sz < collectionMinLenForLog {
 		return "", false
 	}
-	if sz < collectionMinLenForLog {
+	lv := slowLogLv()
+	if lv < 0 {
 		return "", false
 	}
 	if sz >= collectionLargeLen {
