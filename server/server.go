@@ -15,6 +15,7 @@ import (
 
 	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/slow"
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/cluster"
@@ -587,9 +588,13 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 	}
 	cost2 := time.Since(start)
 	kvn.UpdateWriteStats(int64(len(cmd.Raw)), cost2.Microseconds())
-	if cost2 >= slowClusterWriteLogTime {
-		sLog.Infof("write request slow cost: %v, %v, cmd %s %s", cost1, cost2, cmdName, pk)
-	}
+	slow.LogSlowForSteps(
+		slowClusterWriteLogTime,
+		common.LOG_INFO,
+		slow.NewSlowLogInfo(kvn.GetFullName(), string(pk), "write request "+cmdName),
+		cost1,
+		cost2,
+	)
 	kvn.MaybeAddSlow(start.Add(cost2).UnixNano(), cost2, cmdName, string(table))
 	if err == nil && !kvn.IsWriteReady() {
 		sLog.Infof("write request %s on raft success but raft member is less than replicator",

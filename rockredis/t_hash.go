@@ -10,6 +10,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
+	"github.com/youzan/ZanRedisDB/slow"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -127,6 +128,7 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 			db.IncrTableKeyCount(table, 1, wb)
 		}
 		db.topLargeCollKeys.Update(hkey, int(newNum))
+		slow.LogLargeCollection(int(newNum), slow.NewSlowLogInfo(string(table), string(hkey), "hash"))
 		if newNum > collectionLengthForMetric {
 			metric.CollectionLenDist.With(ps.Labels{
 				"table": string(table),
@@ -218,7 +220,6 @@ func (db *RockDB) HSet(ts int64, checkNX bool, key []byte, field []byte, ovalue 
 }
 
 func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
-	s := time.Now()
 	if len(args) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
@@ -226,7 +227,6 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 		return nil
 	}
 
-	c1 := time.Since(s)
 	// get old header for this hash key
 	keyInfo, err := db.prepareHashKeyForWrite(ts, key, nil)
 	if err != nil {
@@ -275,21 +275,21 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 			}
 		}
 	}
-	c2 := time.Since(s)
 	newNum, err := db.hIncrSize(key, keyInfo.OldHeader, num, db.wb)
 	if err != nil {
 		return err
 	} else if newNum > 0 && newNum == num && !keyInfo.Expired {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
-	c3 := time.Since(s)
 	db.topLargeCollKeys.Update(key, int(newNum))
+	slow.LogLargeCollection(int(newNum), slow.NewSlowLogInfo(string(table), string(key), "hash"))
+	if newNum > collectionLengthForMetric {
+		metric.CollectionLenDist.With(ps.Labels{
+			"table": string(table),
+		}).Observe(float64(newNum))
+	}
 
 	err = db.MaybeCommitBatch()
-	c4 := time.Since(s)
-	if c4 > time.Second/3 {
-		dbLog.Infof("key %v slow write cost: %v, %v, %v, %v", string(key), c1, c2, c3, c4)
-	}
 	return err
 }
 

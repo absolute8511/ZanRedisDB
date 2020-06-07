@@ -9,6 +9,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
+	"github.com/youzan/ZanRedisDB/slow"
 	"github.com/youzan/gorocksdb"
 )
 
@@ -218,31 +219,6 @@ func (db *RockDB) sGetVer(key []byte) (int64, error) {
 	return Int64(oldh.UserData[8:16], err)
 }
 
-func (db *RockDB) sSetItem(ts int64, key []byte, member []byte, wb *gorocksdb.WriteBatch) (int64, error) {
-	keyInfo, err := db.prepareCollKeyForWrite(ts, SetType, key, member)
-	if err != nil {
-		return 0, err
-	}
-
-	ek := sEncodeSetKey(keyInfo.Table, keyInfo.VerKey, member)
-
-	var n int64 = 1
-	if vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, ek); vok {
-		n = 0
-	} else {
-		newNum, err := db.sIncrSize(ts, key, keyInfo.OldHeader, 1, wb)
-		if err != nil {
-			return 0, err
-		} else if newNum == 1 && !keyInfo.Expired {
-			db.IncrTableKeyCount(keyInfo.Table, 1, wb)
-		}
-		wb.Put(ek, nil)
-		db.topLargeCollKeys.Update(key, int(newNum))
-	}
-
-	return n, nil
-}
-
 func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if len(args) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
@@ -283,6 +259,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 		db.IncrTableKeyCount(table, 1, wb)
 	}
 	db.topLargeCollKeys.Update(key, int(newNum))
+	slow.LogLargeCollection(int(newNum), slow.NewSlowLogInfo(string(table), string(key), "set"))
 	if newNum > collectionLengthForMetric {
 		metric.CollectionLenDist.With(ps.Labels{
 			"table": string(table),

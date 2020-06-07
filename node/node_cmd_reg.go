@@ -1,6 +1,8 @@
 package node
 
 func (kvsm *kvStoreSM) registerHandlers() {
+
+	kvsm.router.RegisterInternal("noopwrite", kvsm.localNoOpWriteCommand)
 	// only write command need to be registered as internal
 	// kv
 	kvsm.router.RegisterInternal("del", kvsm.localDelCommand)
@@ -88,6 +90,8 @@ func (nd *KVNode) registerHandler() {
 		// other learner role should only sync from raft log, so no need redis API
 		return
 	}
+	// for test on no rocks
+	nd.router.RegisterWrite("noopwrite", wrapWriteCommandKV(nd, checkOKRsp))
 	// for kv
 	nd.router.RegisterRead("get", wrapReadCommandK(nd.getCommand))
 	nd.router.RegisterRead("strlen", wrapReadCommandK(nd.strlenCommand))

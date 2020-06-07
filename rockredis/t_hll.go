@@ -12,6 +12,7 @@ import (
 	hll "github.com/absolute8511/hyperloglog"
 	hll3 "github.com/absolute8511/hyperloglog2"
 	"github.com/golang/snappy"
+	"github.com/youzan/ZanRedisDB/slow"
 	"github.com/youzan/gorocksdb"
 
 	//hll "github.com/axiomhq/hyperloglog"
@@ -334,9 +335,7 @@ func (c *hllCache) onEvicted(rawKey interface{}, value interface{}) {
 	wb.Put(key, oldV)
 	c.db.eng.Write(c.db.defaultWriteOpts, wb)
 	cost := time.Since(s)
-	if cost > time.Millisecond*200 {
-		dbLog.Infof("flush pfadd %v (%v) slow: %v", key, len(oldV), cost)
-	}
+	slow.LogSlowDBWrite(cost, slow.NewSlowLogInfo(c.db.cfg.DataDir, string(key), "flush pfadd"))
 	c.AddToReadCache(cachedKey, item)
 }
 
@@ -434,9 +433,8 @@ func (db *RockDB) PFCount(ts int64, keys ...[]byte) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-		if cost := time.Since(s); cost > time.Millisecond*200 {
-			dbLog.Infof("init item from db slow: %v", cost)
-		}
+		cost := time.Since(s)
+		slow.LogSlowDBWrite(cost, slow.NewSlowLogInfo(db.cfg.DataDir, string(fkv), "init pf item from db"))
 		cnt := item.cachedCount
 		if recompute {
 			cnt = item.computeHLLCount()
@@ -517,16 +515,13 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 		item.ts = ts
 	}
 
-	cost1 := time.Since(s)
 	added, isDirty := item.addCount(db.hasher64, elems...)
 	if added {
 		changed = true
 	}
-	cost2 := time.Since(s)
+	cost := time.Since(s)
 	if !changed {
-		if cost2 >= time.Millisecond*100 {
-			dbLog.Infof("pfadd %v slow: %v, %v", string(rawKey), cost1, cost2)
-		}
+		slow.LogSlowDBWrite(cost, slow.NewSlowLogInfo(db.cfg.DataDir, string(rawKey), "pfadd not changed"))
 		if !isDirty {
 			db.hllCache.AddToReadCache(rawKey, item)
 		}
@@ -538,9 +533,7 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 	item.invalidCachedCnt(ts)
 
 	db.hllCache.AddDirtyWrite(rawKey, item)
-	cost3 := time.Since(s)
-	if cost3 >= time.Millisecond*100 {
-		dbLog.Infof("pfadd %v slow: %v, %v, %v", string(rawKey), cost1, cost2, cost3)
-	}
+	cost = time.Since(s)
+	slow.LogSlowDBWrite(cost, slow.NewSlowLogInfo(db.cfg.DataDir, string(rawKey), "pfadd changed"))
 	return 1, nil
 }
