@@ -13,7 +13,7 @@ Build the rocksdb with jemalloc
 <pre>
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
-git checkout v5.18-patched
+git checkout v6.4.6-patched
 PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 </pre>
 
