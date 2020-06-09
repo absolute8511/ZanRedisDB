@@ -16,7 +16,7 @@ CGO_CFLAGS="-I${ROCKSDB}/include"
 CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -ljemalloc"
 
 if [ "$os" == "linux" ]; then
-  CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -lrt -ljemalloc"
+  CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -lrt -ljemalloc -ldl"
 fi
 
 echo $CGO_LDFLAGS

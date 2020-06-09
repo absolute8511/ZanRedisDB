@@ -42,8 +42,8 @@ if [ ! -f "$rocksdb/Makefile" ]; then
 fi
 pushd $rocksdb
 git pull
-git checkout v5.18-patched
-USE_SSE=1 make static_lib
+git checkout v6.4.6-patched
+PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 popd
 
 CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/youzan/gorocksdb
