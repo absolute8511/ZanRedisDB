@@ -28,6 +28,23 @@ func SetLogger(level int32, logger common.Logger) {
 	dbLog.Logger = logger
 }
 
+type CRange struct {
+	Start []byte
+	Limit []byte
+}
+
+type RefSlice struct {
+	v *gorocksdb.Slice
+}
+
+func (rs *RefSlice) Free() {
+	rs.v.Free()
+}
+
+func (rs *RefSlice) Data() []byte {
+	return rs.v.Data()
+}
+
 type RockOptions struct {
 	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
 	BlockSize                      int    `json:"block_size"`
@@ -192,15 +209,18 @@ func (src *SharedRockConfig) Destroy() {
 }
 
 type RockEng struct {
-	cfg         *RockEngConfig
-	eng         *gorocksdb.DB
-	dbOpts      *gorocksdb.Options
-	lruCache    *gorocksdb.Cache
-	rl          *gorocksdb.RateLimiter
-	engOpened   int32
-	lastCompact int64
-	deletedCnt  int64
-	quit        chan struct{}
+	cfg              *RockEngConfig
+	eng              *gorocksdb.DB
+	dbOpts           *gorocksdb.Options
+	defaultWriteOpts *gorocksdb.WriteOptions
+	defaultReadOpts  *gorocksdb.ReadOptions
+	wb               *RocksWriteBatch
+	lruCache         *gorocksdb.Cache
+	rl               *gorocksdb.RateLimiter
+	engOpened        int32
+	lastCompact      int64
+	deletedCnt       int64
+	quit             chan struct{}
 }
 
 func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
@@ -319,11 +339,18 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		return nil, err
 	}
 	db := &RockEng{
-		cfg:      cfg,
-		dbOpts:   opts,
-		lruCache: lru,
-		rl:       rl,
-		quit:     make(chan struct{}),
+		cfg:              cfg,
+		dbOpts:           opts,
+		lruCache:         lru,
+		rl:               rl,
+		defaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
+		defaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
+		wb:               NewRocksWriteBatch(),
+		quit:             make(chan struct{}),
+	}
+	db.defaultReadOpts.SetVerifyChecksums(false)
+	if cfg.DisableWAL {
+		db.defaultWriteOpts.DisableWAL(true)
 	}
 	if cfg.AutoCompacted {
 		go db.compactLoop()
@@ -380,10 +407,18 @@ func (r *RockEng) compactLoop() {
 			if (r.DeletedBeforeCompact() > compactThreshold) &&
 				(time.Now().Unix()-r.LastCompactTime()) > interval {
 				dbLog.Infof("auto compact : %v, %v", r.DeletedBeforeCompact(), r.LastCompactTime())
-				r.CompactRange()
+				r.CompactAllRange()
 			}
 		}
 	}
+}
+
+func (r *RockEng) NewWriteBatch() WriteBatch {
+	return NewRocksWriteBatch()
+}
+
+func (r *RockEng) DefaultWriteBatch() WriteBatch {
+	return r.wb
 }
 
 func (r *RockEng) GetOpts() *gorocksdb.Options {
@@ -414,6 +449,10 @@ func (r *RockEng) Eng() *gorocksdb.DB {
 	return e
 }
 
+func (r *RockEng) Write(wb WriteBatch) error {
+	return r.eng.Write(r.defaultWriteOpts, wb.(*RocksWriteBatch).wb)
+}
+
 func (r *RockEng) DeletedBeforeCompact() int64 {
 	return atomic.LoadInt64(&r.deletedCnt)
 }
@@ -426,12 +465,26 @@ func (r *RockEng) LastCompactTime() int64 {
 	return atomic.LoadInt64(&r.lastCompact)
 }
 
-func (r *RockEng) CompactRange() {
+func (r *RockEng) CompactRange(rg CRange) {
 	atomic.StoreInt64(&r.lastCompact, time.Now().Unix())
 	atomic.StoreInt64(&r.deletedCnt, 0)
-	var rg gorocksdb.Range
-	r.eng.CompactRange(rg)
+	var rrg gorocksdb.Range
+	rrg.Start = rg.Start
+	rrg.Limit = rg.Limit
+	r.eng.CompactRange(rrg)
 	dbLog.Infof("compact rocksdb %v done", r.GetDataDir())
+}
+
+func (r *RockEng) CompactAllRange() {
+	r.CompactRange(CRange{})
+}
+
+func (r *RockEng) GetApproximateSizes(ranges []CRange, includeMem bool) []uint64 {
+	rgs := make([]gorocksdb.Range, 0, len(ranges))
+	for _, r := range ranges {
+		rgs = append(rgs, gorocksdb.Range{Start: r.Start, Limit: r.Limit})
+	}
+	return r.eng.GetApproximateSizes(rgs, includeMem)
 }
 
 func (r *RockEng) CloseEng() bool {
@@ -465,6 +518,13 @@ func (r *RockEng) CloseAll() {
 		r.rl.Destroy()
 		r.rl = nil
 	}
+
+	if r.defaultWriteOpts != nil {
+		r.defaultWriteOpts.Destroy()
+	}
+	if r.defaultReadOpts != nil {
+		r.defaultReadOpts.Destroy()
+	}
 }
 
 func (r *RockEng) GetStatistics() string {
@@ -495,9 +555,37 @@ func (r *RockEng) GetInternalPropertyStatus(p string) string {
 	return r.eng.GetProperty(p)
 }
 
-func (r *RockEng) GetValueWithOp(opts *gorocksdb.ReadOptions, key []byte,
+func (r *RockEng) GetBytesNoLock(key []byte) ([]byte, error) {
+	return r.eng.GetBytesNoLock(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) GetBytes(key []byte) ([]byte, error) {
+	return r.eng.GetBytes(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) MultiGetBytes(keyList [][]byte, values [][]byte, errs []error) {
+	r.eng.MultiGetBytes(r.defaultReadOpts, keyList, values, errs)
+}
+
+func (r *RockEng) Exist(key []byte) (bool, error) {
+	return r.eng.Exist(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) ExistNoLock(key []byte) (bool, error) {
+	return r.eng.ExistNoLock(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) GetRef(key []byte) (*RefSlice, error) {
+	v, err := r.eng.Get(r.defaultReadOpts, key)
+	if err != nil {
+		return nil, err
+	}
+	return &RefSlice{v: v}, nil
+}
+
+func (r *RockEng) GetValueWithOp(key []byte,
 	op func([]byte) error) error {
-	val, err := r.eng.Get(opts, key)
+	val, err := r.eng.Get(r.defaultReadOpts, key)
 	if err != nil {
 		return err
 	}
@@ -505,12 +593,30 @@ func (r *RockEng) GetValueWithOp(opts *gorocksdb.ReadOptions, key []byte,
 	return op(val.Data())
 }
 
-func (r *RockEng) GetValueWithOpNoLock(opts *gorocksdb.ReadOptions, key []byte,
+func (r *RockEng) GetValueWithOpNoLock(key []byte,
 	op func([]byte) error) error {
-	val, err := r.eng.GetNoLock(opts, key)
+	val, err := r.eng.GetNoLock(r.defaultReadOpts, key)
 	if err != nil {
 		return err
 	}
 	defer val.Free()
 	return op(val.Data())
+}
+
+func (r *RockEng) NewDBRangeIterator(min []byte, max []byte, rtype uint8,
+	reverse bool) (*RangeLimitedIterator, error) {
+	return NewDBRangeIterator(r.eng, min, max, rtype, reverse)
+}
+
+func (r *RockEng) NewDBRangeLimitIterator(min []byte, max []byte, rtype uint8,
+	offset int, count int, reverse bool) (*RangeLimitedIterator, error) {
+	return NewDBRangeLimitIterator(r.eng, min, max, rtype, offset, count, reverse)
+}
+
+func (r *RockEng) NewDBRangeIteratorWithOpts(opts IteratorOpts) (*RangeLimitedIterator, error) {
+	return NewDBRangeIteratorWithOpts(r.eng, opts)
+}
+
+func (r *RockEng) NewDBRangeLimitIteratorWithOpts(opts IteratorOpts) (*RangeLimitedIterator, error) {
+	return NewDBRangeLimitIteratorWithOpts(r.eng, opts)
 }

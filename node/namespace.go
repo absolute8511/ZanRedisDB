@@ -17,7 +17,6 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
-	"github.com/youzan/ZanRedisDB/rockredis"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"golang.org/x/net/context"
 )
@@ -377,7 +376,7 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 	if err == nil {
 		err = db.OpenEng()
 		if err == nil {
-			go db.CompactRange()
+			go db.CompactAllRange()
 			return db
 		}
 	}
@@ -964,18 +963,4 @@ func (nsm *NamespaceMgr) HandleSlowLimiterSwitchChanged(v interface{}) {
 		}
 	}
 	nsm.mutex.RUnlock()
-}
-
-func SetPerfLevel(level int) {
-	atomic.StoreInt32(&perfLevel, int32(level))
-	rockredis.SetPerfLevel(level)
-}
-
-func IsPerfEnabled() bool {
-	lv := GetPerfLevel()
-	return rockredis.IsPerfEnabledLevel(lv)
-}
-
-func GetPerfLevel() int {
-	return int(atomic.LoadInt32(&perfLevel))
 }

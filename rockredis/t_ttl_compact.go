@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/gorocksdb"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 var errHeaderMetaValue = errors.New("invalid header meta value")
@@ -202,7 +202,7 @@ func (exp *compactExpiration) getRawValueForHeader(ts int64, dataType byte, key 
 		return v, err
 	case HashType, SetType, BitmapType, ListType, ZSetType:
 		metaKey := encodeMetaKey(dataType, key)
-		return exp.db.eng.GetBytes(exp.db.defaultReadOpts, metaKey)
+		return exp.db.GetBytes(metaKey)
 	default:
 		return exp.localExp.getRawValueForHeader(ts, dataType, key)
 	}
@@ -240,7 +240,7 @@ func (exp *compactExpiration) ExpireAt(dataType byte, key []byte, rawValue []byt
 		}
 		key = encodeMetaKey(dataType, key)
 		wb.Put(key, newValue)
-		if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
+		if err := exp.db.rockEng.Write(wb); err != nil {
 			return 0, err
 		}
 		return 1, nil
@@ -249,7 +249,7 @@ func (exp *compactExpiration) ExpireAt(dataType byte, key []byte, rawValue []byt
 	}
 }
 
-func (exp *compactExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
+func (exp *compactExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb engine.WriteBatch) ([]byte, error) {
 	switch dataType {
 	case HashType, KVType, SetType, BitmapType, ListType, ZSetType:
 		h := newHeaderMetaV1()
@@ -312,7 +312,7 @@ func (exp *compactExpiration) Stop() {
 	exp.localExp.Stop()
 }
 
-func (exp *compactExpiration) delExpire(dataType byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
+func (exp *compactExpiration) delExpire(dataType byte, key []byte, rawValue []byte, keepValue bool, wb engine.WriteBatch) ([]byte, error) {
 	switch dataType {
 	case HashType, KVType, SetType, BitmapType, ListType, ZSetType:
 		if !keepValue {

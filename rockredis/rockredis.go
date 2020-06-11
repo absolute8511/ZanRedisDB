@@ -161,9 +161,7 @@ type RockDB struct {
 	cfg               *RockRedisDBConfig
 	rockEng           *engine.RockEng
 	eng               *gorocksdb.DB
-	defaultWriteOpts  *gorocksdb.WriteOptions
-	defaultReadOpts   *gorocksdb.ReadOptions
-	wb                *gorocksdb.WriteBatch
+	wb                engine.WriteBatch
 	writeTmpBuf       []byte
 	quit              chan struct{}
 	wg                sync.WaitGroup
@@ -188,18 +186,12 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 	db := &RockDB{
 		cfg:              cfg,
 		rockEng:          eng,
-		defaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
-		defaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
-		wb:               gorocksdb.NewWriteBatch(),
+		wb:               engine.NewRocksWriteBatch(),
 		writeTmpBuf:      make([]byte, writeTmpSize),
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
 		hasher64:         murmur3.New64(),
 		topLargeCollKeys: metric.NewCollSizeHeap(metric.DefaultHeapCapacity),
-	}
-	db.defaultReadOpts.SetVerifyChecksums(false)
-	if cfg.DisableWAL {
-		db.defaultWriteOpts.DisableWAL(true)
 	}
 
 	switch cfg.ExpirationPolicy {
@@ -287,11 +279,6 @@ func (r *RockDB) reOpenEng() error {
 	return nil
 }
 
-func (r *RockDB) getDBEng() *gorocksdb.DB {
-	e := r.eng
-	return e
-}
-
 func (r *RockDB) getIndexer() *IndexMgr {
 	e := r.indexMgr
 	return e
@@ -302,8 +289,7 @@ func (r *RockDB) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error 
 }
 
 func (r *RockDB) CompactRange() {
-	var rg gorocksdb.Range
-	r.eng.CompactRange(rg)
+	r.rockEng.CompactAllRange()
 }
 
 func (r *RockDB) closeEng() {
@@ -337,13 +323,6 @@ func (r *RockDB) Close() {
 	if r.rockEng != nil {
 		r.rockEng.CloseAll()
 	}
-	if r.defaultReadOpts != nil {
-		r.defaultReadOpts.Destroy()
-		r.defaultReadOpts = nil
-	}
-	if r.defaultWriteOpts != nil {
-		r.defaultWriteOpts.Destroy()
-	}
 	if r.wb != nil {
 		r.wb.Destroy()
 	}
@@ -366,6 +345,44 @@ func (r *RockDB) GetTopLargeKeys() []metric.TopNInfo {
 	return r.topLargeCollKeys.TopKeys()
 }
 
+func (r *RockDB) GetBytesNoLock(key []byte) ([]byte, error) {
+	return r.rockEng.GetBytesNoLock(key)
+}
+
+func (r *RockDB) GetBytes(key []byte) ([]byte, error) {
+	return r.rockEng.GetBytes(key)
+}
+
+func (r *RockDB) MultiGetBytes(keyList [][]byte, values [][]byte, errs []error) {
+	r.rockEng.MultiGetBytes(keyList, values, errs)
+}
+
+func (r *RockDB) Exist(key []byte) (bool, error) {
+	return r.rockEng.Exist(key)
+}
+
+func (r *RockDB) ExistNoLock(key []byte) (bool, error) {
+	return r.rockEng.ExistNoLock(key)
+}
+
+func (r *RockDB) NewDBRangeIterator(min []byte, max []byte, rtype uint8,
+	reverse bool) (*engine.RangeLimitedIterator, error) {
+	return r.rockEng.NewDBRangeIterator(min, max, rtype, reverse)
+}
+
+func (r *RockDB) NewDBRangeLimitIterator(min []byte, max []byte, rtype uint8,
+	offset int, count int, reverse bool) (*engine.RangeLimitedIterator, error) {
+	return r.rockEng.NewDBRangeLimitIterator(min, max, rtype, offset, count, reverse)
+}
+
+func (r *RockDB) NewDBRangeIteratorWithOpts(opts engine.IteratorOpts) (*engine.RangeLimitedIterator, error) {
+	return r.rockEng.NewDBRangeIteratorWithOpts(opts)
+}
+
+func (r *RockDB) NewDBRangeLimitIteratorWithOpts(opts engine.IteratorOpts) (*engine.RangeLimitedIterator, error) {
+	return r.rockEng.NewDBRangeLimitIteratorWithOpts(opts)
+}
+
 // [start, end)
 func (r *RockDB) CompactTableRange(table string) {
 	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
@@ -379,7 +396,7 @@ func (r *RockDB) CompactTableRange(table string) {
 		// compact data range
 		dbLog.Infof("compacting dt %v data range: %v", dt, rgs)
 		for _, rg := range rgs {
-			r.eng.CompactRange(rg)
+			r.rockEng.CompactRange(rg)
 		}
 		// compact meta range
 		minKey, maxKey, err := getTableMetaRange(dtsMeta[i], []byte(table), nil, nil)
@@ -387,15 +404,15 @@ func (r *RockDB) CompactTableRange(table string) {
 			dbLog.Infof("failed to get table %v data range: %v", table, err)
 			continue
 		}
-		var rg gorocksdb.Range
+		var rg engine.CRange
 		rg.Start = minKey
 		rg.Limit = maxKey
 		dbLog.Infof("compacting dt %v meta range: %v, %v", dt, minKey, maxKey)
-		r.eng.CompactRange(rg)
+		r.rockEng.CompactRange(rg)
 	}
 }
 
-func getTableDataRange(dt byte, table []byte, start, end []byte) ([]gorocksdb.Range, error) {
+func getTableDataRange(dt byte, table []byte, start, end []byte) ([]engine.CRange, error) {
 	minKey, err := encodeFullScanMinKey(dt, table, start, nil)
 	if err != nil {
 		dbLog.Infof("failed to build dt %v range: %v", dt, err)
@@ -411,8 +428,8 @@ func getTableDataRange(dt byte, table []byte, start, end []byte) ([]gorocksdb.Ra
 		dbLog.Infof("failed to build dt %v range: %v", dt, err)
 		return nil, err
 	}
-	rgs := make([]gorocksdb.Range, 0, 2)
-	rgs = append(rgs, gorocksdb.Range{Start: minKey, Limit: maxKey})
+	rgs := make([]engine.CRange, 0, 2)
+	rgs = append(rgs, engine.CRange{Start: minKey, Limit: maxKey})
 	if dt == ZSetType {
 		// zset has key-score-member data except the key-member data
 		zminKey := zEncodeStartKey(table, start)
@@ -422,7 +439,7 @@ func getTableDataRange(dt byte, table []byte, start, end []byte) ([]gorocksdb.Ra
 		} else {
 			zmaxKey = zEncodeStopKey(table, end)
 		}
-		rgs = append(rgs, gorocksdb.Range{Start: zminKey, Limit: zmaxKey})
+		rgs = append(rgs, engine.CRange{Start: zminKey, Limit: zmaxKey})
 	}
 	dbLog.Debugf("table dt %v data range: %v", dt, rgs)
 	return rgs, nil
@@ -460,7 +477,7 @@ func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end [
 	if tidx != nil {
 		return errors.New("drop table with any index is not supported currently")
 	}
-	wb := gorocksdb.NewWriteBatch()
+	wb := engine.NewRocksWriteBatch()
 	defer wb.Destroy()
 	// kv, hash, set, list, zset
 	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
@@ -485,7 +502,6 @@ func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end [
 			continue
 		}
 		for _, rg := range rgs {
-			r.eng.DeleteFilesInRange(rg)
 			wb.DeleteRange(rg.Start, rg.Limit)
 		}
 		wb.DeleteRange(minMetaKey, maxMetaKey)
@@ -497,7 +513,7 @@ func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end [
 	if dryrun {
 		return nil
 	}
-	err := r.eng.Write(r.defaultWriteOpts, wb)
+	err := r.rockEng.Write(wb)
 	if err != nil {
 		dbLog.Infof("failed to delete table %v range: %v", table, err)
 	}
@@ -530,7 +546,7 @@ func (r *RockDB) GetTablesSizes(tables []string) []int64 {
 func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int64 {
 	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
 	dtsMeta := []byte{KVType, HSizeType, LMetaType, SSizeType, ZSizeType}
-	rgs := make([]gorocksdb.Range, 0, len(dts))
+	rgs := make([]engine.CRange, 0, len(dts))
 	for i, dt := range dts {
 		// data range
 		drgs, err := getTableDataRange(dt, []byte(table), start, end)
@@ -545,12 +561,12 @@ func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int
 			dbLog.Infof("failed to build dt %v meta range: %v", dt, err)
 			continue
 		}
-		var rgMeta gorocksdb.Range
+		var rgMeta engine.CRange
 		rgMeta.Start = minMetaKey
 		rgMeta.Limit = maxMetaKey
 		rgs = append(rgs, rgMeta)
 	}
-	sList := r.eng.GetApproximateSizes(rgs, true)
+	sList := r.rockEng.GetApproximateSizes(rgs, true)
 	dbLog.Debugf("range %v sizes: %v", rgs, sList)
 	total := uint64(0)
 	for _, ss := range sList {
@@ -984,13 +1000,13 @@ func (r *RockDB) MaybeCommitBatch() error {
 	if atomic.LoadInt32(&r.isBatching) == 1 {
 		return nil
 	}
-	err := r.eng.Write(r.defaultWriteOpts, r.wb)
+	err := r.rockEng.Write(r.wb)
 	r.wb.Clear()
 	return err
 }
 
 func (r *RockDB) CommitBatchWrite() error {
-	err := r.eng.Write(r.defaultWriteOpts, r.wb)
+	err := r.rockEng.Write(r.wb)
 	if err != nil {
 		dbLog.Infof("commit write error: %v", err)
 	}
@@ -1016,25 +1032,6 @@ func IsNeedAbortError(err error) bool {
 func IsBatchableWrite(cmd string) bool {
 	_, ok := batchableCmds[cmd]
 	return ok
-}
-
-func SetPerfLevel(level int) {
-	if level <= 0 || level > 4 {
-		DisablePerfLevel()
-		return
-	}
-	gorocksdb.SetPerfLevel(gorocksdb.PerfLevel(level))
-}
-
-func IsPerfEnabledLevel(lv int) bool {
-	if lv <= 0 || lv > 4 {
-		return false
-	}
-	return lv != gorocksdb.PerfDisable
-}
-
-func DisablePerfLevel() {
-	gorocksdb.SetPerfLevel(gorocksdb.PerfDisable)
 }
 
 func init() {
