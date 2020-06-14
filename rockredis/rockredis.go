@@ -158,7 +158,7 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string, latestSnapIndex uint6
 type RockDB struct {
 	expiration
 	cfg               *RockRedisDBConfig
-	rockEng           *engine.RockEng
+	rockEng           *engine.PebbleEng
 	wb                engine.WriteBatch
 	writeTmpBuf       []byte
 	quit              chan struct{}
@@ -176,7 +176,7 @@ type RockDB struct {
 }
 
 func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
-	eng, err := engine.NewRockEng(&cfg.RockEngConfig)
+	eng, err := engine.NewPebbleEng(&cfg.RockEngConfig)
 	if err != nil {
 		return nil, err
 	}
