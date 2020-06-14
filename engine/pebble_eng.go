@@ -84,7 +84,8 @@ func newUint64AddMerger() *pebble.Merger {
 			res.MergeNewer(value)
 			return res, nil
 		},
-		Name: "pebble.uint64add",
+		// the name should match the rocksdb default merge name
+		Name: "UInt64AddOperator",
 	}
 }
 
