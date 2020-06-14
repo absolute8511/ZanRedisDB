@@ -22,7 +22,7 @@ type KVOptions struct {
 	ExpirationPolicy common.ExpirationPolicy
 	DataVersion      common.DataVersionT
 	RockOpts         engine.RockOptions
-	SharedConfig     *engine.SharedRockConfig
+	SharedConfig     engine.SharedRockConfig
 }
 
 func NewKVStore(kvopts *KVOptions) (*KVStore, error) {

@@ -22,7 +22,6 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
-	"github.com/youzan/gorocksdb"
 )
 
 const (
@@ -160,7 +159,6 @@ type RockDB struct {
 	expiration
 	cfg               *RockRedisDBConfig
 	rockEng           *engine.RockEng
-	eng               *gorocksdb.DB
 	wb                engine.WriteBatch
 	writeTmpBuf       []byte
 	quit              chan struct{}
@@ -186,7 +184,6 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 	db := &RockDB{
 		cfg:              cfg,
 		rockEng:          eng,
-		wb:               engine.NewRocksWriteBatch(),
 		writeTmpBuf:      make([]byte, writeTmpSize),
 		backupC:          make(chan *BackupInfo),
 		quit:             make(chan struct{}),
@@ -266,7 +263,7 @@ func (r *RockDB) reOpenEng() error {
 	if err != nil {
 		return err
 	}
-	r.eng = r.rockEng.Eng()
+	r.wb = r.rockEng.DefaultWriteBatch()
 
 	err = r.indexMgr.LoadIndexes(r)
 	if err != nil {
@@ -323,9 +320,6 @@ func (r *RockDB) Close() {
 	if r.rockEng != nil {
 		r.rockEng.CloseAll()
 	}
-	if r.wb != nil {
-		r.wb.Destroy()
-	}
 	dbLog.Infof("rocksdb %v closed", r.cfg.DataDir)
 }
 
@@ -367,20 +361,34 @@ func (r *RockDB) ExistNoLock(key []byte) (bool, error) {
 
 func (r *RockDB) NewDBRangeIterator(min []byte, max []byte, rtype uint8,
 	reverse bool) (*engine.RangeLimitedIterator, error) {
-	return r.rockEng.NewDBRangeIterator(min, max, rtype, reverse)
+	opts := engine.IteratorOpts{
+		Reverse: reverse,
+	}
+	opts.Max = max
+	opts.Min = min
+	opts.Type = rtype
+	return engine.NewDBRangeIteratorWithOpts(r.rockEng, opts)
 }
 
 func (r *RockDB) NewDBRangeLimitIterator(min []byte, max []byte, rtype uint8,
 	offset int, count int, reverse bool) (*engine.RangeLimitedIterator, error) {
-	return r.rockEng.NewDBRangeLimitIterator(min, max, rtype, offset, count, reverse)
+	opts := engine.IteratorOpts{
+		Reverse: reverse,
+	}
+	opts.Max = max
+	opts.Min = min
+	opts.Type = rtype
+	opts.Offset = offset
+	opts.Count = count
+	return engine.NewDBRangeLimitIteratorWithOpts(r.rockEng, opts)
 }
 
 func (r *RockDB) NewDBRangeIteratorWithOpts(opts engine.IteratorOpts) (*engine.RangeLimitedIterator, error) {
-	return r.rockEng.NewDBRangeIteratorWithOpts(opts)
+	return engine.NewDBRangeIteratorWithOpts(r.rockEng, opts)
 }
 
 func (r *RockDB) NewDBRangeLimitIteratorWithOpts(opts engine.IteratorOpts) (*engine.RangeLimitedIterator, error) {
-	return r.rockEng.NewDBRangeLimitIteratorWithOpts(opts)
+	return engine.NewDBRangeLimitIteratorWithOpts(r.rockEng, opts)
 }
 
 // [start, end)
@@ -477,7 +485,7 @@ func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end [
 	if tidx != nil {
 		return errors.New("drop table with any index is not supported currently")
 	}
-	wb := engine.NewRocksWriteBatch()
+	wb := r.rockEng.NewWriteBatch()
 	defer wb.Destroy()
 	// kv, hash, set, list, zset
 	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
@@ -577,19 +585,13 @@ func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int
 
 // [start, end)
 func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end []byte) int64 {
-	numStr := r.eng.GetProperty("rocksdb.estimate-num-keys")
-	num, err := strconv.Atoi(numStr)
-	if err != nil {
-		dbLog.Infof("total keys num error: %v, %v", numStr, err)
-		return 0
-	}
+	num := r.rockEng.GetApproximateTotalKeyNum()
 	if num <= 0 {
-		dbLog.Debugf("total keys num zero: %v", numStr)
 		return 0
 	}
 	dts := []byte{KVType, HashType, ListType, SetType, ZSetType}
 	dtsMeta := []byte{KVType, HSizeType, LMetaType, SSizeType, ZSizeType}
-	rgs := make([]gorocksdb.Range, 0, len(dts))
+	rgs := make([]engine.CRange, 0, len(dts))
 	for i, dt := range dts {
 		// meta range
 		minMetaKey, maxMetaKey, err := getTableMetaRange(dtsMeta[i], []byte(table), start, end)
@@ -597,19 +599,19 @@ func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end [
 			dbLog.Infof("failed to build dt %v meta range: %v", dt, err)
 			continue
 		}
-		var rgMeta gorocksdb.Range
+		var rgMeta engine.CRange
 		rgMeta.Start = minMetaKey
 		rgMeta.Limit = maxMetaKey
 		rgs = append(rgs, rgMeta)
 	}
-	filteredRgs := make([]gorocksdb.Range, 0, len(dts))
-	sList := r.eng.GetApproximateSizes(rgs, true)
+	filteredRgs := make([]engine.CRange, 0, len(dts))
+	sList := r.rockEng.GetApproximateSizes(rgs, true)
 	for i, s := range sList {
 		if s > 0 {
 			filteredRgs = append(filteredRgs, rgs[i])
 		}
 	}
-	keyNum := int64(r.eng.GetApproximateKeyNum(filteredRgs))
+	keyNum := int64(r.rockEng.GetApproximateKeyNum(filteredRgs))
 	dbLog.Debugf("total db key num: %v, table key num %v, %v", num, keyNum, sList)
 	// use GetApproximateSizes and estimate-keys-num in property
 	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
@@ -664,7 +666,7 @@ func (r *RockDB) backupLoop() {
 				defer close(rsp.done)
 				dbLog.Infof("begin backup to:%v \n", rsp.backupDir)
 				start := time.Now()
-				ck, err := gorocksdb.NewCheckpoint(r.eng)
+				ck, err := r.rockEng.NewCheckpoint()
 				if err != nil {
 					dbLog.Infof("init checkpoint failed: %v", err)
 					rsp.err = err
@@ -678,16 +680,7 @@ func (r *RockDB) backupLoop() {
 					os.RemoveAll(rsp.backupDir)
 				}
 				rsp.rsp = []byte(rsp.backupDir)
-				r.eng.RLock()
-				if r.eng.IsOpened() {
-					time.AfterFunc(time.Millisecond*10, func() {
-						close(rsp.started)
-					})
-					err = ck.Save(rsp.backupDir, math.MaxUint64)
-				} else {
-					err = errors.New("db engine closed")
-				}
-				r.eng.RUnlock()
+				err = ck.Save(rsp.backupDir, rsp.started)
 				r.checkpointDirLock.Unlock()
 				if err != nil {
 					dbLog.Infof("save checkpoint failed: %v", err)
@@ -743,19 +736,13 @@ func (r *RockDB) isBackupOKInPath(backupDir string, term uint64, index uint64) (
 	if r.rockEng == nil {
 		return false, errDBClosed
 	}
-	if r.rockEng.GetOpts() == nil {
-		return false, errDBClosed
-	}
 	dbLog.Infof("begin check local checkpoint : %v", fullPath)
 	defer dbLog.Infof("check local checkpoint : %v done", fullPath)
-	ro := *(r.rockEng.GetOpts())
-	ro.SetCreateIfMissing(false)
-	db, err := gorocksdb.OpenDbForReadOnly(&ro, fullPath, false)
+	err = r.rockEng.CheckDBEngForRead(fullPath)
 	if err != nil {
 		dbLog.Infof("checkpoint open failed: %v", err)
 		return false, err
 	}
-	db.Close()
 	return true, nil
 }
 

@@ -250,11 +250,7 @@ func (nsm *NamespaceMgr) SetRateLimiterBytesPerSec(bytesPerSec int64) {
 	if nsm.machineConf.RocksDBSharedConfig == nil {
 		return
 	}
-	limiter := nsm.machineConf.RocksDBSharedConfig.SharedRateLimiter
-	if limiter == nil {
-		return
-	}
-	limiter.SetBytesPerSecond(bytesPerSec)
+	nsm.machineConf.RocksDBSharedConfig.ChangeLimiter(bytesPerSec)
 }
 
 func (nsm *NamespaceMgr) SetIClusterInfo(clusterInfo common.IClusterInfo) {
