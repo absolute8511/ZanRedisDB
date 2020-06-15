@@ -115,6 +115,9 @@ func TestDBSet(t *testing.T) {
 	} else if n != 1 {
 		t.Fatal(n)
 	}
+	tbcnt, err := db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), tbcnt)
 	n, err := db.SAdd(0, key, member)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
@@ -145,25 +148,42 @@ func TestDBSet(t *testing.T) {
 
 	db.SAdd(0, key1, member1, member2)
 
+	tbcnt, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), tbcnt)
 	if n, err := db.SClear(0, key1); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
 	}
 
+	tbcnt, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), tbcnt)
 	db.SAdd(0, key1, member1, member2)
 	db.SAdd(0, key2, member1, member2, []byte("xxx"))
 
 	if n, _ := db.SCard(key2); n != 3 {
 		t.Fatal(n)
 	}
+
+	tbcnt, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), tbcnt)
 	if n, err := db.SMclear(key1, key2); err != nil {
 		t.Fatal(err)
 	} else if n != 2 {
 		t.Fatal(n)
 	}
 
+	tbcnt, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), tbcnt)
 	db.SAdd(0, key2, member1, member2)
+
+	tbcnt, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), tbcnt)
 }
 
 func TestDBSetClearInCompactTTL(t *testing.T) {

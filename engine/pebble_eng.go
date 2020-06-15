@@ -184,10 +184,11 @@ func (pe *PebbleEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) er
 }
 
 func (pe *PebbleEng) CheckDBEngForRead(fullPath string) error {
-	ro := *(pe.opts)
+	ro := pe.opts.Clone()
 	ro.ErrorIfNotExists = true
 	ro.ReadOnly = true
-	db, err := pebble.Open(fullPath, &ro)
+	//ro.Cache = nil
+	db, err := pebble.Open(fullPath, ro)
 	if err != nil {
 		return err
 	}
@@ -201,12 +202,12 @@ func (pe *PebbleEng) OpenEng() error {
 		return errors.New("open failed since not closed")
 	}
 	cache := pebble.NewCache(pe.cfg.BlockCache)
+	defer cache.Unref()
 	pe.opts.Cache = cache
 	eng, err := pebble.Open(pe.GetDataDir(), pe.opts)
 	if err != nil {
 		return err
 	}
-	cache.Unref()
 	pe.eng = eng
 	pe.wb = newPebbleWriteBatch(eng, pe.wo)
 	atomic.StoreInt32(&pe.engOpened, 1)
