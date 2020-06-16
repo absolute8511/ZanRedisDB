@@ -201,6 +201,8 @@ func (pe *PebbleEng) OpenEng() error {
 		dbLog.Warningf("engine already opened: %v, should close it before reopen", pe.GetDataDir())
 		return errors.New("open failed since not closed")
 	}
+	pe.rwmutex.Lock()
+	defer pe.rwmutex.Unlock()
 	cache := pebble.NewCache(pe.cfg.BlockCache)
 	defer cache.Unref()
 	pe.opts.Cache = cache
@@ -208,8 +210,8 @@ func (pe *PebbleEng) OpenEng() error {
 	if err != nil {
 		return err
 	}
-	pe.eng = eng
 	pe.wb = newPebbleWriteBatch(eng, pe.wo)
+	pe.eng = eng
 	atomic.StoreInt32(&pe.engOpened, 1)
 	dbLog.Infof("engine opened: %v", pe.GetDataDir())
 	return nil
@@ -302,6 +304,11 @@ func (pe *PebbleEng) CloseAll() {
 }
 
 func (pe *PebbleEng) GetStatistics() string {
+	pe.rwmutex.RLock()
+	defer pe.rwmutex.RUnlock()
+	if pe.IsClosed() {
+		return ""
+	}
 	return pe.eng.Metrics().String()
 }
 
@@ -432,22 +439,22 @@ func (pe *PebbleEng) GetIterator(opts IteratorOpts) (Iterator, error) {
 
 func (pe *PebbleEng) NewCheckpoint() (KVCheckpoint, error) {
 	return &pebbleEngCheckpoint{
-		eng: pe,
+		pe: pe,
 	}, nil
 }
 
 type pebbleEngCheckpoint struct {
-	eng *PebbleEng
+	pe *PebbleEng
 }
 
 func (pck *pebbleEngCheckpoint) Save(path string, notify chan struct{}) error {
-	pck.eng.rwmutex.RLock()
-	defer pck.eng.rwmutex.RUnlock()
-	if pck.eng.IsClosed() {
+	pck.pe.rwmutex.RLock()
+	defer pck.pe.rwmutex.RUnlock()
+	if pck.pe.IsClosed() {
 		return errDBEngClosed
 	}
 	time.AfterFunc(time.Millisecond*20, func() {
 		close(notify)
 	})
-	return pck.eng.eng.Checkpoint(path)
+	return pck.pe.eng.Checkpoint(path)
 }
