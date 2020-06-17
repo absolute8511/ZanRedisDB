@@ -293,7 +293,7 @@ func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 	return 0, nil
 }
 
-func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
+func (db *RockDB) BitCountV2(key []byte, start, end int64) (int64, error) {
 	// read new v2 first, if not exist, try old version
 	tn := time.Now().UnixNano()
 	oldh, bmSize, _, ok, err := db.getBitmapMeta(tn, key, true)
@@ -304,7 +304,7 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 		return db.bitCountOld(key, start, end)
 	}
 
-	start, end = getRange(start, end, int(bmSize))
+	start, end = getRange(start, end, bmSize)
 	if start > end {
 		return 0, nil
 	}

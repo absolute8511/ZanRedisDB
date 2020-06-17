@@ -667,7 +667,7 @@ func (db *RockDB) SetRange(ts int64, rawKey []byte, offset int, value []byte) (i
 	return int64(retn), nil
 }
 
-func getRange(start int, end int, valLen int) (int, int) {
+func getRange(start int64, end int64, valLen int64) (int64, int64) {
 	if start < 0 {
 		start = valLen + start
 	}
@@ -690,13 +690,13 @@ func getRange(start int, end int, valLen int) (int, int) {
 	return start, end
 }
 
-func (db *RockDB) GetRange(key []byte, start int, end int) ([]byte, error) {
+func (db *RockDB) GetRange(key []byte, start int64, end int64) ([]byte, error) {
 	value, err := db.KVGet(key)
 	if err != nil {
 		return nil, err
 	}
 
-	valLen := len(value)
+	valLen := int64(len(value))
 
 	start, end = getRange(start, end, valLen)
 
@@ -840,12 +840,12 @@ func (db *RockDB) bitGetOld(key []byte, offset int64) (int64, error) {
 	return 0, nil
 }
 
-func (db *RockDB) bitCountOld(key []byte, start, end int) (int64, error) {
+func (db *RockDB) bitCountOld(key []byte, start, end int64) (int64, error) {
 	v, err := db.KVGet(key)
 	if err != nil {
 		return 0, err
 	}
-	start, end = getRange(start, end, len(v))
+	start, end = getRange(start, end, int64(len(v)))
 	if start > end {
 		return 0, nil
 	}
