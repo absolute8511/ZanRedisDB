@@ -338,10 +338,10 @@ func (db *RockDB) BitCountV2(key []byte, start, end int64) (int64, error) {
 		byteStart := 0
 		byteEnd := len(bmv)
 		if index == int64(startI)*bitmapSegBytes {
-			byteStart = start % bitmapSegBytes
+			byteStart = int(start) % bitmapSegBytes
 		}
 		if index == int64(stopI)*bitmapSegBytes {
-			byteEnd = end%bitmapSegBytes + 1
+			byteEnd = int(end)%bitmapSegBytes + 1
 			if byteEnd > len(bmv) {
 				byteEnd = len(bmv)
 			}
