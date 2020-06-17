@@ -15,7 +15,7 @@ require (
 	github.com/absolute8511/redigo v1.3.3
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible // indirect
-	github.com/cockroachdb/pebble v0.0.0-20200616134309-223327f23e83
+	github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713
 	github.com/coreos/etcd v3.1.15+incompatible
 	github.com/coreos/go-semver v0.2.0
 	github.com/coreos/go-systemd v0.0.0-20180511133405-39ca1b05acc7 // indirect

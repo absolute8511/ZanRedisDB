@@ -46,6 +46,8 @@ github.com/cockroachdb/logtags v0.0.0-20190617123548-eb05cc24525f h1:o/kfcElHqOi
 github.com/cockroachdb/logtags v0.0.0-20190617123548-eb05cc24525f/go.mod h1:i/u985jwjWRlyHXQbwatDASoW0RMlZ/3i9yJHE2xLkI=
 github.com/cockroachdb/pebble v0.0.0-20200616134309-223327f23e83 h1:6ntktpHXLc9uvai6BJM62tRWplroGHJ4ho1hKiMrmTA=
 github.com/cockroachdb/pebble v0.0.0-20200616134309-223327f23e83/go.mod h1:crLnbSFbwAcQNs9FPfI1avHb5BqVgqZcr4r+IzpJ5FM=
+github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713 h1:SK0BUmdsXF7Ammqw+AmaHOlzFgkmtyDM/WRCTwDpS6I=
+github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713/go.mod h1:crLnbSFbwAcQNs9FPfI1avHb5BqVgqZcr4r+IzpJ5FM=
 github.com/codahale/hdrhistogram v0.0.0-20161010025455-3a0bb77429bd/go.mod h1:sE/e/2PUdi/liOCUjSTXgM1o87ZssimdTWN964YiIeI=
 github.com/coreos/etcd v3.1.15+incompatible h1:vGoGbT5fUqm0BHb+BKOtdu0rGF3vzDyEv7zbWU3FY+w=
 github.com/coreos/etcd v3.1.15+incompatible/go.mod h1:uF7uidLiAD3TWHmW31ZFd/JWoc32PjwdhPthX9715RE=
