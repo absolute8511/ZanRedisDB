@@ -238,7 +238,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 
 	stopChan := make(chan struct{})
 	w := wait.New()
-	sl := NewSlowLimiter()
+	sl := NewSlowLimiter(config.GroupName)
 	sm, err := NewStateMachine(kvopts, *config.nodeConfig, config.ID, config.GroupName, clusterInfo, w, sl)
 	if err != nil {
 		return nil, err
@@ -728,6 +728,7 @@ func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*Futur
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
 	wrh, err := nd.ProposeInternal(ctx, req, cancel, start)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	var futureRsp FutureRsp
@@ -1537,4 +1538,7 @@ func (nd *KVNode) CanPass(ts int64, cmd string, table string) bool {
 }
 func (nd *KVNode) MaybeAddSlow(ts int64, cost time.Duration, cmd, table string) {
 	nd.slowLimiter.MaybeAddSlow(ts, cost, cmd, table)
+}
+func (nd *KVNode) PreWaitQueue(ctx context.Context, cmd string, table string) (*SlowWaitDone, error) {
+	return nd.slowLimiter.PreWaitQueue(ctx, cmd, table)
 }

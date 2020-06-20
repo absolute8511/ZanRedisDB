@@ -37,6 +37,7 @@ var (
 
 const (
 	slowClusterWriteLogTime = time.Millisecond * 500
+	slowPreWaitQueueTime    = time.Second * 2
 )
 
 var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
@@ -395,6 +396,13 @@ func (s *Server) GetHandleNode(ns string, pk []byte, pkSum int, cmdName string,
 	return n.Node, nil
 }
 
+func isAllowStaleReadCmd(cmdName string) bool {
+	if strings.HasPrefix(cmdName, "stale.") {
+		return true
+	}
+	return false
+}
+
 func (s *Server) GetHandler(cmdName string,
 	cmd redcon.Command, kvn *node.KVNode) (common.CommandFunc, redcon.Command, error) {
 	// for multi primary keys such as mset, mget, we need make sure they are all in the same partition
@@ -402,7 +410,7 @@ func (s *Server) GetHandler(cmdName string,
 	if !ok {
 		return nil, cmd, common.ErrInvalidCommand
 	}
-	if !kvn.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
+	if !kvn.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) && !isAllowStaleReadCmd(cmdName) {
 		// read only to leader to avoid stale read
 		// TODO: also read command can request the raft read index if not leader
 		return nil, cmd, node.ErrNamespaceNotLeader
@@ -564,6 +572,17 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 		conn.WriteError(node.ErrSlowLimiterRefused.Error())
 		return
 	}
+	var sw *node.SlowWaitDone
+	if kvn.IsLead() {
+		var err error
+		ctx, cancel := context.WithTimeout(context.Background(), slowPreWaitQueueTime)
+		sw, err = kvn.PreWaitQueue(ctx, cmdName, string(table))
+		cancel()
+		if err != nil {
+			conn.WriteError(err.Error())
+			return
+		}
+	}
 
 	rsp, err := h(cmd)
 	cost1 := time.Since(start)
@@ -601,6 +620,9 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 			cmd.Raw)
 	}
 
+	if sw != nil {
+		sw.Done()
+	}
 	switch rv := v.(type) {
 	case error:
 		conn.WriteError(rv.Error())

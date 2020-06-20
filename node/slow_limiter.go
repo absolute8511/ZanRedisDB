@@ -1,7 +1,9 @@
 package node
 
 import (
+	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,15 +25,46 @@ func EnableSlowLimiterTest(t bool) {
 // slow down other write.
 var ErrSlowLimiterRefused = errors.New("refused by slow limiter")
 
+type slowLevelT int
+
+const (
+	minSlowLevel slowLevelT = iota
+	midSlowLevel
+	verySlowLevel
+	maxSlowLevel
+)
+
 const (
 	maxSlowThreshold   = 300
 	heavySlowThreshold = 250
 	midSlowThreshold   = 60
 	smallSlowThreshold = 20
+	slowQueueThreshold = 5
 )
 
 var SlowRefuseCostMs = int64(600)
 var SlowHalfOpenSec = int64(15)
+var maybeSlowCmd map[string]bool
+var slowQueueCostMs = int64(250)
+
+func init() {
+	maybeSlowCmd = make(map[string]bool, 100)
+	maybeSlowCmd["spop"] = true
+	maybeSlowCmd["zremrangebyrank"] = true
+	maybeSlowCmd["zremrangebyscore"] = true
+	maybeSlowCmd["zremrangebylex"] = true
+	maybeSlowCmd["ltrim"] = true
+	// remove below if compact ttl is enabled by default
+	maybeSlowCmd["sclear"] = true
+	maybeSlowCmd["zclear"] = true
+	maybeSlowCmd["lclear"] = true
+	maybeSlowCmd["hclear"] = true
+}
+
+func IsMaybeSlowWriteCmd(cmd string) bool {
+	_, ok := maybeSlowCmd[cmd]
+	return ok
+}
 
 func RegisterSlowConfChanged() {
 	common.RegisterConfChangedHandler(common.ConfSlowLimiterRefuseCostMs, func(v interface{}) {
@@ -48,27 +81,53 @@ func RegisterSlowConfChanged() {
 	})
 }
 
-// SlowLimiter is used to limit some slow write command to avoid raft blocking
-type SlowLimiter struct {
-	slowCounter int64
-
-	limiterOn  int32
-	mutex      sync.RWMutex
-	slow100s   map[string]int64
-	slow50s    map[string]int64
-	slow10s    map[string]int64
-	lastSlowTs int64
-	stopC      chan struct{}
-	wg         sync.WaitGroup
+type SlowWaitDone struct {
+	c chan struct{}
 }
 
-func NewSlowLimiter() *SlowLimiter {
-	return &SlowLimiter{
-		limiterOn: int32(common.GetIntDynamicConf(common.ConfSlowLimiterSwitch)),
-		slow100s:  make(map[string]int64),
-		slow50s:   make(map[string]int64),
-		slow10s:   make(map[string]int64),
+func (swd *SlowWaitDone) Done() {
+	if swd.c == nil {
+		return
 	}
+	select {
+	case <-swd.c:
+	default:
+	}
+}
+
+// SlowLimiter is used to limit some slow write command to avoid raft blocking
+type SlowLimiter struct {
+	ns               string
+	slowCounter      int64
+	slowQueueCounter int64
+
+	limiterOn    int32
+	mutex        sync.RWMutex
+	slowHistorys [maxSlowLevel]map[string]int64
+	lastSlowTs   int64
+	stopC        chan struct{}
+	wg           sync.WaitGroup
+	// some slow write should wait in queue until others returned from raft apply
+	slowWaitQueue [maxSlowLevel]chan struct{}
+}
+
+func NewSlowLimiter(ns string) *SlowLimiter {
+	var his [maxSlowLevel]map[string]int64
+	var q [maxSlowLevel]chan struct{}
+	l := 100
+	for i := 0; i < len(his); i++ {
+		his[i] = make(map[string]int64)
+		q[i] = make(chan struct{}, l+5)
+		l = l / 5
+	}
+
+	sl := &SlowLimiter{
+		ns:            ns,
+		limiterOn:     int32(common.GetIntDynamicConf(common.ConfSlowLimiterSwitch)),
+		slowWaitQueue: q,
+		slowHistorys:  his,
+	}
+	return sl
 }
 
 func (sl *SlowLimiter) Start() {
@@ -167,14 +226,11 @@ func (sl *SlowLimiter) clearSlows() {
 	}
 	sl.mutex.Lock()
 	defer sl.mutex.Unlock()
-	if len(sl.slow100s) > 0 {
-		sl.slow100s = make(map[string]int64)
-	}
-	if len(sl.slow50s) > 0 {
-		sl.slow50s = make(map[string]int64)
-	}
-	if len(sl.slow10s) > 0 {
-		sl.slow10s = make(map[string]int64)
+	atomic.StoreInt64(&sl.slowQueueCounter, 0)
+	for i := 0; i < len(sl.slowHistorys); i++ {
+		if len(sl.slowHistorys[i]) > 0 {
+			sl.slowHistorys[i] = make(map[string]int64)
+		}
 	}
 }
 
@@ -184,14 +240,17 @@ func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration, cmd string, pr
 		// while in half open, some history slow write will be passed to do
 		// slow check again, in this way we need check the history to
 		// identify the possible slow write more fast.
-		if cost < time.Millisecond*50 {
+		if cost >= time.Millisecond*time.Duration(slowQueueCostMs) {
+			atomic.AddInt64(&sl.slowQueueCounter, 1)
+		}
+		if cost < getCostThresholdForSlowLevel(midSlowLevel) {
 			return
 		}
 		cnt := atomic.LoadInt64(&sl.slowCounter)
 		if cnt < smallSlowThreshold {
 			return
 		}
-		isSlow, _ := sl.isHistorySlow(cmd, prefix, cnt, true)
+		isSlow, _ := sl.isHistorySlow(cmd, prefix, cnt, minSlowLevel)
 		if !isSlow {
 			return
 		}
@@ -200,27 +259,31 @@ func (sl *SlowLimiter) MaybeAddSlow(ts int64, cost time.Duration, cmd string, pr
 }
 
 // return isslow and issmallslow
-func (sl *SlowLimiter) isHistorySlow(cmd, prefix string, sc int64, ignore10ms bool) (bool, bool) {
+func (sl *SlowLimiter) isHistorySlow(cmd, prefix string, sc int64, ignoreSlowLevel slowLevelT) (bool, slowLevelT) {
 	feat := cmd + " " + prefix
 	sl.mutex.RLock()
 	defer sl.mutex.RUnlock()
-	cnt, ok := sl.slow100s[feat]
-	if ok && cnt > 2 {
-		return true, false
-	}
-	if sc >= midSlowThreshold {
-		cnt, ok := sl.slow50s[feat]
-		if ok && cnt > 4 {
-			return true, true
+	for lv := minSlowLevel; lv < maxSlowLevel; lv++ {
+		if lv <= ignoreSlowLevel {
+			continue
+		}
+		slow := sl.slowHistorys[lv]
+		cnt, ok := slow[feat]
+		if lv >= verySlowLevel {
+			if ok && cnt > 2 {
+				return true, lv
+			}
+		} else if sc >= midSlowThreshold && lv >= midSlowLevel {
+			if ok && cnt > 4 {
+				return true, lv
+			}
+		} else if sc >= heavySlowThreshold && lv >= minSlowLevel {
+			if ok && cnt > 16 {
+				return true, lv
+			}
 		}
 	}
-	if !ignore10ms && sc >= heavySlowThreshold {
-		cnt, ok := sl.slow10s[feat]
-		if ok && cnt > 20 {
-			return true, true
-		}
-	}
-	return false, false
+	return false, 0
 }
 
 func (sl *SlowLimiter) AddSlow(ts int64) {
@@ -230,9 +293,61 @@ func (sl *SlowLimiter) AddSlow(ts int64) {
 
 func (sl *SlowLimiter) addCounterOnly() {
 	cnt := atomic.AddInt64(&sl.slowCounter, 1)
+	atomic.AddInt64(&sl.slowQueueCounter, 1)
 	if cnt > maxSlowThreshold {
 		atomic.AddInt64(&sl.slowCounter, -1)
 	}
+}
+
+func (sl *SlowLimiter) PreWaitQueue(ctx context.Context, cmd string, prefix string) (*SlowWaitDone, error) {
+	feat := cmd + " " + prefix
+	slv := slowLevelT(-1)
+	if IsMaybeSlowWriteCmd(cmd) {
+		slv = verySlowLevel
+	} else {
+		sl.mutex.RLock()
+		for lv := verySlowLevel; lv >= 0; lv-- {
+			slow := sl.slowHistorys[lv]
+			cnt, ok := slow[feat]
+			if ok && cnt > 2 {
+				slv = lv
+				break
+			}
+		}
+		sl.mutex.RUnlock()
+	}
+	if slv >= maxSlowLevel || slv < 0 {
+		return nil, nil
+	}
+	wq := sl.slowWaitQueue[slv]
+	begin := time.Now()
+	select {
+	case <-ctx.Done():
+		metric.SlowLimiterRefusedCnt.With(ps.Labels{
+			"table": prefix,
+			"cmd":   cmd,
+		}).Inc()
+		return nil, ctx.Err()
+	case wq <- struct{}{}:
+	}
+	cost := time.Since(begin)
+	if cost >= time.Millisecond {
+		metric.SlowLimiterQueuedCost.With(ps.Labels{
+			"namespace": sl.ns,
+			"table":     prefix,
+			"cmd":       cmd,
+		}).Observe(float64(cost.Milliseconds()))
+	}
+	metric.SlowLimiterQueuedCnt.With(ps.Labels{
+		"table":      prefix,
+		"cmd":        cmd,
+		"slow_level": getSlowLevelDesp(slv),
+	}).Inc()
+	metric.QueueLen.With(ps.Labels{
+		"namespace":  sl.ns,
+		"queue_name": "slow_wait_queue_" + getSlowLevelDesp(slv),
+	}).Set(float64(len(wq)))
+	return &SlowWaitDone{wq}, nil
 }
 
 func (sl *SlowLimiter) CanPass(ts int64, cmd string, prefix string) bool {
@@ -249,7 +364,7 @@ func (sl *SlowLimiter) CanPass(ts int64, cmd string, prefix string) bool {
 	if ts > atomic.LoadInt64(&sl.lastSlowTs)+time.Second.Nanoseconds()*SlowHalfOpenSec {
 		return true
 	}
-	if isSlow, _ := sl.isHistorySlow(cmd, prefix, sc, false); isSlow {
+	if isSlow, _ := sl.isHistorySlow(cmd, prefix, sc, -1); isSlow {
 		// the write is refused, means it may slow down the raft loop if we passed,
 		// so we need add counter here even we refused it.
 		// However, we do not update timestamp for slow, so we can clear it if it become
@@ -264,47 +379,71 @@ func (sl *SlowLimiter) CanPass(ts int64, cmd string, prefix string) bool {
 	return true
 }
 
+func getCostThresholdForSlowLevel(slv slowLevelT) time.Duration {
+	if slv >= verySlowLevel {
+		return time.Millisecond * 100
+	}
+	if slv >= midSlowLevel {
+		return time.Millisecond * 50
+	}
+	if slv >= minSlowLevel {
+		return time.Millisecond * 10
+	}
+	return 0
+}
+
+func getSlowLevelDesp(slv slowLevelT) string {
+	return strconv.Itoa(int(slv))
+}
+
+func getSlowLevelFromCost(cost time.Duration) slowLevelT {
+	if cost >= time.Millisecond*100 {
+		return verySlowLevel
+	}
+	if cost >= time.Millisecond*50 {
+		return midSlowLevel
+	}
+	if cost >= time.Millisecond*10 {
+		return minSlowLevel
+	}
+	return -1
+}
+
 func (sl *SlowLimiter) RecordSlowCmd(cmd string, prefix string, cost time.Duration) {
 	if prefix == "" || cmd == "" {
 		return
 	}
-	slowKind := 0
-	if cost >= time.Millisecond*100 {
-		slowKind = 100
+	slv := getSlowLevelFromCost(cost)
+	if slv < minSlowLevel || slv >= maxSlowLevel {
+		return
+	}
+	if slv == verySlowLevel {
 		metric.SlowWrite100msCnt.With(ps.Labels{
 			"table": prefix,
 			"cmd":   cmd,
 		}).Inc()
-	} else if cost >= time.Millisecond*50 {
-		slowKind = 50
+	} else if slv == midSlowLevel {
 		metric.SlowWrite50msCnt.With(ps.Labels{
 			"table": prefix,
 			"cmd":   cmd,
 		}).Inc()
-	} else if cost >= time.Millisecond*10 {
-		slowKind = 10
+	} else if slv == minSlowLevel {
 		metric.SlowWrite10msCnt.With(ps.Labels{
 			"table": prefix,
 			"cmd":   cmd,
 		}).Inc()
-	} else {
-		return
 	}
 	if !sl.isOn() {
 		return
 	}
 	sc := atomic.LoadInt64(&sl.slowCounter)
-	if sc < smallSlowThreshold {
+	qc := atomic.LoadInt64(&sl.slowQueueCounter)
+	if sc < smallSlowThreshold && qc < slowQueueThreshold {
 		return
 	}
 	feat := cmd + " " + prefix
 	sl.mutex.Lock()
-	slow := sl.slow100s
-	if slowKind == 50 {
-		slow = sl.slow50s
-	} else if slowKind == 10 {
-		slow = sl.slow10s
-	}
+	slow := sl.slowHistorys[slv]
 	old, ok := slow[feat]
 	if !ok {
 		old = 0

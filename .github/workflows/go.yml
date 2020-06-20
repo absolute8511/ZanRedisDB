@@ -16,7 +16,7 @@ jobs:
     - name: Set up Go 1.x
       uses: actions/setup-go@v2
       with:
-        go-version: 1.13.9
+        go-version: 1.13.12
       id: go
       
     - name: Setup C++ environment
@@ -40,3 +40,6 @@ jobs:
 
     - name: Codecov
       uses: codecov/codecov-action@v1.0.7
+
+    - name: Lint Code base
+      uses: github/super-linter@v2.0.0

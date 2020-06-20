@@ -94,6 +94,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterWrite("noopwrite", wrapWriteCommandKV(nd, checkOKRsp))
 	// for kv
 	nd.router.RegisterRead("get", wrapReadCommandK(nd.getCommand))
+	nd.router.RegisterRead("stale.get", wrapReadCommandK(nd.getCommand))
 	nd.router.RegisterRead("strlen", wrapReadCommandK(nd.strlenCommand))
 	nd.router.RegisterRead("getrange", wrapReadCommandKAnySubkeyN(nd.getRangeCommand, 2))
 	nd.router.RegisterRead("getnolock", wrapReadCommandK(nd.getNoLockCommand))
