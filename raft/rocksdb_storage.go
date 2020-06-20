@@ -489,7 +489,6 @@ func (ms *RocksStorage) Append(entries []pb.Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	s := time.Now()
 	batch := ms.wb
 	batch.Clear()
 	err := ms.addEntries(batch, entries)
@@ -497,10 +496,6 @@ func (ms *RocksStorage) Append(entries []pb.Entry) error {
 		return err
 	}
 	err = ms.commitBatch(batch)
-	cost := time.Since(s)
-	if cost > slowStorage {
-		raftLogger.Infof("append to raft storage slow: %v, %v", len(entries), cost)
-	}
 	return err
 }
 

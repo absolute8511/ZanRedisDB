@@ -1048,7 +1048,16 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 			}
 		}
 	}
+	cost2 := time.Since(start)
 	rc.raftStorage.Append(rd.Entries)
+	cost3 := time.Since(start) - cost2
+	if cost3 > raftSlow/2 {
+		rc.Infof("raft append commit entries slow: %v, cost: %v", len(rd.Entries), cost3)
+	}
+	metric.RaftWriteLatency.With(ps.Labels{
+		"namespace": rc.Descrp(),
+		"step":      "raft_append_commit_entries_to_storage",
+	}).Observe(float64(cost3.Milliseconds()))
 
 	if !isMeNewLeader {
 		raftDone <- struct{}{}
