@@ -139,6 +139,9 @@ func NewPebbleEng(cfg *RockEngConfig) (*PebbleEng, error) {
 		MaxOpenFiles:                -1,
 		MaxConcurrentCompactions:    cfg.MaxBackgroundCompactions,
 	}
+	if cfg.DisableWAL {
+		opts.DisableWAL = true
+	}
 	// prefix search
 	opts.Comparer = pebble.DefaultComparer
 	opts.Comparer.Split = func(a []byte) int {
@@ -383,7 +386,7 @@ func (pe *PebbleEng) ExistNoLock(key []byte) (bool, error) {
 	return val != nil, nil
 }
 
-func (pe *PebbleEng) GetRef(key []byte) (*pebbleRefSlice, error) {
+func (pe *PebbleEng) GetRef(key []byte) (RefSlice, error) {
 	pe.rwmutex.RLock()
 	defer pe.rwmutex.RUnlock()
 	if pe.IsClosed() {
@@ -427,6 +430,10 @@ func (pe *PebbleEng) GetValueWithOpNoLock(key []byte,
 		}
 	}()
 	return op(val)
+}
+
+func (pe *PebbleEng) DeleteFilesInRange(rg CRange) {
+	return
 }
 
 func (pe *PebbleEng) GetIterator(opts IteratorOpts) (Iterator, error) {

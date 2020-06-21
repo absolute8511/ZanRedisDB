@@ -283,11 +283,11 @@ func (ms *RocksStorage) deleteUntil(batch engine.WriteBatch, until uint64) error
 	start := ms.entryKey(0)
 	stop := ms.entryKey(until)
 	//raftLogger.Infof("compact raft storage to %d, %v~%v ", until, start, stop)
-	//rg := gorocksdb.Range{
-	//	Start: start,
-	//	Limit: stop,
-	//}
-	//ms.entryDB.Eng().DeleteFilesInRange(rg)
+	rg := engine.CRange{
+		Start: start,
+		Limit: stop,
+	}
+	ms.entryDB.DeleteFilesInRange(rg)
 	//batch.DeleteRange(start, stop)
 	opts := engine.IteratorOpts{
 		Range:   engine.Range{Min: start, Max: stop, Type: common.RangeROpen},

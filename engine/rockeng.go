@@ -227,6 +227,11 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	} else {
 		cfg.EnableTableCounter = false
 	}
+	// TODO: add avoid_unnecessary_blocking_io option for db
+	// level_compaction_dynamic_level_bytes
+	if cfg.LevelCompactionDynamicLevelBytes {
+		opts.SetLevelCompactionDynamicLevelBytes(true)
+	}
 
 	err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
 	if err != nil {
@@ -343,7 +348,7 @@ func (r *RockEng) CheckDBEngForRead(fullPath string) error {
 }
 
 func (r *RockEng) OpenEng() error {
-	if atomic.LoadInt32(&r.engOpened) == 1 {
+	if !r.IsClosed() {
 		dbLog.Warningf("rocksdb engine already opened: %v, should close it before reopen", r.GetDataDir())
 		return errors.New("rocksdb open failed since not closed")
 	}
@@ -411,6 +416,13 @@ func (r *RockEng) GetApproximateSizes(ranges []CRange, includeMem bool) []uint64
 		rgs = append(rgs, gorocksdb.Range{Start: r.Start, Limit: r.Limit})
 	}
 	return r.eng.GetApproximateSizes(rgs, includeMem)
+}
+
+func (r *RockEng) IsClosed() bool {
+	if atomic.LoadInt32(&r.engOpened) == 0 {
+		return true
+	}
+	return false
 }
 
 func (r *RockEng) CloseEng() bool {
@@ -504,7 +516,7 @@ func (r *RockEng) ExistNoLock(key []byte) (bool, error) {
 	return r.eng.ExistNoLock(r.defaultReadOpts, key)
 }
 
-func (r *RockEng) GetRef(key []byte) (*rockRefSlice, error) {
+func (r *RockEng) GetRef(key []byte) (RefSlice, error) {
 	v, err := r.eng.Get(r.defaultReadOpts, key)
 	if err != nil {
 		return nil, err
@@ -538,6 +550,13 @@ func (r *RockEng) GetIterator(opts IteratorOpts) (Iterator, error) {
 		return nil, err
 	}
 	return dbit, nil
+}
+
+func (r *RockEng) DeleteFilesInRange(rg CRange) {
+	var rrg gorocksdb.Range
+	rrg.Start = rg.Start
+	rrg.Limit = rg.Limit
+	r.eng.DeleteFilesInRange(rrg)
 }
 
 func (r *RockEng) NewCheckpoint() (KVCheckpoint, error) {

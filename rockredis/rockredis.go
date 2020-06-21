@@ -158,7 +158,7 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string, latestSnapIndex uint6
 type RockDB struct {
 	expiration
 	cfg               *RockRedisDBConfig
-	rockEng           *engine.PebbleEng
+	rockEng           engine.KVEngine
 	wb                engine.WriteBatch
 	writeTmpBuf       []byte
 	quit              chan struct{}
@@ -176,7 +176,7 @@ type RockDB struct {
 }
 
 func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
-	eng, err := engine.NewPebbleEng(&cfg.RockEngConfig)
+	eng, err := engine.NewKVEng(&cfg.RockEngConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +510,7 @@ func (r *RockDB) DeleteTableRange(dryrun bool, table string, start []byte, end [
 			continue
 		}
 		for _, rg := range rgs {
+			r.rockEng.DeleteFilesInRange(rg)
 			wb.DeleteRange(rg.Start, rg.Limit)
 		}
 		wb.DeleteRange(minMetaKey, maxMetaKey)

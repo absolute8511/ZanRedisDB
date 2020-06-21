@@ -189,6 +189,10 @@ github.com/youzan/go-zanredisdb v0.5.1 h1:apVoAkIx5fh0qvgpLIRyk1hdwxQYpaZn35c2ZV
 github.com/youzan/go-zanredisdb v0.5.1/go.mod h1:0cy2l2EZTC8Cx4dbqlSl6E+BaXcJc+5J+gyVgX0fkKQ=
 github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5 h1:R8YI/Nexm+LWfr6gzP7FHEty1g0j9TOTaUXal2ei1Ig=
 github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5/go.mod h1:Ztkk3nnoEJnQDM1iSS/2oNOj1qCZIUWJHY2lHL5YRJg=
+github.com/youzan/gorocksdb v0.0.0-20200621101341-c2f8327d1dfe h1:uoDni6CwS/tiRfB9adGLk3Bgld5PqkZBV0G0NjVnkDw=
+github.com/youzan/gorocksdb v0.0.0-20200621101341-c2f8327d1dfe/go.mod h1:Ztkk3nnoEJnQDM1iSS/2oNOj1qCZIUWJHY2lHL5YRJg=
+github.com/youzan/gorocksdb v0.0.0-20200621102424-7269d59fec5c h1:Rq4ZUV+qJzpUUiadCwmbVG0+TGnvmVwhGiZfFkTzLRA=
+github.com/youzan/gorocksdb v0.0.0-20200621102424-7269d59fec5c/go.mod h1:Ztkk3nnoEJnQDM1iSS/2oNOj1qCZIUWJHY2lHL5YRJg=
 github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 h1:1b6PAtenNyhsmo/NKXVe34h7JEZKva1YB/ne7K7mqKM=
 github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036/go.mod h1:gqRgreBUhTSL0GeU64rtZ3Uq3wtjOa/TB2YfrtkCbVQ=
 golang.org/x/crypto v0.0.0-20180904163835-0709b304e793/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"errors"
+
 	"github.com/shirou/gopsutil/mem"
 	"github.com/youzan/ZanRedisDB/common"
 )
@@ -60,7 +62,10 @@ type RockOptions struct {
 	DisableWAL                     bool   `json:"disable_wal,omitempty"`
 	DisableMergeCounter            bool   `json:"disable_merge_counter,omitempty"`
 	OptimizeFiltersForHits         bool   `json:"optimize_filters_for_hits,omitempty"`
-	InsertHintFixedLen             int    `json:"insert_hint_fixed_len"`
+	// note do not change this dynamic for existing db
+	LevelCompactionDynamicLevelBytes bool   `json:"level_compaction_dynamic_level_bytes,omitempty"`
+	InsertHintFixedLen               int    `json:"insert_hint_fixed_len"`
+	EngineType                       string `json:"engine_type,omitempty"`
 }
 
 func FillDefaultOptions(opts *RockOptions) {
@@ -133,4 +138,48 @@ func FillDefaultOptions(opts *RockOptions) {
 
 type KVCheckpoint interface {
 	Save(path string, notify chan struct{}) error
+}
+
+type KVEngine interface {
+	NewWriteBatch() WriteBatch
+	DefaultWriteBatch() WriteBatch
+	GetDataDir() string
+	SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error
+	CheckDBEngForRead(fullPath string) error
+	OpenEng() error
+	Write(wb WriteBatch) error
+	DeletedBeforeCompact() int64
+	AddDeletedCnt(c int64)
+	LastCompactTime() int64
+	CompactRange(rg CRange)
+	CompactAllRange()
+	GetApproximateTotalKeyNum() int
+	GetApproximateKeyNum(ranges []CRange) uint64
+	GetApproximateSizes(ranges []CRange, includeMem bool) []uint64
+	IsClosed() bool
+	CloseEng() bool
+	CloseAll()
+	GetStatistics() string
+	GetInternalStatus() map[string]interface{}
+	GetInternalPropertyStatus(p string) string
+	GetBytesNoLock(key []byte) ([]byte, error)
+	GetBytes(key []byte) ([]byte, error)
+	MultiGetBytes(keyList [][]byte, values [][]byte, errs []error)
+	Exist(key []byte) (bool, error)
+	ExistNoLock(key []byte) (bool, error)
+	GetRef(key []byte) (RefSlice, error)
+	GetValueWithOp(key []byte, op func([]byte) error) error
+	GetValueWithOpNoLock(key []byte, op func([]byte) error) error
+	DeleteFilesInRange(rg CRange)
+	GetIterator(opts IteratorOpts) (Iterator, error)
+	NewCheckpoint() (KVCheckpoint, error)
+}
+
+func NewKVEng(cfg *RockEngConfig) (KVEngine, error) {
+	if cfg.EngineType == "" || cfg.EngineType == "rocksdb" {
+		return NewRockEng(cfg)
+	} else if cfg.EngineType == "pebble" {
+		return NewPebbleEng(cfg)
+	}
+	return nil, errors.New("unknown engine type for: " + cfg.EngineType)
 }
