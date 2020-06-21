@@ -159,7 +159,7 @@ func (nn *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
 
 type NamespaceMeta struct {
 	PartitionNum int
-	walEng       *engine.RockEng
+	walEng       engine.KVEngine
 }
 
 type NamespaceMgr struct {
@@ -355,7 +355,7 @@ func (nsm *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 	return tmp
 }
 
-func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
+func initRaftStorageEng(cfg *engine.RockEngConfig) engine.KVEngine {
 	nodeLog.Infof("using rocksdb raft storage dir:%v", cfg.DataDir)
 	cfg.DisableWAL = true
 	cfg.DisableMergeCounter = true
@@ -368,10 +368,11 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 		cfg.InsertHintFixedLen = 10
 	}
 	cfg.AutoCompacted = true
-	db, err := engine.NewRockEng(cfg)
+	db, err := engine.NewKVEng(cfg)
 	if err == nil {
 		err = db.OpenEng()
 		if err == nil {
+			db.SetOptsForLogStorage()
 			go db.CompactAllRange()
 			return db
 		}
@@ -380,7 +381,7 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 	return nil
 }
 
-func (nsm *NamespaceMgr) getWALEng(ns string, dataDir string, id uint64, gid uint32, meta *NamespaceMeta) *engine.RockEng {
+func (nsm *NamespaceMgr) getWALEng(ns string, dataDir string, id uint64, gid uint32, meta *NamespaceMeta) engine.KVEngine {
 	if !nsm.machineConf.UseRocksWAL || meta == nil {
 		return nil
 	}

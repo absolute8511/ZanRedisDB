@@ -173,6 +173,7 @@ type KVEngine interface {
 	DeleteFilesInRange(rg CRange)
 	GetIterator(opts IteratorOpts) (Iterator, error)
 	NewCheckpoint() (KVCheckpoint, error)
+	SetOptsForLogStorage()
 }
 
 func NewKVEng(cfg *RockEngConfig) (KVEngine, error) {

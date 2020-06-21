@@ -29,7 +29,7 @@ type RocksStorage struct {
 	hardState pb.HardState
 	snapshot  pb.Snapshot
 
-	entryDB    *engine.RockEng
+	entryDB    engine.KVEngine
 	wb         engine.WriteBatch
 	firstIndex uint64
 	lastIndex  uint64
@@ -38,8 +38,7 @@ type RocksStorage struct {
 	engShared  bool
 }
 
-func NewRocksStorage(id uint64, gid uint32, shared bool, db *engine.RockEng) *RocksStorage {
-	db.SetOptsForLogStorage()
+func NewRocksStorage(id uint64, gid uint32, shared bool, db engine.KVEngine) *RocksStorage {
 	ms := &RocksStorage{
 		entryDB:   db,
 		wb:        db.NewWriteBatch(),
@@ -62,7 +61,7 @@ func NewRocksStorage(id uint64, gid uint32, shared bool, db *engine.RockEng) *Ro
 	return ms
 }
 
-func (ms *RocksStorage) Eng() *engine.RockEng {
+func (ms *RocksStorage) Eng() engine.KVEngine {
 	return ms.entryDB
 }
 

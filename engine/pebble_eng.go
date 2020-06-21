@@ -261,6 +261,10 @@ func (pe *PebbleEng) GetApproximateKeyNum(ranges []CRange) uint64 {
 	return 0
 }
 
+func (pe *PebbleEng) SetOptsForLogStorage() {
+	return
+}
+
 func (pe *PebbleEng) GetApproximateSizes(ranges []CRange, includeMem bool) []uint64 {
 	pe.rwmutex.RLock()
 	defer pe.rwmutex.RUnlock()
