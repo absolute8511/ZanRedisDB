@@ -32,22 +32,6 @@ type sharedRockConfig struct {
 	SharedRateLimiter *gorocksdb.RateLimiter
 }
 
-type RockEngConfig struct {
-	DataDir            string
-	SharedConfig       SharedRockConfig
-	EnableTableCounter bool
-	AutoCompacted      bool
-	RockOptions
-}
-
-func NewRockConfig() *RockEngConfig {
-	c := &RockEngConfig{
-		EnableTableCounter: true,
-	}
-	FillDefaultOptions(&c.RockOptions)
-	return c
-}
-
 func NewSharedRockConfig(opt RockOptions) *sharedRockConfig {
 	rc := &sharedRockConfig{}
 	if opt.UseSharedCache {

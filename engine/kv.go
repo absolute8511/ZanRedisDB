@@ -37,6 +37,22 @@ type SharedRockConfig interface {
 	ChangeLimiter(bytesPerSec int64)
 }
 
+type RockEngConfig struct {
+	DataDir            string
+	SharedConfig       SharedRockConfig
+	EnableTableCounter bool
+	AutoCompacted      bool
+	RockOptions
+}
+
+func NewRockConfig() *RockEngConfig {
+	c := &RockEngConfig{
+		EnableTableCounter: true,
+	}
+	FillDefaultOptions(&c.RockOptions)
+	return c
+}
+
 type RockOptions struct {
 	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
 	BlockSize                      int    `json:"block_size"`

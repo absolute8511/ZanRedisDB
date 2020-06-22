@@ -166,6 +166,9 @@ func NewPebbleEng(cfg *RockEngConfig) (*PebbleEng, error) {
 		},
 		quit: make(chan struct{}),
 	}
+	if cfg.AutoCompacted {
+		go db.compactLoop()
+	}
 
 	return db, nil
 }
@@ -184,6 +187,24 @@ func (pe *PebbleEng) GetDataDir() string {
 
 func (pe *PebbleEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
 	return nil
+}
+
+func (pe *PebbleEng) compactLoop() {
+	ticker := time.NewTicker(time.Hour)
+	interval := (time.Hour / time.Second).Nanoseconds()
+	dbLog.Infof("start auto compact loop : %v", interval)
+	for {
+		select {
+		case <-pe.quit:
+			return
+		case <-ticker.C:
+			if (pe.DeletedBeforeCompact() > compactThreshold) &&
+				(time.Now().Unix()-pe.LastCompactTime()) > interval {
+				dbLog.Infof("auto compact : %v, %v", pe.DeletedBeforeCompact(), pe.LastCompactTime())
+				pe.CompactAllRange()
+			}
+		}
+	}
 }
 
 func (pe *PebbleEng) CheckDBEngForRead(fullPath string) error {
