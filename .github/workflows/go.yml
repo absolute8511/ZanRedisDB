@@ -40,6 +40,3 @@ jobs:
 
     - name: Codecov
       uses: codecov/codecov-action@v1.0.7
-
-    - name: Lint Code base
-      uses: github/super-linter@v2.0.0
