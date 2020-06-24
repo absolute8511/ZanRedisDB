@@ -251,3 +251,27 @@ restore -lookup lookuplist -data restore  [-ns namespace -table table_name -qps 
 - 同步完故障期间数据后, 停掉A集群到B机房的数据同步程序
 - 启动反向同步程序, 用于将B机房数据同步到A机房, 此时A机房转换为备集群 (故障会需要传输全量数据, 注意网络情况)
 - 修复数据, A机房集群故障时记录的同步位移点之后的数据, B集群故障切换之后写入的新数据在A机房未同步的数据集合做对比.
+
+
+## 故障处理
+
+### 单分区数据故障
+
+假如某些异常导致单个分区下的一个副本数据异常, 可以尝试将该副本手动剔除来尝试恢复一致. 操作如下:
+
+```
+DELETE /cluster/partition/remove_node?namespace=xxx&partition=xxx&node=xxxx
+```
+往placedriver的leader节点发送以上命令, 其中node需要输入节点在该namespace的唯一节点id, 可以通过/query/xxx 查询namespace元数据方式获取对应的node_id字段.
+
+观察集群是否自动将该分组下的异常节点剔除, 剔除后, 集群会自动重新分配新的副本, 确保集群有足够的副本数.
+
+### raft某个副本分组无法和etcd保持一致
+
+假如raft副本集合和etcd不一致, 正常情况下, 会通过调度使得最终副本集合和etcd上配置一致, 假如某些原因导致raft分组无法增加或者调整副本集, 需要手动强制重置副本, 并修复etcd配置,  首先尝试使用单分区数据故障处理方式, 将异常副本剔除, 如果可以的话, 一个个剔除后, 理论上可以恢复. 如果不行, 说明leader节点已经无法形成, raft分组无法选举, 那么针对某个分组使用如下API强制重新组成新的单副本集群(注意选择数据完整的节点发送此API).
+
+```
+POST /cluster/raft/forcenew/namespace-pid
+```
+
+然后, 修改etcd元数据, 使得namespace对应分区的副本集元数据只包含这个新的节点id, 然后等待副本自动增加.
