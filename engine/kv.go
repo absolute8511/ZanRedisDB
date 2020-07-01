@@ -200,3 +200,12 @@ func NewKVEng(cfg *RockEngConfig) (KVEngine, error) {
 	}
 	return nil, errors.New("unknown engine type for: " + cfg.EngineType)
 }
+
+func NewSharedEngConfig(cfg RockOptions) (SharedRockConfig, error) {
+	if cfg.EngineType == "" || cfg.EngineType == "rocksdb" {
+		return newSharedRockConfig(cfg), nil
+	} else if cfg.EngineType == "pebble" {
+		return newSharedPebblekConfig(cfg), nil
+	}
+	return nil, errors.New("unknown engine type for: " + cfg.EngineType)
+}

@@ -79,10 +79,10 @@ type Server struct {
 	scanStats     metric.ScanStats
 }
 
-func NewServer(conf ServerConfig) *Server {
+func NewServer(conf ServerConfig) (*Server, error) {
 	hname, err := os.Hostname()
 	if err != nil {
-		sLog.Fatal(err)
+		return nil, err
 	}
 	if conf.TickMs < 100 {
 		conf.TickMs = 100
@@ -131,7 +131,7 @@ func NewServer(conf ServerConfig) *Server {
 	}
 
 	if conf.ClusterID == "" {
-		sLog.Fatalf("cluster id can not be empty")
+		return nil, errors.New("cluster id can not be empty")
 	}
 	if conf.BroadcastInterface != "" {
 		myNode.NodeIP = common.GetIPv4ForInterfaceName(conf.BroadcastInterface)
@@ -145,7 +145,7 @@ func NewServer(conf ServerConfig) *Server {
 		conf.BroadcastAddr = myNode.NodeIP
 	}
 	if myNode.NodeIP == "0.0.0.0" || myNode.NodeIP == "" {
-		sLog.Fatalf("can not decide the broadcast ip: %v", myNode.NodeIP)
+		return nil, fmt.Errorf("can not decide the broadcast ip: %v", myNode.NodeIP)
 	}
 	conf.LocalRaftAddr = strings.Replace(conf.LocalRaftAddr, "0.0.0.0", myNode.NodeIP, 1)
 	myNode.RaftTransportAddr = conf.LocalRaftAddr
@@ -189,13 +189,19 @@ func NewServer(conf ServerConfig) *Server {
 		WALRocksDBOpts:    conf.WALRocksDBOpts,
 	}
 	if mconf.RocksDBOpts.UseSharedCache || mconf.RocksDBOpts.AdjustThreadPool || mconf.RocksDBOpts.UseSharedRateLimiter {
-		sc := engine.NewSharedRockConfig(conf.RocksDBOpts)
+		sc, err := engine.NewSharedEngConfig(conf.RocksDBOpts)
+		if err != nil {
+			return nil, err
+		}
 		mconf.RocksDBSharedConfig = sc
 	}
 
 	if mconf.UseRocksWAL {
 		if mconf.WALRocksDBOpts.UseSharedCache || mconf.WALRocksDBOpts.AdjustThreadPool || mconf.WALRocksDBOpts.UseSharedRateLimiter {
-			sc := engine.NewSharedRockConfig(conf.WALRocksDBOpts)
+			sc, err := engine.NewSharedEngConfig(conf.WALRocksDBOpts)
+			if err != nil {
+				return nil, err
+			}
 			mconf.WALRocksDBSharedConfig = sc
 		}
 	}
@@ -205,11 +211,11 @@ func NewServer(conf ServerConfig) *Server {
 	if conf.EtcdClusterAddresses != "" {
 		r, err := cluster.NewDNEtcdRegister(conf.EtcdClusterAddresses)
 		if err != nil {
-			sLog.Fatalf("failed to init register for coordinator: %v", err)
+			return nil, err
 		}
 		s.dataCoord = datanode_coord.NewDataCoordinator(conf.ClusterID, myNode, s.nsMgr)
 		if err := s.dataCoord.SetRegister(r); err != nil {
-			sLog.Fatalf("failed to init register for coordinator: %v", err)
+			return nil, err
 		}
 		s.raftTransport.ID = types.ID(s.dataCoord.GetMyRegID())
 		s.nsMgr.SetIClusterInfo(s.dataCoord)
@@ -217,7 +223,7 @@ func NewServer(conf ServerConfig) *Server {
 		s.raftTransport.ID = types.ID(myNode.RegID)
 	}
 
-	return s
+	return s, nil
 }
 
 func (s *Server) Stop() {
@@ -352,7 +358,7 @@ func (s *Server) Start() {
 	if s.dataCoord != nil {
 		err := s.dataCoord.Start()
 		if err != nil {
-			sLog.Fatalf("data coordinator start failed: %v", err)
+			sLog.Panicf("data coordinator start failed: %v", err)
 		}
 	} else {
 		s.nsMgr.Start()
@@ -430,11 +436,11 @@ func (s *Server) GetWriteHandler(cmdName string,
 func (s *Server) serveRaft(stopCh <-chan struct{}) {
 	url, err := url.Parse(s.conf.LocalRaftAddr)
 	if err != nil {
-		sLog.Fatalf("failed parsing raft url: %v", err)
+		sLog.Panicf("failed parsing raft url: %v", err)
 	}
 	ln, err := common.NewStoppableListener(url.Host, stopCh)
 	if err != nil {
-		sLog.Fatalf("failed to listen rafthttp : %v", err)
+		sLog.Panicf("failed to listen rafthttp : %v", err)
 	}
 	err = (&http.Server{Handler: s.raftTransport.Handler()}).Serve(ln)
 	select {

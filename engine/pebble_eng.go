@@ -12,6 +12,7 @@ import (
 
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"
+	"github.com/shirou/gopsutil/mem"
 	"github.com/youzan/ZanRedisDB/common"
 )
 
@@ -86,6 +87,38 @@ func newUint64AddMerger() *pebble.Merger {
 		},
 		// the name should match the rocksdb default merge name
 		Name: "UInt64AddOperator",
+	}
+}
+
+type sharedPebbleConfig struct {
+	SharedCache *pebble.Cache
+}
+
+func newSharedPebblekConfig(opt RockOptions) *sharedPebbleConfig {
+	sc := &sharedPebbleConfig{}
+	if opt.UseSharedCache {
+		if opt.BlockCache <= 0 {
+			v, err := mem.VirtualMemory()
+			if err != nil {
+				opt.BlockCache = 1024 * 1024 * 128 * 10
+			} else {
+				opt.BlockCache = int64(v.Total / 10)
+				if opt.CacheIndexAndFilterBlocks || opt.EnablePartitionedIndexFilter {
+					opt.BlockCache *= 2
+				}
+			}
+		}
+		sc.SharedCache = pebble.NewCache(opt.BlockCache)
+	}
+	return sc
+}
+
+func (sc *sharedPebbleConfig) ChangeLimiter(bytesPerSec int64) {
+}
+
+func (sc *sharedPebbleConfig) Destroy() {
+	if sc.SharedCache != nil {
+		sc.SharedCache.Unref()
 	}
 }
 
@@ -227,9 +260,17 @@ func (pe *PebbleEng) OpenEng() error {
 	}
 	pe.rwmutex.Lock()
 	defer pe.rwmutex.Unlock()
-	cache := pebble.NewCache(pe.cfg.BlockCache)
-	defer cache.Unref()
-	pe.opts.Cache = cache
+	if pe.cfg.UseSharedCache && pe.cfg.SharedConfig != nil {
+		sc, ok := pe.cfg.SharedConfig.(*sharedPebbleConfig)
+		if ok {
+			pe.opts.Cache = sc.SharedCache
+			dbLog.Infof("using shared cache for pebble engine")
+		}
+	} else {
+		cache := pebble.NewCache(pe.cfg.BlockCache)
+		defer cache.Unref()
+		pe.opts.Cache = cache
+	}
 	eng, err := pebble.Open(pe.GetDataDir(), pe.opts)
 	if err != nil {
 		return err

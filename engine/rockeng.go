@@ -32,7 +32,7 @@ type sharedRockConfig struct {
 	SharedRateLimiter *gorocksdb.RateLimiter
 }
 
-func NewSharedRockConfig(opt RockOptions) *sharedRockConfig {
+func newSharedRockConfig(opt RockOptions) *sharedRockConfig {
 	rc := &sharedRockConfig{}
 	if opt.UseSharedCache {
 		if opt.BlockCache <= 0 {
