@@ -46,7 +46,8 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 		ElectionTick:  5,
 	}
 	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-	kv := NewServer(kvOpts)
+	kv, err := NewServer(kvOpts)
+	assert.Nil(t, err)
 	var replica node.ReplicaInfo
 	replica.NodeID = 1
 	replica.ReplicaID = 1
