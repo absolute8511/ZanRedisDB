@@ -85,6 +85,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/cluster/balance", common.Decorate(s.doClusterSwitchBalance, log, common.V1))
 	router.Handle("POST", "/cluster/pd/tombstone", common.Decorate(s.doClusterTombstonePD, log, common.V1))
 	router.Handle("POST", "/cluster/node/remove", common.Decorate(s.doClusterRemoveDataNode, log, common.V1))
+	router.Handle("DELETE", "/cluster/partition/remove_node", common.Decorate(s.doClusterNamespacePartRemoveNode, log, common.V1))
 	router.Handle("POST", "/cluster/upgrade/begin", common.Decorate(s.doClusterBeginUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/upgrade/done", common.Decorate(s.doClusterFinishUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/create", common.Decorate(s.doCreateNamespace, log, common.V1))
@@ -394,6 +395,22 @@ func (s *Server) doClusterRemoveDataNode(w http.ResponseWriter, req *http.Reques
 	nid := reqParams.Get("remove_node")
 
 	err = s.pdCoord.MarkNodeAsRemoving(nid)
+	if err != nil {
+		return nil, common.HttpErr{Code: 500, Text: err.Error()}
+	}
+	return nil, nil
+}
+
+func (s *Server) doClusterNamespacePartRemoveNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	nid := reqParams.Get("node")
+	ns := reqParams.Get("namespace")
+	pid := reqParams.Get("partition")
+
+	err = s.pdCoord.RemoveNamespaceFromNode(ns, pid, nid)
 	if err != nil {
 		return nil, common.HttpErr{Code: 500, Text: err.Error()}
 	}

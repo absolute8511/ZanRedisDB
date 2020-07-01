@@ -85,6 +85,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 		UseRedisV2:     true,
 	}
 	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+	kvOpts.WALRocksDBOpts.EngineType = "pebble"
 
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
@@ -97,7 +98,8 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 	//nsConf.ExpirationPolicy = common.ConsistencyDeletionExpirationPolicy
 	nsConf.ExpirationPolicy = common.WaitCompactExpirationPolicy
 	nsConf.DataVersion = common.ValueHeaderV1Str
-	kv := NewServer(kvOpts)
+	kv, err := NewServer(kvOpts)
+	assert.Nil(t, err)
 	if _, err := kv.InitKVNamespace(1, nsConf, false); err != nil {
 		t.Fatalf("failed to init namespace: %v", err)
 	}

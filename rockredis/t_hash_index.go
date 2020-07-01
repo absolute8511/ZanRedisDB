@@ -7,7 +7,6 @@ import (
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
-	"github.com/youzan/gorocksdb"
 )
 
 const (
@@ -242,7 +241,7 @@ func encodeHsetIndexStringStopKey(table []byte, indexName []byte, indexValue []b
 	return k, nil
 }
 
-func hsetIndexAddNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, pkvalue []byte, wb *gorocksdb.WriteBatch) error {
+func hsetIndexAddNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, pkvalue []byte, wb engine.WriteBatch) error {
 	dbkey, err := encodeHsetIndexNumberKey(table, indexName, indexValue, pk, false)
 	if err != nil {
 		return err
@@ -251,7 +250,7 @@ func hsetIndexAddNumberRec(table []byte, indexName []byte, indexValue int64, pk 
 	return nil
 }
 
-func hsetIndexRemoveNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, wb *gorocksdb.WriteBatch) error {
+func hsetIndexRemoveNumberRec(table []byte, indexName []byte, indexValue int64, pk []byte, wb engine.WriteBatch) error {
 	dbkey, err := encodeHsetIndexNumberKey(table, indexName, indexValue, pk, false)
 	if err != nil {
 		return err
@@ -260,7 +259,7 @@ func hsetIndexRemoveNumberRec(table []byte, indexName []byte, indexValue int64, 
 	return nil
 }
 
-func hsetIndexAddStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, pkvalue []byte, wb *gorocksdb.WriteBatch) error {
+func hsetIndexAddStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, pkvalue []byte, wb engine.WriteBatch) error {
 	dbkey, err := encodeHsetIndexStringKey(table, indexName, indexValue, pk, false)
 	if err != nil {
 		return err
@@ -269,7 +268,7 @@ func hsetIndexAddStringRec(table []byte, indexName []byte, indexValue []byte, pk
 	return nil
 }
 
-func hsetIndexRemoveStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, wb *gorocksdb.WriteBatch) error {
+func hsetIndexRemoveStringRec(table []byte, indexName []byte, indexValue []byte, pk []byte, wb engine.WriteBatch) error {
 	dbkey, err := encodeHsetIndexStringKey(table, indexName, indexValue, pk, false)
 	if err != nil {
 		return err
@@ -278,7 +277,7 @@ func hsetIndexRemoveStringRec(table []byte, indexName []byte, indexValue []byte,
 	return nil
 }
 
-func (db *RockDB) hsetIndexAddFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) hsetIndexAddFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb engine.WriteBatch) error {
 	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
@@ -300,7 +299,7 @@ func (db *RockDB) hsetIndexAddFieldRecs(pk []byte, fieldList [][]byte, valueList
 	return nil
 }
 
-func (db *RockDB) hsetIndexUpdateFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) hsetIndexUpdateFieldRecs(pk []byte, fieldList [][]byte, valueList [][]byte, wb engine.WriteBatch) error {
 	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
@@ -326,7 +325,7 @@ func (db *RockDB) hsetIndexUpdateFieldRecs(pk []byte, fieldList [][]byte, valueL
 	return nil
 }
 
-func (db *RockDB) hsetIndexAddRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) hsetIndexAddRec(pk []byte, field []byte, value []byte, wb engine.WriteBatch) error {
 	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
@@ -340,7 +339,7 @@ func (db *RockDB) hsetIndexAddRec(pk []byte, field []byte, value []byte, wb *gor
 	return hindex.UpdateRec(nil, value, pk, wb)
 }
 
-func (db *RockDB) hsetIndexUpdateRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) hsetIndexUpdateRec(pk []byte, field []byte, value []byte, wb engine.WriteBatch) error {
 	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
@@ -359,7 +358,7 @@ func (db *RockDB) hsetIndexUpdateRec(pk []byte, field []byte, value []byte, wb *
 	return hindex.UpdateRec(oldvalue, value, pk, wb)
 }
 
-func (self *RockDB) hsetIndexRemoveRec(pk []byte, field []byte, value []byte, wb *gorocksdb.WriteBatch) error {
+func (self *RockDB) hsetIndexRemoveRec(pk []byte, field []byte, value []byte, wb engine.WriteBatch) error {
 	table, _, _ := extractTableFromRedisKey(pk)
 	if len(table) == 0 {
 		return errTableName
@@ -490,7 +489,7 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 	if dbLog.Level() >= common.LOG_DEBUG {
 		dbLog.Debugf("begin search index: %v-%v-%v, %v~%v", string(self.Table), string(self.Name), string(self.IndexField), min, max)
 	}
-	it, err := engine.NewDBRangeLimitIterator(db.eng, min, max, rt, cond.Offset, cond.Limit, false)
+	it, err := db.NewDBRangeLimitIterator(min, max, rt, cond.Offset, cond.Limit, false)
 	if err != nil {
 		return n, nil, err
 	}
@@ -524,7 +523,7 @@ func (self *HsetIndex) SearchRec(db *RockDB, cond *IndexCondition, countOnly boo
 	return n, pkList, nil
 }
 
-func (self *HsetIndex) UpdateRec(oldvalue []byte, value []byte, pk []byte, wb *gorocksdb.WriteBatch) error {
+func (self *HsetIndex) UpdateRec(oldvalue []byte, value []byte, pk []byte, wb engine.WriteBatch) error {
 	if self.State == DeletedIndex {
 		return nil
 	}
@@ -555,7 +554,7 @@ func (self *HsetIndex) UpdateRec(oldvalue []byte, value []byte, pk []byte, wb *g
 	return nil
 }
 
-func (self *HsetIndex) RemoveRec(value []byte, pk []byte, wb *gorocksdb.WriteBatch) {
+func (self *HsetIndex) RemoveRec(value []byte, pk []byte, wb engine.WriteBatch) {
 	if value == nil {
 		return
 	}
@@ -584,12 +583,12 @@ func (self *HsetIndex) cleanAll(db *RockDB, stopChan chan struct{}) error {
 
 	dbLog.Infof("begin clean index: %v-%v-%v", string(self.Table), string(self.Name), string(self.IndexField))
 
-	wb := gorocksdb.NewWriteBatch()
+	wb := db.rockEng.NewWriteBatch()
 	defer wb.Destroy()
 	wb.DeleteRange(min, max)
 	wb.Delete(max)
 
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	err := db.rockEng.Write(wb)
 	if err != nil {
 		dbLog.Infof("clean index %v, %v error: %v", string(self.Table), string(self.Name), err)
 	} else {

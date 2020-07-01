@@ -78,6 +78,26 @@ func (pdCoord *PDCoordinator) SetClusterUpgradeState(upgrading bool) error {
 	return nil
 }
 
+func (pdCoord *PDCoordinator) RemoveNamespaceFromNode(ns string, pidStr string, nid string) error {
+	if pdCoord.leaderNode.GetID() != pdCoord.myNode.GetID() {
+		cluster.CoordLog().Infof("not leader while delete namespace")
+		return ErrNotLeader
+	}
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return err
+	}
+	nsinfo, err := pdCoord.register.GetNamespacePartInfo(ns, pid)
+	if err != nil {
+		return err
+	}
+	coordErr := pdCoord.removeNamespaceFromNode(nsinfo, nid)
+	if coordErr != nil {
+		return coordErr.ToErrorType()
+	}
+	return nil
+}
+
 func (pdCoord *PDCoordinator) MarkNodeAsRemoving(nid string) error {
 	if pdCoord.leaderNode.GetID() != pdCoord.myNode.GetID() {
 		cluster.CoordLog().Infof("not leader while delete namespace")

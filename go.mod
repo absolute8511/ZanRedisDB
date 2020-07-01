@@ -1,6 +1,6 @@
 module github.com/youzan/ZanRedisDB
 
-go 1.12
+go 1.13
 
 require (
 	github.com/AndreasBriese/bbloom v0.0.0-20190306092124-e2d15f34fcf9 // indirect
@@ -15,6 +15,7 @@ require (
 	github.com/absolute8511/redigo v1.3.3
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible // indirect
+	github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713
 	github.com/coreos/etcd v3.1.15+incompatible
 	github.com/coreos/go-semver v0.2.0
 	github.com/coreos/go-systemd v0.0.0-20180511133405-39ca1b05acc7 // indirect
@@ -26,9 +27,9 @@ require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/go-ole/go-ole v1.2.1 // indirect
 	github.com/gobwas/glob v0.2.3
-	github.com/gogo/protobuf v1.2.1
+	github.com/gogo/protobuf v1.3.1
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b // indirect
-	github.com/golang/snappy v0.0.1
+	github.com/golang/snappy v0.0.2-0.20190904063534-ff6b7dc882cf
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/hashicorp/golang-lru v0.0.0-20180201235237-0fb14efe8c47
 	github.com/judwhite/go-svc v1.0.0
@@ -48,7 +49,7 @@ require (
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
 	github.com/youzan/go-zanredisdb v0.5.1
-	github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5
+	github.com/youzan/gorocksdb v0.0.0-20200621102424-7269d59fec5c
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
 	google.golang.org/genproto v0.0.0-20180518175338-11a468237815 // indirect

@@ -288,7 +288,7 @@ func (db *RockDB) buildFullScanIterator(storeDataType byte, table,
 
 	dbLog.Debugf("full scan range: %v, %v, %v, %v", minKey, maxKey, string(minKey), string(maxKey))
 	//	minKey = minKey[:0]
-	it, err := engine.NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeOpen, 0, count+1, false)
+	it, err := db.NewDBRangeLimitIterator(minKey, maxKey, common.RangeOpen, 0, count+1, false)
 	if err != nil {
 		return nil, err
 	}

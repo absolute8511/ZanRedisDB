@@ -9,7 +9,6 @@ import (
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
-	"github.com/youzan/gorocksdb"
 )
 
 var (
@@ -101,7 +100,7 @@ type expiration interface {
 	// key here should be full key in ns:table:realK
 	getRawValueForHeader(ts int64, dt byte, key []byte) ([]byte, error)
 	ExpireAt(dt byte, key []byte, rawValue []byte, when int64) (int64, error)
-	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error)
+	rawExpireAt(dt byte, key []byte, rawValue []byte, when int64, wb engine.WriteBatch) ([]byte, error)
 	// should be called only in read operation
 	ttl(ts int64, dt byte, key []byte, rawValue []byte) (int64, error)
 	// if in raft write loop should avoid lock, otherwise lock should be used
@@ -109,7 +108,7 @@ type expiration interface {
 	isExpired(ts int64, dt byte, key []byte, rawValue []byte, useLock bool) (bool, error)
 	decodeRawValue(dt byte, rawValue []byte) (*headerMetaValue, error)
 	encodeToRawValue(dt byte, h *headerMetaValue) []byte
-	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb *gorocksdb.WriteBatch) ([]byte, error)
+	delExpire(dt byte, key []byte, rawValue []byte, keepValue bool, wb engine.WriteBatch) ([]byte, error)
 	renewOnExpired(ts int64, dt byte, key []byte, oldh *headerMetaValue)
 	check(common.ExpiredDataBuffer, chan struct{}) error
 	Start()
@@ -244,7 +243,7 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 	var scanned int64
 	checkStart := time.Now()
 
-	it, err := engine.NewDBRangeLimitIterator(c.db.eng, minKey, maxKey,
+	it, err := c.db.NewDBRangeLimitIterator(minKey, maxKey,
 		common.RangeROpen, 0, -1, false)
 	if err != nil {
 		c.setNextCheckTime(now, false)

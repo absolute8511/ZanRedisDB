@@ -83,7 +83,7 @@ func buildMatchRegexp(match string) (glob.Glob, error) {
 
 func (db *RockDB) buildScanIterator(minKey []byte, maxKey []byte, reverse bool) (*engine.RangeLimitedIterator, error) {
 	tp := common.RangeOpen
-	return engine.NewDBRangeIterator(db.eng, minKey, maxKey, tp, reverse)
+	return db.NewDBRangeIterator(minKey, maxKey, tp, reverse)
 }
 
 func buildScanKeyRange(storeDataType byte, key []byte, reverse bool) (minKey []byte, maxKey []byte, err error) {

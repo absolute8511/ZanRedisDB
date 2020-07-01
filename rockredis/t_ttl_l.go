@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/gorocksdb"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 var localExpCheckInterval = 300
@@ -79,13 +79,13 @@ func (exp *localExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte,
 	if err != nil {
 		return 0, err
 	}
-	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
+	if err := exp.db.rockEng.Write(wb); err != nil {
 		return 0, err
 	}
 	return 1, nil
 }
 
-func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
+func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb engine.WriteBatch) ([]byte, error) {
 	tk := expEncodeTimeKey(dataType, key, when)
 	mk := expEncodeMetaKey(dataType, key)
 	wb.Put(tk, mk)
@@ -103,7 +103,7 @@ func (exp *localExpiration) renewOnExpired(ts int64, dataType byte, key []byte, 
 	return
 }
 
-func (exp *localExpiration) delExpire(dt byte, key []byte, rawv []byte, keepV bool, wb *gorocksdb.WriteBatch) ([]byte, error) {
+func (exp *localExpiration) delExpire(dt byte, key []byte, rawv []byte, keepV bool, wb engine.WriteBatch) ([]byte, error) {
 	return rawv, nil
 }
 
@@ -261,7 +261,7 @@ func (exp *localExpiration) Destroy() {
 	}
 }
 
-func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch) func(keys [][]byte) error {
+func createLocalDelFunc(dt common.DataType, db *RockDB, wb engine.WriteBatch) func(keys [][]byte) error {
 	switch dt {
 	case common.KV:
 		return func(keys [][]byte) error {
@@ -269,7 +269,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			for _, k := range keys {
 				db.KVDelWithBatch(k, wb)
 			}
-			err := db.eng.Write(db.defaultWriteOpts, wb)
+			err := db.rockEng.Write(wb)
 			if err != nil {
 				return err
 			}
@@ -286,7 +286,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 					return err
 				}
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	case common.LIST:
 		return func(keys [][]byte) error {
@@ -294,7 +294,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			if err := db.lMclearWithBatch(wb, keys...); err != nil {
 				return err
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	case common.SET:
 		return func(keys [][]byte) error {
@@ -302,7 +302,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			if err := db.sMclearWithBatch(wb, keys...); err != nil {
 				return err
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	case common.ZSET:
 		return func(keys [][]byte) error {
@@ -310,7 +310,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			if err := db.zMclearWithBatch(wb, keys...); err != nil {
 				return err
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	default:
 		// TODO: currently bitmap/json is not handled
@@ -321,14 +321,14 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 type localBatch struct {
 	keys       [][]byte
 	dt         common.DataType
-	wb         *gorocksdb.WriteBatch
+	wb         engine.WriteBatch
 	localDelFn func([][]byte) error
 }
 
 func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 	batch := &localBatch{
 		dt:   dt,
-		wb:   gorocksdb.NewWriteBatch(),
+		wb:   db.rockEng.NewWriteBatch(),
 		keys: make([][]byte, 0, localBatchedMaxKeysNum),
 	}
 	batch.localDelFn = createLocalDelFunc(dt, db, batch.wb)

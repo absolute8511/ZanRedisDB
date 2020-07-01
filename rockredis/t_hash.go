@@ -11,7 +11,6 @@ import (
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/slow"
-	"github.com/youzan/gorocksdb"
 )
 
 var (
@@ -102,7 +101,7 @@ func hEncodeStopKey(table []byte, key []byte) []byte {
 
 // return if we create the new field or override it
 func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, value []byte,
-	wb *gorocksdb.WriteBatch, hindex *HsetIndex) (int64, error) {
+	wb engine.WriteBatch, hindex *HsetIndex) (int64, error) {
 	created := int64(1)
 	keyInfo, err := db.prepareHashKeyForWrite(ts, hkey, field)
 	if err != nil {
@@ -115,7 +114,7 @@ func (db *RockDB) hSetField(ts int64, checkNX bool, hkey []byte, field []byte, v
 	tsBuf := PutInt64(ts)
 	value = append(value, tsBuf...)
 	var oldV []byte
-	if oldV, _ = db.eng.GetBytesNoLock(db.defaultReadOpts, ek); oldV != nil {
+	if oldV, _ = db.GetBytesNoLock(ek); oldV != nil {
 		created = 0
 		if checkNX || bytes.Equal(oldV, value) {
 			return created, nil
@@ -166,7 +165,7 @@ func (db *RockDB) HLen(hkey []byte) (int64, error) {
 	return Int64(oldh.UserData, err)
 }
 
-func (db *RockDB) hIncrSize(hkey []byte, oldh *headerMetaValue, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) hIncrSize(hkey []byte, oldh *headerMetaValue, delta int64, wb engine.WriteBatch) (int64, error) {
 	sk := hEncodeSizeKey(hkey)
 	metaV := oldh.UserData
 	size, err := Int64(metaV, nil)
@@ -253,7 +252,7 @@ func (db *RockDB) HMset(ts int64, key []byte, args ...common.KVRecord) error {
 		ek := hEncodeHashKey(table, verKey, args[i].Key)
 
 		var oldV []byte
-		if oldV, err = db.eng.GetBytesNoLock(db.defaultReadOpts, ek); err != nil {
+		if oldV, err = db.GetBytesNoLock(ek); err != nil {
 			return err
 		} else if oldV == nil {
 			num++
@@ -309,10 +308,10 @@ func (db *RockDB) hGetRawFieldValue(ts int64, key []byte, field []byte, checkExp
 	ek := hEncodeHashKey(table, rk, field)
 
 	if useLock {
-		v, err := db.eng.GetBytes(db.defaultReadOpts, ek)
+		v, err := db.GetBytes(ek)
 		return v, err
 	} else {
-		v, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
+		v, err := db.GetBytesNoLock(ek)
 		return v, err
 	}
 }
@@ -333,10 +332,10 @@ func (db *RockDB) hExistRawField(ts int64, key []byte, field []byte, checkExpire
 	ek := hEncodeHashKey(table, rk, field)
 
 	if useLock {
-		v, err := db.eng.Exist(db.defaultReadOpts, ek)
+		v, err := db.Exist(ek)
 		return v, err
 	} else {
-		v, err := db.eng.ExistNoLock(db.defaultReadOpts, ek)
+		v, err := db.ExistNoLock(ek)
 		return v, err
 	}
 }
@@ -367,7 +366,7 @@ func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) er
 	rk := keyInfo.VerKey
 	ek := hEncodeHashKey(table, rk, field)
 
-	return db.rockEng.GetValueWithOp(db.defaultReadOpts, ek, func(v []byte) error {
+	return db.rockEng.GetValueWithOp(ek, func(v []byte) error {
 		if len(v) >= tsLen {
 			v = v[:len(v)-tsLen]
 		}
@@ -438,7 +437,7 @@ func (db *RockDB) HDel(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}
 
 		ek = hEncodeHashKey(table, rk, args[i])
-		oldV, err = db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
+		oldV, err = db.GetBytesNoLock(ek)
 		if oldV == nil {
 			continue
 		} else {
@@ -471,7 +470,7 @@ func (db *RockDB) HDel(ts int64, key []byte, args ...[]byte) (int64, error) {
 	return num, err
 }
 
-func (db *RockDB) hDeleteAll(ts int64, hkey []byte, hlen int64, wb *gorocksdb.WriteBatch, tableIndexes *TableIndexContainer) error {
+func (db *RockDB) hDeleteAll(ts int64, hkey []byte, hlen int64, wb engine.WriteBatch, tableIndexes *TableIndexContainer) error {
 	keyInfo, err := db.getCollVerKeyForRange(ts, HashType, hkey, false)
 	if err != nil {
 		return err
@@ -491,7 +490,7 @@ func (db *RockDB) hDeleteAll(ts int64, hkey []byte, hlen int64, wb *gorocksdb.Wr
 	stop := keyInfo.RangeEnd
 
 	if tableIndexes != nil || hlen <= RangeDeleteNum {
-		it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+		it, err := db.NewDBRangeIterator(start, stop, common.RangeROpen, false)
 		if err != nil {
 			return err
 		}
@@ -560,7 +559,7 @@ func (db *RockDB) HClear(ts int64, hkey []byte) (int64, error) {
 	return 0, err
 }
 
-func (db *RockDB) hClearWithBatch(hkey []byte, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) hClearWithBatch(hkey []byte, wb engine.WriteBatch) error {
 	if err := checkKeySize(hkey); err != nil {
 		return err
 	}
@@ -662,7 +661,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, []common.KVRecordRet, error) {
 		return length, nil, errTooMuchBatchSize
 	}
 
-	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := db.NewDBRangeIterator(start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -706,7 +705,7 @@ func (db *RockDB) HKeys(key []byte) (int64, []common.KVRecordRet, error) {
 		return length, nil, errTooMuchBatchSize
 	}
 
-	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := db.NewDBRangeIterator(start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -752,7 +751,7 @@ func (db *RockDB) HValues(key []byte) (int64, []common.KVRecordRet, error) {
 		return length, nil, errTooMuchBatchSize
 	}
 
-	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := db.NewDBRangeIterator(start, stop, common.RangeROpen, false)
 	if err != nil {
 		return 0, nil, err
 	}

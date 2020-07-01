@@ -208,6 +208,7 @@ func TestKVNode_kvCommand(t *testing.T) {
 		{"setbit", buildCommand([][]byte{[]byte("setbit"), testBitKey, []byte("1"), []byte("1")})},
 		{"getbit", buildCommand([][]byte{[]byte("getbit"), testBitKey, []byte("1")})},
 		{"bitcount", buildCommand([][]byte{[]byte("bitcount"), testBitKey, []byte("1"), []byte("2")})},
+		{"getrange", buildCommand([][]byte{[]byte("getrange"), testKey, []byte("1"), []byte("2")})},
 	}
 	defer os.RemoveAll(dataDir)
 	defer nd.Stop()

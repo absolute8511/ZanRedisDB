@@ -17,7 +17,6 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
-	"github.com/youzan/ZanRedisDB/rockredis"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 	"golang.org/x/net/context"
 )
@@ -160,7 +159,7 @@ func (nn *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
 
 type NamespaceMeta struct {
 	PartitionNum int
-	walEng       *engine.RockEng
+	walEng       engine.KVEngine
 }
 
 type NamespaceMgr struct {
@@ -251,11 +250,7 @@ func (nsm *NamespaceMgr) SetRateLimiterBytesPerSec(bytesPerSec int64) {
 	if nsm.machineConf.RocksDBSharedConfig == nil {
 		return
 	}
-	limiter := nsm.machineConf.RocksDBSharedConfig.SharedRateLimiter
-	if limiter == nil {
-		return
-	}
-	limiter.SetBytesPerSecond(bytesPerSec)
+	nsm.machineConf.RocksDBSharedConfig.ChangeLimiter(bytesPerSec)
 }
 
 func (nsm *NamespaceMgr) SetIClusterInfo(clusterInfo common.IClusterInfo) {
@@ -360,7 +355,7 @@ func (nsm *NamespaceMgr) GetNamespaces() map[string]*NamespaceNode {
 	return tmp
 }
 
-func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
+func initRaftStorageEng(cfg *engine.RockEngConfig) engine.KVEngine {
 	nodeLog.Infof("using rocksdb raft storage dir:%v", cfg.DataDir)
 	cfg.DisableWAL = true
 	cfg.DisableMergeCounter = true
@@ -373,11 +368,12 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 		cfg.InsertHintFixedLen = 10
 	}
 	cfg.AutoCompacted = true
-	db, err := engine.NewRockEng(cfg)
+	db, err := engine.NewKVEng(cfg)
 	if err == nil {
 		err = db.OpenEng()
 		if err == nil {
-			go db.CompactRange()
+			db.SetOptsForLogStorage()
+			go db.CompactAllRange()
 			return db
 		}
 	}
@@ -385,7 +381,7 @@ func initRaftStorageEng(cfg *engine.RockEngConfig) *engine.RockEng {
 	return nil
 }
 
-func (nsm *NamespaceMgr) getWALEng(ns string, dataDir string, id uint64, gid uint32, meta *NamespaceMeta) *engine.RockEng {
+func (nsm *NamespaceMgr) getWALEng(ns string, dataDir string, id uint64, gid uint32, meta *NamespaceMeta) engine.KVEngine {
 	if !nsm.machineConf.UseRocksWAL || meta == nil {
 		return nil
 	}
@@ -964,18 +960,4 @@ func (nsm *NamespaceMgr) HandleSlowLimiterSwitchChanged(v interface{}) {
 		}
 	}
 	nsm.mutex.RUnlock()
-}
-
-func SetPerfLevel(level int) {
-	atomic.StoreInt32(&perfLevel, int32(level))
-	rockredis.SetPerfLevel(level)
-}
-
-func IsPerfEnabled() bool {
-	lv := GetPerfLevel()
-	return rockredis.IsPerfEnabledLevel(lv)
-}
-
-func GetPerfLevel() int {
-	return int(atomic.LoadInt32(&perfLevel))
 }
