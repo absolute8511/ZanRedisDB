@@ -156,13 +156,13 @@ func (bo *kvbatchOperator) AbortBatchForError(err error) {
 		return
 	}
 	bo.SetBatched(false)
-	bo.dupCheckMap = make(map[string]bool)
 	batchCost := time.Since(bo.batchStart)
 	// write the future response or error
 	for _, rid := range bo.batchReqIDList {
 		bo.kvsm.w.Trigger(rid, err)
 	}
 	slow.LogSlowDBWrite(batchCost, slow.NewSlowLogInfo(bo.kvsm.fullNS, "batched", strconv.Itoa(len(bo.batchReqIDList))))
+	bo.dupCheckMap = make(map[string]bool)
 	bo.batchReqIDList = bo.batchReqIDList[:0]
 	bo.batchReqRspList = bo.batchReqRspList[:0]
 }
@@ -173,7 +173,6 @@ func (bo *kvbatchOperator) CommitBatch() {
 	}
 	err := bo.kvsm.store.CommitBatchWrite()
 	bo.SetBatched(false)
-	bo.dupCheckMap = make(map[string]bool)
 	batchCost := time.Since(bo.batchStart)
 	if nodeLog.Level() >= common.LOG_DETAIL && len(bo.batchReqIDList) > 1 {
 		bo.kvsm.Infof("batching command number: %v", len(bo.batchReqIDList))
@@ -192,6 +191,13 @@ func (bo *kvbatchOperator) CommitBatch() {
 		metric.DBWriteLatency.With(ps.Labels{
 			"namespace": bo.kvsm.fullNS,
 		}).Observe(float64(batchCost.Milliseconds()))
+	}
+	if len(bo.dupCheckMap) >= 10 {
+		bo.dupCheckMap = make(map[string]bool)
+	} else {
+		for k := range bo.dupCheckMap {
+			delete(bo.dupCheckMap, k)
+		}
 	}
 	bo.batchReqIDList = bo.batchReqIDList[:0]
 	bo.batchReqRspList = bo.batchReqRspList[:0]
