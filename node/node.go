@@ -728,6 +728,7 @@ func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*Futur
 	ctx, cancel := context.WithTimeout(context.Background(), proposeTimeout)
 	wrh, err := nd.ProposeInternal(ctx, req, cancel, start)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	var futureRsp FutureRsp
