@@ -85,18 +85,59 @@ namespace创建参数建议3副本, 分区数可以预估集群最大规模, 一
 
 ## 创建namespace
 
-关于ttl的说明, 默认使用非精确ttl
+往placedriver的leader节点发送如下API可以动态创建新的namespace
+
+```
+POST /cluster/namespace/create?namespace=test_p16&partition_num=16&replicator=3&data_version=value_header_v1&expiration_policy=wait_compact
+
+data_version: 存储的数据版本, 不同版本序列化格式会有区别, namespace初始化后不能动态修改, 默认使用老版本, value_header_v1是目前唯一的新版本用于支持精确过期功能
+expiration_policy: 配置过期策略, 默认使用非精确过期, 新版本支持wait_compact精确过期策略, 此策略下过期的数据不会返回给客户端, 过期数据的真实清理会等待compact时再判断是否需要清理.
+```
+
+关于ttl的说明:
+
+默认使用非精确ttl, 非精确ttl使用的是报错过期key列表并且定期扫描的策略, 因此只能支持设置一次过期时间, 并且过期精度取决于扫描周期(默认5分钟).
+
+如果需要类似redis的精确ttl(秒级)支持, 可以使用新的`wait_compact`过期策略, 这种过期策略会将过期时间和key的元数据放到一起, 每次读写的时候会检查是否已经过期, 从而实现更加精确的过期判断能力. 由于只是检查过期的元数据, 并不会真实删除, 因此需要等待底层compact的时候才能物理删除, 理论上空间回收会滞后. 注意, 新的过期策略必须使用新的数据版本`value_header_v1`
 
 ## 慢写动态限流说明
 
+v0.8新版本开始, 增加了慢写入动态限流和预排队功能, 用于减少某些慢写入命令对其他命令的rt影响. 内部会周期性汇总写入命令在底层DB的rt耗时, 超过一定阈值后, 会被判断为不同程度的慢, 针对不同程度的慢写入, 会使用不同的预排队队列进行排队, 队列长度也会不同, 从而控制这些慢写入命令同时进入raft请求的个数, 来避免这些慢写入在raft apply队列排队写入时占用过多时间, 从而影响队列里面其他的写入rt. 如果超过一定的阈值, 还会触发直接拒绝限流. 
+
+动态限流可以通过配置关闭 `POST /conf/set?type=int&key=slow_limiter_switch&value=0`
+
+
 ## 监控项说明
+
+除了默认的stats接口, 还有如下几个新增的监控数据, 可以查看内部状态.
 
 ### Prometheus
 
+通过数据节点的HTTP端口的`/metric`, 可以查看更多的监控数据, 主要有一下几个大类:
+
+- 延迟监控: 包括db存储层的写入rt, raft各个阶段的rt, 集群端到端响应rt等
+- 慢写监控: 包括表+命令纬度的底层DB慢写入统计, 统计历史rt分布, 慢写限流次数, 慢写预排队次数, 慢写预排队时间分布
+- 事件监控: 包括各类事件的发送次数统计, 比如leader切换事件, 各类错误发生次数统计
+- 队列监控: 包括各类队列深度的监控, 比如raft待提交队列深度, 状态机待apply队列深度, 网络层待传输队列深度等
+- 集合大小监控: 统计各种集合类型的集合大小分布, 用于判断大集合在各个表的分布情况
+
 ### topn
+
+通过HTTP端口的`/stats?table_detail=true`, 可以查看更详细的key级别统计的topn数据, 包括:
+
+- 按写入次数统计的topn写入key
+- 按集合元素大小排序的对应的topn 集合key
+
+统计结果按照一定的次数和最近时间综合进行淘汰
 
 ### SLOW_LOGS
 
+部分重要影响集群性能的操作会以慢查日志的方式进行输出, 用于监控和排查一些业务不合理的数据使用导致的性能隐患. 目前有以下几种情况会输出慢日志:
+
+- 写入命令在存储层执行时间超过一定的阈值
+- 当某个集合元素大小超过一定的阈值
+
+慢日志可以通过API `POST /slowlog/set?loglevel=0` 单独设置输出级别, 不同级别的输出阈值不同. (-1表示关闭)
 
 ## 操作和接口说明
 
@@ -128,7 +169,7 @@ zankv API
 
 ```
 /kv/optimize
-为了避免太多删除数据影响性能, 可以定期执行此API清理优化性能, 建议每几个月执行一次 (每台zankv机子错峰执行).
+为了避免太多删除数据影响性能, 可以定期执行此API清理优化性能, 建议每几个月执行一次 (每台zankv机子错峰执行). rocksdb v6及以上新版本已经有部分优化, 因此可以不用执行.
 
 /stats
 获取统计数据,其中db_write_stats, cluster_write_stats中两个长度为16的数据对应的数据, 标识对应区间统计的计数器. 其中db_write_stats代表存储层的统计数据, cluster_write_stats表示服务端协议层的统计数据(从收到网络请求开始, 到回复网络请求结束), 具体的统计区间含义可以参考代码WriteStats结构的定义.
@@ -160,7 +201,12 @@ ignore_remote_file_sync - 是否忽略跨机房同步的快照传输
 
 动态调整部分rocksdb参数使用如下API:
 ```
+POST /db/options/set?key=xxx&value=xxx
 ```
+说明: 目前仅有rocksdb底层存储支持动态调整, 可调整的key如下:
+- "rate_limiter_bytes_per_sec": rocksdb的ratelimiter限流字节数调整
+- "max_background_compactions": rocksdb后台compaction任务上限调整
+- "max_background_jobs": rocksdb后台jobs任务上限调整
 
 
 ## 备份恢复
@@ -222,7 +268,7 @@ backup -lookup lookuplist -ns namespace -table table_name [-data_dir backup -typ
  
 参数说明:
 -lookup            zankv lookup服务器,可以是用","分割的一组服务器
--ns                  要备份的namespace
+-ns                 要备份的namespace
 -table              要备份的table
 -data_dir         备份目录，默认当前目录下打data目录
 -type              要备份的数据结构类型，支持kv,hash,set,zset,list，all表示备份所有类型，输入all了，就不能输入其他的类型了，默认为all

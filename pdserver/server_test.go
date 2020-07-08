@@ -25,6 +25,7 @@ import (
 func TestMain(m *testing.M) {
 	pdnode_coord.ChangeIntervalForTest()
 	datanode_coord.ChangeIntervalForTest()
+
 	common.InitDefaultForGLogger("")
 
 	ret := m.Run()
@@ -1575,6 +1576,66 @@ func TestClusterDecrReplicaOneByOne(t *testing.T) {
 
 func TestRestartWithForceAlone(t *testing.T) {
 	// TODO: test force restart with alone
+}
+
+func TestInstallSnapshotOnFollower(t *testing.T) {
+	// Test the follower fall behind too much, and the leader send the snapshot to follower,
+	ensureClusterReady(t, 4)
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_snap_install"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 3, len(oldNs.GetISR()))
+	foWrap, _ := getFollowerNode(t, ns, 0)
+	foWrap.s.Stop()
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	c := getTestRedisConn(t, dnw.redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "snap_transfer:k1")
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	leaderV, err := goredis.String(c.Do("get", key))
+	assert.True(t, err == nil || err == goredis.ErrNil)
+	assert.Equal(t, "1234", leaderV)
+
+	foWrap.s.Start()
+	time.Sleep(time.Second * 10)
+	addr := fmt.Sprintf("http://127.0.0.1:%v", foWrap.httpPort)
+	enableStaleRead(t, addr, true)
+	followerConn := getTestRedisConn(t, foWrap.redisPort)
+	defer followerConn.Close()
+
+	waitForAllFullReady(t, ns, 0)
+	time.Sleep(time.Second * 3)
+
+	getV, err := goredis.String(followerConn.Do("get", key))
+	assert.True(t, err == nil || err == goredis.ErrNil)
+	assert.Equal(t, "1234", getV)
+	enableStaleRead(t, addr, false)
 }
 
 func TestInstallSnapshotTransferFailed(t *testing.T) {

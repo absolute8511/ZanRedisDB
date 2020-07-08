@@ -20,6 +20,7 @@
 |set|√|
 |setex|√|
 |get|√|
+|getset|√|
 |expire|√|
 |del|√|
 |ttl|√|
@@ -76,6 +77,7 @@
 |scard|√|
 |sismember|√|
 |smembers|√|
+|srandmember|√, 按顺序返回|
 |sadd|√|
 |srem|√|
 |spop|√|

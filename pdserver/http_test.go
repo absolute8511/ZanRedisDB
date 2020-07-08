@@ -79,7 +79,9 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 			RemoteSyncCluster:    "http://127.0.0.1:" + pdRemoteHttpPort,
 			UseRocksWAL:          true,
 		}
-		kv := ds.NewServer(kvOpts)
+		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)
 		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})
@@ -125,7 +127,9 @@ func addMoreTestDataNodeToCluster(t *testing.T, n int) ([]dataNodeWrapper, strin
 			SyncerWriteOnly:      syncOnly,
 			UseRocksWAL:          true,
 		}
-		kv := ds.NewServer(kvOpts)
+		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)
 		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})
@@ -186,7 +190,9 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 			SyncerWriteOnly:      syncOnly,
 			UseRocksWAL:          true,
 		}
-		kv := ds.NewServer(kvOpts)
+		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)
 		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})

@@ -57,6 +57,15 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 	futureList := make([]func() error, 0, len(reqs.RaftLog))
 	start := time.Now()
 	lastIndex := uint64(0)
+	defer func() {
+		if rpcErr.ErrMsg == "" && rpcErr.ErrCode == 0 {
+			return
+		}
+		// clean future response for error
+		for _, f := range futureList {
+			f()
+		}
+	}()
 	for _, r := range reqs.RaftLog {
 		if sLog.Level() >= common.LOG_DETAIL {
 			sLog.Debugf("applying raft log from remote cluster syncer: %v", r.String())
