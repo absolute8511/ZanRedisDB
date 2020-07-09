@@ -478,8 +478,18 @@ func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps ht
 	}
 	sLog.Infof("syncer only state changed to : %v", param)
 	if param == "true" {
+		err := s.updateSyncerWriteOnlyToRegister(true)
+		if err != nil {
+			sLog.Warningf("failed to set syncer only state: %v", err.Error())
+			return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+		}
 		node.SetSyncerOnly(true)
 	} else {
+		err := s.updateSyncerWriteOnlyToRegister(false)
+		if err != nil {
+			sLog.Warningf("failed to set syncer only state: %v", err.Error())
+			return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+		}
 		node.SetSyncerOnly(false)
 	}
 	return nil, nil
