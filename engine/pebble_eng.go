@@ -195,7 +195,7 @@ func NewPebbleEng(cfg *RockEngConfig) (*PebbleEng, error) {
 		opts: opts,
 		ito:  &pebble.IterOptions{},
 		wo: &pebble.WriteOptions{
-			Sync: true,
+			Sync: !cfg.DisableWAL,
 		},
 		quit: make(chan struct{}),
 	}
