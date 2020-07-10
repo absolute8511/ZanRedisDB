@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -13,141 +14,26 @@ import (
 	"github.com/youzan/gorocksdb"
 )
 
-const (
-	compactThreshold = 5000000
-)
-
-var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
-
-func SetLogLevel(level int32) {
-	dbLog.SetLevel(level)
+type rockRefSlice struct {
+	v *gorocksdb.Slice
 }
 
-func SetLogger(level int32, logger common.Logger) {
-	dbLog.SetLevel(level)
-	dbLog.Logger = logger
+func (rs *rockRefSlice) Free() {
+	rs.v.Free()
 }
 
-type RockOptions struct {
-	VerifyReadChecksum             bool   `json:"verify_read_checksum"`
-	BlockSize                      int    `json:"block_size"`
-	BlockCache                     int64  `json:"block_cache"`
-	CacheIndexAndFilterBlocks      bool   `json:"cache_index_and_filter_blocks"`
-	EnablePartitionedIndexFilter   bool   `json:"enable_partitioned_index_filter"`
-	WriteBufferSize                int    `json:"write_buffer_size"`
-	MaxWriteBufferNumber           int    `json:"max_write_buffer_number"`
-	MinWriteBufferNumberToMerge    int    `json:"min_write_buffer_number_to_merge"`
-	Level0FileNumCompactionTrigger int    `json:"level0_file_num_compaction_trigger"`
-	MaxBytesForLevelBase           uint64 `json:"max_bytes_for_level_base"`
-	TargetFileSizeBase             uint64 `json:"target_file_size_base"`
-	MaxBackgroundFlushes           int    `json:"max_background_flushes"`
-	MaxBackgroundCompactions       int    `json:"max_background_compactions"`
-	MinLevelToCompress             int    `json:"min_level_to_compress"`
-	MaxMainifestFileSize           uint64 `json:"max_mainifest_file_size"`
-	RateBytesPerSec                int64  `json:"rate_bytes_per_sec"`
-	BackgroundHighThread           int    `json:"background_high_thread,omitempty"`
-	BackgroundLowThread            int    `json:"background_low_thread,omitempty"`
-	AdjustThreadPool               bool   `json:"adjust_thread_pool,omitempty"`
-	UseSharedCache                 bool   `json:"use_shared_cache,omitempty"`
-	UseSharedRateLimiter           bool   `json:"use_shared_rate_limiter,omitempty"`
-	DisableWAL                     bool   `json:"disable_wal,omitempty"`
-	DisableMergeCounter            bool   `json:"disable_merge_counter,omitempty"`
-	OptimizeFiltersForHits         bool   `json:"optimize_filters_for_hits,omitempty"`
-	InsertHintFixedLen             int    `json:"insert_hint_fixed_len"`
+func (rs *rockRefSlice) Data() []byte {
+	return rs.v.Data()
 }
 
-func FillDefaultOptions(opts *RockOptions) {
-	// use large block to reduce index block size for hdd
-	// if using ssd, should use the default value
-	if opts.BlockSize <= 0 {
-		// for hdd use 64KB and above
-		// for ssd use 32KB and below
-		opts.BlockSize = 1024 * 8
-	}
-	// should about 20% less than host RAM
-	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
-	if opts.BlockCache <= 0 {
-		v, err := mem.VirtualMemory()
-		if err != nil {
-			opts.BlockCache = 1024 * 1024 * 128
-		} else {
-			opts.BlockCache = int64(v.Total / 100)
-			if opts.UseSharedCache {
-				opts.BlockCache *= 10
-			} else {
-				if opts.BlockCache < 1024*1024*64 {
-					opts.BlockCache = 1024 * 1024 * 64
-				} else if opts.BlockCache > 1024*1024*1024*8 {
-					opts.BlockCache = 1024 * 1024 * 1024 * 8
-				}
-			}
-		}
-	}
-	// keep level0_file_num_compaction_trigger * write_buffer_size * min_write_buffer_number_tomerge = max_bytes_for_level_base to minimize write amplification
-	if opts.WriteBufferSize <= 0 {
-		opts.WriteBufferSize = 1024 * 1024 * 64
-	}
-	if opts.MaxWriteBufferNumber <= 0 {
-		opts.MaxWriteBufferNumber = 6
-	}
-	if opts.MinWriteBufferNumberToMerge <= 0 {
-		opts.MinWriteBufferNumberToMerge = 2
-	}
-	if opts.Level0FileNumCompactionTrigger <= 0 {
-		opts.Level0FileNumCompactionTrigger = 2
-	}
-	if opts.MaxBytesForLevelBase <= 0 {
-		opts.MaxBytesForLevelBase = 1024 * 1024 * 256
-	}
-	if opts.TargetFileSizeBase <= 0 {
-		opts.TargetFileSizeBase = 1024 * 1024 * 64
-	}
-	if opts.MaxBackgroundFlushes <= 0 {
-		opts.MaxBackgroundFlushes = 2
-	}
-	if opts.MaxBackgroundCompactions <= 0 {
-		opts.MaxBackgroundCompactions = 8
-	}
-	if opts.MinLevelToCompress <= 0 {
-		opts.MinLevelToCompress = 3
-	}
-	if opts.MaxMainifestFileSize <= 0 {
-		opts.MaxMainifestFileSize = 1024 * 1024 * 32
-	}
-	if opts.AdjustThreadPool {
-		if opts.BackgroundHighThread <= 0 {
-			opts.BackgroundHighThread = 2
-		}
-		if opts.BackgroundLowThread <= 0 {
-			opts.BackgroundLowThread = 16
-		}
-	}
-}
-
-type SharedRockConfig struct {
+type sharedRockConfig struct {
 	SharedCache       *gorocksdb.Cache
 	SharedEnv         *gorocksdb.Env
 	SharedRateLimiter *gorocksdb.RateLimiter
 }
 
-type RockEngConfig struct {
-	DataDir            string
-	SharedConfig       *SharedRockConfig
-	EnableTableCounter bool
-	AutoCompacted      bool
-	RockOptions
-}
-
-func NewRockConfig() *RockEngConfig {
-	c := &RockEngConfig{
-		EnableTableCounter: true,
-	}
-	FillDefaultOptions(&c.RockOptions)
-	return c
-}
-
-func NewSharedRockConfig(opt RockOptions) *SharedRockConfig {
-	rc := &SharedRockConfig{}
+func newSharedRockConfig(opt RockOptions) *sharedRockConfig {
+	rc := &sharedRockConfig{}
 	if opt.UseSharedCache {
 		if opt.BlockCache <= 0 {
 			v, err := mem.VirtualMemory()
@@ -179,7 +65,15 @@ func NewSharedRockConfig(opt RockOptions) *SharedRockConfig {
 	return rc
 }
 
-func (src *SharedRockConfig) Destroy() {
+func (src *sharedRockConfig) ChangeLimiter(bytesPerSec int64) {
+	limiter := src.SharedRateLimiter
+	if limiter == nil {
+		return
+	}
+	limiter.SetBytesPerSecond(bytesPerSec)
+}
+
+func (src *sharedRockConfig) Destroy() {
 	if src.SharedCache != nil {
 		src.SharedCache.Destroy()
 	}
@@ -192,15 +86,18 @@ func (src *SharedRockConfig) Destroy() {
 }
 
 type RockEng struct {
-	cfg         *RockEngConfig
-	eng         *gorocksdb.DB
-	dbOpts      *gorocksdb.Options
-	lruCache    *gorocksdb.Cache
-	rl          *gorocksdb.RateLimiter
-	engOpened   int32
-	lastCompact int64
-	deletedCnt  int64
-	quit        chan struct{}
+	cfg              *RockEngConfig
+	eng              *gorocksdb.DB
+	dbOpts           *gorocksdb.Options
+	defaultWriteOpts *gorocksdb.WriteOptions
+	defaultReadOpts  *gorocksdb.ReadOptions
+	wb               *rocksWriteBatch
+	lruCache         *gorocksdb.Cache
+	rl               *gorocksdb.RateLimiter
+	engOpened        int32
+	lastCompact      int64
+	deletedCnt       int64
+	quit             chan struct{}
 }
 
 func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
@@ -220,12 +117,13 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	// should about 20% less than host RAM
 	// http://smalldatum.blogspot.com/2016/09/tuning-rocksdb-block-cache.html
 	var lru *gorocksdb.Cache
+	sharedConfig, _ := cfg.SharedConfig.(*sharedRockConfig)
 	if cfg.RockOptions.UseSharedCache {
-		if cfg.SharedConfig == nil || cfg.SharedConfig.SharedCache == nil {
+		if sharedConfig == nil || sharedConfig.SharedCache == nil {
 			return nil, errors.New("missing shared cache instance")
 		}
-		bbto.SetBlockCache(cfg.SharedConfig.SharedCache)
-		dbLog.Infof("use shared cache: %v", cfg.SharedConfig.SharedCache)
+		bbto.SetBlockCache(sharedConfig.SharedCache)
+		dbLog.Infof("use shared cache: %v", sharedConfig.SharedCache)
 	} else {
 		lru = gorocksdb.NewLRUCache(cfg.BlockCache)
 		bbto.SetBlockCache(lru)
@@ -260,11 +158,11 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	}
 	opts.SetBlockBasedTableFactory(bbto)
 	if cfg.RockOptions.AdjustThreadPool {
-		if cfg.SharedConfig == nil || cfg.SharedConfig.SharedEnv == nil {
+		if cfg.SharedConfig == nil || sharedConfig.SharedEnv == nil {
 			return nil, errors.New("missing shared env instance")
 		}
-		opts.SetEnv(cfg.SharedConfig.SharedEnv)
-		dbLog.Infof("use shared env: %v", cfg.SharedConfig.SharedEnv)
+		opts.SetEnv(sharedConfig.SharedEnv)
+		dbLog.Infof("use shared env: %v", sharedConfig.SharedEnv)
 	}
 
 	var rl *gorocksdb.RateLimiter
@@ -273,8 +171,8 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 			if cfg.SharedConfig == nil {
 				return nil, errors.New("missing shared instance")
 			}
-			opts.SetRateLimiter(cfg.SharedConfig.SharedRateLimiter)
-			dbLog.Infof("use shared rate limiter: %v", cfg.SharedConfig.SharedRateLimiter)
+			opts.SetRateLimiter(sharedConfig.SharedRateLimiter)
+			dbLog.Infof("use shared rate limiter: %v", sharedConfig.SharedRateLimiter)
 		} else {
 			rl = gorocksdb.NewGenericRateLimiter(cfg.RateBytesPerSec, 100*1000, 10)
 			opts.SetRateLimiter(rl)
@@ -313,17 +211,29 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	} else {
 		cfg.EnableTableCounter = false
 	}
+	// TODO: add avoid_unnecessary_blocking_io option for db
+	// level_compaction_dynamic_level_bytes
+	if cfg.LevelCompactionDynamicLevelBytes {
+		opts.SetLevelCompactionDynamicLevelBytes(true)
+	}
 
 	err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
 	if err != nil {
 		return nil, err
 	}
 	db := &RockEng{
-		cfg:      cfg,
-		dbOpts:   opts,
-		lruCache: lru,
-		rl:       rl,
-		quit:     make(chan struct{}),
+		cfg:              cfg,
+		dbOpts:           opts,
+		lruCache:         lru,
+		rl:               rl,
+		defaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
+		defaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
+		wb:               newRocksWriteBatch(),
+		quit:             make(chan struct{}),
+	}
+	db.defaultReadOpts.SetVerifyChecksums(false)
+	if cfg.DisableWAL {
+		db.defaultWriteOpts.DisableWAL(true)
 	}
 	if cfg.AutoCompacted {
 		go db.compactLoop()
@@ -380,10 +290,26 @@ func (r *RockEng) compactLoop() {
 			if (r.DeletedBeforeCompact() > compactThreshold) &&
 				(time.Now().Unix()-r.LastCompactTime()) > interval {
 				dbLog.Infof("auto compact : %v, %v", r.DeletedBeforeCompact(), r.LastCompactTime())
-				r.CompactRange()
+				r.CompactAllRange()
 			}
 		}
 	}
+}
+
+func (r *RockEng) NewWriteBatch() WriteBatch {
+	return newRocksWriteBatch()
+}
+
+func (r *RockEng) DefaultWriteBatch() WriteBatch {
+	return r.wb
+}
+
+func (r *RockEng) SetOptsForLogStorage() {
+	r.defaultReadOpts.SetVerifyChecksums(false)
+	r.defaultReadOpts.SetFillCache(false)
+	// read raft always hit non-deleted range
+	r.defaultReadOpts.SetIgnoreRangeDeletions(true)
+	r.defaultWriteOpts.DisableWAL(true)
 }
 
 func (r *RockEng) GetOpts() *gorocksdb.Options {
@@ -394,8 +320,19 @@ func (r *RockEng) GetDataDir() string {
 	return path.Join(r.cfg.DataDir, "rocksdb")
 }
 
+func (r *RockEng) CheckDBEngForRead(fullPath string) error {
+	ro := *(r.GetOpts())
+	ro.SetCreateIfMissing(false)
+	db, err := gorocksdb.OpenDbForReadOnly(&ro, fullPath, false)
+	if err != nil {
+		return err
+	}
+	db.Close()
+	return nil
+}
+
 func (r *RockEng) OpenEng() error {
-	if atomic.LoadInt32(&r.engOpened) == 1 {
+	if !r.IsClosed() {
 		dbLog.Warningf("rocksdb engine already opened: %v, should close it before reopen", r.GetDataDir())
 		return errors.New("rocksdb open failed since not closed")
 	}
@@ -409,9 +346,8 @@ func (r *RockEng) OpenEng() error {
 	return nil
 }
 
-func (r *RockEng) Eng() *gorocksdb.DB {
-	e := r.eng
-	return e
+func (r *RockEng) Write(wb WriteBatch) error {
+	return r.eng.Write(r.defaultWriteOpts, wb.(*rocksWriteBatch).wb)
 }
 
 func (r *RockEng) DeletedBeforeCompact() int64 {
@@ -426,12 +362,51 @@ func (r *RockEng) LastCompactTime() int64 {
 	return atomic.LoadInt64(&r.lastCompact)
 }
 
-func (r *RockEng) CompactRange() {
+func (r *RockEng) CompactRange(rg CRange) {
 	atomic.StoreInt64(&r.lastCompact, time.Now().Unix())
 	atomic.StoreInt64(&r.deletedCnt, 0)
-	var rg gorocksdb.Range
-	r.eng.CompactRange(rg)
+	var rrg gorocksdb.Range
+	rrg.Start = rg.Start
+	rrg.Limit = rg.Limit
+	r.eng.CompactRange(rrg)
 	dbLog.Infof("compact rocksdb %v done", r.GetDataDir())
+}
+
+func (r *RockEng) CompactAllRange() {
+	r.CompactRange(CRange{})
+}
+
+func (r *RockEng) GetApproximateTotalKeyNum() int {
+	numStr := r.eng.GetProperty("rocksdb.estimate-num-keys")
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		dbLog.Infof("total keys num error: %v, %v", numStr, err)
+		return 0
+	}
+	return num
+}
+
+func (r *RockEng) GetApproximateKeyNum(ranges []CRange) uint64 {
+	rgs := make([]gorocksdb.Range, 0, len(ranges))
+	for _, r := range ranges {
+		rgs = append(rgs, gorocksdb.Range{Start: r.Start, Limit: r.Limit})
+	}
+	return r.eng.GetApproximateKeyNum(rgs)
+}
+
+func (r *RockEng) GetApproximateSizes(ranges []CRange, includeMem bool) []uint64 {
+	rgs := make([]gorocksdb.Range, 0, len(ranges))
+	for _, r := range ranges {
+		rgs = append(rgs, gorocksdb.Range{Start: r.Start, Limit: r.Limit})
+	}
+	return r.eng.GetApproximateSizes(rgs, includeMem)
+}
+
+func (r *RockEng) IsClosed() bool {
+	if atomic.LoadInt32(&r.engOpened) == 0 {
+		return true
+	}
+	return false
 }
 
 func (r *RockEng) CloseEng() bool {
@@ -465,6 +440,16 @@ func (r *RockEng) CloseAll() {
 		r.rl.Destroy()
 		r.rl = nil
 	}
+
+	if r.defaultWriteOpts != nil {
+		r.defaultWriteOpts.Destroy()
+	}
+	if r.defaultReadOpts != nil {
+		r.defaultReadOpts.Destroy()
+	}
+	if r.wb != nil {
+		r.wb.Destroy()
+	}
 }
 
 func (r *RockEng) GetStatistics() string {
@@ -495,9 +480,37 @@ func (r *RockEng) GetInternalPropertyStatus(p string) string {
 	return r.eng.GetProperty(p)
 }
 
-func (r *RockEng) GetValueWithOp(opts *gorocksdb.ReadOptions, key []byte,
+func (r *RockEng) GetBytesNoLock(key []byte) ([]byte, error) {
+	return r.eng.GetBytesNoLock(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) GetBytes(key []byte) ([]byte, error) {
+	return r.eng.GetBytes(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) MultiGetBytes(keyList [][]byte, values [][]byte, errs []error) {
+	r.eng.MultiGetBytes(r.defaultReadOpts, keyList, values, errs)
+}
+
+func (r *RockEng) Exist(key []byte) (bool, error) {
+	return r.eng.Exist(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) ExistNoLock(key []byte) (bool, error) {
+	return r.eng.ExistNoLock(r.defaultReadOpts, key)
+}
+
+func (r *RockEng) GetRef(key []byte) (RefSlice, error) {
+	v, err := r.eng.Get(r.defaultReadOpts, key)
+	if err != nil {
+		return nil, err
+	}
+	return &rockRefSlice{v: v}, nil
+}
+
+func (r *RockEng) GetValueWithOp(key []byte,
 	op func([]byte) error) error {
-	val, err := r.eng.Get(opts, key)
+	val, err := r.eng.Get(r.defaultReadOpts, key)
 	if err != nil {
 		return err
 	}
@@ -505,12 +518,55 @@ func (r *RockEng) GetValueWithOp(opts *gorocksdb.ReadOptions, key []byte,
 	return op(val.Data())
 }
 
-func (r *RockEng) GetValueWithOpNoLock(opts *gorocksdb.ReadOptions, key []byte,
+func (r *RockEng) GetValueWithOpNoLock(key []byte,
 	op func([]byte) error) error {
-	val, err := r.eng.GetNoLock(opts, key)
+	val, err := r.eng.GetNoLock(r.defaultReadOpts, key)
 	if err != nil {
 		return err
 	}
 	defer val.Free()
 	return op(val.Data())
+}
+
+func (r *RockEng) GetIterator(opts IteratorOpts) (Iterator, error) {
+	dbit, err := newRockIterator(r.eng, true, opts)
+	if err != nil {
+		return nil, err
+	}
+	return dbit, nil
+}
+
+func (r *RockEng) DeleteFilesInRange(rg CRange) {
+	var rrg gorocksdb.Range
+	rrg.Start = rg.Start
+	rrg.Limit = rg.Limit
+	r.eng.DeleteFilesInRange(rrg)
+}
+
+func (r *RockEng) NewCheckpoint() (KVCheckpoint, error) {
+	ck, err := gorocksdb.NewCheckpoint(r.eng)
+	if err != nil {
+		return nil, err
+	}
+	return &rockEngCheckpoint{
+		ck:  ck,
+		eng: r.eng,
+	}, nil
+}
+
+type rockEngCheckpoint struct {
+	ck  *gorocksdb.Checkpoint
+	eng *gorocksdb.DB
+}
+
+func (rck *rockEngCheckpoint) Save(path string, notify chan struct{}) error {
+	rck.eng.RLock()
+	defer rck.eng.RUnlock()
+	if rck.eng.IsOpened() {
+		time.AfterFunc(time.Millisecond*20, func() {
+			close(notify)
+		})
+		return rck.ck.Save(path, math.MaxUint64)
+	}
+	return errDBEngClosed
 }

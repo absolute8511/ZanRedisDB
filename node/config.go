@@ -55,9 +55,9 @@ type MachineConfig struct {
 	RemoteSyncCluster      string             `json:"remote_sync_cluster"`
 	StateMachineType       string             `json:"state_machine_type"`
 	RocksDBOpts            engine.RockOptions `json:"rocksdb_opts"`
-	RocksDBSharedConfig    *engine.SharedRockConfig
+	RocksDBSharedConfig    engine.SharedRockConfig
 	WALRocksDBOpts         engine.RockOptions `json:"wal_rocksdb_opts"`
-	WALRocksDBSharedConfig *engine.SharedRockConfig
+	WALRocksDBSharedConfig engine.SharedRockConfig
 }
 
 type ReplicaInfo struct {
@@ -84,10 +84,10 @@ type RaftConfig struct {
 	SnapCatchup    int                    `json:"snap_catchup"`
 	Replicator     int32                  `json:"replicator"`
 	OptimizedFsync bool                   `json:"optimized_fsync"`
-	rockEng        *engine.RockEng
+	rockEng        engine.KVEngine
 	nodeConfig     *MachineConfig
 }
 
-func (rc *RaftConfig) SetEng(eng *engine.RockEng) {
+func (rc *RaftConfig) SetEng(eng engine.KVEngine) {
 	rc.rockEng = eng
 }

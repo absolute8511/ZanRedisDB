@@ -4,7 +4,6 @@ import (
 	"bytes"
 
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/gorocksdb"
 )
 
 // make sure keep the same with rockredis
@@ -14,6 +13,10 @@ const (
 	HashType byte = 22
 	tsLen         = 8
 )
+
+type IteratorGetter interface {
+	GetIterator(IteratorOpts) (Iterator, error)
+}
 
 type Iterator interface {
 	Next()
@@ -77,112 +80,6 @@ type Limit struct {
 	Count  int
 }
 
-type DBIterator struct {
-	*gorocksdb.Iterator
-	snap         *gorocksdb.Snapshot
-	ro           *gorocksdb.ReadOptions
-	db           *gorocksdb.DB
-	upperBound   *gorocksdb.IterBound
-	lowerBound   *gorocksdb.IterBound
-	removeTsType byte
-}
-
-// low_bound is inclusive
-// upper bound is exclusive
-func NewDBIterator(db *gorocksdb.DB, withSnap bool, prefixSame bool, lowbound []byte, upbound []byte, ignoreDel bool) (*DBIterator, error) {
-	db.RLock()
-	if !db.IsOpened() {
-		db.RUnlock()
-		return nil, common.ErrStopped
-	}
-	dbit := &DBIterator{
-		db: db,
-	}
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	readOpts.SetFillCache(false)
-	readOpts.SetVerifyChecksums(false)
-	if prefixSame {
-		readOpts.SetPrefixSameAsStart(true)
-	}
-	if lowbound != nil {
-		dbit.lowerBound = gorocksdb.NewIterBound(lowbound)
-		readOpts.SetIterLowerBound(dbit.lowerBound)
-	}
-	if upbound != nil {
-		dbit.upperBound = gorocksdb.NewIterBound(upbound)
-		readOpts.SetIterUpperBound(dbit.upperBound)
-	}
-	if ignoreDel {
-		// may iterator some deleted keys still not compacted.
-		readOpts.SetIgnoreRangeDeletions(true)
-	}
-	dbit.ro = readOpts
-	var err error
-	if withSnap {
-		dbit.snap, err = db.NewSnapshot()
-		if err != nil {
-			dbit.Close()
-			return nil, err
-		}
-		readOpts.SetSnapshot(dbit.snap)
-	}
-	dbit.Iterator, err = db.NewIterator(readOpts)
-	if err != nil {
-		dbit.Close()
-		return nil, err
-	}
-	return dbit, nil
-}
-
-// the bytes returned will be freed after next
-func (it *DBIterator) RefKey() []byte {
-	return it.Iterator.Key().Data()
-}
-
-func (it *DBIterator) Key() []byte {
-	return it.Iterator.Key().Bytes()
-}
-
-// the bytes returned will be freed after next
-func (it *DBIterator) RefValue() []byte {
-	v := it.Iterator.Value().Data()
-	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {
-		v = v[:len(v)-tsLen]
-	}
-	return v
-}
-
-func (it *DBIterator) Value() []byte {
-	v := it.Iterator.Value().Bytes()
-	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {
-		v = v[:len(v)-tsLen]
-	}
-	return v
-}
-
-func (it *DBIterator) NoTimestamp(vt byte) {
-	it.removeTsType = vt
-}
-
-func (it *DBIterator) Close() {
-	if it.Iterator != nil {
-		it.Iterator.Close()
-	}
-	if it.ro != nil {
-		it.ro.Destroy()
-	}
-	if it.snap != nil {
-		it.snap.Release()
-	}
-	if it.upperBound != nil {
-		it.upperBound.Destroy()
-	}
-	if it.lowerBound != nil {
-		it.lowerBound.Destroy()
-	}
-	it.db.RUnlock()
-}
-
 type IteratorOpts struct {
 	Range
 	Limit
@@ -191,20 +88,10 @@ type IteratorOpts struct {
 	WithSnap  bool
 }
 
-func NewDBRangeLimitIteratorWithOpts(db *gorocksdb.DB, opts IteratorOpts) (*RangeLimitedIterator, error) {
-	upperBound := opts.Max
-	lowerBound := opts.Min
-	if opts.Type&common.RangeROpen <= 0 && upperBound != nil {
-		// range right not open, we need inclusive the max,
-		// however upperBound is exclusive
-		upperBound = append(upperBound, 0)
-	}
-
-	// TODO: avoid large offset, which will scan too much data.
-	// Maybe return error to avoid impact the performance.
-
-	//dbLog.Infof("iterator %v : %v", lowerBound, upperBound)
-	dbit, err := NewDBIterator(db, opts.WithSnap, true, lowerBound, upperBound, opts.IgnoreDel)
+// note: all the iterator use the prefix iterator flag. Which means it may skip the keys for different table
+// prefix.
+func NewDBRangeLimitIteratorWithOpts(ig IteratorGetter, opts IteratorOpts) (*RangeLimitedIterator, error) {
+	dbit, err := ig.GetIterator(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -219,57 +106,8 @@ func NewDBRangeLimitIteratorWithOpts(db *gorocksdb.DB, opts IteratorOpts) (*Rang
 
 // note: all the iterator use the prefix iterator flag. Which means it may skip the keys for different table
 // prefix.
-func NewDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
-	offset int, count int, reverse bool) (*RangeLimitedIterator, error) {
-
-	opts := IteratorOpts{
-		Reverse: reverse,
-	}
-	opts.Max = max
-	opts.Min = min
-	opts.Type = rtype
-	opts.Offset = offset
-	opts.Count = count
-
-	return NewDBRangeLimitIteratorWithOpts(db, opts)
-}
-
-func NewSnapshotDBRangeLimitIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
-	offset int, count int, reverse bool) (*RangeLimitedIterator, error) {
-
-	opts := IteratorOpts{
-		Reverse: reverse,
-	}
-	opts.Max = max
-	opts.Min = min
-	opts.Type = rtype
-	opts.Offset = offset
-	opts.Count = count
-	opts.WithSnap = true
-
-	return NewDBRangeLimitIteratorWithOpts(db, opts)
-}
-
-func NewDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
-	reverse bool) (*RangeLimitedIterator, error) {
-	opts := IteratorOpts{
-		Reverse: reverse,
-	}
-	opts.Max = max
-	opts.Min = min
-	opts.Type = rtype
-	return NewDBRangeIteratorWithOpts(db, opts)
-}
-
-func NewDBRangeIteratorWithOpts(db *gorocksdb.DB, opts IteratorOpts) (*RangeLimitedIterator, error) {
-	upperBound := opts.Max
-	lowerBound := opts.Min
-	if opts.Type&common.RangeROpen <= 0 && upperBound != nil {
-		// range right not open, we need inclusive the max,
-		// however upperBound is exclusive
-		upperBound = append(upperBound, 0)
-	}
-	dbit, err := NewDBIterator(db, opts.WithSnap, true, lowerBound, upperBound, opts.IgnoreDel)
+func NewDBRangeIteratorWithOpts(ig IteratorGetter, opts IteratorOpts) (*RangeLimitedIterator, error) {
+	dbit, err := ig.GetIterator(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -278,19 +116,6 @@ func NewDBRangeIteratorWithOpts(db *gorocksdb.DB, opts IteratorOpts) (*RangeLimi
 	} else {
 		return NewRevRangeIterator(dbit, &opts.Range), nil
 	}
-}
-
-func NewSnapshotDBRangeIterator(db *gorocksdb.DB, min []byte, max []byte, rtype uint8,
-	reverse bool) (*RangeLimitedIterator, error) {
-	opts := IteratorOpts{
-		Reverse: reverse,
-	}
-	opts.Max = max
-	opts.Min = min
-	opts.Type = rtype
-	opts.WithSnap = true
-
-	return NewDBRangeIteratorWithOpts(db, opts)
 }
 
 type RangeLimitedIterator struct {

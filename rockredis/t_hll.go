@@ -13,7 +13,6 @@ import (
 	hll3 "github.com/absolute8511/hyperloglog2"
 	"github.com/golang/snappy"
 	"github.com/youzan/ZanRedisDB/slow"
-	"github.com/youzan/gorocksdb"
 
 	//hll "github.com/axiomhq/hyperloglog"
 	lru "github.com/hashicorp/golang-lru"
@@ -315,9 +314,9 @@ func (c *hllCache) onEvicted(rawKey interface{}, value interface{}) {
 	}
 
 	s := time.Now()
-	wb := gorocksdb.NewWriteBatch()
+	wb := c.db.rockEng.NewWriteBatch()
 	defer wb.Destroy()
-	oldV, _ := c.db.eng.GetBytesNoLock(c.db.defaultReadOpts, key)
+	oldV, _ := c.db.GetBytesNoLock(key)
 
 	if c.db.cfg.EnableTableCounter && oldV == nil {
 		c.db.IncrTableKeyCount(table, 1, wb)
@@ -333,7 +332,7 @@ func (c *hllCache) onEvicted(rawKey interface{}, value interface{}) {
 	oldV = append(oldV, newV...)
 	oldV = append(oldV, tsBuf...)
 	wb.Put(key, oldV)
-	c.db.eng.Write(c.db.defaultWriteOpts, wb)
+	c.db.rockEng.Write(wb)
 	cost := time.Since(s)
 	slow.LogSlowDBWrite(cost, slow.NewSlowLogInfo(c.db.cfg.DataDir, string(key), "flush pfadd"))
 	c.AddToReadCache(cachedKey, item)
@@ -410,7 +409,7 @@ func (db *RockDB) PFCount(ts int64, keys ...[]byte) (int64, error) {
 			return cntFromItem(ts, item)
 		}
 	}
-	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, keyList, errs)
+	db.MultiGetBytes(keyList, keyList, errs)
 	for i, v := range keyList {
 		if errs[i] == nil && len(v) >= tsLen {
 			keyList[i] = keyList[i][:len(v)-tsLen]
@@ -494,7 +493,7 @@ func (db *RockDB) PFAdd(ts int64, rawKey []byte, elems ...[]byte) (int64, error)
 	s := time.Now()
 	changed := false
 	if !ok {
-		oldV, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+		oldV, _ := db.GetBytesNoLock(key)
 		if oldV != nil {
 			if len(oldV) < 8+1+tsLen {
 				return 0, errInvalidHLLData

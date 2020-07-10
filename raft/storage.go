@@ -130,7 +130,7 @@ func newDefaultRaftStorage(id uint64, gid uint32) IExtRaftStorage {
 	if cfg.InsertHintFixedLen == 0 {
 		cfg.InsertHintFixedLen = 10
 	}
-	scf := engine.NewSharedRockConfig(cfg.RockOptions)
+	scf, _ := engine.NewSharedEngConfig(cfg.RockOptions)
 	cfg.SharedConfig = scf
 	db, err := engine.NewRockEng(cfg)
 	if err == nil {

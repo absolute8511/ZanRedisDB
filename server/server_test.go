@@ -183,6 +183,8 @@ func startTestClusterWithBasePort(portBase int, replicaNum int,
 			SharedRocksWAL: true,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+		kvOpts.RocksDBOpts.EngineType = "pebble"
+
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer
 			// use test:// will ignore the remote cluster fail
@@ -204,7 +206,7 @@ func startTestClusterWithBasePort(portBase int, replicaNum int,
 		nsConf.RaftGroupConf.SeedNodes = tmpSeeds
 		nsConf.ExpirationPolicy = common.WaitCompactExpirationPolicy
 		nsConf.DataVersion = common.ValueHeaderV1Str
-		kv := NewServer(kvOpts)
+		kv, _ := NewServer(kvOpts)
 		kv.nsMgr.SetIClusterInfo(fakeCI)
 		if _, err := kv.InitKVNamespace(replica.ReplicaID, nsConf, false); err != nil {
 			return kvsClusterTmp, tmpSeeds, learnerServersTmp, ctmpDir, err

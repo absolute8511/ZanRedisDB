@@ -152,9 +152,9 @@ func (db *RockDB) collHeaderMeta(ts int64, dt byte, key []byte, useLock bool) (*
 	var v []byte
 	var err error
 	if useLock {
-		v, err = db.eng.GetBytes(db.defaultReadOpts, sizeKey)
+		v, err = db.GetBytes(sizeKey)
 	} else {
-		v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, sizeKey)
+		v, err = db.GetBytesNoLock(sizeKey)
 	}
 	if err != nil {
 		return nil, false, err

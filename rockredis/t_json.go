@@ -88,7 +88,7 @@ func (db *RockDB) getOldJSON(table []byte, rk []byte) ([]byte, []byte, bool, err
 	if err != nil {
 		return nil, nil, false, err
 	}
-	oldV, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
+	oldV, err := db.GetBytesNoLock(ek)
 	if err != nil {
 		return ek, nil, false, err
 	}
@@ -304,7 +304,7 @@ func (db *RockDB) JKeyExists(key []byte) (int64, error) {
 		return 0, err
 	}
 	sk, _ := encodeJSONKey(table, rk)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
+	v, err := db.GetBytes(sk)
 	if v != nil && err == nil {
 		return 1, nil
 	}

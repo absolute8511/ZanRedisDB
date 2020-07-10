@@ -186,7 +186,13 @@ func (bo *kvbatchOperator) CommitBatch() {
 		}
 	}
 	if len(bo.batchReqIDList) > 0 {
-		slow.LogSlowDBWrite(batchCost, slow.NewSlowLogInfo(bo.kvsm.fullNS, "batched", strconv.Itoa(len(bo.batchReqIDList))))
+		bk := "batched: "
+		// just use one of the batched keys as log
+		for k, _ := range bo.dupCheckMap {
+			bk += k + ","
+			break
+		}
+		slow.LogSlowDBWrite(batchCost, slow.NewSlowLogInfo(bo.kvsm.fullNS, bk, strconv.Itoa(len(bo.batchReqIDList))))
 		bo.kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Microseconds(), int64(len(bo.batchReqIDList)))
 		metric.DBWriteLatency.With(ps.Labels{
 			"namespace": bo.kvsm.fullNS,

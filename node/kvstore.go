@@ -22,7 +22,7 @@ type KVOptions struct {
 	ExpirationPolicy common.ExpirationPolicy
 	DataVersion      common.DataVersionT
 	RockOpts         engine.RockOptions
-	SharedConfig     *engine.SharedRockConfig
+	SharedConfig     engine.SharedRockConfig
 }
 
 func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
@@ -49,7 +49,7 @@ func (s *KVStore) openDB() error {
 		cfg.KeepBackup = s.opts.KeepBackup
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
 		if err != nil {
-			nodeLog.Warningf("failed to open rocksdb: %v", err)
+			nodeLog.Warningf("failed to open rocksdb: %v, %v", err, cfg.DataDir)
 		}
 	} else {
 		return errors.New("Not recognized engine type:" + s.opts.EngType)

@@ -652,7 +652,7 @@ func TestHashIndexInt64V(t *testing.T) {
 	for i, pk := range inputPKList {
 		db.hsetIndexAddRec(pk, hindex.IndexField, inputFVList[i], db.wb)
 	}
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.rockEng.Write(db.wb)
 	condAll := &IndexCondition{
 		StartKey:     nil,
 		IncludeStart: false,
@@ -779,7 +779,7 @@ func TestHashIndexInt64V(t *testing.T) {
 
 	db.wb.Clear()
 	db.hsetIndexRemoveRec(inputPKList[0], hindex.IndexField, inputFVList[0], db.wb)
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.rockEng.Write(db.wb)
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condEqual, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))

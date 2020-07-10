@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
-	"github.com/youzan/gorocksdb"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 // kv new format as below:
@@ -112,7 +112,7 @@ func (db *RockDB) prepareKVValueForWrite(ts int64, rawKey []byte, reset bool) (v
 }
 
 // this will reset the expire meta on old and rewrite the value with new ttl and new header
-func (db *RockDB) resetWithNewKVValue(ts int64, rawKey []byte, value []byte, ttl int64, wb *gorocksdb.WriteBatch) ([]byte, error) {
+func (db *RockDB) resetWithNewKVValue(ts int64, rawKey []byte, value []byte, ttl int64, wb engine.WriteBatch) ([]byte, error) {
 	oldHeader, err := db.expiration.decodeRawValue(KVType, nil)
 	if err != nil {
 		return nil, err
@@ -200,7 +200,7 @@ func (db *RockDB) isKVExistOrExpired(ts int64, rawKey []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	vref, err := db.eng.Get(db.defaultReadOpts, kk)
+	vref, err := db.rockEng.GetRef(kk)
 	if err != nil {
 		return 0, err
 	}
@@ -225,9 +225,9 @@ func (db *RockDB) getRawDBKVValue(ts int64, rawKey []byte, useLock bool) ([]byte
 
 	var v []byte
 	if useLock {
-		v, err = db.eng.GetBytes(db.defaultReadOpts, key)
+		v, err = db.GetBytes(key)
 	} else {
-		v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, key)
+		v, err = db.GetBytesNoLock(key)
 	}
 	if err != nil {
 		return table, key, nil, false, err
@@ -281,7 +281,7 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	delCnt := int64(1)
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
-			vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, key)
+			vok, _ := db.ExistNoLock(key)
 			if vok {
 				db.IncrTableKeyCount(table, -1, db.wb)
 			} else {
@@ -302,14 +302,14 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 	return delCnt, nil
 }
 
-func (db *RockDB) KVDelWithBatch(key []byte, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) KVDelWithBatch(key []byte, wb engine.WriteBatch) error {
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
 		return err
 	}
 	if db.cfg.EnableTableCounter {
 		if !db.cfg.EstimateTableCounter {
-			vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, key)
+			vok, _ := db.ExistNoLock(key)
 			if vok {
 				db.IncrTableKeyCount(table, -1, wb)
 			}
@@ -369,7 +369,7 @@ func (db *RockDB) KVExists(keys ...[]byte) (int64, error) {
 		}
 	}
 	cnt := int64(0)
-	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, valueList, errs)
+	db.MultiGetBytes(keyList, valueList, errs)
 	for i, v := range valueList {
 		if errs[i] == nil && v != nil {
 			expired, _ := db.expiration.isExpired(tn, KVType, keys[i], v, true)
@@ -388,7 +388,7 @@ func (db *RockDB) KVGetVer(key []byte) (int64, error) {
 		return 0, err
 	}
 	var ts uint64
-	v, err := db.eng.GetBytes(db.defaultReadOpts, key)
+	v, err := db.GetBytes(key)
 	if len(v) >= tsLen {
 		ts, err = Uint64(v[len(v)-tsLen:], err)
 	}
@@ -401,7 +401,7 @@ func (db *RockDB) GetValueWithOpNoLock(rawKey []byte,
 	if err != nil {
 		return err
 	}
-	return db.rockEng.GetValueWithOpNoLock(db.defaultReadOpts, key, func(v []byte) error {
+	return db.rockEng.GetValueWithOpNoLock(key, func(v []byte) error {
 		ts := time.Now().UnixNano()
 		expired, realV, err := db.getAndCheckExpRealValue(ts, rawKey, v, false)
 		if err != nil {
@@ -420,7 +420,7 @@ func (db *RockDB) GetValueWithOp(rawKey []byte,
 	if err != nil {
 		return err
 	}
-	return db.rockEng.GetValueWithOp(db.defaultReadOpts, key, func(v []byte) error {
+	return db.rockEng.GetValueWithOp(key, func(v []byte) error {
 		ts := time.Now().UnixNano()
 		expired, realV, err := db.getAndCheckExpRealValue(ts, rawKey, v, false)
 		if err != nil {
@@ -467,7 +467,7 @@ func (db *RockDB) MGet(keys ...[]byte) ([][]byte, []error) {
 		}
 	}
 	tn := time.Now().UnixNano()
-	db.eng.MultiGetBytes(db.defaultReadOpts, keyList, valueList, errs)
+	db.MultiGetBytes(keyList, valueList, errs)
 	//log.Printf("mget: %v", keyList)
 	for i, v := range valueList {
 		if errs[i] == nil {
@@ -510,7 +510,7 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 		if db.cfg.EnableTableCounter {
 			vok := false
 			if !db.cfg.EstimateTableCounter {
-				vok, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
+				vok, _ = db.ExistNoLock(key)
 			}
 			if !vok {
 				n := tableCnt[string(table)]
@@ -542,7 +542,7 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 	if db.cfg.EnableTableCounter {
 		found := false
 		if !db.cfg.EstimateTableCounter {
-			found, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
+			found, _ = db.ExistNoLock(key)
 		}
 		if !found {
 			db.IncrTableKeyCount(table, 1, db.wb)
@@ -592,7 +592,7 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	if db.cfg.EnableTableCounter {
 		vok := false
 		if !db.cfg.EstimateTableCounter {
-			vok, _ = db.eng.ExistNoLock(db.defaultReadOpts, key)
+			vok, _ = db.ExistNoLock(key)
 		}
 		if !vok {
 			db.IncrTableKeyCount(table, 1, db.wb)
@@ -667,7 +667,7 @@ func (db *RockDB) SetRange(ts int64, rawKey []byte, offset int, value []byte) (i
 	return int64(retn), nil
 }
 
-func getRange(start int, end int, valLen int) (int, int) {
+func getRange(start int64, end int64, valLen int64) (int64, int64) {
 	if start < 0 {
 		start = valLen + start
 	}
@@ -690,13 +690,13 @@ func getRange(start int, end int, valLen int) (int, int) {
 	return start, end
 }
 
-func (db *RockDB) GetRange(key []byte, start int, end int) ([]byte, error) {
+func (db *RockDB) GetRange(key []byte, start int64, end int64) ([]byte, error) {
 	value, err := db.KVGet(key)
 	if err != nil {
 		return nil, err
 	}
 
-	valLen := len(value)
+	valLen := int64(len(value))
 
 	start, end = getRange(start, end, valLen)
 
@@ -840,12 +840,12 @@ func (db *RockDB) bitGetOld(key []byte, offset int64) (int64, error) {
 	return 0, nil
 }
 
-func (db *RockDB) bitCountOld(key []byte, start, end int) (int64, error) {
+func (db *RockDB) bitCountOld(key []byte, start, end int64) (int64, error) {
 	v, err := db.KVGet(key)
 	if err != nil {
 		return 0, err
 	}
-	start, end = getRange(start, end, len(v))
+	start, end = getRange(start, end, int64(len(v)))
 	if start > end {
 		return 0, nil
 	}

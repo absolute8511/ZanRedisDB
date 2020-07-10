@@ -52,6 +52,28 @@ func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (nd *KVNode) getRangeCommand(conn redcon.Conn, cmd redcon.Command) {
+	if len(cmd.Args) != 4 {
+		conn.WriteError(errWrongNumberArgs.Error())
+		return
+	}
+	start, end, err := getRangeArgs(cmd)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	val, err := nd.store.GetRange(cmd.Args[1], start, end)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	if val == nil {
+		conn.WriteNull()
+	} else {
+		conn.WriteBulk(val)
+	}
+}
+
 func (nd *KVNode) strlenCommand(conn redcon.Conn, cmd redcon.Command) {
 	val, err := nd.store.StrLen(cmd.Args[1])
 	if err != nil {
@@ -84,26 +106,34 @@ func (nd *KVNode) getbitCommand(conn redcon.Conn, cmd redcon.Command) {
 	conn.WriteInt64(val)
 }
 
+func getRangeArgs(cmd redcon.Command) (int64, int64, error) {
+	start, end := int64(0), int64(-1)
+	var err error
+	if len(cmd.Args) >= 4 {
+		start, err = strconv.ParseInt(string(cmd.Args[2]), 10, 64)
+		if err != nil {
+			return start, end, err
+		}
+		end, err = strconv.ParseInt(string(cmd.Args[3]), 10, 64)
+		if err != nil {
+			return start, end, err
+		}
+	}
+	return start, end, nil
+}
+
 func (nd *KVNode) bitcountCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 2 && len(cmd.Args) != 4 {
 		conn.WriteError(errWrongNumberArgs.Error())
 		return
 	}
-	start, end := int64(0), int64(-1)
-	var err error
-	if len(cmd.Args) == 4 {
-		start, err = strconv.ParseInt(string(cmd.Args[2]), 10, 64)
-		if err != nil {
-			conn.WriteError(err.Error())
-			return
-		}
-		end, err = strconv.ParseInt(string(cmd.Args[3]), 10, 64)
-		if err != nil {
-			conn.WriteError(err.Error())
-			return
-		}
+	start, end, err := getRangeArgs(cmd)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
 	}
-	val, err := nd.store.BitCountV2(cmd.Args[1], int(start), int(end))
+
+	val, err := nd.store.BitCountV2(cmd.Args[1], start, end)
 	if err != nil {
 		conn.WriteError(err.Error())
 		return

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -59,17 +60,17 @@ func (p *program) Start() error {
 	if *configFilePath != "" {
 		d, err := ioutil.ReadFile(*configFilePath)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		err = json.Unmarshal(d, &configFile)
 		if err != nil {
-			panic(err)
+			return err
 		}
 	}
 	if configFile.ServerConf.DataDir == "" {
 		tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 		if err != nil {
-			panic(err)
+			return err
 		}
 		configFile.ServerConf.DataDir = tmpDir
 	}
@@ -81,28 +82,31 @@ func (p *program) Start() error {
 	fmt.Printf("loading with conf:%v\n", string(loadConf))
 	bip := server.GetIPv4ForInterfaceName(serverConf.BroadcastInterface)
 	if bip == "" || bip == "0.0.0.0" {
-		panic("broadcast ip can not be found")
+		return errors.New("broadcast ip can not be found")
 	} else {
 		serverConf.BroadcastAddr = bip
 	}
 	fmt.Printf("broadcast ip is :%v\n", bip)
-	app := server.NewServer(serverConf)
+	app, err := server.NewServer(serverConf)
+	if err != nil {
+		return err
+	}
 	for _, nsNodeConf := range serverConf.Namespaces {
 		nsFile := path.Join(configDir, nsNodeConf.Name)
 		d, err := ioutil.ReadFile(nsFile)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		var nsConf node.NamespaceConfig
 		err = json.Unmarshal(d, &nsConf)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		if nsConf.Name != nsNodeConf.Name {
-			panic("namespace name not match the config file")
+			return errors.New("namespace name not match the config file")
 		}
 		if nsConf.Replicator <= 0 {
-			panic("namespace replicator should be set")
+			return errors.New("namespace replicator should be set")
 		}
 
 		id := nsNodeConf.LocalReplicaID

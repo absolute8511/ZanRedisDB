@@ -47,6 +47,15 @@ var (
 		Name: "slow_limiter_refused_cnt",
 		Help: "slow limiter refused counter for slow write command",
 	}, []string{"table", "cmd"})
+	SlowLimiterQueuedCnt = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "slow_limiter_queued_cnt",
+		Help: "queued total counter for slow wait queue",
+	}, []string{"table", "cmd", "slow_level"})
+	SlowLimiterQueuedCost = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "slow_limiter_queued_cost",
+		Help:    "slow limiter queued cost distribution in slow wait queue",
+		Buckets: prometheus.ExponentialBuckets(1, 2, 14),
+	}, []string{"namespace", "table", "cmd"})
 
 	QueueLen = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "queue_len",

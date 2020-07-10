@@ -28,12 +28,23 @@ zankv数据节点配置参数说明:
   "rsync_limit": 0,   ### 限制rsync传输的速度, 一般不需要配置, 会使用默认限制
   "election_tick": 30,   ### raft leader失效间隔, 建议使用默认值
   "tick_ms": 200,   ### raft 心跳包间隔, 建议使用默认值
+  "use_redis_v2": true,  ### 是否在raft entry里面启用新的redis序列化, 默认不开启, 0.8.4以上版本支持, 不兼容低版本, 开启后可以提升写入性能
+  "log_dir": "/data/logs/zankv", ### 设置glog目录, 0.8.4以上版本支持
+  "use_rocks_wal": false,  ### 是否使用rocksdb存储raft wal日志, 默认不启用, 启用后可以优化内存占用, 性能会有一定影响
+  "shared_rocks_wal": true, ### 是否在不同raft分组使用共享的rocksdb来存储wal, 默认不启用
+  "wal_rocksdb_opts": {
+      "use_shared_cache":true,
+      "use_shared_rate_limiter":true,
+      "rate_bytes_per_sec":80000000,
+      "max_write_buffer_number":10,
+      "optimize_filters_for_hits":true  ### 用于存储wal时, 可以配置此项提升性能, 因为wal查询都会命中
+  },
   "rocksdb_opts": {   ### rocksdb参数参见调优
    "verify_read_checksum": false,
    "use_shared_cache": true,
    "use_shared_rate_limiter": true
   },
-  "max_scan_job": 0   ### 允许的最大scan任何数量, 一般使用内置的默认值
+  "max_scan_job": 0   ### 允许的最大scan任务并行数量, 一般使用内置的默认值
  }
 }
 
@@ -65,10 +76,27 @@ namespace创建参数建议3副本, 分区数可以预估集群最大规模, 一
    "min_level_to_compress": 0,   ### 建议使用默认值
    "max_mainifest_file_size": 0,   ### 建议使用默认值
    "rate_bytes_per_sec": 20000000,   ### rocksdb后台IO操作限速, 建议设置避免IO毛刺, 建议限速 20MB ~ 50MB 之间
-   "use_shared_cache": true,  ### 建议true, 所有实例共享block cache
+   "use_shared_cache": true,  ### 建议true, 所有rocksdb实例共享block cache
+   "engine_type": "",  ### 支持rocksdb和pebble两种, 默认使用rocksdb
    "use_shared_rate_limiter": true   ### 建议true, 所有实例共享限速指标
 }
 ```
+
+
+## 创建namespace
+
+关于ttl的说明, 默认使用非精确ttl
+
+## 慢写动态限流说明
+
+## 监控项说明
+
+### Prometheus
+
+### topn
+
+### SLOW_LOGS
+
 
 ## 操作和接口说明
 
@@ -105,6 +133,8 @@ zankv API
 /stats
 获取统计数据,其中db_write_stats, cluster_write_stats中两个长度为16的数据对应的数据, 标识对应区间统计的计数器. 其中db_write_stats代表存储层的统计数据, cluster_write_stats表示服务端协议层的统计数据(从收到网络请求开始, 到回复网络请求结束), 具体的统计区间含义可以参考代码WriteStats结构的定义.
 
+如果需要获取集群表统计信息, 需要加上参数table_details=true
+
 /raft/stats
 获取raft集群状态, 用于判断异常信息
 ```
@@ -127,6 +157,11 @@ string类型:
 ignore_startup_nobackup - 启动时是否忽略快照不存在的错误.
 ignore_remote_file_sync - 是否忽略跨机房同步的快照传输
 ```
+
+动态调整部分rocksdb参数使用如下API:
+```
+```
+
 
 ## 备份恢复
 

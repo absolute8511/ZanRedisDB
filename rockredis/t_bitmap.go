@@ -9,7 +9,6 @@ import (
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
-	"github.com/youzan/gorocksdb"
 )
 
 const (
@@ -93,7 +92,7 @@ func encodeBitmapStopKey(table []byte, key []byte) ([]byte, error) {
 	return buf, err
 }
 
-func (db *RockDB) bitSetToNew(ts int64, wb *gorocksdb.WriteBatch, bmSize int64, key []byte, offset int64, on int) (int64, error) {
+func (db *RockDB) bitSetToNew(ts int64, wb engine.WriteBatch, bmSize int64, key []byte, offset int64, on int) (int64, error) {
 	keyInfo, err := db.prepareCollKeyForWrite(ts, BitmapType, key, nil)
 	if err != nil {
 		return 0, err
@@ -107,7 +106,7 @@ func (db *RockDB) bitSetToNew(ts int64, wb *gorocksdb.WriteBatch, bmSize int64, 
 	if err != nil {
 		return 0, err
 	}
-	bmv, err := db.eng.GetBytesNoLock(db.defaultReadOpts, bmk)
+	bmv, err := db.GetBytesNoLock(bmk)
 	if err != nil {
 		return 0, err
 	}
@@ -171,7 +170,7 @@ func (db *RockDB) BitSetV2(ts int64, key []byte, offset int64, on int) (int64, e
 			return 0, err
 		}
 		var v []byte
-		if v, err = db.eng.GetBytesNoLock(db.defaultReadOpts, oldkey); err != nil {
+		if v, err = db.GetBytesNoLock(oldkey); err != nil {
 			return 0, err
 		}
 		if v == nil {
@@ -213,7 +212,7 @@ func (db *RockDB) BitSetV2(ts int64, key []byte, offset int64, on int) (int64, e
 	return oldBit, err
 }
 
-func (db *RockDB) updateBitmapMeta(ts int64, wb *gorocksdb.WriteBatch, oldh *headerMetaValue, key []byte, bmSize int64) error {
+func (db *RockDB) updateBitmapMeta(ts int64, wb engine.WriteBatch, oldh *headerMetaValue, key []byte, bmSize int64) error {
 	metaKey := bitEncodeMetaKey(key)
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint64(buf[:8], uint64(bmSize))
@@ -275,7 +274,7 @@ func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	v, err := db.eng.GetBytes(db.defaultReadOpts, bitk)
+	v, err := db.GetBytes(bitk)
 	if err != nil {
 		return 0, err
 	}
@@ -294,7 +293,7 @@ func (db *RockDB) BitGetV2(key []byte, offset int64) (int64, error) {
 	return 0, nil
 }
 
-func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
+func (db *RockDB) BitCountV2(key []byte, start, end int64) (int64, error) {
 	// read new v2 first, if not exist, try old version
 	tn := time.Now().UnixNano()
 	oldh, bmSize, _, ok, err := db.getBitmapMeta(tn, key, true)
@@ -305,7 +304,7 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 		return db.bitCountOld(key, start, end)
 	}
 
-	start, end = getRange(start, end, int(bmSize))
+	start, end = getRange(start, end, bmSize)
 	if start > end {
 		return 0, nil
 	}
@@ -321,7 +320,7 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 
 	iterStart, _ := encodeBitmapStartKey(table, rk, int64(startI)*bitmapSegBytes)
 	iterStop, _ := encodeBitmapStopKey(table, rk)
-	it, err := engine.NewDBRangeIterator(db.eng, iterStart, iterStop, common.RangeROpen, false)
+	it, err := db.NewDBRangeIterator(iterStart, iterStop, common.RangeROpen, false)
 	if err != nil {
 		return 0, err
 	}
@@ -339,10 +338,10 @@ func (db *RockDB) BitCountV2(key []byte, start, end int) (int64, error) {
 		byteStart := 0
 		byteEnd := len(bmv)
 		if index == int64(startI)*bitmapSegBytes {
-			byteStart = start % bitmapSegBytes
+			byteStart = int(start) % bitmapSegBytes
 		}
 		if index == int64(stopI)*bitmapSegBytes {
-			byteEnd = end%bitmapSegBytes + 1
+			byteEnd = int(end)%bitmapSegBytes + 1
 			if byteEnd > len(bmv) {
 				byteEnd = len(bmv)
 			}
@@ -385,7 +384,7 @@ func (db *RockDB) BitClear(ts int64, key []byte) (int64, error) {
 		if bmSize/bitmapSegBytes > RangeDeleteNum {
 			wb.DeleteRange(iterStart, iterStop)
 		} else {
-			it, err := engine.NewDBRangeIterator(db.eng, iterStart, iterStop, common.RangeROpen, false)
+			it, err := db.NewDBRangeIterator(iterStart, iterStop, common.RangeROpen, false)
 			if err != nil {
 				return 0, err
 			}

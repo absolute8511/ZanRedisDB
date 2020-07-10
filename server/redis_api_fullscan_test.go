@@ -50,6 +50,8 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 		SharedRocksWAL: true,
 	}
 	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+	kvOpts.WALRocksDBOpts.EngineType = "pebble"
+
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
 	nsConf.BaseName = "default"
@@ -58,7 +60,8 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 	nsConf.Replicator = 1
 	nsConf.RaftGroupConf.GroupID = 1000
 	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	kv := NewServer(kvOpts)
+	kv, err := NewServer(kvOpts)
+	assert.Nil(t, err)
 	_, err = kv.InitKVNamespace(1, nsConf, false)
 	if err != nil {
 		t.Fatalf("failed to init namespace: %v", err)

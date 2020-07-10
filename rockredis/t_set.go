@@ -10,7 +10,6 @@ import (
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/slow"
-	"github.com/youzan/gorocksdb"
 )
 
 var (
@@ -100,7 +99,7 @@ func sEncodeStopKey(table []byte, key []byte) []byte {
 	return k
 }
 
-func (db *RockDB) sDelete(tn int64, key []byte, wb *gorocksdb.WriteBatch) int64 {
+func (db *RockDB) sDelete(tn int64, key []byte, wb engine.WriteBatch) int64 {
 	sk := sEncodeSizeKey(key)
 	keyInfo, err := db.getCollVerKeyForRange(tn, SetType, key, false)
 	if err != nil {
@@ -138,7 +137,7 @@ func (db *RockDB) sDelete(tn int64, key []byte, wb *gorocksdb.WriteBatch) int64 
 			Reverse:   false,
 			IgnoreDel: true,
 		}
-		it, err := engine.NewDBRangeIteratorWithOpts(db.eng, opts)
+		it, err := db.NewDBRangeIteratorWithOpts(opts)
 		if err != nil {
 			return 0
 		}
@@ -154,7 +153,7 @@ func (db *RockDB) sDelete(tn int64, key []byte, wb *gorocksdb.WriteBatch) int64 
 }
 
 // size key include set size and set modify timestamp
-func (db *RockDB) sIncrSize(ts int64, key []byte, oldh *headerMetaValue, delta int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) sIncrSize(ts int64, key []byte, oldh *headerMetaValue, delta int64, wb engine.WriteBatch) (int64, error) {
 	sk := sEncodeSizeKey(key)
 	meta := oldh.UserData
 
@@ -244,7 +243,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 		ek = sEncodeSetKey(table, rk, args[i])
 
 		// must use exist to tell the different of not found and nil value (member value is also nil)
-		if vok, err := db.eng.ExistNoLock(db.defaultReadOpts, ek); err != nil {
+		if vok, err := db.ExistNoLock(ek); err != nil {
 			return 0, err
 		} else if !vok {
 			num++
@@ -266,7 +265,7 @@ func (db *RockDB) SAdd(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}).Observe(float64(newNum))
 	}
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.rockEng.Write(wb)
 	return num, err
 }
 
@@ -296,7 +295,7 @@ func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
 	ek := sEncodeSetKey(table, rk, member)
 
 	var n int64 = 1
-	if vok, err := db.eng.Exist(db.defaultReadOpts, ek); err != nil {
+	if vok, err := db.Exist(ek); err != nil {
 		return 0, err
 	} else if !vok {
 		n = 0
@@ -359,7 +358,7 @@ func (db *RockDB) sMembersN(tn int64, key []byte, num int) ([][]byte, error) {
 	start := keyInfo.RangeStart
 	stop := keyInfo.RangeEnd
 
-	it, err := engine.NewDBRangeIterator(db.eng, start, stop, common.RangeROpen, false)
+	it, err := db.NewDBRangeIterator(start, stop, common.RangeROpen, false)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +409,7 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}
 
 		ek = sEncodeSetKey(table, rk, args[i])
-		vok, _ := db.eng.ExistNoLock(db.defaultReadOpts, ek)
+		vok, _ := db.ExistNoLock(ek)
 		if !vok {
 			continue
 		} else {
@@ -432,7 +431,7 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	}
 	db.topLargeCollKeys.Update(key, int(newNum))
 
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.rockEng.Write(wb)
 	return num, err
 }
 
@@ -453,7 +452,7 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 	if len(keys) > MAX_BATCH_NUM {
 		return 0, errTooMuchBatchSize
 	}
-	wb := gorocksdb.NewWriteBatch()
+	wb := db.rockEng.NewWriteBatch()
 	defer wb.Destroy()
 	for _, key := range keys {
 		if err := checkKeySize(key); err != nil {
@@ -462,11 +461,11 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 		db.sDelete(0, key, wb)
 	}
 
-	err := db.eng.Write(db.defaultWriteOpts, wb)
+	err := db.rockEng.Write(wb)
 	return int64(len(keys)), err
 }
 
-func (db *RockDB) sMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
+func (db *RockDB) sMclearWithBatch(wb engine.WriteBatch, keys ...[]byte) error {
 	if len(keys) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}

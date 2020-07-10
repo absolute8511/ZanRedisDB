@@ -10,7 +10,6 @@ import (
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
 	"github.com/youzan/ZanRedisDB/slow"
-	"github.com/youzan/gorocksdb"
 )
 
 // we can use ring buffer to allow the list pop and push many times
@@ -126,7 +125,7 @@ func (db *RockDB) fixListKey(ts int64, key []byte) {
 	dbLog.Infof("list %v before fix: meta: %v, %v", string(key), headSeq, tailSeq)
 	startKey := lEncodeListKey(table, rk, listMinSeq)
 	stopKey := lEncodeListKey(table, rk, listMaxSeq)
-	rit, err := engine.NewDBRangeIterator(db.eng, startKey, stopKey, common.RangeClose, false)
+	rit, err := db.NewDBRangeIterator(startKey, stopKey, common.RangeClose, false)
 	if err != nil {
 		dbLog.Warningf("read list %v error: %v", string(key), err.Error())
 		return
@@ -173,7 +172,7 @@ func (db *RockDB) fixListKey(ts int64, key []byte) {
 		}
 	}
 	dbLog.Infof("list %v fixed to %v, %v, cnt: %v", string(key), fixedHead, fixedTail, cnt)
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.rockEng.Write(db.wb)
 }
 
 func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (int64, error) {
@@ -222,7 +221,7 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 	for i := 0; i < pushCnt; i++ {
 		ek := lEncodeListKey(table, rk, seq+int64(i)*delta)
 		// we assume there is no bug, so it must not override
-		v, _ := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
+		v, _ := db.GetBytesNoLock(ek)
 		if v != nil {
 			dbLog.Warningf("list %v should not override the old value: %v, meta: %v, %v,%v", string(key),
 				v, seq, headSeq, tailSeq)
@@ -252,7 +251,7 @@ func (db *RockDB) lpush(ts int64, key []byte, whereSeq int64, args ...[]byte) (i
 		db.fixListKey(ts, key)
 		return 0, err
 	}
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.rockEng.Write(wb)
 
 	newNum := int64(size) + int64(pushCnt)
 	db.topLargeCollKeys.Update(key, int(newNum))
@@ -297,7 +296,7 @@ func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {
 	}
 
 	itemKey := lEncodeListKey(table, rk, seq)
-	value, err = db.eng.GetBytesNoLock(db.defaultReadOpts, itemKey)
+	value, err = db.GetBytesNoLock(itemKey)
 	// nil value means not exist
 	// empty value should be ""
 	// since we pop should success if size is not zero, we need fix this
@@ -330,7 +329,7 @@ func (db *RockDB) lpop(ts int64, key []byte, whereSeq int64) ([]byte, error) {
 		db.delExpire(ListType, key, nil, false, wb)
 	}
 	db.topLargeCollKeys.Update(key, int(newNum))
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.rockEng.Write(wb)
 	return value, err
 }
 
@@ -407,7 +406,7 @@ func (db *RockDB) ltrim2(ts int64, key []byte, startP, stopP int64) error {
 	}
 
 	db.topLargeCollKeys.Update(key, int(newLen))
-	return db.eng.Write(db.defaultWriteOpts, wb)
+	return db.rockEng.Write(wb)
 }
 
 func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, error) {
@@ -475,13 +474,13 @@ func (db *RockDB) ltrim(ts int64, key []byte, trimSize, whereSeq int64) (int64, 
 	}
 
 	db.topLargeCollKeys.Update(key, int(newLen))
-	err = db.eng.Write(db.defaultWriteOpts, wb)
+	err = db.rockEng.Write(wb)
 	return trimEndSeq - trimStartSeq + 1, err
 }
 
 //	ps : here just focus on deleting the list data,
 //		 any other likes expire is ignore.
-func (db *RockDB) lDelete(ts int64, key []byte, wb *gorocksdb.WriteBatch) int64 {
+func (db *RockDB) lDelete(ts int64, key []byte, wb engine.WriteBatch) int64 {
 	keyInfo, headSeq, tailSeq, size, _, err := db.lHeaderAndMeta(ts, key, false)
 	if err != nil {
 		return 0
@@ -515,7 +514,7 @@ func (db *RockDB) lDelete(ts int64, key []byte, wb *gorocksdb.WriteBatch) int64 
 			Reverse:   false,
 			IgnoreDel: true,
 		}
-		rit, err := engine.NewDBRangeIteratorWithOpts(db.eng, opts)
+		rit, err := db.NewDBRangeIteratorWithOpts(opts)
 		if err != nil {
 			return 0
 		}
@@ -561,7 +560,7 @@ func encodeListMeta(oldh *headerMetaValue, headSeq int64, tailSeq int64, ts int6
 	return nv
 }
 
-func (db *RockDB) lSetMeta(key []byte, oldh *headerMetaValue, headSeq int64, tailSeq int64, ts int64, wb *gorocksdb.WriteBatch) (int64, error) {
+func (db *RockDB) lSetMeta(key []byte, oldh *headerMetaValue, headSeq int64, tailSeq int64, ts int64, wb engine.WriteBatch) (int64, error) {
 	metaKey := lEncodeMetaKey(key)
 	size := tailSeq - headSeq + 1
 	if size < 0 {
@@ -607,7 +606,7 @@ func (db *RockDB) LIndex(key []byte, index int64) ([]byte, error) {
 		return nil, nil
 	}
 	sk := lEncodeListKey(table, rk, seq)
-	return db.eng.GetBytes(db.defaultReadOpts, sk)
+	return db.GetBytes(sk)
 }
 
 func (db *RockDB) LVer(key []byte) (int64, error) {
@@ -737,7 +736,7 @@ func (db *RockDB) LRange(key []byte, start int64, stop int64) ([][]byte, error) 
 	startKey := lEncodeListKey(table, rk, headSeq)
 	stopKey := lEncodeListKey(table, rk, tailSeq)
 
-	rit, err := engine.NewDBRangeLimitIterator(db.eng, startKey, stopKey, common.RangeClose, 0, int(limit), false)
+	rit, err := db.NewDBRangeLimitIterator(startKey, stopKey, common.RangeClose, 0, int(limit), false)
 	if err != nil {
 		return nil, err
 	}
@@ -794,7 +793,7 @@ func (db *RockDB) LMclear(keys ...[]byte) (int64, error) {
 	return int64(len(keys)), err
 }
 
-func (db *RockDB) lMclearWithBatch(wb *gorocksdb.WriteBatch, keys ...[]byte) error {
+func (db *RockDB) lMclearWithBatch(wb engine.WriteBatch, keys ...[]byte) error {
 	if len(keys) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}

@@ -796,22 +796,6 @@ func (s *Server) doWALDBStats(w http.ResponseWriter, req *http.Request, ps httpr
 	return ss, nil
 }
 
-func (s *Server) doDBPerf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	reqParams, err := url.ParseQuery(req.URL.RawQuery)
-	if err != nil {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
-	}
-	levelStr := reqParams.Get("level")
-	level, err := strconv.Atoi(levelStr)
-	if err != nil {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
-	}
-
-	node.SetPerfLevel(level)
-	sLog.Infof("perf level set to: %v", level)
-	return nil, nil
-}
-
 func setBlockRateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	rate, err := strconv.Atoi(req.FormValue("rate"))
 	if err != nil {
@@ -876,7 +860,6 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
 	router.Handle("POST", "/db/options/set", common.Decorate(s.doSetDBOptions, log, common.V1))
 	router.Handle("GET", "/waldb/stats", common.Decorate(s.doWALDBStats, common.V1))
-	router.Handle("GET", "/db/perf", common.Decorate(s.doDBPerf, log, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 
 	router.Handle("POST", "/debug/setblockrate", common.Decorate(setBlockRateHandler, log, common.V1))
