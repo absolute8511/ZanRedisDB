@@ -56,7 +56,10 @@ func NewRocksStorage(id uint64, gid uint32, shared bool, db engine.KVEngine) *Ro
 	if err == errNotFound {
 		// When starting from scratch populate the list with a dummy entry at term zero.
 		ents := make([]pb.Entry, 1)
-		ms.reset(ents)
+		err = ms.reset(ents)
+		if err != nil {
+			panic(err)
+		}
 	}
 	return ms
 }
@@ -88,8 +91,6 @@ func (ms *RocksStorage) parseIndex(key []byte) uint64 {
 func (ms *RocksStorage) reset(es []pb.Entry) error {
 	// Clean out the state.
 	batch := ms.wb
-	batch.Clear()
-
 	err := ms.deleteFrom(batch, 0)
 	if err != nil {
 		return err
@@ -98,7 +99,6 @@ func (ms *RocksStorage) reset(es []pb.Entry) error {
 	if err != nil {
 		return err
 	}
-	batch.Clear()
 
 	err = ms.writeEnts(batch, es)
 	if err != nil {
@@ -399,7 +399,6 @@ func (ms *RocksStorage) ApplySnapshot(snap pb.Snapshot) error {
 	ms.Unlock()
 
 	batch := ms.wb
-	batch.Clear()
 	e := pb.Entry{Term: snap.Metadata.Term, Index: snap.Metadata.Index}
 	data, err := e.Marshal()
 	if err != nil {
@@ -480,7 +479,9 @@ func (ms *RocksStorage) Compact(compactIndex uint64) error {
 }
 
 func (ms *RocksStorage) commitBatch(batch engine.WriteBatch) error {
-	return ms.entryDB.Write(batch)
+	err := ms.entryDB.Write(batch)
+	batch.Clear()
+	return err
 }
 
 // Append the new entries to storage.
@@ -489,7 +490,6 @@ func (ms *RocksStorage) Append(entries []pb.Entry) error {
 		return nil
 	}
 	batch := ms.wb
-	batch.Clear()
 	err := ms.addEntries(batch, entries)
 	if err != nil {
 		return err
@@ -550,7 +550,6 @@ func (ms *RocksStorage) writeEnts(batch engine.WriteBatch, es []pb.Entry) error 
 			if err != nil {
 				return err
 			}
-			batch.Clear()
 		}
 	}
 	return nil
