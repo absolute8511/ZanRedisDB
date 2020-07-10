@@ -63,14 +63,14 @@ func enableAutoBalance(t *testing.T, pduri string, enable bool) {
 	//gpdServer.pdCoord.SetBalanceInterval(0, 24)
 }
 
-func waitForLeader(t *testing.T, ns string, part int) (dataNodeWrapper, *node.NamespaceNode) {
+func waitForLeaderFromNodes(t *testing.T, ns string, part int, nodeList []dataNodeWrapper) (dataNodeWrapper, *node.NamespaceNode) {
 	start := time.Now()
 	for {
 		if time.Since(start) > time.Minute*3 {
 			t.Errorf("timeout while waiting leader")
 			break
 		}
-		for _, kv := range gkvList {
+		for _, kv := range nodeList {
 			nsNode := kv.s.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(part))
 			if nsNode == nil {
 				continue
@@ -83,6 +83,10 @@ func waitForLeader(t *testing.T, ns string, part int) (dataNodeWrapper, *node.Na
 		time.Sleep(time.Millisecond * 100)
 	}
 	return dataNodeWrapper{}, nil
+}
+
+func waitForLeader(t *testing.T, ns string, part int) (dataNodeWrapper, *node.NamespaceNode) {
+	return waitForLeaderFromNodes(t, ns, part, gkvList)
 }
 
 func waitForAllFullReady(t *testing.T, ns string, part int) {
@@ -1932,4 +1936,56 @@ func TestInstallSnapshotApplyRestoreFailed(t *testing.T) {
 	assert.True(t, err == nil || err == goredis.ErrNil)
 	assert.Equal(t, "1234", getV)
 	enableStaleRead(t, addr, false)
+}
+
+func TestSyncerWriteOnlyInitTrueLoadFromRegister(t *testing.T) {
+	testSyncerWriteOnlyLoadFromRegister(t, true)
+}
+
+func TestSyncerWriteOnlyInitFalseLoadFromRegister(t *testing.T) {
+	testSyncerWriteOnlyLoadFromRegister(t, false)
+}
+
+func testSyncerWriteOnlyLoadFromRegister(t *testing.T, syncerOnly bool) {
+	clusterName := "unit-test_syncer_write_only"
+	pd, dataNodes, dataDir := startTestCluster(t, syncerOnly, clusterName, pdHttpPort, 1, baseRedisPort+2000)
+	defer os.RemoveAll(dataDir)
+	defer pd.Stop()
+	defer dataNodes[0].s.Stop()
+
+	time.Sleep(time.Second)
+	ns := "test_cluster_start_init_syncer_write_only"
+	partNum := 1
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(dataNodes))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 1)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, _ := waitForLeaderFromNodes(t, ns, 0, dataNodes)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	test.Equal(t, syncerOnly, node.IsSyncerOnly())
+	// test restart (should ignore local config)
+	dataNodes[0].s.Stop()
+	dataNodes[0].s.Start()
+	dnw, _ = waitForLeaderFromNodes(t, ns, 0, dataNodes)
+	leader = dnw.s
+	assert.NotNil(t, leader)
+	test.Equal(t, syncerOnly, node.IsSyncerOnly())
+
+	dataNodes[0].s.Stop()
+	dataNodes[0].s.GetCoord().UpdateSyncerWriteOnly(!syncerOnly)
+	dataNodes[0].s.Start()
+	dnw, _ = waitForLeaderFromNodes(t, ns, 0, dataNodes)
+	leader = dnw.s
+	assert.NotNil(t, leader)
+	test.Equal(t, !syncerOnly, node.IsSyncerOnly())
+	dataNodes[0].s.Stop()
+
+	dataNodes[0].s.Start()
+	dnw, _ = waitForLeaderFromNodes(t, ns, 0, dataNodes)
+	leader = dnw.s
+	assert.NotNil(t, leader)
+	test.Equal(t, !syncerOnly, node.IsSyncerOnly())
 }

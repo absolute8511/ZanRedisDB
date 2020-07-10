@@ -103,9 +103,6 @@ func NewServer(conf ServerConfig) (*Server, error) {
 		common.DefaultSnapCatchup = conf.DefaultSnapCatchup
 	}
 
-	if conf.SyncerWriteOnly {
-		node.SetSyncerOnly(true)
-	}
 	if conf.LearnerRole != "" && conf.SyncerNormalInit {
 		sLog.Infof("server started as normal init")
 		node.SetSyncerNormalInit()
@@ -226,6 +223,38 @@ func NewServer(conf ServerConfig) (*Server, error) {
 	return s, nil
 }
 
+func (s *Server) getOrInitSyncerWriteOnly() error {
+	if s.conf.SyncerWriteOnly {
+		node.SetSyncerOnly(true)
+	}
+	initValue := node.IsSyncerOnly()
+	if s.dataCoord == nil {
+		return nil
+	}
+	// if etcd key is exist, then use the value in etcd. If not, we set it to the initValue and update to etcd
+	origV, err := s.dataCoord.GetSyncerWriteOnly()
+	if err == nil {
+		node.SetSyncerOnly(origV)
+		return nil
+	}
+	if err != cluster.ErrKeyNotFound {
+		return err
+	}
+	err = s.updateSyncerWriteOnlyToRegister(initValue)
+	if err != nil {
+		return err
+	}
+	node.SetSyncerOnly(initValue)
+	return nil
+}
+
+func (s *Server) updateSyncerWriteOnlyToRegister(isSyncerWriteOnly bool) error {
+	if s.dataCoord == nil {
+		return nil
+	}
+	return s.dataCoord.UpdateSyncerWriteOnly(isSyncerWriteOnly)
+}
+
 func (s *Server) Stop() {
 	sLog.Infof("server begin stopping")
 	s.nsMgr.BackupDB("", true)
@@ -329,6 +358,11 @@ func (s *Server) RestartAsStandalone(fullNamespace string) error {
 }
 
 func (s *Server) Start() {
+	err := s.getOrInitSyncerWriteOnly()
+	if err != nil {
+		sLog.Panicf("failed to init syncer write only state: %v", err.Error())
+	}
+
 	s.raftTransport.Start()
 	s.stopC = make(chan struct{})
 

@@ -36,6 +36,7 @@ const (
 	PD_ROOT_DIR            = "PDInfo"
 	PD_NODE_DIR            = "PDNodes"
 	PD_LEADER_SESSION      = "PDLeaderSession"
+	DataKVDir              = "DataKV"
 )
 
 const (
@@ -531,8 +532,36 @@ func (etcdReg *EtcdRegister) GetNamespaceMetaInfo(ns string) (NamespaceMetaInfo,
 	return parts[0].NamespaceMetaInfo, nil
 }
 
+func (etcdReg *EtcdRegister) GetKV(key string) (string, error) {
+	if key == "" {
+		return "", errors.New("data key can not be empty")
+	}
+	rk := path.Join(etcdReg.getClusterDataKVPath(), key)
+	rsp, err := etcdReg.client.Get(rk, false, false)
+	if err != nil {
+		if client.IsKeyNotFound(err) {
+			return "", ErrKeyNotFound
+		}
+		return "", err
+	}
+	return string(rsp.Node.Value), nil
+}
+
+func (etcdReg *EtcdRegister) SaveKV(key string, value string) error {
+	if key == "" || value == "" {
+		return errors.New("data key value can not be empty")
+	}
+	rk := path.Join(etcdReg.getClusterDataKVPath(), key)
+	_, err := etcdReg.client.Set(rk, value, 0)
+	return err
+}
+
 func (etcdReg *EtcdRegister) getClusterPath() string {
 	return path.Join("/", ROOT_DIR, etcdReg.clusterID)
+}
+
+func (etcdReg *EtcdRegister) getClusterDataKVPath() string {
+	return path.Join(etcdReg.getClusterPath(), DataKVDir)
 }
 
 func (etcdReg *EtcdRegister) getClusterMetaPath() string {

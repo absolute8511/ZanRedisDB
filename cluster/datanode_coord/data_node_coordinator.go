@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -121,10 +122,12 @@ func (dc *DataCoordinator) SetRegister(l cluster.DataNodeRegister) error {
 				cluster.CoordLog().Errorf("failed to init node register id: %v", err)
 				return err
 			}
-			err = dc.localNSMgr.SaveMachineRegID(dc.myNode.RegID)
-			if err != nil {
-				cluster.CoordLog().Errorf("failed to save register id: %v", err)
-				return err
+			if dc.localNSMgr != nil {
+				err = dc.localNSMgr.SaveMachineRegID(dc.myNode.RegID)
+				if err != nil {
+					cluster.CoordLog().Errorf("failed to save register id: %v", err)
+					return err
+				}
 			}
 		}
 		if dc.learnerRole == "" {
@@ -135,6 +138,37 @@ func (dc *DataCoordinator) SetRegister(l cluster.DataNodeRegister) error {
 		cluster.CoordLog().Infof("node start with register id: %v, learner role: %v", dc.myNode.RegID, dc.learnerRole)
 	}
 	return nil
+}
+
+func (dc *DataCoordinator) UpdateSyncerWriteOnly(v bool) error {
+	if dc.register == nil {
+		return errors.New("missing register")
+	}
+	key := dc.myNode.GetID() + "_kv:syncer_write_only"
+	vstr := "false"
+	if v {
+		vstr = "true"
+	}
+	return dc.register.SaveKV(key, vstr)
+}
+
+func (dc *DataCoordinator) GetSyncerWriteOnly() (bool, error) {
+	if dc.register == nil {
+		return false, errors.New("missing register")
+	}
+	key := dc.myNode.GetID() + "_kv:syncer_write_only"
+	v, err := dc.register.GetKV(key)
+	if err != nil {
+		return false, err
+	}
+
+	if v == "true" {
+		return true, nil
+	}
+	if v == "false" {
+		return false, nil
+	}
+	return false, fmt.Errorf("invalid value : " + v)
 }
 
 func (dc *DataCoordinator) Start() error {
@@ -620,6 +654,9 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 		}
 
 		// check local namespaces with cluster to remove the unneed data
+		if dc.localNSMgr == nil {
+			return
+		}
 		tmpChecks := dc.localNSMgr.GetNamespaces()
 		allIndexSchemas := make(map[string]map[string]*common.IndexSchema)
 		allNamespaces, _, err := dc.register.GetAllNamespaces()
@@ -1321,7 +1358,9 @@ func (dc *DataCoordinator) prepareLeavingCluster() {
 	}
 
 	cluster.CoordLog().Infof("prepare leaving finished.")
-	dc.localNSMgr.Stop()
+	if dc.localNSMgr != nil {
+		dc.localNSMgr.Stop()
+	}
 }
 
 func (dc *DataCoordinator) Stats(namespace string, part int) *cluster.CoordStats {

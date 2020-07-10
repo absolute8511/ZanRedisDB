@@ -255,5 +255,10 @@ type DataNodeRegister interface {
 	// while became the new leader, update to my node
 	UpdateNamespaceLeader(ns string, partition int, rl RealLeader, oldGen EpochType) (EpochType, error)
 	GetNamespaceLeader(ns string, partition int) (string, EpochType, error)
+	// the saved key should have the node info prefix to avoid conflict with each other data node
+	// if it is designed to shared between data node, should use carefully with concurrent modify
+	// note: the data key will be under the cluster root data path
+	SaveKV(key string, value string) error
+	GetKV(key string) (string, error)
 	NewRegisterNodeID() (uint64, error)
 }

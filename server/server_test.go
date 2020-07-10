@@ -333,6 +333,7 @@ func waitSyncedWithCommit(t *testing.T, w time.Duration, leaderci uint64, node *
 		}
 	}
 }
+
 func TestStartClusterWithLogSyncer(t *testing.T) {
 	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
