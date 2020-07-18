@@ -117,7 +117,7 @@ func NewSlowLimiter(ns string) *SlowLimiter {
 	l := 100
 	for i := 0; i < len(his); i++ {
 		his[i] = make(map[string]int64)
-		q[i] = make(chan struct{}, l+5)
+		q[i] = make(chan struct{}, l+3)
 		l = l / 5
 	}
 
