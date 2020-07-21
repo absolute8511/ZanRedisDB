@@ -103,10 +103,6 @@ func NewServer(conf ServerConfig) (*Server, error) {
 		common.DefaultSnapCatchup = conf.DefaultSnapCatchup
 	}
 
-	if conf.LearnerRole != "" && conf.SyncerNormalInit {
-		sLog.Infof("server started as normal init")
-		node.SetSyncerNormalInit()
-	}
 	if conf.UseRedisV2 {
 		node.UseRedisV2 = true
 	}
@@ -255,6 +251,40 @@ func (s *Server) updateSyncerWriteOnlyToRegister(isSyncerWriteOnly bool) error {
 	return s.dataCoord.UpdateSyncerWriteOnly(isSyncerWriteOnly)
 }
 
+func (s *Server) getOrInitSyncerNormalInit() error {
+	if s.conf.LearnerRole != "" && s.conf.SyncerNormalInit {
+		sLog.Infof("server started as normal init")
+		node.SetSyncerNormalInit(true)
+	}
+	initValue := node.IsSyncerNormalInit()
+	if s.dataCoord == nil {
+		return nil
+	}
+	// if etcd key is exist, then use the value in etcd. If not, we set it to the initValue and update to etcd
+	origV, err := s.dataCoord.GetSyncerNormalInit()
+	if err == nil {
+		sLog.Infof("server started normal init state is: %v", origV)
+		node.SetSyncerNormalInit(origV)
+		return nil
+	}
+	if err != cluster.ErrKeyNotFound {
+		return err
+	}
+	err = s.updateSyncerNormalInitToRegister(initValue)
+	if err != nil {
+		return err
+	}
+	node.SetSyncerNormalInit(initValue)
+	return nil
+}
+
+func (s *Server) updateSyncerNormalInitToRegister(v bool) error {
+	if s.dataCoord == nil {
+		return nil
+	}
+	return s.dataCoord.UpdateSyncerNormalInit(v)
+}
+
 func (s *Server) Stop() {
 	sLog.Infof("server begin stopping")
 	s.nsMgr.BackupDB("", true)
@@ -361,6 +391,10 @@ func (s *Server) Start() {
 	err := s.getOrInitSyncerWriteOnly()
 	if err != nil {
 		sLog.Panicf("failed to init syncer write only state: %v", err.Error())
+	}
+	err = s.getOrInitSyncerNormalInit()
+	if err != nil {
+		sLog.Panicf("failed to init syncer normal init state: %v", err.Error())
 	}
 
 	s.raftTransport.Start()

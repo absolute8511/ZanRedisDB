@@ -74,6 +74,13 @@ type RaftStatus struct {
 	RaftStat   CustomRaftStatus     `json:"raft_stat,omitempty"`
 }
 
+func toBoolParam(param string) bool {
+	if param == "true" {
+		return true
+	}
+	return false
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	s.router.ServeHTTP(w, req)
 }
@@ -463,6 +470,45 @@ func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps htt
 	return nil, nil
 }
 
+func (s *Server) getSyncerRunnings(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	if s.dataCoord == nil {
+		return nil, nil
+	}
+	runnings, err := s.dataCoord.GetCurrentNsWithLearners()
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return struct {
+		Runnings []string `json:"runnings"`
+	}{
+		Runnings: runnings,
+	}, nil
+}
+
+func (s *Server) getSyncerNormalInit(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	return node.IsSyncerNormalInit(), nil
+}
+
+func (s *Server) doSetSyncerNormalInit(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	param := reqParams.Get("enable")
+	if param == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	}
+	boolParam := toBoolParam(param)
+	sLog.Infof("syncer normal init state changed to : %v", param)
+	err = s.updateSyncerNormalInitToRegister(boolParam)
+	if err != nil {
+		sLog.Warningf("failed to set state: %v", err.Error())
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	node.SetSyncerNormalInit(boolParam)
+	return nil, nil
+}
+
 func (s *Server) getSyncerOnlyState(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	return node.IsSyncerOnly(), nil
 }
@@ -476,22 +522,14 @@ func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps ht
 	if param == "" {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
 	}
+	boolParam := toBoolParam(param)
 	sLog.Infof("syncer only state changed to : %v", param)
-	if param == "true" {
-		err := s.updateSyncerWriteOnlyToRegister(true)
-		if err != nil {
-			sLog.Warningf("failed to set syncer only state: %v", err.Error())
-			return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
-		}
-		node.SetSyncerOnly(true)
-	} else {
-		err := s.updateSyncerWriteOnlyToRegister(false)
-		if err != nil {
-			sLog.Warningf("failed to set syncer only state: %v", err.Error())
-			return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
-		}
-		node.SetSyncerOnly(false)
+	err = s.updateSyncerWriteOnlyToRegister(boolParam)
+	if err != nil {
+		sLog.Warningf("failed to set syncer only state: %v", err.Error())
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
 	}
+	node.SetSyncerOnly(boolParam)
 	return nil, nil
 }
 
@@ -849,6 +887,9 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/conf/get", common.Decorate(s.doGetDynamicConf, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
+	router.Handle("POST", "/syncer/normalinit", common.Decorate(s.doSetSyncerNormalInit, log, common.V1))
+	router.Handle("GET", "/syncer/normalinit", common.Decorate(s.getSyncerNormalInit, log, common.V1))
+	router.Handle("GET", "/syncer/runnings", common.Decorate(s.getSyncerRunnings, log, common.V1))
 
 	router.Handle("POST", "/topn/enable/:namespace", common.Decorate(s.doEnableTopn, log, common.V1))
 	router.Handle("POST", "/topn/disable/:namespace", common.Decorate(s.doDisableTopn, log, common.V1))

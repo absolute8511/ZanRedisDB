@@ -291,6 +291,10 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	return s, nil
 }
 
+func (nd *KVNode) GetLearnerRole() string {
+	return nd.machineConfig.LearnerRole
+}
+
 func (nd *KVNode) GetFullName() string {
 	return nd.ns
 }

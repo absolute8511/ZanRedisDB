@@ -81,6 +81,9 @@ func (s *Server) initHttpHandler() {
 	router.Handle("DELETE", "/namespace/rmlearner", common.Decorate(s.doRemoveNamespaceLearner, log, common.V1))
 
 	// cluster prefix url means only handled by leader of pd
+	router.Handle("POST", "/cluster/learner/stop", common.Decorate(s.doStopLearner, log, common.V1))
+	router.Handle("POST", "/cluster/learner/start", common.Decorate(s.doStartLearner, log, common.V1))
+
 	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
 	router.Handle("POST", "/cluster/balance", common.Decorate(s.doClusterSwitchBalance, log, common.V1))
 	router.Handle("POST", "/cluster/pd/tombstone", common.Decorate(s.doClusterTombstonePD, log, common.V1))
@@ -701,6 +704,22 @@ func (s *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request,
 	}
 	return nil, nil
 
+}
+
+func (s *Server) doStopLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SwitchStartLearner(false)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
+}
+
+func (s *Server) doStartLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SwitchStartLearner(true)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
 }
 
 func (s *Server) doRemoveNamespaceLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
