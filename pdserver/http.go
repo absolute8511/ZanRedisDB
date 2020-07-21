@@ -80,10 +80,9 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/querytable/stats/:table", common.Decorate(s.doQueryTableStats, debugLog, common.V1))
 	router.Handle("DELETE", "/namespace/rmlearner", common.Decorate(s.doRemoveNamespaceLearner, log, common.V1))
 
+	router.Handle("POST", "/learner/stop", common.Decorate(s.doStopLearner, log, common.V1))
+	router.Handle("POST", "/learner/start", common.Decorate(s.doStartLearner, log, common.V1))
 	// cluster prefix url means only handled by leader of pd
-	router.Handle("POST", "/cluster/learner/stop", common.Decorate(s.doStopLearner, log, common.V1))
-	router.Handle("POST", "/cluster/learner/start", common.Decorate(s.doStartLearner, log, common.V1))
-
 	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
 	router.Handle("POST", "/cluster/balance", common.Decorate(s.doClusterSwitchBalance, log, common.V1))
 	router.Handle("POST", "/cluster/pd/tombstone", common.Decorate(s.doClusterTombstonePD, log, common.V1))

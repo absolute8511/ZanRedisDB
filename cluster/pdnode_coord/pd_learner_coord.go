@@ -58,9 +58,6 @@ func (pdCoord *PDCoordinator) SwitchStartLearner(enable bool) error {
 	if pdCoord.learnerRole == "" {
 		return nil
 	}
-	if pdCoord.leaderNode.GetID() != pdCoord.myNode.GetID() {
-		return ErrNotLeader
-	}
 	value := "false"
 	if enable {
 		value = "true"
