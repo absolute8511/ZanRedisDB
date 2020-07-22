@@ -65,6 +65,12 @@ func (pdCoord *PDCoordinator) SwitchStartLearner(enable bool) error {
 	return pdCoord.register.SaveKV(pdRegisterKVLearnerStartPrefix+pdCoord.learnerRole, value)
 }
 
+func (pdCoord *PDCoordinator) GetLearnerRunningState() (bool, error) {
+	v, err := pdCoord.register.GetKV(pdRegisterKVLearnerStartPrefix + pdCoord.learnerRole)
+	// we use not equal false to make sure the false running is always determined
+	return v != "false", err
+}
+
 func (pdCoord *PDCoordinator) doCheckNamespacesForLearner(monitorChan chan struct{}) {
 	needLearner, err := pdCoord.register.GetKV(pdRegisterKVLearnerStartPrefix + pdCoord.learnerRole)
 	if err != nil {
