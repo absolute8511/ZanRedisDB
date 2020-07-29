@@ -17,6 +17,7 @@ type ServerConfig struct {
 	ProfilePort          int               `json:"profile_port"`
 	DataDir              string            `json:"data_dir"`
 	LogDir               string            `json:"log_dir"`
+	RemoteLogAddr        string            `json:"remote_log_addr"`
 	DataRsyncModule      string            `json:"data_rsync_module"`
 	LocalRaftAddr        string            `json:"local_raft_addr"`
 	Tags                 map[string]string `json:"tags"`

@@ -146,6 +146,7 @@ func NewServer(conf ServerConfig) (*Server, error) {
 		myNode.Tags[k] = tag
 	}
 	os.MkdirAll(conf.DataDir, common.DIR_PERM)
+	slow.SetRemoteLogger(conf.RemoteLogAddr)
 
 	s := &Server{
 		conf:       conf,
