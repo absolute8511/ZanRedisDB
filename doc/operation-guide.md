@@ -297,6 +297,7 @@ restore -lookup lookuplist -data restore  [-ns namespace -table table_name -qps 
 
 ### 初始化
 
+zankv 0.9.0版本之前
 - B机房集群用于同步, 使用相同配置, 更改其中的cluster_id和A机房不同, 以及etcd地址使用B机房, B机房zankv配置增加一项: "syncer_write_only": true, 逐一启动
 - B机房调用API创建初始化namespace, 保持和A机房一样
 - B机房选择2台机子做同步程序部署. 用于A到B机房同步
@@ -306,16 +307,37 @@ restore -lookup lookuplist -data restore  [-ns namespace -table table_name -qps 
 - 等待数据同步初始化
 - 反向同步, 配置对应修改好, 不启动
 
+zankv 0.9.0版本以及更新版本之后
+- B机房集群用于同步, 使用相同配置, 更改其中的cluster_id和A机房不同, 以及etcd地址使用B机房, B机房zankv配置增加一项: "syncer_write_only": true, 逐一启动
+- B机房调用API创建初始化namespace, 保持和A机房一样
+- B机房选择2台机子做同步程序部署. 用于A到B机房同步
+- 反向同步部署到A机房, 用于切换后从B到A同步. 
+- B机房部署的同步管理程序placedriver和数据同步程序zankv都和A机房配置一样, 都需要增加 learner_role="role_log_syncer" 配置, 表明该程序只做数据同步, 同步程序placedriver只需部署一台, 同步程序zankv部署2台做主备, 同步程序zankv, 配置还增加需要同步的目标集群(B机房集群)地址 "remote_sync_cluster": "remoteip:port"
+- 启动同步placedriver, 再启动2台同步程序zankv. 
+- 发送API部署在B机房的同步管理程序placedriver, 启动A到B集群的同步: `curl -XPOST "127.0.0.1:18001/learner/start"`
+- 等待数据同步初始化
+- 反向同步, 配置对应修改好, 启动后, 发送API命令配置为禁用状态, `curl -XPOST "127.0.0.1:18001/learner/stop"`
+
 部署好之后, 架构如下:
 ![zankv-cluster-sync](resource/zankv-sync-cluster.png)
 
 ### 机房正常切换
 
+zankv 0.9.0版本之前
 - A机房集群禁止客户端写入, 所有节点调用API设置只允许同步程序写入 POST /synceronly?enable=true
 - 观察数据同步完成,  停止用于同步A集群到B机房的数据同步程序和同步管理程序. (停同步程序, 向管理程序发送删除raft learner请求, 清理磁盘数据)
 - 启动事先准备好的反向同步, 用于同步B集群到A机房, 注意配置修改, 增加 syncer_normal_init=true用于正常初始化
 - 数据同步程序会自动初始化同步数据(获取B集群各个分区最新的term-index数据, 设置A集群的同步起始term-index为B集群的最新term-index), 观察同步启动初始化完成后, 去掉syncer_normal_init配置重启数据同步程序.
 - B集群API设置允许非同步程序写入. B机房集群开始接收新的客户端写入 POST /synceronly?enable=false, 并去掉配置文件中的 "syncer_write_only": true
+
+zankv 0.9.0版本以及更新版本之后
+- A机房集群禁止客户端写入, 所有节点调用API设置只允许同步程序写入 POST /synceronly?enable=true
+- 观察数据同步完成, 发送API给部署在B机房的同步管理程序placedriver, 停止用于同步A集群到B机房的数据同步并清理同步程序的磁盘数据. `curl -XPOST "127.0.0.1:18001/learner/stop"`
+- 观察等待数据同步停止, 使用 `curl "127.0.0.1:3801/syncer/runnings"` 查看同步程序的运行列表是否为空.
+- 确认A到B同步停止后, 先发送API给部署在A机房的同步节点, 初始化反向同步状态: `curl -XPOST "127.0.0.1:3801/syncer/normalinit?enable=true"`
+- 然后发送API给部署在A机房的同步管理程序placedriver, 启动事先准备好的反向同步, 用于同步B集群到A机房.`curl -XPOST "127.0.0.1:18001/learner/start"`
+- 数据同步程序会自动初始化同步数据(获取B集群各个分区最新的term-index数据, 设置A集群的同步起始term-index为B集群的最新term-index), 观察同步启动初始化完成后, 使用API重置syncer_normal_init状态, `curl -XPOST "127.0.0.1:3801/syncer/normalinit?enable=false"`.
+- B集群API设置允许非同步程序写入. B机房集群开始接收新的客户端写入 POST /synceronly?enable=false
 
 切换完成
 

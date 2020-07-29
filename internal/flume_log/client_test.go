@@ -8,7 +8,7 @@ import (
 )
 
 func TestClient_Info(t *testing.T) {
-	client := NewClient("127.0.0.1:5140", "zankv", "zankv_slowlogs")
+	client := NewClient("127.0.0.1:5140", "zankv", "zankv_slowlog")
 	detail := make(map[string]interface{})
 
 	detail["Scope"] = "youzan:test"
@@ -28,5 +28,6 @@ func TestClient_Info(t *testing.T) {
 	detail["Note"] = "note_err"
 	err = client.Error("测试 error", detail)
 	assert.Nil(t, err)
-	time.Sleep(time.Second)
+	// wait remote log flush
+	time.Sleep(time.Second * 10)
 }

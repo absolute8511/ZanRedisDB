@@ -85,6 +85,8 @@ func TestSlowLogRemote(t *testing.T) {
 	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", "slow for large note"))
 	t.Log(str)
 	assert.Equal(t, true, logged)
+	// wait remote log flush
+	time.Sleep(time.Second * 10)
 }
 
 func BenchmarkLogLarge(b *testing.B) {
