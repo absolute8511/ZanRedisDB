@@ -26,12 +26,20 @@ const (
 	logSendBufferLen = 512
 )
 
-var syncerNormalInit = false
+var syncerNormalInit int32
 
 var remoteSnapRecoverCnt int64
 
-func SetSyncerNormalInit() {
-	syncerNormalInit = true
+func SetSyncerNormalInit(enable bool) {
+	if enable {
+		atomic.StoreInt32(&syncerNormalInit, 1)
+	} else {
+		atomic.StoreInt32(&syncerNormalInit, 0)
+	}
+}
+
+func IsSyncerNormalInit() bool {
+	return atomic.LoadInt32(&syncerNormalInit) == 1
 }
 
 var syncLearnerRecvStats metric.WriteStats
@@ -477,7 +485,7 @@ func (sm *logSyncerSM) PrepareSnapshot(raftSnapshot raftpb.Snapshot, stop chan s
 		return nil
 	}
 
-	if syncerNormalInit {
+	if IsSyncerNormalInit() {
 		// set term-index to remote cluster with skipped snap so we can
 		// avoid transfer the snapshot while the two clusters have the exactly same logs
 		err := sm.lgSender.sendAndWaitApplySkippedSnap(raftSnapshot, stop)

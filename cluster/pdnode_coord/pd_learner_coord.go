@@ -8,6 +8,10 @@ import (
 	"github.com/youzan/ZanRedisDB/cluster"
 )
 
+const (
+	pdRegisterKVLearnerStartPrefix = "placedriver:learner:need_start_learner:"
+)
+
 func (pdCoord *PDCoordinator) checkNamespacesForLearner(monitorChan chan struct{}) {
 	ticker := time.NewTicker(nsCheckLearnerInterval)
 	defer func() {
@@ -28,11 +32,72 @@ func (pdCoord *PDCoordinator) checkNamespacesForLearner(monitorChan chan struct{
 	}
 }
 
+func (pdCoord *PDCoordinator) cleanAllLearners(ns string) error {
+	oldMeta, err := pdCoord.register.GetNamespaceMetaInfo(ns)
+	if err != nil {
+		cluster.CoordLog().Infof("get namespace key %v failed :%v", ns, err)
+		return err
+	}
+	for i := 0; i < oldMeta.PartitionNum; i++ {
+		origNSInfo, err := pdCoord.register.GetNamespacePartInfo(ns, i)
+		if err != nil {
+			cluster.CoordLog().Infof("get namespace %v info failed :%v", ns, err)
+			continue
+		}
+		err = pdCoord.removeNsAllLearners(origNSInfo)
+		if err != nil {
+			cluster.CoordLog().Infof("namespace %v-%v remove learner failed :%v", ns, i, err.Error())
+			return err
+		}
+	}
+	return nil
+}
+
+// use this to switch start or stop learner without restart the node
+func (pdCoord *PDCoordinator) SwitchStartLearner(enable bool) error {
+	if pdCoord.learnerRole == "" {
+		return nil
+	}
+	value := "false"
+	if enable {
+		value = "true"
+	}
+	return pdCoord.register.SaveKV(pdRegisterKVLearnerStartPrefix+pdCoord.learnerRole, value)
+}
+
+func (pdCoord *PDCoordinator) GetLearnerRunningState() (bool, error) {
+	v, err := pdCoord.register.GetKV(pdRegisterKVLearnerStartPrefix + pdCoord.learnerRole)
+	// we use not equal false to make sure the false running is always determined
+	return v != "false", err
+}
+
 func (pdCoord *PDCoordinator) doCheckNamespacesForLearner(monitorChan chan struct{}) {
+	needLearner, err := pdCoord.register.GetKV(pdRegisterKVLearnerStartPrefix + pdCoord.learnerRole)
+	if err != nil {
+		cluster.CoordLog().Infof("learner start state (should be one of true/false) read error: %v", err.Error())
+		return
+	}
 	namespaces := []cluster.PartitionMetaInfo{}
 	allNamespaces, _, commonErr := pdCoord.register.GetAllNamespaces()
 	if commonErr != nil {
 		cluster.CoordLog().Infof("scan namespaces failed. %v", commonErr)
+		return
+	}
+	if needLearner == "false" {
+		// remove learners from meta info
+		// to make sure the learner node is stopped, you should
+		// query the api on the learner node.
+		for ns, _ := range allNamespaces {
+			err = pdCoord.cleanAllLearners(ns)
+			if err != nil {
+				cluster.CoordLog().Infof("clean namespace %s learner failed. %v", ns, err.Error())
+				return
+			}
+		}
+		return
+	}
+	if needLearner != "true" {
+		cluster.CoordLog().Infof("unexpected learner start state (should be one of true/false) : %v", needLearner)
 		return
 	}
 	for _, parts := range allNamespaces {

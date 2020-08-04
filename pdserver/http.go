@@ -80,6 +80,9 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/querytable/stats/:table", common.Decorate(s.doQueryTableStats, debugLog, common.V1))
 	router.Handle("DELETE", "/namespace/rmlearner", common.Decorate(s.doRemoveNamespaceLearner, log, common.V1))
 
+	router.Handle("POST", "/learner/stop", common.Decorate(s.doStopLearner, log, common.V1))
+	router.Handle("POST", "/learner/start", common.Decorate(s.doStartLearner, log, common.V1))
+	router.Handle("GET", "/learner/state", common.Decorate(s.getLearnerRunningState, log, common.V1))
 	// cluster prefix url means only handled by leader of pd
 	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
 	router.Handle("POST", "/cluster/balance", common.Decorate(s.doClusterSwitchBalance, log, common.V1))
@@ -701,6 +704,30 @@ func (s *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request,
 	}
 	return nil, nil
 
+}
+
+func (s *Server) doStopLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SwitchStartLearner(false)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
+}
+
+func (s *Server) getLearnerRunningState(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	v, err := s.pdCoord.GetLearnerRunningState()
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return v, nil
+}
+
+func (s *Server) doStartLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SwitchStartLearner(true)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
 }
 
 func (s *Server) doRemoveNamespaceLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {

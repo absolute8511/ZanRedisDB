@@ -141,10 +141,26 @@ func (dc *DataCoordinator) SetRegister(l cluster.DataNodeRegister) error {
 }
 
 func (dc *DataCoordinator) UpdateSyncerWriteOnly(v bool) error {
+	return dc.updateRegisterKV("syncer_write_only", v)
+}
+
+func (dc *DataCoordinator) GetSyncerWriteOnly() (bool, error) {
+	return dc.getRegisterKV("syncer_write_only")
+}
+
+func (dc *DataCoordinator) UpdateSyncerNormalInit(v bool) error {
+	return dc.updateRegisterKV("syncer_normal_init", v)
+}
+
+func (dc *DataCoordinator) GetSyncerNormalInit() (bool, error) {
+	return dc.getRegisterKV("syncer_normal_init")
+}
+
+func (dc *DataCoordinator) updateRegisterKV(k string, v bool) error {
 	if dc.register == nil {
 		return errors.New("missing register")
 	}
-	key := dc.myNode.GetID() + "_kv:syncer_write_only"
+	key := dc.myNode.GetID() + "_kv:" + k
 	vstr := "false"
 	if v {
 		vstr = "true"
@@ -152,11 +168,11 @@ func (dc *DataCoordinator) UpdateSyncerWriteOnly(v bool) error {
 	return dc.register.SaveKV(key, vstr)
 }
 
-func (dc *DataCoordinator) GetSyncerWriteOnly() (bool, error) {
+func (dc *DataCoordinator) getRegisterKV(k string) (bool, error) {
 	if dc.register == nil {
 		return false, errors.New("missing register")
 	}
-	key := dc.myNode.GetID() + "_kv:syncer_write_only"
+	key := dc.myNode.GetID() + "_kv:" + k
 	v, err := dc.register.GetKV(key)
 	if err != nil {
 		return false, err

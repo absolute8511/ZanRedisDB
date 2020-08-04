@@ -73,6 +73,22 @@ func TestSlowLogLevel(t *testing.T) {
 	assert.Equal(t, false, logged)
 }
 
+func TestSlowLogRemote(t *testing.T) {
+	SetLogger(common.LOG_INFO, common.NewDefaultLogger("test"))
+	SetRemoteLogger("127.0.0.1:5140")
+	str, logged := LogSlowDBWrite(dbWriteSlow, NewSlowLogInfo("test", "testkey", "slow db write note"))
+	t.Log(str)
+	assert.Equal(t, true, logged)
+	str, logged = LogSlowForSteps(dbWriteSlow/4, common.LOG_ERR, NewSlowLogInfo("test", "testkey", "slow for steps note"), dbWriteSlow/2, dbWriteSlow)
+	t.Log(str)
+	assert.Equal(t, true, logged)
+	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", "slow for large note"))
+	t.Log(str)
+	assert.Equal(t, true, logged)
+	// wait remote log flush
+	time.Sleep(time.Second * 10)
+}
+
 func BenchmarkLogLarge(b *testing.B) {
 	SetLogger(common.LOG_INFO, common.NewDefaultLogger("test"))
 

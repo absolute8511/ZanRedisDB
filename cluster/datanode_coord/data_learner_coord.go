@@ -10,6 +10,46 @@ import (
 	node "github.com/youzan/ZanRedisDB/node"
 )
 
+// GetCurrentNsWithLearners will return all currently namespaces which have running learners,
+// we can use this to check if any remaining learners still running in the namespace (even the register is removed).
+func (dc *DataCoordinator) GetCurrentNsWithLearners() ([]string, error) {
+	nsList := make([]string, 0)
+	tmpChecks := dc.localNSMgr.GetNamespaces()
+	for name, ns := range tmpChecks {
+		if ns.Node == nil {
+			continue
+		}
+		if ns.Node.GetLearnerRole() != "" {
+			nsList = append(nsList, name)
+		}
+	}
+	if dc.register == nil {
+		return nsList, nil
+	}
+	// check both local running and the meta for sure all learners will be included
+	namespaceMap, _, err := dc.register.GetAllNamespaces()
+	if err != nil {
+		if err == cluster.ErrKeyNotFound {
+			return nsList, nil
+		}
+		return nil, err
+	}
+	for ns, parts := range namespaceMap {
+		for pid, pinfo := range parts {
+			lrns := pinfo.LearnerNodes
+			if lrns == nil {
+				continue
+			}
+			nodes, ok := lrns[dc.learnerRole]
+			if !ok || len(nodes) == 0 {
+				continue
+			}
+			nsList = append(nsList, common.GetNsDesp(ns, pid))
+		}
+	}
+	return nsList, nil
+}
+
 func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 	if dc.localNSMgr == nil {
 		cluster.CoordLog().Infof("no namespace manager")

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/internal/flume_log"
 )
 
 // merged and formatted slow logs for write or large collections
@@ -15,6 +16,19 @@ const (
 	collectionLargeLen     = 5000
 	dbWriteSlow            = time.Millisecond * 100
 )
+
+const (
+	appName = "zankv"
+	logName = "zankv_slowlog"
+)
+
+var remoteLog *flume_log.RemoteLogClient
+
+func SetRemoteLogger(remote string) {
+	if remote != "" {
+		remoteLog = flume_log.NewClient(remote, appName, logName)
+	}
+}
 
 var sl = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 
@@ -95,6 +109,9 @@ func LogSlowDBWrite(cost time.Duration, si SlowLogInfo) (string, bool) {
 			si.Scope, cost, si.Key, si.Note)
 
 		sl.InfoDepth(1, str)
+		if remoteLog != nil {
+			remoteLog.Warn(str, &si)
+		}
 		return str, true
 	}
 	return "", false
@@ -108,6 +125,10 @@ func LogDebugSlowWrite(cost time.Duration, thres time.Duration, lvFor int32, si 
 		str := fmt.Sprintf("[SLOW_LOGS] debug slow write in scope %v, cost: %v, note: %v",
 			si.Scope, cost, si.Note)
 		sl.InfoDepth(1, str)
+
+		if remoteLog != nil {
+			remoteLog.Info(str, &si)
+		}
 		return str, true
 	}
 	return "", false
@@ -124,6 +145,10 @@ func LogSlowForSteps(thres time.Duration, lvFor int32, si SlowLogInfo, costList 
 		str := fmt.Sprintf("[SLOW_LOGS] steps slow in scope %v, cost list: %v, note: %v",
 			si.Scope, costList, si.Note)
 		sl.InfoDepth(1, str)
+
+		if remoteLog != nil {
+			remoteLog.Info(str, &si)
+		}
 		return str, true
 	}
 	return "", false
@@ -143,6 +168,10 @@ func LogLargeCollection(sz int, si SlowLogInfo) (string, bool) {
 				si.Scope, sz, si.Key, si.Note)
 			sl.InfoDepth(1, str)
 			updateLastLogCollTime(si)
+
+			if remoteLog != nil {
+				remoteLog.Info(str, &si)
+			}
 			return str, true
 		}
 	}
@@ -154,6 +183,10 @@ func LogLargeCollection(sz int, si SlowLogInfo) (string, bool) {
 		sl.InfoDepth(1, str)
 		if lv <= common.LOG_INFO {
 			updateLastLogCollTime(si)
+		}
+
+		if remoteLog != nil {
+			remoteLog.Info(str, &si)
 		}
 		return str, true
 	}
