@@ -1031,10 +1031,12 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	if cost >= raftSlow/2 {
 		rc.Infof("raft persist state slow: %v, cost: %v", len(rd.Entries), cost)
 	}
-	metric.RaftWriteLatency.With(ps.Labels{
-		"namespace": rc.Descrp(),
-		"step":      "raft_persist_commit_entries",
-	}).Observe(float64(cost.Milliseconds()))
+	if cost >= time.Millisecond {
+		metric.RaftWriteLatency.With(ps.Labels{
+			"namespace": rc.Descrp(),
+			"step":      "raft_persist_commit_entries",
+		}).Observe(float64(cost.Milliseconds()))
+	}
 
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		// we need to notify to tell that the snapshot has been perisisted onto the disk
@@ -1054,10 +1056,12 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	if cost3 > raftSlow/2 {
 		rc.Infof("raft append commit entries slow: %v, cost: %v", len(rd.Entries), cost3)
 	}
-	metric.RaftWriteLatency.With(ps.Labels{
-		"namespace": rc.Descrp(),
-		"step":      "raft_append_commit_entries_to_storage",
-	}).Observe(float64(cost3.Milliseconds()))
+	if cost3 >= time.Millisecond {
+		metric.RaftWriteLatency.With(ps.Labels{
+			"namespace": rc.Descrp(),
+			"step":      "raft_append_commit_entries_to_storage",
+		}).Observe(float64(cost3.Milliseconds()))
+	}
 
 	if !isMeNewLeader {
 		raftDone <- struct{}{}

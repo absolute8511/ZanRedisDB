@@ -76,6 +76,10 @@ var (
 		Name: "read_cmd_total",
 		Help: "redis read command total counter",
 	})
+	WriteCmdCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "write_cmd_total",
+		Help: "redis write command total counter",
+	}, []string{"namespace"})
 
 	CollectionLenDist = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "collection_length_dist",

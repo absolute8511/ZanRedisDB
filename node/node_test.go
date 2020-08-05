@@ -35,13 +35,13 @@ func TestWaitReqPools(t *testing.T) {
 	//assert.Equal(t, minPoolIDLen*2*2*2, cap(wr.ids))
 	//wr = wrPools.getWaitReq(minPoolIDLen * 2 * 2 * 2)
 	//assert.Equal(t, minPoolIDLen*2*2*2, cap(wr.ids))
-	wr.release()
+	wr.release(true)
 	//wr = wrPools.getWaitReq(maxPoolIDLen)
 	//assert.Equal(t, minPoolIDLen*int(math.Pow(float64(2), float64(waitPoolSize-1))), cap(wr.ids))
 	//wr.release()
 	wr = wrPools.getWaitReq(maxPoolIDLen + 1)
 	assert.Equal(t, maxPoolIDLen+1, cap(wr.reqs.Reqs))
-	wr.release()
+	wr.release(true)
 }
 
 func BenchmarkBatchRequestMarshal(b *testing.B) {

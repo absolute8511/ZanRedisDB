@@ -115,13 +115,17 @@ type waitReqHeaders struct {
 	pool *sync.Pool
 }
 
-func (wrh *waitReqHeaders) release() {
+func (wrh *waitReqHeaders) release(reuseBuf bool) {
 	if wrh != nil {
 		wrh.wr = nil
 		if wrh.pool != nil {
 			wrh.reqs.Reqs = wrh.reqs.Reqs[:0]
-			if wrh.buf != nil {
-				wrh.buf.Reset()
+			if reuseBuf {
+				if wrh.buf != nil {
+					wrh.buf.Reset()
+				}
+			} else {
+				wrh.buf = &bytes.Buffer{}
 			}
 			wrh.pool.Put(wrh)
 		}
@@ -547,9 +551,10 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 		// buffer will be reused by raft
 		n, err := wrh.reqs.MarshalTo(b[:needSize])
 		if err != nil {
-			wrh.release()
+			wrh.release(true)
 			return nil, err
 		}
+
 		rbuf := make([]byte, n)
 		copy(rbuf, b[:n])
 		e.Data = rbuf
@@ -564,7 +569,7 @@ func (nd *KVNode) ProposeInternal(ctx context.Context, irr InternalRaftRequest, 
 			"error_info": "raft_propose_failed",
 		}).Inc()
 		nd.w.Trigger(irr.Header.ID, err)
-		wrh.release()
+		wrh.release(false)
 		return nil, err
 	}
 	proposalCost := time.Since(start)
@@ -699,9 +704,14 @@ func (nd *KVNode) ProposeRawAndWaitFromSyncer(reqList *BatchInternalRaftRequest,
 func (nd *KVNode) UpdateWriteStats(vSize int64, latencyUs int64) {
 	nd.clusterWriteStats.UpdateWriteStats(vSize, latencyUs)
 
-	metric.ClusterWriteLatency.With(ps.Labels{
+	if latencyUs >= time.Millisecond.Microseconds() {
+		metric.ClusterWriteLatency.With(ps.Labels{
+			"namespace": nd.GetFullName(),
+		}).Observe(float64(latencyUs / 1000))
+	}
+	metric.WriteCmdCounter.With(ps.Labels{
 		"namespace": nd.GetFullName(),
-	}).Observe(float64(latencyUs / 1000))
+	}).Inc()
 }
 
 type FutureRsp struct {
@@ -754,15 +764,16 @@ func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*Futur
 		}
 		rsp = wrh.wr.GetResult()
 		cancel()
-		wrh.release()
 
+		defer wrh.release(err == nil)
+		if err != nil {
+			return nil, err
+		}
 		if err, ok = rsp.(error); ok {
 			rsp = nil
-			//nd.rn.Infof("request return error: %v, %v", req.String(), err.Error())
-		} else {
-			err = nil
+			return nil, err
 		}
-		return rsp, err
+		return rsp, nil
 	}
 	return &futureRsp, nil
 }
@@ -1306,10 +1317,12 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	if cost > raftSlow {
 		nd.rn.Infof("raft apply slow cost: %v, number %v", cost, len(applyEvent.ents))
 	}
-	metric.RaftWriteLatency.With(ps.Labels{
-		"namespace": nd.GetFullName(),
-		"step":      "raft_sm_applyall",
-	}).Observe(float64(cost.Milliseconds()))
+	if cost >= time.Millisecond {
+		metric.RaftWriteLatency.With(ps.Labels{
+			"namespace": nd.GetFullName(),
+			"step":      "raft_sm_applyall",
+		}).Observe(float64(cost.Milliseconds()))
+	}
 
 	lastIndex := np.appliedi
 	if applyEvent.snapshot.Metadata.Index > lastIndex {

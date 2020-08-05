@@ -194,9 +194,11 @@ func (bo *kvbatchOperator) CommitBatch() {
 		}
 		slow.LogSlowDBWrite(batchCost, slow.NewSlowLogInfo(bo.kvsm.fullNS, bk, strconv.Itoa(len(bo.batchReqIDList))))
 		bo.kvsm.dbWriteStats.BatchUpdateLatencyStats(batchCost.Microseconds(), int64(len(bo.batchReqIDList)))
-		metric.DBWriteLatency.With(ps.Labels{
-			"namespace": bo.kvsm.fullNS,
-		}).Observe(float64(batchCost.Milliseconds()))
+		if batchCost >= time.Millisecond {
+			metric.DBWriteLatency.With(ps.Labels{
+				"namespace": bo.kvsm.fullNS,
+			}).Observe(float64(batchCost.Milliseconds()))
+		}
 	}
 	if len(bo.dupCheckMap) >= 10 {
 		bo.dupCheckMap = make(map[string]bool)
@@ -672,10 +674,12 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 		if cost > raftSlow.Nanoseconds()/2 && nodeLog.Level() >= common.LOG_DETAIL {
 			kvsm.Debugf("receive raft requests in state machine slow cost: %v, %v", len(reqList.Reqs), cost)
 		}
-		metric.RaftWriteLatency.With(ps.Labels{
-			"namespace": kvsm.fullNS,
-			"step":      "raft_commit_sm_received",
-		}).Observe(float64(cost / time.Millisecond.Nanoseconds()))
+		if cost >= time.Millisecond.Nanoseconds() {
+			metric.RaftWriteLatency.With(ps.Labels{
+				"namespace": kvsm.fullNS,
+				"step":      "raft_commit_sm_received",
+			}).Observe(float64(cost / time.Millisecond.Nanoseconds()))
+		}
 	}
 	// TODO: maybe we can merge the same write with same key and value to avoid too much hot write on the same key-value
 	var retErr error
@@ -758,9 +762,11 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 							batch.AbortBatchForError(err)
 						}
 					} else {
-						metric.WriteByteSize.With(ps.Labels{
-							"namespace": kvsm.fullNS,
-						}).Observe(float64(len(cmd.Raw)))
+						if len(cmd.Raw) >= 100 {
+							metric.WriteByteSize.With(ps.Labels{
+								"namespace": kvsm.fullNS,
+							}).Observe(float64(len(cmd.Raw)))
+						}
 						if batch.IsBatched() {
 							batch.AddBatchRsp(reqID, v)
 							if nodeLog.Level() > common.LOG_DETAIL {
@@ -772,9 +778,11 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 							cmdCost := time.Since(cmdStart)
 							slow.LogSlowDBWrite(cmdCost, slow.NewSlowLogInfo(kvsm.fullNS, string(cmd.Raw), ""))
 							kvsm.dbWriteStats.UpdateWriteStats(int64(len(cmd.Raw)), cmdCost.Microseconds())
-							metric.DBWriteLatency.With(ps.Labels{
-								"namespace": kvsm.fullNS,
-							}).Observe(float64(cmdCost.Milliseconds()))
+							if cmdCost >= time.Millisecond {
+								metric.DBWriteLatency.With(ps.Labels{
+									"namespace": kvsm.fullNS,
+								}).Observe(float64(cmdCost.Milliseconds()))
+							}
 							if kvsm.slowLimiter != nil {
 								table, _, _ := common.ExtractTable(pk)
 								kvsm.slowLimiter.RecordSlowCmd(cmdName, string(table), cmdCost)
