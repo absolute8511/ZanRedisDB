@@ -34,6 +34,7 @@ var TopnHotKeys = NewTopNHot()
 
 type topNBucket struct {
 	hotWriteKeys *lru.ARCCache
+	sampleCnt    int64
 }
 
 func newTopNBucket() *topNBucket {
@@ -64,6 +65,10 @@ func handleTopnHit(hotKeys *lru.ARCCache, k []byte) *HKeyInfo {
 }
 
 func (b *topNBucket) write(k []byte) {
+	c := atomic.AddInt64(&b.sampleCnt, 1)
+	if c%3 != 0 {
+		return
+	}
 	handleTopnHit(b.hotWriteKeys, k)
 }
 

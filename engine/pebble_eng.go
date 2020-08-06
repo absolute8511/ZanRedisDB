@@ -382,7 +382,9 @@ func (pe *PebbleEng) GetStatistics() string {
 }
 
 func (pe *PebbleEng) GetInternalStatus() map[string]interface{} {
-	return nil
+	s := make(map[string]interface{})
+	s["internal"] = pe.GetStatistics()
+	return s
 }
 
 func (pe *PebbleEng) GetInternalPropertyStatus(p string) string {

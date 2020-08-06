@@ -10,7 +10,7 @@ import (
 func TestTopNWrite(t *testing.T) {
 	topn := NewTopNHot()
 
-	for i := 0; i < defaultTopnBucketSize; i++ {
+	for i := 0; i < defaultTopnBucketSize*2; i++ {
 		k := []byte(strconv.Itoa(i))
 		topn.HitWrite(k)
 	}
@@ -22,7 +22,7 @@ func TestTopNWrite(t *testing.T) {
 	t.Logf("%v", topn.GetTopNWrites())
 	assert.Equal(t, defaultTopnBucketSize, len(topn.GetTopNWrites()))
 
-	for i := 0; i < defaultTopnBucketSize; i++ {
+	for i := 0; i < defaultTopnBucketSize*2; i++ {
 		k := []byte(strconv.Itoa(i))
 		topn.HitWrite(k)
 	}

@@ -7,23 +7,6 @@
 #sudo yum install devtoolset-3-gcc devtoolset-3-gcc-c++ devtoolset-3-gdb
 
 echo `pwd`
-GoDep=$(go env GOPATH)/src/golang.org/x
-mkdir -p $GoDep
-if [ ! -d "$GoDep/net" ]; then
-  pushd $GoDep && git clone https://github.com/golang/net.git && popd
-fi
-if [ ! -d "$GoDep/sys" ]; then
-  pushd $GoDep && git clone https://github.com/golang/sys.git && popd
-fi
-
-googleDep=$(go env GOPATH)/src/google.golang.org
-mkdir -p $googleDep
-if [ ! -d "$googleDep/grpc" ]; then
-  pushd $googleDep && git clone https://github.com/grpc/grpc-go.git grpc && popd
-fi
-if [ ! -d "$googleDep/genproto" ]; then
-  pushd $googleDep && git https://github.com/google/go-genproto clone genproto && popd
-fi
 
 go get -d github.com/youzan/ZanRedisDB/...
 arch=$(go env GOARCH)
@@ -45,8 +28,6 @@ git pull
 git checkout v6.4.6-patched
 PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 popd
-
-CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/youzan/gorocksdb
 
 export PATH=$(pwd):$PATH
 
