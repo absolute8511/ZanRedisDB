@@ -28,13 +28,22 @@ func (st *raftPersistStorage) SaveSnap(snap raftpb.Snapshot) error {
 		Index: snap.Metadata.Index,
 		Term:  snap.Metadata.Term,
 	}
-	err := st.WAL.SaveSnapshot(walsnap)
+	// save the snapshot file before writing the snapshot to the wal.
+	// This makes it possible for the snapshot file to become orphaned, but prevents
+	// a WAL snapshot entry from having no corresponding snapshot file.
+	err := st.Snapshotter.SaveSnap(snap)
 	if err != nil {
 		return err
 	}
-	err = st.Snapshotter.SaveSnap(snap)
-	if err != nil {
+	return st.WAL.SaveSnapshot(walsnap)
+}
+
+// Release releases resources older than the given snap and are no longer needed:
+// - releases the locks to the wal files that are older than the provided wal for the given snap.
+// - deletes any .snap.db files that are older than the given snap.
+func (st *raftPersistStorage) Release(snap raftpb.Snapshot) error {
+	if err := st.WAL.ReleaseLockTo(snap.Metadata.Index); err != nil {
 		return err
 	}
-	return st.WAL.ReleaseLockTo(snap.Metadata.Index)
+	return st.Snapshotter.ReleaseSnapDBs(snap)
 }

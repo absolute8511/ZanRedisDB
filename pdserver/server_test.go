@@ -1720,11 +1720,9 @@ func TestInstallSnapshotTransferFailed(t *testing.T) {
 }
 
 func TestInstallSnapshotSaveRaftFailed(t *testing.T) {
-	// TODO: test the snapshot transfer to follower success, but the follower save snapshot meta to raft storage failed
+	// test the snapshot transfer to follower success, but the follower save snapshot meta to raft storage failed
 	// should restart to re-apply
-	// Fixme: currently, the hardstate and snapshot saving is not atomic, enable this test if we can make that.
-	return
-
+	// the hardstate and snapshot saving is not atomic, enable this test if we can make that.
 	defer node.EnableSnapForTest(false, false, false, false)
 
 	ensureClusterReady(t, 4)

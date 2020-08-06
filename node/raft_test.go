@@ -27,6 +27,7 @@ import (
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 	"golang.org/x/net/context"
 )
 
@@ -152,15 +153,32 @@ func (p *storageRecorder) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	return nil
 }
 
-func (p *storageRecorder) Load() (*raftpb.Snapshot, string, error) {
+func (p *storageRecorder) Load() (*raftpb.Snapshot, error) {
 	p.Record(testutil.Action{Name: "Load"})
-	return nil, "", nil
+	return nil, nil
+}
+
+func (p *storageRecorder) LoadNewestAvailable(walSnaps []walpb.Snapshot) (*raftpb.Snapshot, error) {
+	p.Record(testutil.Action{Name: "LoadNewestAvailable"})
+	return nil, nil
 }
 
 func (p *storageRecorder) SaveSnap(st raftpb.Snapshot) error {
 	if !raft.IsEmptySnap(st) {
 		p.Record(testutil.Action{Name: "SaveSnap"})
 	}
+	return nil
+}
+
+func (p *storageRecorder) Release(st raftpb.Snapshot) error {
+	if !raft.IsEmptySnap(st) {
+		p.Record(testutil.Action{Name: "Release"})
+	}
+	return nil
+}
+
+func (p *storageRecorder) Sync() error {
+	p.Record(testutil.Action{Name: "Sync"})
 	return nil
 }
 

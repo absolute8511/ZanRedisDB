@@ -26,6 +26,7 @@ var (
 	badWalName = errors.New("bad wal name")
 )
 
+// Exist returns true if there are any files in a given directory.
 func Exist(dirpath string) bool {
 	names, err := fileutil.ReadDir(dirpath)
 	if err != nil {
@@ -40,7 +41,7 @@ func Exist(dirpath string) bool {
 func searchIndex(names []string, index uint64) (int, bool) {
 	for i := len(names) - 1; i >= 0; i-- {
 		name := names[i]
-		_, curIndex, err := parseWalName(name)
+		_, curIndex, err := parseWALName(name)
 		if err != nil {
 			plog.Panicf("parse correct name should never fail: %v", err)
 		}
@@ -56,7 +57,7 @@ func searchIndex(names []string, index uint64) (int, bool) {
 func isValidSeq(names []string) bool {
 	var lastSeq uint64
 	for _, name := range names {
-		curSeq, _, err := parseWalName(name)
+		curSeq, _, err := parseWALName(name)
 		if err != nil {
 			plog.Panicf("parse correct name should never fail: %v", err)
 		}
@@ -67,7 +68,7 @@ func isValidSeq(names []string) bool {
 	}
 	return true
 }
-func readWalNames(dirpath string) ([]string, error) {
+func readWALNames(dirpath string) ([]string, error) {
 	names, err := fileutil.ReadDir(dirpath)
 	if err != nil {
 		return nil, err
@@ -82,7 +83,7 @@ func readWalNames(dirpath string) ([]string, error) {
 func checkWalNames(names []string) []string {
 	wnames := make([]string, 0)
 	for _, name := range names {
-		if _, _, err := parseWalName(name); err != nil {
+		if _, _, err := parseWALName(name); err != nil {
 			// don't complain about left over tmp files
 			if !strings.HasSuffix(name, ".tmp") {
 				plog.Warningf("ignored file %v in wal", name)
@@ -94,7 +95,7 @@ func checkWalNames(names []string) []string {
 	return wnames
 }
 
-func parseWalName(str string) (seq, index uint64, err error) {
+func parseWALName(str string) (seq, index uint64, err error) {
 	if !strings.HasSuffix(str, ".wal") {
 		return 0, 0, badWalName
 	}
