@@ -1400,8 +1400,8 @@ func TestClusterBalanceToNewNode(t *testing.T) {
 						// wait remove unneed replica
 						continue
 					}
-					break
 					t.Logf("%v balanced isr: %v", nsInfo.GetDesp(), newISR)
+					break
 				}
 			}
 			waitBalancedLeader(t, ns, i)
