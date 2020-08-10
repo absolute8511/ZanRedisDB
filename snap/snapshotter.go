@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/snap/snappb"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 const (
@@ -79,51 +81,67 @@ func (s *Snapshotter) save(snapshot *raftpb.Snapshot) error {
 	d, err := snap.Marshal()
 	if err != nil {
 		return err
-	} else {
-		marshallingDurations.Observe(float64(time.Since(start)) / float64(time.Second))
 	}
+	marshallingDurations.Observe(float64(time.Since(start)) / float64(time.Second))
 
-	err = pioutil.WriteAndSyncFile(filepath.Join(s.dir, fname), d, 0666)
-	if err == nil {
-		saveDurations.Observe(float64(time.Since(start)) / float64(time.Second))
-	} else {
-		err1 := os.Remove(filepath.Join(s.dir, fname))
+	spath := filepath.Join(s.dir, fname)
+	err = pioutil.WriteAndSyncFile(spath, d, 0666)
+	if err != nil {
+		plog.Warningf("failed to write a snap file: %s", err)
+		err1 := os.Remove(spath)
 		if err1 != nil {
-			plog.Errorf("failed to remove broken snapshot file %s", filepath.Join(s.dir, fname))
+			plog.Errorf("failed to remove broken snapshot file %s, %s", spath, err1)
 		}
+		return err
 	}
-	return err
+	saveDurations.Observe(time.Since(start).Seconds())
+	return nil
 }
 
-func (s *Snapshotter) RemoveSnap(snapName string) {
-	fpath := filepath.Join(s.dir, snapName)
-	renameBroken(fpath)
+// Load returns the newest snapshot.
+func (s *Snapshotter) Load() (*raftpb.Snapshot, error) {
+	return s.loadMatching(func(*raftpb.Snapshot) bool { return true })
 }
 
-func (s *Snapshotter) Load() (*raftpb.Snapshot, string, error) {
+// LoadNewestAvailable loads the newest snapshot available that is in walSnaps.
+func (s *Snapshotter) LoadNewestAvailable(walSnaps []walpb.Snapshot) (*raftpb.Snapshot, error) {
+	return s.loadMatching(func(snapshot *raftpb.Snapshot) bool {
+		m := snapshot.Metadata
+		for i := len(walSnaps) - 1; i >= 0; i-- {
+			if m.Term == walSnaps[i].Term && m.Index == walSnaps[i].Index {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// loadMatching returns the newest snapshot where matchFn returns true.
+func (s *Snapshotter) loadMatching(matchFn func(*raftpb.Snapshot) bool) (*raftpb.Snapshot, error) {
 	names, err := s.snapNames()
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	var snap *raftpb.Snapshot
-	var snapName string
 	for _, name := range names {
-		if snap, err = loadSnap(s.dir, name); err == nil {
-			snapName = name
-			break
+		if snap, err = loadSnap(s.dir, name); err == nil && matchFn(snap) {
+			return snap, nil
 		}
 	}
-	if err != nil {
-		return nil, "", ErrNoSnapshot
-	}
-	return snap, snapName, nil
+	return nil, ErrNoSnapshot
 }
 
 func loadSnap(dir, name string) (*raftpb.Snapshot, error) {
 	fpath := filepath.Join(dir, name)
 	snap, err := Read(fpath)
 	if err != nil {
-		renameBroken(fpath)
+		brokenPath := fpath + ".broken"
+		plog.Warningf("failed to read a snap file %s, %s", fpath, err)
+		if rerr := os.Rename(fpath, brokenPath); rerr != nil {
+			plog.Warningf("failed to rename a broken snap file %s, %s, %s", fpath, brokenPath, rerr)
+		} else {
+			plog.Warningf("renamed to a broken snap file %s, %s", fpath, brokenPath)
+		}
 	}
 	return snap, err
 }
@@ -132,35 +150,29 @@ func loadSnap(dir, name string) (*raftpb.Snapshot, error) {
 func Read(snapname string) (*raftpb.Snapshot, error) {
 	b, err := ioutil.ReadFile(snapname)
 	if err != nil {
-		plog.Errorf("cannot read file %v: %v", snapname, err)
 		return nil, err
 	}
 
 	if len(b) == 0 {
-		plog.Errorf("unexpected empty snapshot")
 		return nil, ErrEmptySnapshot
 	}
 
 	var serializedSnap snappb.Snapshot
 	if err = serializedSnap.Unmarshal(b); err != nil {
-		plog.Errorf("corrupted snapshot file %v: %v", snapname, err)
 		return nil, err
 	}
 
 	if len(serializedSnap.Data) == 0 || serializedSnap.Crc == 0 {
-		plog.Errorf("unexpected empty snapshot")
 		return nil, ErrEmptySnapshot
 	}
 
 	crc := crc32.Update(0, crcTable, serializedSnap.Data)
 	if crc != serializedSnap.Crc {
-		plog.Errorf("corrupted snapshot file %v: crc mismatch", snapname)
 		return nil, ErrCRCMismatch
 	}
 
 	var snap raftpb.Snapshot
 	if err = snap.Unmarshal(serializedSnap.Data); err != nil {
-		plog.Errorf("corrupted snapshot file %v: %v", snapname, err)
 		return nil, err
 	}
 	return &snap, nil
@@ -178,7 +190,11 @@ func (s *Snapshotter) snapNames() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	snaps := checkSuffix(names)
+	filenames, err := s.cleanupSnapdir(names)
+	if err != nil {
+		return nil, err
+	}
+	snaps := checkSuffix(filenames)
 	if len(snaps) == 0 {
 		return nil, ErrNoSnapshot
 	}
@@ -195,11 +211,57 @@ func checkSuffix(names []string) []string {
 			// If we find a file which is not a snapshot then check if it's
 			// a vaild file. If not throw out a warning.
 			if _, ok := validFiles[names[i]]; !ok {
-				plog.Warningf("skipped unexpected non snapshot file %v", names[i])
+				plog.Warningf("found unexpected non-snap file; skipping %s", names[i])
 			}
 		}
 	}
 	return snaps
+}
+
+// cleanupSnapdir removes any files that should not be in the snapshot directory:
+// - db.tmp prefixed files that can be orphaned by defragmentation
+func (s *Snapshotter) cleanupSnapdir(filenames []string) (names []string, err error) {
+	names = make([]string, 0, len(filenames))
+	for _, filename := range filenames {
+		if strings.HasPrefix(filename, "db.tmp") {
+			plog.Infof("found orphaned defragmentation file; deleting %s", filename)
+			if rmErr := os.Remove(filepath.Join(s.dir, filename)); rmErr != nil && !os.IsNotExist(rmErr) {
+				return names, fmt.Errorf("failed to remove orphaned .snap.db file %s: %v", filename, rmErr)
+			}
+		} else {
+			names = append(names, filename)
+		}
+	}
+	return names, nil
+}
+
+func (s *Snapshotter) ReleaseSnapDBs(snap raftpb.Snapshot) error {
+	dir, err := os.Open(s.dir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	filenames, err := dir.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, filename := range filenames {
+		if strings.HasSuffix(filename, ".snap.db") {
+			hexIndex := strings.TrimSuffix(filepath.Base(filename), ".snap.db")
+			index, err := strconv.ParseUint(hexIndex, 16, 64)
+			if err != nil {
+				plog.Errorf("failed to parse index from filename %s, %s", filename, err.Error())
+				continue
+			}
+			if index < snap.Metadata.Index {
+				plog.Infof("found orphaned .snap.db file; deleting %s", filename)
+				if rmErr := os.Remove(filepath.Join(s.dir, filename)); rmErr != nil && !os.IsNotExist(rmErr) {
+					plog.Errorf("failed to remove orphaned .snap.db file %s, %s", filename, rmErr.Error())
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func renameBroken(path string) {

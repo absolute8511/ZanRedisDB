@@ -58,6 +58,8 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 	opts.LearnerRole = common.LearnerRoleLogSyncer
 	pd := NewServer(opts)
 	pd.Start()
+	// init start syncer
+	pd.pdCoord.SwitchStartLearner(true)
 
 	for i := 0; i < n; i++ {
 		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))

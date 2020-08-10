@@ -73,9 +73,14 @@ type IRaftPersistStorage interface {
 	Save(st raftpb.HardState, ents []raftpb.Entry) error
 	// SaveSnap function saves snapshot to the underlying stable storage.
 	SaveSnap(snap raftpb.Snapshot) error
-	Load() (*raftpb.Snapshot, string, error)
+	Load() (*raftpb.Snapshot, error)
+	LoadNewestAvailable(walSnaps []walpb.Snapshot) (*raftpb.Snapshot, error)
 	// Close closes the Storage and performs finalization.
 	Close() error
+	// Release releases the locked wal files older than the provided snapshot.
+	Release(snap raftpb.Snapshot) error
+	// Sync WAL
+	Sync() error
 }
 
 type DataStorage interface {
@@ -365,7 +370,14 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 	}
 
 	if oldwal {
-		snapshot, _, err := rc.persistStorage.Load()
+		// Find a snapshot to start/restart a raft node
+		walSnaps, err := wal.ValidSnapshotEntries(walDir)
+		if err != nil {
+			return err
+		}
+		// snapshot files can be orphaned if etcd crashes after writing them but before writing the corresponding
+		// wal log entries
+		snapshot, err := rc.persistStorage.LoadNewestAvailable(walSnaps)
 		if err != nil && err != snap.ErrNoSnapshot {
 			nodeLog.Warning(err)
 			return err
@@ -612,7 +624,7 @@ func newSnapshotReaderCloser() io.ReadCloser {
 func (rc *raftNode) handleSendSnapshot(np *nodeProgress) {
 	select {
 	case m := <-rc.msgSnapC:
-		snapData, _, err := rc.persistStorage.Load()
+		snapData, err := rc.persistStorage.Load()
 		if err != nil {
 			rc.Infof("load snapshot error : %v", err)
 			rc.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
@@ -681,11 +693,15 @@ func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftp
 			rc.Errorf("create snapshot at index %d failed: %v", snapi, err)
 			return
 		}
+		// SaveSnap saves the snapshot to file and appends the corresponding WAL entry.
 		if err := rc.persistStorage.SaveSnap(snap); err != nil {
 			rc.Errorf("save snapshot at index %v failed: %v", snap.Metadata, err)
 			return
 		}
-
+		if err = rc.persistStorage.Release(snap); err != nil {
+			rc.Errorf("failed to release wal: %s", err)
+			return
+		}
 		// update the latest snapshot index for statemachine
 		rc.ds.UpdateSnapshotState(snap.Metadata.Term, snap.Metadata.Index)
 
@@ -1040,6 +1056,16 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		// we need to notify to tell that the snapshot has been perisisted onto the disk
+		// Force WAL to fsync its hard state before Release() releases
+		// old data from the WAL. Otherwise could get an error like:
+		// panic: tocommit(107) is out of range [lastIndex(84)]. Was the raft log corrupted, truncated, or lost?
+		// See https://github.com/etcd-io/etcd/issues/10219 for more details.
+		if err := rc.persistStorage.Sync(); err != nil {
+			rc.Errorf("failed to sync Raft snapshot: %s", err)
+			go rc.ds.Stop()
+			<-rc.stopc
+			return
+		}
 		raftDone <- struct{}{}
 		rc.raftStorage.ApplySnapshot(rd.Snapshot)
 		rc.Infof("raft applied incoming snapshot done: %v", rd.Snapshot.String())
@@ -1048,6 +1074,9 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 				rc.Infof("replay finished at snapshot index: %v\n", rd.Snapshot.String())
 				rc.MarkReplayFinished()
 			}
+		}
+		if err := rc.persistStorage.Release(rd.Snapshot); err != nil {
+			rc.Errorf("failed to release Raft wal: %s", err)
 		}
 	}
 	cost2 := time.Since(start)
@@ -1093,11 +1122,8 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 
 //should  atomically saves the Raft states, log entries and snapshots
 func (rc *raftNode) persistRaftState(rd *raft.Ready) error {
-	if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
-		rc.Errorf("raft save wal error: %v", err)
-		return err
-	}
-
+	// Must save the snapshot file and WAL snapshot entry before saving any other entries or hardstate to
+	// ensure that recovery after a snapshot restore is possible.
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		err := rc.persistStorage.SaveSnap(rd.Snapshot)
 		if err != nil {
@@ -1107,6 +1133,10 @@ func (rc *raftNode) persistRaftState(rd *raft.Ready) error {
 		rc.Infof("raft persist snapshot meta done : %v", rd.Snapshot.String())
 		// update the latest snapshot index for statemachine
 		rc.ds.UpdateSnapshotState(rd.Snapshot.Metadata.Term, rd.Snapshot.Metadata.Index)
+	}
+	if err := rc.persistStorage.Save(rd.HardState, rd.Entries); err != nil {
+		rc.Errorf("raft save wal error: %v", err)
+		return err
 	}
 	return nil
 }
