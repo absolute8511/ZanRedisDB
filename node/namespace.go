@@ -821,6 +821,13 @@ func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
 					if meta.walEng != nil {
 						meta.walEng.CloseAll()
 					}
+					if nsm.machineConf.UseRocksWAL && baseNS != "" {
+						// clean the rock wal files
+						rsDir := path.Join(nsm.machineConf.DataRootDir, "rswal", baseNS)
+						ts := strconv.Itoa(int(time.Now().UnixNano()))
+						os.Rename(rsDir,
+							rsDir+"-deleted-"+ts)
+					}
 					delete(nsm.nsMetas, baseNS)
 				}
 			}
