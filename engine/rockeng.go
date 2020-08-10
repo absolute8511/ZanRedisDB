@@ -228,7 +228,6 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		rl:               rl,
 		defaultWriteOpts: gorocksdb.NewDefaultWriteOptions(),
 		defaultReadOpts:  gorocksdb.NewDefaultReadOptions(),
-		wb:               newRocksWriteBatch(),
 		quit:             make(chan struct{}),
 	}
 	db.defaultReadOpts.SetVerifyChecksums(false)
@@ -296,11 +295,20 @@ func (r *RockEng) compactLoop() {
 	}
 }
 
+// NewWriteBatch init a new write batch for write, should only call this after the engine opened
 func (r *RockEng) NewWriteBatch() WriteBatch {
-	return newRocksWriteBatch()
+	if r.eng == nil {
+		panic("nil engine, should only get write batch after db opened")
+	}
+	return newRocksWriteBatch(r.eng, r.defaultWriteOpts)
 }
 
+// DefaultWriteBatch return the internal default write batch for write, should only call this after the engine opened
+// and can not be used concurrently
 func (r *RockEng) DefaultWriteBatch() WriteBatch {
+	if r.wb == nil {
+		panic("nil default write batch, should only get write batch after db opened")
+	}
 	return r.wb
 }
 
@@ -341,13 +349,14 @@ func (r *RockEng) OpenEng() error {
 		return err
 	}
 	r.eng = eng
+	r.wb = newRocksWriteBatch(r.eng, r.defaultWriteOpts)
 	atomic.StoreInt32(&r.engOpened, 1)
 	dbLog.Infof("rocksdb engine opened: %v", r.GetDataDir())
 	return nil
 }
 
 func (r *RockEng) Write(wb WriteBatch) error {
-	return r.eng.Write(r.defaultWriteOpts, wb.(*rocksWriteBatch).wb)
+	return wb.Commit()
 }
 
 func (r *RockEng) DeletedBeforeCompact() int64 {
@@ -412,6 +421,9 @@ func (r *RockEng) IsClosed() bool {
 func (r *RockEng) CloseEng() bool {
 	if r.eng != nil {
 		if atomic.CompareAndSwapInt32(&r.engOpened, 1, 0) {
+			if r.wb != nil {
+				r.wb.Destroy()
+			}
 			r.eng.PreShutdown()
 			r.eng.Close()
 			dbLog.Infof("rocksdb engine closed: %v", r.GetDataDir())
@@ -446,9 +458,6 @@ func (r *RockEng) CloseAll() {
 	}
 	if r.defaultReadOpts != nil {
 		r.defaultReadOpts.Destroy()
-	}
-	if r.wb != nil {
-		r.wb.Destroy()
 	}
 }
 

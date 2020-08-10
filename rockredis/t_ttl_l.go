@@ -26,18 +26,16 @@ var (
 
 type localExpiration struct {
 	*TTLChecker
-	db          *RockDB
-	stopCh      chan struct{}
-	wg          sync.WaitGroup
-	localBuffer *localBatchedBuffer
-	running     int32
+	db      *RockDB
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
+	running int32
 }
 
 func newLocalExpiration(db *RockDB) *localExpiration {
 	exp := &localExpiration{
-		db:          db,
-		TTLChecker:  newTTLChecker(db),
-		localBuffer: newLocalBatchedBuffer(db, localBatchedBufSize),
+		db:         db,
+		TTLChecker: newTTLChecker(db),
 	}
 
 	return exp
@@ -130,21 +128,24 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 	defer t.Stop()
 
 	checker := exp.TTLChecker
-
+	localBuffer := newLocalBatchedBuffer(exp.db, localBatchedBufSize)
+	defer localBuffer.Destroy()
 	for {
 		select {
 		case <-t.C:
 			for {
-				err := checker.check(exp.localBuffer, stop)
+				err := checker.check(localBuffer, stop)
 				select {
 				case <-stop:
-					exp.localBuffer.Clear()
+					localBuffer.Clear()
 					return
 				default:
-					exp.localBuffer.commit()
+					localBuffer.commit()
 				}
 				//start the next check immediately if the last check is stopped because of the buffer is fully filled
 				if err == ErrLocalBatchedBuffFull {
+					// avoid 100% cpu
+					time.Sleep(time.Millisecond)
 					continue
 				} else if err != nil {
 					dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
@@ -250,15 +251,11 @@ func (exp *localExpiration) Stop() {
 	if atomic.CompareAndSwapInt32(&exp.running, 1, 0) {
 		close(exp.stopCh)
 		exp.wg.Wait()
-		exp.localBuffer.Clear()
 	}
 }
 
 func (exp *localExpiration) Destroy() {
 	exp.Stop()
-	if exp.localBuffer != nil {
-		exp.localBuffer.Destroy()
-	}
 }
 
 func createLocalDelFunc(dt common.DataType, db *RockDB, wb engine.WriteBatch) func(keys [][]byte) error {

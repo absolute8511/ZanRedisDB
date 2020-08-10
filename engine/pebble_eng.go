@@ -207,10 +207,16 @@ func NewPebbleEng(cfg *RockEngConfig) (*PebbleEng, error) {
 }
 
 func (pe *PebbleEng) NewWriteBatch() WriteBatch {
+	if pe.eng == nil {
+		panic("nil engine, should only get write batch after db opened")
+	}
 	return newPebbleWriteBatch(pe.eng, pe.wo)
 }
 
 func (pe *PebbleEng) DefaultWriteBatch() WriteBatch {
+	if pe.wb == nil {
+		panic("nil write batch, should only get write batch after db opened")
+	}
 	return pe.wb
 }
 
@@ -283,8 +289,7 @@ func (pe *PebbleEng) OpenEng() error {
 }
 
 func (pe *PebbleEng) Write(wb WriteBatch) error {
-	pwb := wb.(*pebbleWriteBatch)
-	return pe.eng.Apply(pwb.wb, pe.wo)
+	return wb.Commit()
 }
 
 func (pe *PebbleEng) DeletedBeforeCompact() int64 {

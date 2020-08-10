@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"errors"
+
 	"github.com/cockroachdb/pebble"
 	"github.com/youzan/gorocksdb"
 )
@@ -12,15 +14,20 @@ type WriteBatch interface {
 	Delete(key []byte)
 	Put(key []byte, value []byte)
 	Merge(key []byte, value []byte)
+	Commit() error
 }
 
 type rocksWriteBatch struct {
 	wb *gorocksdb.WriteBatch
+	wo *gorocksdb.WriteOptions
+	db *gorocksdb.DB
 }
 
-func newRocksWriteBatch() *rocksWriteBatch {
+func newRocksWriteBatch(db *gorocksdb.DB, wo *gorocksdb.WriteOptions) *rocksWriteBatch {
 	return &rocksWriteBatch{
 		wb: gorocksdb.NewWriteBatch(),
+		wo: wo,
+		db: db,
 	}
 }
 
@@ -46,6 +53,13 @@ func (wb *rocksWriteBatch) Put(key []byte, value []byte) {
 
 func (wb *rocksWriteBatch) Merge(key []byte, value []byte) {
 	wb.wb.Merge(key, value)
+}
+
+func (wb *rocksWriteBatch) Commit() error {
+	if wb.db == nil || wb.wo == nil {
+		return errors.New("nil db or options")
+	}
+	return wb.db.Write(wb.wo, wb.wb)
 }
 
 type pebbleWriteBatch struct {
@@ -87,4 +101,11 @@ func (wb *pebbleWriteBatch) Put(key []byte, value []byte) {
 
 func (wb *pebbleWriteBatch) Merge(key []byte, value []byte) {
 	wb.wb.Merge(key, value, wb.wo)
+}
+
+func (wb *pebbleWriteBatch) Commit() error {
+	if wb.db == nil || wb.wo == nil {
+		return errors.New("nil db or options")
+	}
+	return wb.db.Apply(wb.wb, wb.wo)
 }
