@@ -28,10 +28,6 @@ func init() {
 	expireCmds[common.ZSET] = []byte("zmclear")
 }
 
-func (nd *KVNode) setexCommand(cmd redcon.Command, v interface{}) (interface{}, error) {
-	return "OK", nil
-}
-
 func (kvsm *kvStoreSM) localSetexCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	if duration, err := strconv.Atoi(string(cmd.Args[2])); err != nil {
 		return nil, err

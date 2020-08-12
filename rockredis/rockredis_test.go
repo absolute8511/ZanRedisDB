@@ -100,7 +100,7 @@ func TestDBCompact(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, string(value), string(v))
 	for i := 0; i < 50; i++ {
-		db.KVDel([]byte(string(key) + strconv.Itoa(i)))
+		db.DelKeys([]byte(string(key) + strconv.Itoa(i)))
 	}
 
 	db.CompactRange()

@@ -35,6 +35,7 @@ var (
 	ErrStopped           = errors.New("the node stopped")
 	ErrQueueTimeout      = errors.New("queue request timeout")
 	ErrInvalidArgs       = errors.New("invalid arguments")
+	ErrInvalidTTL        = errors.New("invalid expire time")
 	ErrInvalidRedisKey   = errors.New("invalid redis key")
 	ErrInvalidScanType   = errors.New("invalid scan type")
 	ErrEpochMismatch     = errors.New("epoch mismatch")

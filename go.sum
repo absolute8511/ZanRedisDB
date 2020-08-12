@@ -44,8 +44,6 @@ github.com/cockroachdb/errors v1.2.4 h1:Lap807SXTH5tri2TivECb/4abUkMZC9zRoLarvcK
 github.com/cockroachdb/errors v1.2.4/go.mod h1:rQD95gz6FARkaKkQXUksEje/d9a6wBJoCr5oaCLELYA=
 github.com/cockroachdb/logtags v0.0.0-20190617123548-eb05cc24525f h1:o/kfcElHqOiXqcou5a3rIlMc7oJbMQkeLk0VQJ7zgqY=
 github.com/cockroachdb/logtags v0.0.0-20190617123548-eb05cc24525f/go.mod h1:i/u985jwjWRlyHXQbwatDASoW0RMlZ/3i9yJHE2xLkI=
-github.com/cockroachdb/pebble v0.0.0-20200616134309-223327f23e83 h1:6ntktpHXLc9uvai6BJM62tRWplroGHJ4ho1hKiMrmTA=
-github.com/cockroachdb/pebble v0.0.0-20200616134309-223327f23e83/go.mod h1:crLnbSFbwAcQNs9FPfI1avHb5BqVgqZcr4r+IzpJ5FM=
 github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713 h1:SK0BUmdsXF7Ammqw+AmaHOlzFgkmtyDM/WRCTwDpS6I=
 github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713/go.mod h1:crLnbSFbwAcQNs9FPfI1avHb5BqVgqZcr4r+IzpJ5FM=
 github.com/codahale/hdrhistogram v0.0.0-20161010025455-3a0bb77429bd/go.mod h1:sE/e/2PUdi/liOCUjSTXgM1o87ZssimdTWN964YiIeI=
@@ -177,8 +175,8 @@ github.com/stretchr/testify v1.3.0 h1:TivCn/peBQ7UY8ooIcPgZFpTNSz0Q2U6UrFlUfqbe0
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/tidwall/gjson v1.1.0 h1:/7OBSUzFP8NhuzLlHg0vETJrRL02C++0ql5uSY3DITs=
 github.com/tidwall/gjson v1.1.0/go.mod h1:c/nTNbUr0E0OrXEhq1pwa8iEgc2DOt4ZZqAt1HtCkPA=
-github.com/tidwall/match v1.0.0 h1:Ym1EcFkp+UQ4ptxfWlW+iMdq5cPH5nEuGzdf/Pb7VmI=
-github.com/tidwall/match v1.0.0/go.mod h1:LujAq0jyVjBy028G1WhWfIzbpQfMO8bBZ6Tyb0+pL9E=
+github.com/tidwall/match v1.0.1 h1:PnKP62LPNxHKTwvHHZZzdOAOCtsJTjo6dZLCwpKm5xc=
+github.com/tidwall/match v1.0.1/go.mod h1:LujAq0jyVjBy028G1WhWfIzbpQfMO8bBZ6Tyb0+pL9E=
 github.com/tidwall/sjson v1.0.0 h1:hOrzQPtGKlKAudQVmU43GkxEgG8TOgKyiKUyb7sE0rs=
 github.com/tidwall/sjson v1.0.0/go.mod h1:bURseu1nuBkFpIES5cz6zBtjmYeOQmEESshn7VpF15Y=
 github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 h1:BPPUhSq7uU6E9lFzyb81vjwVOhiWwMXp0EpKL75NX+8=
@@ -187,10 +185,6 @@ github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18 h1:MPPkRncZLN9Kh4M
 github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/youzan/go-zanredisdb v0.5.1 h1:apVoAkIx5fh0qvgpLIRyk1hdwxQYpaZn35c2ZV6hkhE=
 github.com/youzan/go-zanredisdb v0.5.1/go.mod h1:0cy2l2EZTC8Cx4dbqlSl6E+BaXcJc+5J+gyVgX0fkKQ=
-github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5 h1:R8YI/Nexm+LWfr6gzP7FHEty1g0j9TOTaUXal2ei1Ig=
-github.com/youzan/gorocksdb v0.0.0-20191212113425-d53e56974cb5/go.mod h1:Ztkk3nnoEJnQDM1iSS/2oNOj1qCZIUWJHY2lHL5YRJg=
-github.com/youzan/gorocksdb v0.0.0-20200621101341-c2f8327d1dfe h1:uoDni6CwS/tiRfB9adGLk3Bgld5PqkZBV0G0NjVnkDw=
-github.com/youzan/gorocksdb v0.0.0-20200621101341-c2f8327d1dfe/go.mod h1:Ztkk3nnoEJnQDM1iSS/2oNOj1qCZIUWJHY2lHL5YRJg=
 github.com/youzan/gorocksdb v0.0.0-20200621102424-7269d59fec5c h1:Rq4ZUV+qJzpUUiadCwmbVG0+TGnvmVwhGiZfFkTzLRA=
 github.com/youzan/gorocksdb v0.0.0-20200621102424-7269d59fec5c/go.mod h1:Ztkk3nnoEJnQDM1iSS/2oNOj1qCZIUWJHY2lHL5YRJg=
 github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 h1:1b6PAtenNyhsmo/NKXVe34h7JEZKva1YB/ne7K7mqKM=

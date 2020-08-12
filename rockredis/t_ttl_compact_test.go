@@ -191,7 +191,7 @@ func TestKVTTL_CompactKeepTTL(t *testing.T) {
 	v, err := db.KVGet(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, "2ranged", string(v))
-	db.KVDel(key1)
+	db.DelKeys(key1)
 	// bitset
 	db.BitSetOld(0, key1, 1, 1)
 	if v, err := db.Expire(tn, key1, ttl1); err != nil {
