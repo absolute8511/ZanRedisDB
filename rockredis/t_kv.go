@@ -1,6 +1,7 @@
 package rockredis
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -272,7 +273,7 @@ func (db *RockDB) incr(ts int64, key []byte, delta int64) (int64, error) {
 
 //	ps : here just focus on deleting the key-value data,
 //		 any other likes expire is ignore.
-func (db *RockDB) KVDel(key []byte) (int64, error) {
+func (db *RockDB) kvDel(key []byte, wb engine.WriteBatch) (int64, error) {
 	rawKey := key
 	table, key, err := convertRedisKeyToDBKVKey(key)
 	if err != nil {
@@ -283,19 +284,15 @@ func (db *RockDB) KVDel(key []byte) (int64, error) {
 		if !db.cfg.EstimateTableCounter {
 			vok, _ := db.ExistNoLock(key)
 			if vok {
-				db.IncrTableKeyCount(table, -1, db.wb)
+				db.IncrTableKeyCount(table, -1, wb)
 			} else {
 				delCnt = int64(0)
 			}
 		} else {
-			db.IncrTableKeyCount(table, -1, db.wb)
+			db.IncrTableKeyCount(table, -1, wb)
 		}
 	}
-	db.wb.Delete(key)
-	err = db.MaybeCommitBatch()
-	if err != nil {
-		return 0, err
-	}
+	wb.Delete(key)
 	// fixme: if del is batched, the deleted key may be in write batch while removing cache
 	// and removed cache may be reload by read before the write batch is committed.
 	db.delPFCache(rawKey)
@@ -336,7 +333,7 @@ func (db *RockDB) DelKeys(keys ...[]byte) (int64, error) {
 
 	delCnt := int64(0)
 	for _, k := range keys {
-		c, _ := db.KVDel(k)
+		c, _ := db.kvDel(k, db.wb)
 		delCnt += c
 	}
 
@@ -533,6 +530,38 @@ func (db *RockDB) MSet(ts int64, args ...common.KVRecord) error {
 }
 
 func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
+	return db.setKV(ts, rawKey, value, 0)
+}
+
+func (db *RockDB) KVSetWithOpts(ts int64, rawKey []byte, value []byte, duration int64, createOnly bool, updateOnly bool) (int64, error) {
+	if err := checkValueSize(value); err != nil {
+		return 0, err
+	}
+	keyInfo, realV, err := db.prepareKVValueForWrite(ts, rawKey, false)
+	if err != nil {
+		return 0, err
+	}
+
+	if createOnly && realV != nil && !keyInfo.Expired {
+		return 0, nil
+	}
+	if updateOnly && (realV == nil || keyInfo.Expired) {
+		return 0, nil
+
+	}
+	if realV == nil && !keyInfo.Expired {
+		db.IncrTableKeyCount(keyInfo.Table, 1, db.wb)
+	}
+	// prepare for write will renew the expire data on expired value,
+	// however, we still need del the old expire meta data since it may store the
+	// expire meta data in different place under different expire policy.
+	value, err = db.resetWithNewKVValue(ts, rawKey, value, duration, db.wb)
+	db.wb.Put(keyInfo.VerKey, value)
+	err = db.MaybeCommitBatch()
+	return 1, err
+}
+
+func (db *RockDB) setKV(ts int64, rawKey []byte, value []byte, duration int64) error {
 	table, key, err := convertRedisKeyToDBKVKey(rawKey)
 	if err != nil {
 		return err
@@ -548,7 +577,7 @@ func (db *RockDB) KVSet(ts int64, rawKey []byte, value []byte) error {
 			db.IncrTableKeyCount(table, 1, db.wb)
 		}
 	}
-	value, err = db.resetWithNewKVValue(ts, rawKey, value, 0, db.wb)
+	value, err = db.resetWithNewKVValue(ts, rawKey, value, duration, db.wb)
 	if err != nil {
 		return err
 	}
@@ -583,32 +612,14 @@ func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) e
 	if duration <= 0 {
 		return errInvalidTTL
 	}
-	table, key, err := convertRedisKeyToDBKVKey(rawKey)
-	if err != nil {
-		return err
-	} else if err = checkValueSize(value); err != nil {
-		return err
-	}
-	if db.cfg.EnableTableCounter {
-		vok := false
-		if !db.cfg.EstimateTableCounter {
-			vok, _ = db.ExistNoLock(key)
-		}
-		if !vok {
-			db.IncrTableKeyCount(table, 1, db.wb)
-		}
-	}
-	value, err = db.resetWithNewKVValue(ts, rawKey, value, duration, db.wb)
-	if err != nil {
-		return err
-	}
-	db.wb.Put(key, value)
-	err = db.MaybeCommitBatch()
-
-	return err
+	return db.setKV(ts, rawKey, value, duration)
 }
 
 func (db *RockDB) SetNX(ts int64, rawKey []byte, value []byte) (int64, error) {
+	return db.KVSetWithOpts(ts, rawKey, value, 0, true, false)
+}
+
+func (db *RockDB) SetIfEQ(ts int64, rawKey []byte, oldV []byte, value []byte, duration int64) (int64, error) {
 	if err := checkValueSize(value); err != nil {
 		return 0, err
 	}
@@ -618,7 +629,7 @@ func (db *RockDB) SetNX(ts int64, rawKey []byte, value []byte) (int64, error) {
 	}
 	var n int64 = 1
 
-	if realV != nil && !keyInfo.Expired {
+	if !bytes.Equal(realV, oldV) && !keyInfo.Expired {
 		n = 0
 	} else {
 		if realV == nil && !keyInfo.Expired {
@@ -627,9 +638,24 @@ func (db *RockDB) SetNX(ts int64, rawKey []byte, value []byte) (int64, error) {
 		// prepare for write will renew the expire data on expired value,
 		// however, we still need del the old expire meta data since it may store the
 		// expire meta data in different place under different expire policy.
-		value, err = db.resetWithNewKVValue(ts, rawKey, value, 0, db.wb)
+		value, err = db.resetWithNewKVValue(ts, rawKey, value, duration, db.wb)
 		db.wb.Put(keyInfo.VerKey, value)
 		err = db.MaybeCommitBatch()
+	}
+	return n, err
+}
+
+func (db *RockDB) DelIfEQ(ts int64, rawKey []byte, oldV []byte) (int64, error) {
+	keyInfo, realV, err := db.prepareKVValueForWrite(ts, rawKey, false)
+	if err != nil {
+		return 0, err
+	}
+	var n int64 = 1
+
+	if !bytes.Equal(realV, oldV) && !keyInfo.Expired {
+		n = 0
+	} else {
+		return db.DelKeys(rawKey)
 	}
 	return n, err
 }

@@ -137,6 +137,117 @@ func TestKV(t *testing.T) {
 	}
 }
 
+func TestKVSetOpts(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+	key1 := "default:test:setopt_a"
+	_, err := goredis.String(c.Do("set", key1, "1234", "xx"))
+	assert.Equal(t, goredis.ErrNil, err)
+
+	ok, err := goredis.String(c.Do("set", key1, "123", "nx", "ex", "4"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, ok)
+	v, err := goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "123", v)
+
+	ok, err = goredis.String(c.Do("set", key1, "1234", "ex", "3"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, ok)
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", v)
+
+	_, err = goredis.String(c.Do("set", key1, "12345", "nx"))
+	assert.Equal(t, goredis.ErrNil, err)
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", v)
+
+	_, err = goredis.String(c.Do("set", key1, "123456", "xx"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, ok)
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "123456", v)
+
+	_, err = goredis.String(c.Do("set", key1, "1234567", "xx", "ex", "2"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, ok)
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234567", v)
+	// wait expire
+	time.Sleep(time.Second * 3)
+	_, err = goredis.String(c.Do("set", key1, "1234", "xx"))
+	assert.Equal(t, goredis.ErrNil, err)
+	ok, err = goredis.String(c.Do("set", key1, "123", "nx", "ex", "2"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, ok)
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "123", v)
+}
+
+func TestKVSetIfOpts(t *testing.T) {
+	c := getTestConn(t)
+	defer c.Close()
+	key1 := "default:test:setifopt_a"
+	n, err := goredis.Int(c.Do("setifeq", key1, "123", "1234", "ex", "4"))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
+
+	n, err = goredis.Int(c.Do("setifeq", key1, "", "123"))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
+	v, err := goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "123", v)
+
+	n, err = goredis.Int(c.Do("setifeq", key1, "", "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
+
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "123", v)
+
+	n, err = goredis.Int(c.Do("setifeq", key1, "123", "1234", "ex", "3"))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
+
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "1234", v)
+
+	n, err = goredis.Int(c.Do("delifeq", key1, ""))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
+
+	n, err = goredis.Int(c.Do("delifeq", key1, v))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
+
+	_, err = goredis.String(c.Do("get", key1))
+	assert.Equal(t, goredis.ErrNil, err)
+
+	n, err = goredis.Int(c.Do("setifeq", key1, "", "1234", "ex", "2"))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
+	// wait expire
+	time.Sleep(time.Second * 3)
+	n, err = goredis.Int(c.Do("delifeq", key1, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
+	n, err = goredis.Int(c.Do("setifeq", key1, "", "12345", "ex", "3"))
+	assert.Nil(t, err)
+	assert.Equal(t, int(1), n)
+
+	v, err = goredis.String(c.Do("get", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "12345", v)
+}
+
 func TestKVPipeline(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
@@ -776,7 +887,26 @@ func TestKVErrorParams(t *testing.T) {
 	_, err := c.Do("get", key1, key2, key3)
 	assert.NotNil(t, err)
 
+	_, err = c.Do("set", key1)
+	assert.NotNil(t, err)
 	_, err = c.Do("set", key1, key2, key3)
+	assert.NotNil(t, err)
+	_, err = c.Do("set", key1, key1, "ex")
+	assert.NotNil(t, err)
+	_, err = c.Do("set", key1, key1, "ex", "nx")
+	assert.NotNil(t, err)
+
+	_, err = c.Do("setifeq", key1, "old", "nvalue", "ex")
+	assert.NotNil(t, err)
+	_, err = c.Do("setifeq", key1, "old")
+	assert.NotNil(t, err)
+	_, err = c.Do("delifeq", key1)
+	assert.NotNil(t, err)
+
+	_, err = c.Do("setex", key1, "10")
+	assert.NotNil(t, err)
+
+	_, err = c.Do("setex", key1, "10", key1, key1)
 	assert.NotNil(t, err)
 
 	_, err = c.Do("getset", key1, key2, key3)

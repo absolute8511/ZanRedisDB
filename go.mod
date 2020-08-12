@@ -44,10 +44,11 @@ require (
 	github.com/spaolacci/murmur3 v0.0.0-20170819071325-9f5d223c6079
 	github.com/stretchr/testify v1.3.0
 	github.com/tidwall/gjson v1.1.0
-	github.com/tidwall/match v1.0.0 // indirect
+	github.com/tidwall/match v1.0.1 // indirect
 	github.com/tidwall/sjson v1.0.0
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
+	github.com/xujiajun/nutsdb v0.5.0
 	github.com/youzan/go-zanredisdb v0.5.1
 	github.com/youzan/gorocksdb v0.0.0-20200621102424-7269d59fec5c
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect

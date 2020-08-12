@@ -93,7 +93,7 @@ func (s *KVStore) LocalLookup(key []byte) ([]byte, error) {
 }
 
 func (s *KVStore) LocalDelete(key []byte) (int64, error) {
-	return s.KVDel(key)
+	return s.DelKeys(key)
 }
 
 func (s *KVStore) LocalPut(ts int64, key []byte, value []byte) error {

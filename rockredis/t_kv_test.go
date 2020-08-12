@@ -3,6 +3,7 @@ package rockredis
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
@@ -114,7 +115,7 @@ func TestDBKV(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(4), num)
 
-	db.KVDel(key3)
+	db.DelKeys(key3)
 	r, _ = db.KVExists(key3)
 	assert.Equal(t, int64(0), r)
 	num, err = db.GetTableKeyCount([]byte("test"))
@@ -149,7 +150,60 @@ func TestDBKV(t *testing.T) {
 	} else if num != 6 {
 		t.Errorf("table count not as expected: %v", num)
 	}
+}
 
+func TestDBKVSetIF(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key1 := []byte("test:testdb_kv_setif_a")
+	ts := time.Now().UnixNano()
+
+	n, err := db.SetIfEQ(ts, key1, nil, []byte("hello world 1"), 30)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.KVTtl(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(30), n)
+
+	n, err = db.SetIfEQ(ts, key1, []byte("not equal"), []byte("hello world 1"), 30)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	v1, _ := db.KVGet(key1)
+	assert.Equal(t, "hello world 1", string(v1))
+
+	n, err = db.SetIfEQ(ts, key1, v1, []byte("hello world 2"), 30)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	v1, _ = db.KVGet(key1)
+	assert.Equal(t, "hello world 2", string(v1))
+
+	n, err = db.DelIfEQ(ts, key1, []byte("not equal"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.DelIfEQ(ts, key1, v1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.GetTableKeyCount([]byte("test"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 }
 
 func TestDBKVBit(t *testing.T) {

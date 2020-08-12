@@ -269,6 +269,20 @@ func wrapWriteCommandKAnySubkey(kvn *KVNode, f common.CommandRspFunc, minSubKeyL
 		return rsp, err
 	}
 }
+func wrapWriteCommandKAnySubkeyAndMax(kvn *KVNode, f common.CommandRspFunc, minSubKeyLen int, maxSubKeyLen int) common.WriteCommandFunc {
+	return func(cmd redcon.Command) (interface{}, error) {
+		if len(cmd.Args) < 2+minSubKeyLen {
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
+		}
+		if len(cmd.Args) > 2+maxSubKeyLen {
+			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+			return nil, err
+		}
+		rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
+		return rsp, err
+	}
+}
 
 func wrapWriteCommandKV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
@@ -283,13 +297,17 @@ func wrapWriteCommandKV(kvn *KVNode, f common.CommandRspFunc) common.WriteComman
 
 func wrapWriteCommandKVV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
-		if len(cmd.Args) < 3 {
+		if len(cmd.Args) != 4 {
 			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
 			return nil, err
 		}
 		rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
 		return rsp, err
 	}
+}
+
+func wrapWriteCommandKSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+	return wrapWriteCommandKVV(kvn, f)
 }
 
 /*
@@ -331,17 +349,6 @@ func wrapWriteCommandKVKV(kvn *KVNode, f common.CommandRspFunc) common.WriteComm
 	}
 }
 */
-
-func wrapWriteCommandKSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
-	return func(cmd redcon.Command) (interface{}, error) {
-		if len(cmd.Args) != 4 {
-			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
-			return nil, err
-		}
-		rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
-		return rsp, err
-	}
-}
 
 func wrapWriteCommandKSubkeyVSubkeyV(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
