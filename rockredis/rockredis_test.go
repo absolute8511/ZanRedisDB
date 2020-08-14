@@ -1,6 +1,7 @@
 package rockredis
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -12,7 +13,36 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/slow"
 )
+
+const (
+	testEngineType = "pebble"
+)
+
+type testLogger struct {
+	t *testing.T
+}
+
+func newTestLogger(t *testing.T) *testLogger {
+	return &testLogger{t: t}
+}
+
+func (l *testLogger) Output(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputErr(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputWarning(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
 
 func getTestDBNoTableCounter(t *testing.T) *RockDB {
 	cfg := NewRockRedisDBConfig()
@@ -23,19 +53,6 @@ func getTestDBNoTableCounter(t *testing.T) *RockDB {
 	assert.Nil(t, err)
 	testDB, err := OpenRockDB(cfg)
 	assert.Nil(t, err)
-	return testDB
-}
-
-func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
-	cfg := NewRockRedisDBConfig()
-	cfg.EnableTableCounter = true
-	cfg.DataDir = dataDir
-	cfg.EnablePartitionedIndexFilter = true
-	testDB, err := OpenRockDB(cfg)
-	assert.Nil(t, err)
-	if testing.Verbose() {
-		SetLogLevel(int32(4))
-	}
 	return testDB
 }
 
@@ -55,13 +72,12 @@ func getTestDBForBench() *RockDB {
 	return testDB
 }
 
-func getTestDB(t *testing.T) *RockDB {
+func getTestDBWithDirType(t *testing.T, dataDir string, tp string) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
 	cfg.EnablePartitionedIndexFilter = true
-	var err error
-	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
-	assert.Nil(t, err)
+	cfg.EngineType = tp
+	cfg.DataDir = dataDir
 	testDB, err := OpenRockDB(cfg)
 	assert.Nil(t, err)
 	if testing.Verbose() {
@@ -70,8 +86,26 @@ func getTestDB(t *testing.T) *RockDB {
 	return testDB
 }
 
+func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
+	return getTestDBWithDirType(t, dataDir, testEngineType)
+}
+
+func getTestDB(t *testing.T) *RockDB {
+	dataDir, err := ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	return getTestDBWithDirType(t, dataDir, testEngineType)
+}
+
 func TestMain(m *testing.M) {
-	common.InitDefaultForGLogger("")
+	SetLogger(int32(common.LOG_INFO), nil)
+	engine.SetLogger(int32(common.LOG_INFO), nil)
+	slow.SetLogger(int32(common.LOG_INFO), nil)
+	flag.Parse()
+	if testing.Verbose() {
+		common.InitDefaultForGLogger("")
+		SetLogLevel(int32(common.LOG_DETAIL))
+		engine.SetLogLevel(int32(common.LOG_DETAIL))
+	}
 	ret := m.Run()
 	os.Exit(ret)
 }

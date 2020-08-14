@@ -257,6 +257,10 @@ func TestDBHLLOp(t *testing.T) {
 	assert.Nil(t, err)
 	t.Log(v3)
 	assert.True(t, v3 <= v11+v22, "merged count should not great than add")
+	ck, _ := db.rockEng.NewCheckpoint()
+	err = ck.Save(db.GetDataDir(), nil)
+	assert.Nil(t, err)
+
 	db.Close()
 	db = getTestDBWithDir(t, db.cfg.DataDir)
 	defer db.Close()
@@ -444,6 +448,12 @@ func TestDBHLLDifferentType(t *testing.T) {
 	v3, _ := db.PFCount(0, key2)
 	t.Log(v3)
 	assert.True(t, v3 > 0, "should have pf count")
+
+	if db.cfg.EngineType == "mem" {
+		ck, _ := db.rockEng.NewCheckpoint()
+		err = ck.Save(db.GetDataDir(), nil)
+		assert.Nil(t, err)
+	}
 
 	db.Close()
 	db = getTestDBWithDir(t, db.cfg.DataDir)

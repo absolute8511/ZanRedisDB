@@ -17,9 +17,11 @@ import (
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/node"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/slow"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 )
 
@@ -61,16 +63,19 @@ var testSnap = 10
 var testSnapCatchup = 3
 
 func TestMain(m *testing.M) {
-	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+	SetLogger(int32(common.LOG_INFO), nil)
+	rockredis.SetLogger(int32(common.LOG_INFO), nil)
+	slow.SetLogger(int32(common.LOG_INFO), nil)
+	node.SetLogger(int32(common.LOG_INFO), nil)
+	engine.SetLogger(int32(common.LOG_INFO), nil)
+	rafthttp.SetLogger(int32(common.LOG_INFO), nil)
 	node.EnableForTest()
 	node.EnableSlowLimiterTest(true)
 
 	flag.Parse()
 
-	common.InitDefaultForGLogger("")
 	if testing.Verbose() {
+		common.InitDefaultForGLogger("")
 		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
 		node.SetLogLevel(int(common.LOG_DETAIL))
 		sLog.SetLevel(int32(common.LOG_DETAIL))

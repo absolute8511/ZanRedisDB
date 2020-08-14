@@ -24,13 +24,14 @@ import (
 	"time"
 
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/pkg/testutil"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
 )
 
 func TestMain(m *testing.M) {
-	common.InitDefaultForGLogger("")
+	engine.SetLogger(int32(common.LOG_INFO), nil)
 	ret := m.Run()
 	os.Exit(ret)
 }
