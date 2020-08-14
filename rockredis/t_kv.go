@@ -205,6 +205,9 @@ func (db *RockDB) isKVExistOrExpired(ts int64, rawKey []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if vref == nil {
+		return 0, nil
+	}
 	defer vref.Free()
 	v := vref.Data()
 	if v == nil {

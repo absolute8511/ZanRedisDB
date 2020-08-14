@@ -460,6 +460,9 @@ func (db *RockDB) ZScore(key []byte, member []byte) (float64, error) {
 	if err != nil {
 		return score, err
 	}
+	if refv == nil {
+		return score, errScoreMiss
+	}
 	defer refv.Free()
 	if refv.Data() == nil {
 		return score, errScoreMiss
