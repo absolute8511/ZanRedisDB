@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"flag"
 	"io/ioutil"
 	"os"
 	"path"
@@ -9,7 +10,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 )
+
+func TestMain(m *testing.M) {
+	SetLogger(int32(common.LOG_INFO), nil)
+	flag.Parse()
+	if testing.Verbose() {
+		common.InitDefaultForGLogger("")
+		SetLogLevel(int32(common.LOG_DETAIL))
+	}
+	ret := m.Run()
+	os.Exit(ret)
+}
 
 func TestRocksdbCheckpointData(t *testing.T) {
 	testCheckpointData(t, "rocksdb")
@@ -17,6 +30,10 @@ func TestRocksdbCheckpointData(t *testing.T) {
 
 func TestPebbleEngCheckpointData(t *testing.T) {
 	testCheckpointData(t, "pebble")
+}
+
+func TestMemEngCheckpointData(t *testing.T) {
+	testCheckpointData(t, "mem")
 }
 
 func testCheckpointData(t *testing.T, engType string) {
@@ -38,7 +55,7 @@ func testCheckpointData(t *testing.T, engType string) {
 	assert.Nil(t, err)
 	// test save should not block, so lastTs should be updated soon
 	ckpath := path.Join(tmpDir, "newCk")
-	os.MkdirAll(ckpath, 0755)
+	os.MkdirAll(ckpath, common.DIR_PERM)
 	// since the open engine will  add rocksdb as subdir, we save it to the right place
 	err = ck.Save(path.Join(ckpath, engType), make(chan struct{}))
 	assert.Nil(t, err)
@@ -54,7 +71,7 @@ func testCheckpointData(t *testing.T, engType string) {
 	assert.Nil(t, err)
 	// test save should not block, so lastTs should be updated soon
 	ckpath2 := path.Join(tmpDir, "newCk2")
-	os.MkdirAll(ckpath2, 0755)
+	os.MkdirAll(ckpath2, common.DIR_PERM)
 	err = ck2.Save(path.Join(ckpath2, engType), make(chan struct{}))
 	assert.Nil(t, err)
 
