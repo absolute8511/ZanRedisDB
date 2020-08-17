@@ -29,7 +29,7 @@ func (wb *memWriteBatch) Clear() {
 }
 
 func (wb *memWriteBatch) DeleteRange(start, end []byte) {
-	wb.db.writerMutex.Lock()
+	wb.db.rwmutex.Lock()
 	bit := wb.db.eng.MakeIter()
 	bit.SeekGE(&kvitem{key: start})
 	keys := make([][]byte, 0, 100)
@@ -39,16 +39,16 @@ func (wb *memWriteBatch) DeleteRange(start, end []byte) {
 		}
 		keys = append(keys, bit.Cur().key)
 	}
-	wb.db.writerMutex.Unlock()
+	wb.db.rwmutex.Unlock()
 	for _, k := range keys {
 		wb.Delete(k)
 	}
 }
 
 func (wb *memWriteBatch) Delete(key []byte) {
-	wb.db.writerMutex.Lock()
+	wb.db.rwmutex.Lock()
 	wb.db.eng.Delete(&kvitem{key: key})
-	wb.db.writerMutex.Unlock()
+	wb.db.rwmutex.Unlock()
 }
 
 func (wb *memWriteBatch) Put(key []byte, value []byte) {
@@ -57,12 +57,14 @@ func (wb *memWriteBatch) Put(key []byte, value []byte) {
 	item.value = make([]byte, len(value))
 	copy(item.key, key)
 	copy(item.value, value)
-	wb.db.writerMutex.Lock()
+	wb.db.rwmutex.Lock()
 	wb.db.eng.Set(item)
-	wb.db.writerMutex.Unlock()
+	wb.db.rwmutex.Unlock()
 }
 
 func (wb *memWriteBatch) Merge(key []byte, value []byte) {
+	wb.db.rwmutex.Lock()
+	defer wb.db.rwmutex.Unlock()
 	v, err := wb.db.GetBytesNoLock(key)
 	cur, err := GetRocksdbUint64(v, err)
 	if err != nil {
@@ -79,8 +81,6 @@ func (wb *memWriteBatch) Merge(key []byte, value []byte) {
 	item.key = make([]byte, len(key))
 	copy(item.key, key)
 	item.value = buf
-	wb.db.writerMutex.Lock()
 	wb.db.eng.Set(item)
-	wb.db.writerMutex.Unlock()
 	return
 }

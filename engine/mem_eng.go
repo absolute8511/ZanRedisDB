@@ -45,7 +45,6 @@ func (sc *sharedMemConfig) Destroy() {
 
 type memEng struct {
 	rwmutex     sync.RWMutex
-	writerMutex sync.Mutex
 	cfg         *RockEngConfig
 	eng         *btree
 	engOpened   int32
