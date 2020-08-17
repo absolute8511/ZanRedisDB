@@ -710,6 +710,36 @@ func TestSetSPopCompatile(t *testing.T) {
 	assert.Equal(t, true, ok)
 }
 
+func TestSetSPopSAddConcurrent(t *testing.T) {
+	var wg sync.WaitGroup
+	for index := 0; index < 10; index++ {
+		wg.Add(1)
+		client := getTestConn(t)
+		defer client.Close()
+		go func(c *goredis.PoolConn) {
+			defer wg.Done()
+			for loop := 0; loop < 2000; loop++ {
+				key1 := "default:test:testdb_spop_sadd_concurrency" + strconv.Itoa(loop)
+				binaryStr := make([]byte, 10)
+				binaryStr = []byte("binary" + string(binaryStr) + "bb")
+				_, err := goredis.Int(c.Do("sadd", key1, binaryStr))
+				assert.Nil(t, err)
+				binaryStr2 := []byte(string(binaryStr) + strconv.Itoa(loop%2))
+				_, err = goredis.Int(c.Do("sadd", key1, binaryStr2))
+				assert.Nil(t, err)
+				_, err = c.Do("smembers", key1)
+				assert.Nil(t, err)
+
+				_, err = c.Do("spop", key1)
+				assert.Nil(t, err)
+				_, err = goredis.MultiBulk(c.Do("spop", key1, 2))
+				assert.Nil(t, err)
+			}
+		}(client)
+	}
+	wg.Wait()
+}
+
 func TestSetExpire(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
