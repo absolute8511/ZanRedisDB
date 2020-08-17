@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -726,4 +727,28 @@ func TestDBZClearInCompactTTL(t *testing.T) {
 	vlist, err = db.ZScan(key, []byte(""), -1, "", false)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(vlist))
+}
+
+func BenchmarkZaddAndZRembyrange(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	// all range remove test
+	key := []byte("test:zkey_range_rm_bench")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		member := common.ScorePair{
+			Score:  float64(i),
+			Member: []byte(strconv.Itoa(i)),
+		}
+		db.ZAdd(0, key, member)
+	}
+
+	for i := 0; i < b.N; i++ {
+		db.ZRemRangeByRank(0, key, 1, 100)
+		db.ZRemRangeByScore(0, key, 101, 201)
+		db.ZRemRangeByLex(0, key, []byte("0"), []byte("100"), common.RangeClose)
+	}
+	b.StopTimer()
 }

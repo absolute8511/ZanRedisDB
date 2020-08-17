@@ -484,6 +484,7 @@ func BenchmarkBitSetV2(b *testing.B) {
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
+	b.StopTimer()
 	key := []byte("test:testdb_kv_bit_benchset")
 	bitsForOne := make(map[int]bool)
 	// insert one bit at start and end of each segment
@@ -512,6 +513,7 @@ func BenchmarkBitSetV2(b *testing.B) {
 	bitsForOne[bitmapSegBits*2+bitmapSegBytes] = true
 	bitsForOne[bitmapSegBits*2+bitmapSegBytes+1] = true
 
+	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		// test set 0 to 1
 		for bpos := range bitsForOne {
@@ -530,6 +532,7 @@ func BenchmarkBitSetV2(b *testing.B) {
 			db.BitSetV2(0, key, int64(bpos), 0)
 		}
 	}
+	b.StopTimer()
 }
 
 func BenchmarkBitGetV2(b *testing.B) {

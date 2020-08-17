@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -347,4 +348,42 @@ func TestDBSPop(t *testing.T) {
 	if vals, _ := db.SMembers(key); len(vals) != 0 {
 		t.Errorf("should empty set")
 	}
+}
+
+func BenchmarkSIsMember(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test:sismember_bench")
+
+	for i := 0; i < b.N+1000; i++ {
+		if i%2 == 0 {
+			continue
+		}
+		db.SAdd(0, key, []byte("hello"+strconv.Itoa(i)))
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.SIsMember(key, []byte("hello"+strconv.Itoa(i)))
+	}
+	b.StopTimer()
+}
+
+func BenchmarkSAddAndSPop(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key := []byte("test:spop_bench")
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N+1000; i++ {
+		db.SAdd(0, key, []byte("hello"+strconv.Itoa(i)))
+	}
+
+	for i := 0; i < b.N; i++ {
+		db.SPop(0, key, 100)
+	}
+	b.StopTimer()
 }

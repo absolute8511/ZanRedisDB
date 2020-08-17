@@ -257,9 +257,11 @@ func TestDBHLLOp(t *testing.T) {
 	assert.Nil(t, err)
 	t.Log(v3)
 	assert.True(t, v3 <= v11+v22, "merged count should not great than add")
-	ck, _ := db.rockEng.NewCheckpoint()
-	err = ck.Save(db.GetDataDir(), nil)
-	assert.Nil(t, err)
+	if db.cfg.EngineType == "mem" {
+		ck, _ := db.rockEng.NewCheckpoint()
+		err = ck.Save(db.GetDataDir(), nil)
+		assert.Nil(t, err)
+	}
 
 	db.Close()
 	db = getTestDBWithDir(t, db.cfg.DataDir)
@@ -674,4 +676,19 @@ func TestDBHLLOpPerf3(t *testing.T) {
 		}
 		time.Sleep(time.Microsecond)
 	}
+}
+
+func BenchmarkHLLPFADD(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key1 := []byte("test:hll_pfadd_bench")
+
+	b.ResetTimer()
+	for i := 0; i <= b.N; i++ {
+		db.PFAdd(0, key1, []byte("hello world 1"+strconv.Itoa(i)))
+		db.hllCache.Flush()
+	}
+	b.StopTimer()
 }

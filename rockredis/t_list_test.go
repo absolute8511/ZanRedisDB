@@ -492,3 +492,20 @@ func TestDBListClearInCompactTTL(t *testing.T) {
 	assert.Equal(t, memberNew, vlist[0])
 	assert.Equal(t, int(n), len(vlist))
 }
+
+func BenchmarkListAddAndLtrim(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:list_addtrim_bench")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.RPush(0, key, []byte(strconv.Itoa(i)))
+	}
+	for i := 100; i >= 1; i-- {
+		db.LTrim(0, key, 0, int64(i))
+	}
+	b.StopTimer()
+}

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	testEngineType = "pebble"
+	testEngineType = "rocksdb"
 )
 
 type testLogger struct {
@@ -48,6 +48,7 @@ func getTestDBNoTableCounter(t *testing.T) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = false
 	cfg.EnablePartitionedIndexFilter = true
+	cfg.EngineType = testEngineType
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
@@ -60,6 +61,7 @@ func getTestDBForBench() *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
 	cfg.EnablePartitionedIndexFilter = true
+	cfg.EngineType = testEngineType
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
 	if err != nil {

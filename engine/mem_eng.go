@@ -119,6 +119,8 @@ func (pe *memEng) OpenEng() error {
 	eng := &btree{
 		cmp: cmpItem,
 	}
+
+	os.MkdirAll(pe.GetDataDir(), common.DIR_PERM)
 	err := LoadBtreeFromFile(eng, pe.GetDataDir())
 	if err != nil {
 		return err

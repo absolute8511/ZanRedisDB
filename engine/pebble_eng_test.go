@@ -116,7 +116,8 @@ func TestPebbleReopenAndCheck(t *testing.T) {
 	err = pe.Write(wb)
 	assert.Nil(t, err)
 	ck, _ := pe.NewCheckpoint()
-	ck.Save(path.Join(tmpDir, "cktmp"), make(chan struct{}))
+	err = ck.Save(path.Join(tmpDir, "cktmp"), make(chan struct{}))
+	assert.Nil(t, err)
 
 	err = pe.CheckDBEngForRead(path.Join(tmpDir, "cktmp"))
 	assert.Nil(t, err)
