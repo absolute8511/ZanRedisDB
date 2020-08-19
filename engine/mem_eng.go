@@ -154,7 +154,9 @@ func (pe *memEng) CompactAllRange() {
 }
 
 func (pe *memEng) GetApproximateTotalKeyNum() int {
-	return 0
+	pe.rwmutex.RLock()
+	defer pe.rwmutex.RUnlock()
+	return pe.eng.Len()
 }
 
 func (pe *memEng) GetApproximateKeyNum(ranges []CRange) uint64 {
@@ -283,8 +285,7 @@ func (pe *memEng) ExistNoLock(key []byte) (bool, error) {
 }
 
 func (pe *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
-	bt := pe.eng.Clone()
-	defer bt.Reset()
+	bt := pe.eng
 	bi := bt.MakeIter()
 
 	bi.SeekGE(&kvitem{key: key})
@@ -438,6 +439,10 @@ func saveBtreeToFile(cbt *btree, dir string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer func() {
+		fs.Sync()
+		fs.Close()
+	}()
 	total := int64(0)
 	n, err := fs.Write([]byte("v001\n"))
 	if err != nil {

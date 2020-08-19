@@ -7,7 +7,6 @@ import (
 type memIterator struct {
 	db           *memEng
 	bit          biterator
-	cbt          btree
 	opts         IteratorOpts
 	upperBound   []byte
 	lowerBound   []byte
@@ -30,11 +29,9 @@ func newMemIterator(db *memEng, opts IteratorOpts) (*memIterator, error) {
 		upperBound = append(upperBound, 0)
 	}
 
-	cbt := db.eng.Clone()
 	dbit := &memIterator{
 		db:         db,
-		bit:        cbt.MakeIter(),
-		cbt:        cbt,
+		bit:        db.eng.MakeIter(),
 		lowerBound: lowerBound,
 		upperBound: upperBound,
 		opts:       opts,
@@ -104,6 +101,5 @@ func (it *memIterator) NoTimestamp(vt byte) {
 }
 
 func (it *memIterator) Close() {
-	it.cbt.Reset()
 	it.db.rwmutex.RUnlock()
 }
