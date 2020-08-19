@@ -105,7 +105,7 @@ func lDecodeListKey(ek []byte) (table []byte, key []byte, seq int64, err error) 
 	return
 }
 
-func (db *RockDB) fixListKey(ts int64, key []byte) {
+func (db *RockDB) scanfixListKey(ts int64, key []byte, wb engine.WriteBatch) {
 	// fix head and tail by iterator to find if any list key found or not found
 	var headSeq int64
 	var tailSeq int64
@@ -121,7 +121,6 @@ func (db *RockDB) fixListKey(ts int64, key []byte) {
 	}
 	table := keyInfo.Table
 	rk := keyInfo.VerKey
-	defer db.wb.Clear()
 	dbLog.Infof("list %v before fix: meta: %v, %v", string(key), headSeq, tailSeq)
 	startKey := lEncodeListKey(table, rk, listMinSeq)
 	stopKey := lEncodeListKey(table, rk, listMaxSeq)
@@ -163,15 +162,20 @@ func (db *RockDB) fixListKey(ts int64, key []byte) {
 	}
 	if cnt == 0 {
 		metaKey := lEncodeMetaKey(key)
-		db.wb.Delete(metaKey)
-		db.IncrTableKeyCount(table, -1, db.wb)
+		wb.Delete(metaKey)
+		db.IncrTableKeyCount(table, -1, wb)
 	} else {
-		_, err = db.lSetMeta(key, keyInfo.OldHeader, fixedHead, fixedTail, ts, db.wb)
+		_, err = db.lSetMeta(key, keyInfo.OldHeader, fixedHead, fixedTail, ts, wb)
 		if err != nil {
 			return
 		}
 	}
 	dbLog.Infof("list %v fixed to %v, %v, cnt: %v", string(key), fixedHead, fixedTail, cnt)
+}
+
+func (db *RockDB) fixListKey(ts int64, key []byte) {
+	defer db.wb.Clear()
+	db.scanfixListKey(ts, key, db.wb)
 	db.rockEng.Write(db.wb)
 }
 
