@@ -85,7 +85,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 		UseRedisV2:     true,
 	}
 	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-	kvOpts.WALRocksDBOpts.EngineType = "pebble"
+	kvOpts.WALRocksDBOpts.EngineType = testEngineType
 
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"

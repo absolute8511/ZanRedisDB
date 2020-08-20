@@ -27,6 +27,10 @@ import (
 
 var clusterName = "cluster-unittest-server"
 
+const (
+	testEngineType = "pebble"
+)
+
 type fakeClusterInfo struct {
 	clusterName string
 	snapSyncs   []common.SnapshotSyncInfo
@@ -76,9 +80,11 @@ func TestMain(m *testing.M) {
 
 	if testing.Verbose() {
 		common.InitDefaultForGLogger("")
-		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
-		node.SetLogLevel(int(common.LOG_DETAIL))
-		sLog.SetLevel(int32(common.LOG_DETAIL))
+		SetLogger(int32(common.LOG_DETAIL), common.NewGLogger())
+		rockredis.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
+		slow.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
+		node.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
+		engine.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
 	}
 
 	ret := m.Run()
@@ -188,7 +194,7 @@ func startTestClusterWithBasePort(portBase int, replicaNum int,
 			SharedRocksWAL: true,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kvOpts.RocksDBOpts.EngineType = testEngineType
 
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer

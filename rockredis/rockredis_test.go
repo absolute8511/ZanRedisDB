@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	testEngineType = "rocksdb"
+	testEngineType = "pebble"
 )
 
 type testLogger struct {

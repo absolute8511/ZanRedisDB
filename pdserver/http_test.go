@@ -28,6 +28,7 @@ const (
 	pdRemoteHttpPort          = "18008"
 	pdLearnerHttpPort         = "18009"
 	baseRedisPort             = 62345
+	testEngineType            = "pebble"
 )
 
 var testEtcdServers = "http://127.0.0.1:2379"
@@ -82,7 +83,7 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 			UseRocksWAL:          true,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kvOpts.RocksDBOpts.EngineType = testEngineType
 		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)
@@ -130,7 +131,7 @@ func addMoreTestDataNodeToCluster(t *testing.T, n int) ([]dataNodeWrapper, strin
 			UseRocksWAL:          true,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kvOpts.RocksDBOpts.EngineType = testEngineType
 		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)
@@ -193,7 +194,7 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 			UseRocksWAL:          true,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kvOpts.RocksDBOpts.EngineType = testEngineType
 		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)

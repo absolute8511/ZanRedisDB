@@ -50,7 +50,7 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 		SharedRocksWAL: true,
 	}
 	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-	kvOpts.WALRocksDBOpts.EngineType = "pebble"
+	kvOpts.WALRocksDBOpts.EngineType = testEngineType
 
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
