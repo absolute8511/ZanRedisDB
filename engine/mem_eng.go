@@ -354,10 +354,10 @@ type memEngCheckpoint struct {
 	pe *memEng
 }
 
-func (pck *memEngCheckpoint) Save(path string, notify chan struct{}) error {
+func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
 	pck.pe.rwmutex.RLock()
-	defer pck.pe.rwmutex.RUnlock()
 	if pck.pe.IsClosed() {
+		pck.pe.rwmutex.RUnlock()
 		return errDBEngClosed
 	}
 	cbt := pck.pe.eng.Clone()
@@ -366,13 +366,29 @@ func (pck *memEngCheckpoint) Save(path string, notify chan struct{}) error {
 	if notify != nil {
 		close(notify)
 	}
-	n, err := saveBtreeToFile(&cbt, path)
+	n, fs, err := saveBtreeToFile(&cbt, cpath)
+	// release the lock early to avoid blocking while sync file
+	pck.pe.rwmutex.RUnlock()
+
 	if err != nil {
-		dbLog.Infof("save checkpoint to %v failed: %s", path, err.Error())
+		dbLog.Infof("save checkpoint to %v failed: %s", cpath, err.Error())
 		return err
 	}
-	dbLog.Infof("save checkpoint to %v done: %v bytes", path, n)
-	return nil
+	if fs != nil {
+		err = fs.Sync()
+		if err != nil {
+			dbLog.Errorf("save checkpoint to %v sync failed: %v ", cpath, err.Error())
+			return err
+		}
+		fs.Close()
+	}
+	err = os.Rename(path.Join(cpath, "btree.dat.tmp"), path.Join(cpath, "btree.dat"))
+	if err != nil {
+		dbLog.Errorf("save checkpoint to %v failed: %v ", cpath, err.Error())
+	} else {
+		dbLog.Infof("save checkpoint to %v done: %v bytes", cpath, n)
+	}
+	return err
 }
 
 func LoadBtreeFromFile(eng *btree, dir string) error {
@@ -430,28 +446,30 @@ func LoadBtreeFromFile(eng *btree, dir string) error {
 	return nil
 }
 
-func saveBtreeToFile(cbt *btree, dir string) (int64, error) {
+func saveBtreeToFile(cbt *btree, dir string) (int64, *os.File, error) {
 	err := os.Mkdir(dir, common.DIR_PERM)
 	if err != nil && !os.IsExist(err) {
-		return 0, err
+		return 0, nil, err
 	}
-	fs, err := os.OpenFile(path.Join(dir, "btree.dat"), os.O_CREATE|os.O_WRONLY, common.FILE_PERM)
+	fs, err := os.OpenFile(path.Join(dir, "btree.dat.tmp"), os.O_CREATE|os.O_WRONLY, common.FILE_PERM)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer func() {
-		fs.Sync()
-		fs.Close()
+		if err != nil {
+			fs.Close()
+		}
 	}()
 	total := int64(0)
-	n, err := fs.Write([]byte("v001\n"))
+	n := int(0)
+	n, err = fs.Write([]byte("v001\n"))
 	if err != nil {
-		return total, err
+		return total, nil, err
 	}
 	total += int64(n)
 	n, err = fs.Write([]byte(fmt.Sprintf("%016d\n", cbt.Len())))
 	if err != nil {
-		return total, err
+		return total, nil, err
 	}
 	total += int64(n)
 	bi := cbt.MakeIter()
@@ -463,26 +481,26 @@ func saveBtreeToFile(cbt *btree, dir string) (int64, error) {
 		binary.BigEndian.PutUint64(buf, vlen)
 		n, err = fs.Write(buf[:8])
 		if err != nil {
-			return total, err
+			return total, nil, err
 		}
 		total += int64(n)
 		n, err = fs.Write(item.key)
 		if err != nil {
-			return total, err
+			return total, nil, err
 		}
 		total += int64(n)
 		vlen = uint64(len(item.value))
 		binary.BigEndian.PutUint64(buf, vlen)
 		n, err = fs.Write(buf[:8])
 		if err != nil {
-			return total, err
+			return total, nil, err
 		}
 		total += int64(n)
 		n, err = fs.Write(item.value)
 		if err != nil {
-			return total, err
+			return total, nil, err
 		}
 		total += int64(n)
 	}
-	return total, nil
+	return total, fs, nil
 }
