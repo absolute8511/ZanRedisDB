@@ -66,11 +66,11 @@ func TestKVNode_setCommandConcurrent(t *testing.T) {
 	defer nd.Stop()
 	defer close(stopC)
 	var wg sync.WaitGroup
-	for index := 0; index < 10; index++ {
+	for index := 0; index < 3; index++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for loop := 0; loop < 1000; loop++ {
+			for loop := 0; loop < 100; loop++ {
 				c := &fakeRedisConn{}
 				testKey := []byte("default:test:1")
 				testMember := []byte("1" + strconv.Itoa(loop))

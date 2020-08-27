@@ -815,7 +815,7 @@ func TestListTTL_Compact_KeepTTL(t *testing.T) {
 	assert.Equal(t, int64(1), n)
 	n, err = db.ListTtl(setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, n)
+	assert.InDelta(t, ttl, n, 1)
 
 	// should keep ttl
 	n, err = db.RPush(tn, setKey, []byte("newm1"))
@@ -823,14 +823,14 @@ func TestListTTL_Compact_KeepTTL(t *testing.T) {
 	assert.Equal(t, int64(4), n)
 	n, err = db.ListTtl(setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, n)
+	assert.InDelta(t, ttl, n, 1)
 
 	elem, err := db.LPop(tn, setKey)
 	assert.Nil(t, err)
 	assert.Equal(t, mems[0], elem)
 	n, err = db.ListTtl(setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, n)
+	assert.InDelta(t, ttl, n, 1)
 }
 
 func TestListTTL_Compact_TTLExpired(t *testing.T) {
@@ -854,7 +854,7 @@ func TestListTTL_Compact_TTLExpired(t *testing.T) {
 
 	n, err = db.ListTtl(setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, n)
+	assert.InDelta(t, ttl, n, 1)
 
 	elem, err := db.LIndex(setKey, 0)
 	assert.Nil(t, err)
@@ -1012,7 +1012,7 @@ func TestSetTTL_Compact_KeepTTL(t *testing.T) {
 	assert.Equal(t, int64(1), n)
 	n, err = db.SetTtl(setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, n)
+	assert.InDelta(t, ttl, n, 1)
 
 	// should keep ttl
 	n, err = db.SAdd(tn, setKey, []byte("newm1"))
@@ -1020,7 +1020,7 @@ func TestSetTTL_Compact_KeepTTL(t *testing.T) {
 	assert.Equal(t, int64(1), n)
 	n, err = db.SetTtl(setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, n)
+	assert.InDelta(t, ttl, n, 1)
 
 	n, err = db.SRem(tn, setKey, mems[0])
 	assert.Nil(t, err)
@@ -1032,7 +1032,7 @@ func TestSetTTL_Compact_KeepTTL(t *testing.T) {
 	assert.Nil(t, err)
 	n, err = db.SetTtl(setKey)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl, n)
+	assert.InDelta(t, ttl, n, 1)
 }
 
 func TestSetTTL_Compact_TTLExpired(t *testing.T) {
