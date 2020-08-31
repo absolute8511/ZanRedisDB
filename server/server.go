@@ -15,8 +15,6 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/felixge/fgprof"
-
 	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/slow"
@@ -412,7 +410,7 @@ func (s *Server) Start() {
 	}()
 
 	if s.conf.ProfilePort >= 0 {
-		http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
+		//http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
 		go http.ListenAndServe(":"+strconv.Itoa(s.conf.ProfilePort), nil)
 	}
 

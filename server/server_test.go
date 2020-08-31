@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/pkg/fileutil"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/rockredis"
 	"github.com/youzan/ZanRedisDB/slow"
@@ -623,6 +625,213 @@ func TestCompactCancelAfterStopped(t *testing.T) {
 
 	leaderNode := waitForLeader(t, time.Minute)
 	assert.NotNil(t, leaderNode)
+}
+
+func readWALNames(dirpath string) []string {
+	names, err := fileutil.ReadDir(dirpath)
+	if err != nil {
+		return nil
+	}
+	wnames := checkWalNames(names)
+	if len(wnames) == 0 {
+		return nil
+	}
+	return wnames
+}
+func checkWalNames(names []string) []string {
+	wnames := make([]string, 0)
+	for _, name := range names {
+		if _, _, err := parseWALName(name); err != nil {
+			// don't complain about left over tmp files
+			if !strings.HasSuffix(name, ".tmp") {
+			}
+			continue
+		}
+		wnames = append(wnames, name)
+	}
+	return wnames
+}
+
+func parseWALName(str string) (seq, index uint64, err error) {
+	if !strings.HasSuffix(str, ".wal") {
+		return 0, 0, errors.New("bad wal file")
+	}
+	_, err = fmt.Sscanf(str, "%016x-%016x.wal", &seq, &index)
+	return seq, index, err
+}
+
+func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
+	// stop all nodes in cluster and start one by one
+	kvs, _, _, path, err := startTestClusterWithBasePort(12345, 1, 0, false)
+	if err != nil {
+		t.Fatalf("init cluster failed: %v", err)
+	}
+	if path != "" {
+		defer os.RemoveAll(path)
+	}
+	time.Sleep(time.Second)
+	defer func() {
+		for _, n := range kvs {
+			n.server.Stop()
+		}
+	}()
+	leaderNode, err := waitForLeaderForClusters(time.Minute, kvs)
+	assert.Nil(t, err)
+	assert.NotNil(t, leaderNode)
+	rport := kvs[0].redisPort
+
+	client := goredis.NewClient("127.0.0.1:"+strconv.Itoa(rport), "")
+	client.SetMaxIdleConns(4)
+	defer client.Close()
+	c, err := client.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	assert.Equal(t, 1, len(kvs))
+
+	key := "default:test-cluster:a"
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, rsp)
+	for i := 0; i < testSnap*100; i++ {
+		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)))
+		assert.Nil(t, err)
+		assert.Equal(t, OK, rsp)
+	}
+
+	ci := leaderNode.Node.GetAppliedIndex()
+	for _, s := range kvs {
+		node := s.server.GetNamespaceFromFullName("default-0")
+		node.Close()
+	}
+	// truncate the leader logs
+	// note we only truncate the logs which will keep recent valid snapshot
+	raftConf := leaderNode.Node.GetRaftConfig()
+	names := readWALNames(raftConf.WALDir)
+	lastWAL := filepath.Join(raftConf.WALDir, names[len(names)-1])
+	os.Truncate(lastWAL, 140*1000)
+
+	for _, s := range kvs {
+		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
+		assert.Nil(t, err)
+		assert.NotNil(t, node)
+		err = node.Start(false)
+		assert.Nil(t, err)
+		if err != nil {
+			return
+		}
+	}
+	time.Sleep(time.Second * 2)
+
+	hasLeader := false
+	newci := uint64(0)
+	for _, s := range kvs {
+		replicaNode := s.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		newci = replicaNode.Node.GetAppliedIndex()
+		assert.True(t, newci < ci)
+		if replicaNode.Node.IsLead() {
+			hasLeader = true
+		}
+	}
+	assert.Equal(t, true, hasLeader)
+	rsp, err = goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, strconv.Itoa(testSnap*100-int(ci+2-newci)), rsp)
+}
+
+func TestFollowRestartWithTailWALLogLost(t *testing.T) {
+	// stop all nodes in cluster and start one by one
+	kvs, _, _, path, err := startTestClusterWithBasePort(12345, 2, 0, false)
+	if err != nil {
+		t.Fatalf("init cluster failed: %v", err)
+	}
+	if path != "" {
+		defer os.RemoveAll(path)
+	}
+	time.Sleep(time.Second)
+	defer func() {
+		for _, n := range kvs {
+			n.server.Stop()
+		}
+	}()
+	leaderNode, err := waitForLeaderForClusters(time.Minute, kvs)
+	assert.Nil(t, err)
+	assert.NotNil(t, leaderNode)
+	var follower *node.NamespaceNode
+	rport := 0
+	for _, n := range kvs {
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
+		if !replicaNode.Node.IsLead() {
+			follower = replicaNode
+		} else {
+			rport = n.redisPort
+		}
+	}
+
+	client := goredis.NewClient("127.0.0.1:"+strconv.Itoa(rport), "")
+	client.SetMaxIdleConns(4)
+	defer client.Close()
+	c, err := client.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	assert.Equal(t, 2, len(kvs))
+
+	key := "default:test-cluster:a"
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, rsp)
+	for i := 0; i < testSnap*100; i++ {
+		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)))
+		assert.Nil(t, err)
+		assert.Equal(t, OK, rsp)
+	}
+
+	time.Sleep(time.Second)
+	ci := leaderNode.Node.GetAppliedIndex()
+	raftConf := follower.Node.GetRaftConfig()
+	for _, s := range kvs {
+		node := s.server.GetNamespaceFromFullName("default-0")
+		node.Close()
+	}
+	// truncate the logs
+	// note we only truncate the logs which will keep recent valid snapshot
+	names := readWALNames(raftConf.WALDir)
+	lastWAL := filepath.Join(raftConf.WALDir, names[len(names)-1])
+	os.Truncate(lastWAL, 140*1000)
+
+	for _, s := range kvs {
+		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
+		assert.Nil(t, err)
+		assert.NotNil(t, node)
+		err = node.Start(false)
+		assert.Nil(t, err)
+		if err != nil {
+			return
+		}
+	}
+	time.Sleep(time.Second * 2)
+
+	hasLeader := false
+	newci := uint64(0)
+	for _, s := range kvs {
+		replicaNode := s.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		newci = replicaNode.Node.GetAppliedIndex()
+		assert.Equal(t, ci+1, newci)
+		if replicaNode.Node.IsLead() {
+			hasLeader = true
+		}
+	}
+	assert.Equal(t, true, hasLeader)
+	rsp, err = goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, strconv.Itoa(testSnap*100-1), rsp)
 }
 
 func BenchmarkWriteToClusterWithEmptySM(b *testing.B) {
