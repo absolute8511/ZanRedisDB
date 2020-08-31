@@ -25,6 +25,7 @@ import (
 	"github.com/youzan/ZanRedisDB/rockredis"
 	"github.com/youzan/ZanRedisDB/slow"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
+	"github.com/youzan/ZanRedisDB/wal"
 )
 
 var clusterName = "cluster-unittest-server"
@@ -63,6 +64,11 @@ var learnerServers []*Server
 var gtmpClusterDir string
 var seedNodes []node.ReplicaInfo
 var remoteClusterBasePort = 22345
+var fullscanTestPortBase = 52345
+var mergeTestPortBase = 42345
+var redisAPITestPortBase = 12345
+var localClusterTestPortBase = 24345
+var tmpUsedClusterPortBase = 23345
 
 //
 var testSnap = 10
@@ -125,8 +131,8 @@ func TestMain(m *testing.M) {
 }
 
 func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string) {
-	rport := 24345
-	kvs, ns, servers, path, err := startTestClusterWithBasePort(rport, replicaNum, syncLearnerNum, false)
+	rport := localClusterTestPortBase
+	kvs, ns, servers, path, err := startTestClusterWithBasePort("unit-test-localcluster", rport, replicaNum, syncLearnerNum, false)
 	if err != nil {
 		t.Fatalf("init cluster failed: %v", err)
 	}
@@ -134,11 +140,11 @@ func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testC
 }
 
 func startTestClusterWithEmptySM(replicaNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string, error) {
-	rport := 23345
-	return startTestClusterWithBasePort(rport, replicaNum, 0, true)
+	rport := tmpUsedClusterPortBase
+	return startTestClusterWithBasePort("unit-test-emptysm", rport, replicaNum, 0, true)
 }
 
-func startTestClusterWithBasePort(portBase int, replicaNum int,
+func startTestClusterWithBasePort(cid string, portBase int, replicaNum int,
 	syncLearnerNum int, useEmptySM bool) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string, error) {
 	ctmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	if err != nil {
@@ -183,7 +189,7 @@ func startTestClusterWithBasePort(portBase int, replicaNum int,
 		replica.ReplicaID = uint64(1 + index)
 		replica.RaftAddr = raftAddr
 		kvOpts := ServerConfig{
-			ClusterID:      "unit-test-cluster",
+			ClusterID:      cid,
 			DataDir:        tmpDir,
 			RedisAPIPort:   redisport,
 			GrpcAPIPort:    grpcPort,
@@ -351,7 +357,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	remoteServers, _, _, remoteDir, err := startTestClusterWithBasePort(remoteClusterBasePort, 1, 0, false)
+	remoteServers, _, _, remoteDir, err := startTestClusterWithBasePort("unit-test-remotecluster", remoteClusterBasePort, 1, 0, false)
 	defer func() {
 		for _, remote := range remoteServers {
 			remote.server.Stop()
@@ -662,7 +668,7 @@ func parseWALName(str string) (seq, index uint64, err error) {
 
 func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
 	// stop all nodes in cluster and start one by one
-	kvs, _, _, path, err := startTestClusterWithBasePort(12345, 1, 0, false)
+	kvs, _, _, path, err := startTestClusterWithBasePort("unit-test-leaderwallost", tmpUsedClusterPortBase, 1, 0, false)
 	if err != nil {
 		t.Fatalf("init cluster failed: %v", err)
 	}
@@ -696,7 +702,7 @@ func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
 	for i := 0; i < testSnap*100; i++ {
-		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)))
+		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)+"aaaaa"))
 		assert.Nil(t, err)
 		assert.Equal(t, OK, rsp)
 	}
@@ -711,7 +717,18 @@ func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
 	raftConf := leaderNode.Node.GetRaftConfig()
 	names := readWALNames(raftConf.WALDir)
 	lastWAL := filepath.Join(raftConf.WALDir, names[len(names)-1])
-	os.Truncate(lastWAL, 140*1000)
+	snaps, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+	t.Logf("truncating the wal: %s", lastWAL)
+	t.Logf("snaps in the wal: %v", snaps)
+	for i := 150; i > 0; i++ {
+		os.Truncate(lastWAL, int64(i*1000))
+		snaps2, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+		assert.Nil(t, err)
+		if len(snaps2) < len(snaps)-1 {
+			t.Logf("snaps in the wal after truncate: %v", snaps2)
+			break
+		}
+	}
 
 	for _, s := range kvs {
 		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
@@ -731,6 +748,7 @@ func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
 		replicaNode := s.server.GetNamespaceFromFullName("default-0")
 		assert.NotNil(t, replicaNode)
 		newci = replicaNode.Node.GetAppliedIndex()
+		t.Logf("restarted ci: %v, old %v", newci, ci)
 		assert.True(t, newci < ci)
 		if replicaNode.Node.IsLead() {
 			hasLeader = true
@@ -739,12 +757,12 @@ func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
 	assert.Equal(t, true, hasLeader)
 	rsp, err = goredis.String(c.Do("get", key))
 	assert.Nil(t, err)
-	assert.Equal(t, strconv.Itoa(testSnap*100-int(ci+2-newci)), rsp)
+	assert.Equal(t, strconv.Itoa(testSnap*100-int(ci+2-newci))+"aaaaa", rsp)
 }
 
 func TestFollowRestartWithTailWALLogLost(t *testing.T) {
 	// stop all nodes in cluster and start one by one
-	kvs, _, _, path, err := startTestClusterWithBasePort(12345, 2, 0, false)
+	kvs, _, _, path, err := startTestClusterWithBasePort("unit-test-follower-wallost", tmpUsedClusterPortBase, 2, 0, false)
 	if err != nil {
 		t.Fatalf("init cluster failed: %v", err)
 	}
@@ -787,7 +805,7 @@ func TestFollowRestartWithTailWALLogLost(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
 	for i := 0; i < testSnap*100; i++ {
-		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)))
+		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)+"aaaaa"))
 		assert.Nil(t, err)
 		assert.Equal(t, OK, rsp)
 	}
@@ -803,7 +821,17 @@ func TestFollowRestartWithTailWALLogLost(t *testing.T) {
 	// note we only truncate the logs which will keep recent valid snapshot
 	names := readWALNames(raftConf.WALDir)
 	lastWAL := filepath.Join(raftConf.WALDir, names[len(names)-1])
-	os.Truncate(lastWAL, 140*1000)
+	t.Logf("truncating the wal: %s", lastWAL)
+	snaps, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+	for i := 150; i > 0; i++ {
+		os.Truncate(lastWAL, int64(i*1000))
+		snaps2, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+		assert.Nil(t, err)
+		if len(snaps2) < len(snaps)-1 {
+			t.Logf("snaps in the wal after truncate: %v", snaps2)
+			break
+		}
+	}
 
 	for _, s := range kvs {
 		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
@@ -818,6 +846,9 @@ func TestFollowRestartWithTailWALLogLost(t *testing.T) {
 	time.Sleep(time.Second * 2)
 
 	hasLeader := false
+	leaderNode, err = waitForLeaderForClusters(time.Second*10, kvs)
+	assert.Nil(t, err)
+	assert.NotNil(t, leaderNode)
 	newci := uint64(0)
 	for _, s := range kvs {
 		replicaNode := s.server.GetNamespaceFromFullName("default-0")
@@ -829,9 +860,9 @@ func TestFollowRestartWithTailWALLogLost(t *testing.T) {
 		}
 	}
 	assert.Equal(t, true, hasLeader)
-	rsp, err = goredis.String(c.Do("get", key))
+	rsp, err = goredis.String(c.Do("stale.get", key))
 	assert.Nil(t, err)
-	assert.Equal(t, strconv.Itoa(testSnap*100-1), rsp)
+	assert.Equal(t, strconv.Itoa(testSnap*100-1)+"aaaaa", rsp)
 }
 
 func BenchmarkWriteToClusterWithEmptySM(b *testing.B) {
@@ -906,7 +937,7 @@ func BenchmarkGetOpWithLockAndNoLock(b *testing.B) {
 	raft.SetLogger(nil)
 	rafthttp.SetLogLevel(0)
 
-	kvs, _, _, dir, err := startTestClusterWithBasePort(23355, 1, 0, false)
+	kvs, _, _, dir, err := startTestClusterWithBasePort("bench-test-get", tmpUsedClusterPortBase, 1, 0, false)
 	if err != nil {
 		panic(err)
 	}

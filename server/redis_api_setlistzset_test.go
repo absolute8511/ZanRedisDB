@@ -712,13 +712,13 @@ func TestSetSPopCompatile(t *testing.T) {
 
 func TestSetSPopSAddConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
-	for index := 0; index < 10; index++ {
+	for index := 0; index < 4; index++ {
 		wg.Add(1)
 		client := getTestConn(t)
 		defer client.Close()
 		go func(c *goredis.PoolConn) {
 			defer wg.Done()
-			for loop := 0; loop < 2000; loop++ {
+			for loop := 0; loop < 1000; loop++ {
 				key1 := "default:test:testdb_spop_sadd_concurrency" + strconv.Itoa(loop)
 				binaryStr := make([]byte, 10)
 				binaryStr = []byte("binary" + string(binaryStr) + "bb")

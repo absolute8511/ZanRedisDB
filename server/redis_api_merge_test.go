@@ -33,10 +33,10 @@ func startMergeTestServer(t *testing.T) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	rport := 42345
+	rport := mergeTestPortBase
 	raftAddr := fmt.Sprintf("http://127.0.0.1:%d", rport+2)
 	kvOpts := ServerConfig{
-		ClusterID:     "test",
+		ClusterID:     "unit-test-merge",
 		DataDir:       tmpDir,
 		RedisAPIPort:  rport,
 		HttpAPIPort:   rport + 1,

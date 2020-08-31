@@ -32,14 +32,14 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	rport := 52345
+	rport := fullscanTestPortBase
 	raftAddr := fmt.Sprintf("http://127.0.0.1:%d", rport+2)
 	var replica node.ReplicaInfo
 	replica.NodeID = 1
 	replica.ReplicaID = 1
 	replica.RaftAddr = raftAddr
 	kvOpts := ServerConfig{
-		ClusterID:      "test",
+		ClusterID:      "unit-test-scan",
 		DataDir:        tmpDir,
 		RedisAPIPort:   rport,
 		LocalRaftAddr:  raftAddr,
