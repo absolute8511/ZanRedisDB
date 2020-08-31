@@ -55,7 +55,7 @@ func (it *pebbleIterator) Prev() {
 }
 
 func (it *pebbleIterator) Seek(key []byte) {
-	it.Iterator.SeekPrefixGE(key)
+	it.Iterator.SeekGE(key)
 }
 
 func (it *pebbleIterator) SeekForPrev(key []byte) {

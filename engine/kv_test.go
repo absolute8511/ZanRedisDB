@@ -105,3 +105,91 @@ func testCheckpointData(t *testing.T, engType string) {
 	}
 	time.Sleep(time.Second)
 }
+
+func TestMemEngIterator(t *testing.T) {
+	testKVIterator(t, "mem")
+}
+
+func TestRockEngIterator(t *testing.T) {
+	testKVIterator(t, "rocksdb")
+}
+
+func TestPebbleEngIterator(t *testing.T) {
+	testKVIterator(t, "pebble")
+}
+
+func testKVIterator(t *testing.T, engType string) {
+	SetLogger(0, nil)
+	cfg := NewRockConfig()
+	tmpDir, err := ioutil.TempDir("", "iterator_data")
+	assert.Nil(t, err)
+	t.Log(tmpDir)
+	defer os.RemoveAll(tmpDir)
+	cfg.DataDir = tmpDir
+	cfg.EngineType = engType
+	eng, err := NewKVEng(cfg)
+	assert.Nil(t, err)
+	err = eng.OpenEng()
+	assert.Nil(t, err)
+	defer eng.CloseAll()
+
+	wb := eng.NewWriteBatch()
+	key := []byte("test")
+	wb.Put(key, key)
+	eng.Write(wb)
+	wb.Clear()
+	key2 := []byte("test2")
+	wb.Put(key2, key2)
+	eng.Write(wb)
+	wb.Clear()
+	key3 := []byte("test3")
+	wb.Put(key3, key3)
+	eng.Write(wb)
+	wb.Clear()
+	key4 := []byte("test4")
+	wb.Put(key4, key4)
+	eng.Write(wb)
+	wb.Clear()
+	it, _ := eng.GetIterator(IteratorOpts{})
+	defer it.Close()
+	it.SeekToFirst()
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, key, it.Value())
+	it.Next()
+	assert.True(t, it.Valid())
+	assert.Equal(t, key2, it.Key())
+	assert.Equal(t, key2, it.Value())
+	it.Next()
+	assert.True(t, it.Valid())
+	assert.Equal(t, key3, it.Key())
+	assert.Equal(t, key3, it.Value())
+	it.Prev()
+	assert.True(t, it.Valid())
+	assert.Equal(t, key2, it.Key())
+	assert.Equal(t, key2, it.Value())
+	it.SeekToLast()
+	assert.True(t, it.Valid())
+	assert.Equal(t, key4, it.Key())
+	assert.Equal(t, key4, it.Value())
+	it.Prev()
+	assert.True(t, it.Valid())
+	assert.Equal(t, key3, it.Key())
+	assert.Equal(t, key3, it.Value())
+	//it.SeekForPrev(key3)
+	//assert.True(t, it.Valid())
+	//assert.Equal(t, key2, it.Key())
+	//assert.Equal(t, key2, it.Value())
+
+	it.SeekForPrev([]byte("test5"))
+	assert.True(t, it.Valid())
+	assert.Equal(t, key4, it.Key())
+	assert.Equal(t, key4, it.Value())
+
+	it.SeekForPrev([]byte("test1"))
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, key, it.Value())
+	it.Prev()
+	assert.True(t, !it.Valid())
+}
