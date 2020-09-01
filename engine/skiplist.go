@@ -4,7 +4,11 @@ package engine
 // #include "skiplist.h"
 // #include "kv_skiplist.h"
 import "C"
-import "unsafe"
+import (
+	"sync"
+	"sync/atomic"
+	"unsafe"
+)
 
 // byteToChar returns *C.char from byte slice.
 func byteToChar(b []byte) *C.char {
@@ -16,7 +20,9 @@ func byteToChar(b []byte) *C.char {
 }
 
 type skipList struct {
-	csl *C.skiplist_raw
+	csl    *C.skiplist_raw
+	closed int32
+	mutex  sync.RWMutex
 }
 
 func NewSkipList() *skipList {
@@ -26,19 +32,40 @@ func NewSkipList() *skipList {
 }
 
 func (sl *skipList) Destroy() {
+	if sl.IsClosed() {
+		return
+	}
+	sl.mutex.Lock()
+	defer sl.mutex.Unlock()
+	atomic.StoreInt32(&sl.closed, 1)
 	C.kv_skiplist_destroy(sl.csl)
 }
 
+func (sl *skipList) IsClosed() bool {
+	return atomic.LoadInt32(&sl.closed) == 1
+}
+
 func (sl *skipList) Size() int64 {
+	sl.mutex.RLock()
+	defer sl.mutex.RUnlock()
+	if sl.IsClosed() {
+		return 0
+	}
 	cs := C.skiplist_get_size(sl.csl)
 	return int64(cs)
 }
 
-func (sl *skipList) NewIterator() *SkipListIterator {
-	return &SkipListIterator{
-		sl:     sl.csl,
-		cursor: nil,
+func (sl *skipList) NewIterator() (*SkipListIterator, error) {
+	sl.mutex.RLock()
+	if sl.IsClosed() {
+		sl.mutex.RUnlock()
+		return nil, errDBEngClosed
 	}
+	// the mutex RUnlock must be called while iterator is closed
+	return &SkipListIterator{
+		sl:     sl,
+		cursor: nil,
+	}, nil
 }
 
 func (sl *skipList) Get(key []byte) ([]byte, error) {
@@ -47,6 +74,11 @@ func (sl *skipList) Get(key []byte) ([]byte, error) {
 		cKey = byteToChar(key)
 	)
 
+	sl.mutex.RLock()
+	defer sl.mutex.RUnlock()
+	if sl.IsClosed() {
+		return nil, errDBEngClosed
+	}
 	cv := C.kv_skiplist_get(sl.csl, cKey, C.size_t(len(key)), &cvsz)
 	if cv == nil {
 		return nil, nil
@@ -56,6 +88,9 @@ func (sl *skipList) Get(key []byte) ([]byte, error) {
 }
 
 func (sl *skipList) Insert(key []byte, value []byte) error {
+	if sl.IsClosed() {
+		return errDBEngClosed
+	}
 	var (
 		cKey   = byteToChar(key)
 		cValue = byteToChar(value)
@@ -65,6 +100,9 @@ func (sl *skipList) Insert(key []byte, value []byte) error {
 }
 
 func (sl *skipList) Delete(key []byte) error {
+	if sl.IsClosed() {
+		return errDBEngClosed
+	}
 	cKey := byteToChar(key)
 	C.kv_skiplist_del(sl.csl, cKey, C.size_t(len(key)))
 	return nil

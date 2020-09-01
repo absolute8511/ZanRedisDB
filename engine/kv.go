@@ -7,6 +7,11 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
+var (
+	errDBEngClosed = errors.New("db engine is closed")
+	errIntNumber   = errors.New("invalid integer")
+)
+
 type RefSlice interface {
 	Data() []byte
 	Free()

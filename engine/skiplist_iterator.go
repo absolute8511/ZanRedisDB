@@ -6,7 +6,7 @@ import "C"
 import "unsafe"
 
 type SkipListIterator struct {
-	sl     *C.skiplist_raw
+	sl     *skipList
 	cursor *C.skiplist_node
 }
 
@@ -44,7 +44,7 @@ func (iter *SkipListIterator) Value() []byte {
 // Next moves the iterator to the next sequential key in the database.
 func (iter *SkipListIterator) Next() {
 	old := iter.cursor
-	iter.cursor = C.skiplist_next(iter.sl, iter.cursor)
+	iter.cursor = C.skiplist_next(iter.sl.csl, iter.cursor)
 	if old != nil {
 		C.skiplist_release_node(old)
 	}
@@ -53,7 +53,7 @@ func (iter *SkipListIterator) Next() {
 // Prev moves the iterator to the previous sequential key in the database.
 func (iter *SkipListIterator) Prev() {
 	old := iter.cursor
-	iter.cursor = C.skiplist_prev(iter.sl, iter.cursor)
+	iter.cursor = C.skiplist_prev(iter.sl.csl, iter.cursor)
 	if old != nil {
 		C.skiplist_release_node(old)
 	}
@@ -64,7 +64,7 @@ func (iter *SkipListIterator) SeekToFirst() {
 	if iter.cursor != nil {
 		C.skiplist_release_node(iter.cursor)
 	}
-	iter.cursor = C.skiplist_begin(iter.sl)
+	iter.cursor = C.skiplist_begin(iter.sl.csl)
 }
 
 // SeekToLast moves the iterator to the last key in the database.
@@ -72,7 +72,7 @@ func (iter *SkipListIterator) SeekToLast() {
 	if iter.cursor != nil {
 		C.skiplist_release_node(iter.cursor)
 	}
-	iter.cursor = C.skiplist_end(iter.sl)
+	iter.cursor = C.skiplist_end(iter.sl.csl)
 }
 
 // Seek moves the iterator to the position greater than or equal to the key.
@@ -81,7 +81,7 @@ func (iter *SkipListIterator) Seek(key []byte) {
 		C.skiplist_release_node(iter.cursor)
 	}
 	cKey := byteToChar(key)
-	iter.cursor = C.kv_skiplist_find_ge(iter.sl, cKey, C.size_t(len(key)))
+	iter.cursor = C.kv_skiplist_find_ge(iter.sl.csl, cKey, C.size_t(len(key)))
 }
 
 // seek to the last key that less than or equal to the target key
@@ -92,11 +92,12 @@ func (iter *SkipListIterator) SeekForPrev(key []byte) {
 		C.skiplist_release_node(iter.cursor)
 	}
 	cKey := byteToChar(key)
-	iter.cursor = C.kv_skiplist_find_le(iter.sl, cKey, C.size_t(len(key)))
+	iter.cursor = C.kv_skiplist_find_le(iter.sl.csl, cKey, C.size_t(len(key)))
 }
 
 // Close closes the iterator.
 func (iter *SkipListIterator) Close() {
+	iter.sl.mutex.RUnlock()
 	if iter.cursor == nil {
 		return
 	}
