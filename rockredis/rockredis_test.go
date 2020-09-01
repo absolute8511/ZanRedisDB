@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	testEngineType = "pebble"
+	testEngineType = "mem"
 )
 
 type testLogger struct {

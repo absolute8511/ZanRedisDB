@@ -554,6 +554,10 @@ func (t *btree) Reset() {
 	t.length = 0
 }
 
+func (t *btree) Destroy() {
+	t.Reset()
+}
+
 // Clone clones the btree, lazily. It does so in constant time.
 func (t *btree) Clone() btree {
 	c := *t
@@ -742,6 +746,10 @@ func (i *biterator) reset() {
 	i.s.reset()
 }
 
+func (i *biterator) Close() {
+	i.reset()
+}
+
 func (i *biterator) descend(n *node, pos int16) {
 	i.s.push(iterFrame{n: n, pos: pos})
 	i.n = n.children[pos]
@@ -754,6 +762,10 @@ func (i *biterator) ascend() {
 	f := i.s.pop()
 	i.n = f.n
 	i.pos = f.pos
+}
+
+func (i *biterator) Seek(key []byte) {
+	i.SeekGE(&kvitem{key: key})
 }
 
 // SeekGE seeks to the first item greater-than or equal to the provided
@@ -777,6 +789,10 @@ func (i *biterator) SeekGE(item *kvitem) {
 		}
 		i.descend(i.n, i.pos)
 	}
+}
+
+func (i *biterator) SeekForPrev(key []byte) {
+	i.SeekLT(&kvitem{key: key})
 }
 
 // SeekLT seeks to the first item less-than the provided item.
@@ -880,4 +896,11 @@ func (i *biterator) Valid() bool {
 // to call Cur if the iterator is not valid.
 func (i *biterator) Cur() *kvitem {
 	return i.n.items[i.pos]
+}
+
+func (i *biterator) Key() []byte {
+	return i.Cur().key
+}
+func (i *biterator) Value() []byte {
+	return i.Cur().value
 }

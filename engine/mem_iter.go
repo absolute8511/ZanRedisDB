@@ -4,9 +4,22 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
+type memIter interface {
+	Next()
+	Prev()
+	Valid() bool
+	Seek([]byte)
+	SeekForPrev([]byte)
+	First()
+	Last()
+	Close()
+	Key() []byte
+	Value() []byte
+}
+
 type memIterator struct {
 	db           *memEng
-	bit          biterator
+	memit        memIter
 	opts         IteratorOpts
 	upperBound   []byte
 	lowerBound   []byte
@@ -31,50 +44,58 @@ func newMemIterator(db *memEng, opts IteratorOpts) (*memIterator, error) {
 
 	dbit := &memIterator{
 		db:         db,
-		bit:        db.eng.MakeIter(),
 		lowerBound: lowerBound,
 		upperBound: upperBound,
 		opts:       opts,
+	}
+	if useSkiplist {
+		dbit.memit = db.slEng.NewIterator()
+	} else {
+		bit := db.eng.MakeIter()
+		dbit.memit = &bit
 	}
 
 	return dbit, nil
 }
 
 func (it *memIterator) Next() {
-	it.bit.Next()
+	it.memit.Next()
 }
 
 func (it *memIterator) Prev() {
-	it.bit.Prev()
+	it.memit.Prev()
 }
 
 func (it *memIterator) Seek(key []byte) {
-	it.bit.SeekGE(&kvitem{key: key})
+	it.memit.Seek(key)
 }
 
 func (it *memIterator) SeekForPrev(key []byte) {
-	it.bit.SeekLT(&kvitem{key: key})
+	it.memit.SeekForPrev(key)
 }
 
 func (it *memIterator) SeekToFirst() {
-	it.bit.First()
+	it.memit.First()
 }
 
 func (it *memIterator) SeekToLast() {
-	it.bit.Last()
+	it.memit.Last()
 }
 
 func (it *memIterator) Valid() bool {
-	return it.bit.Valid()
+	return it.memit.Valid()
 }
 
 // the bytes returned will be freed after next
 func (it *memIterator) RefKey() []byte {
-	return it.bit.Cur().key
+	return it.memit.Key()
 }
 
 func (it *memIterator) Key() []byte {
 	d := it.RefKey()
+	if useSkiplist {
+		return d
+	}
 	c := make([]byte, len(d))
 	copy(c, d)
 	return c
@@ -82,7 +103,7 @@ func (it *memIterator) Key() []byte {
 
 // the bytes returned will be freed after next
 func (it *memIterator) RefValue() []byte {
-	v := it.bit.Cur().value
+	v := it.memit.Value()
 	if (it.removeTsType == KVType || it.removeTsType == HashType) && len(v) >= tsLen {
 		v = v[:len(v)-tsLen]
 	}
@@ -91,6 +112,9 @@ func (it *memIterator) RefValue() []byte {
 
 func (it *memIterator) Value() []byte {
 	d := it.RefValue()
+	if useSkiplist {
+		return d
+	}
 	c := make([]byte, len(d))
 	copy(c, d)
 	return c
@@ -101,5 +125,6 @@ func (it *memIterator) NoTimestamp(vt byte) {
 }
 
 func (it *memIterator) Close() {
+	it.memit.Close()
 	it.db.rwmutex.RUnlock()
 }

@@ -32,7 +32,14 @@ func TestPebbleEngCheckpointData(t *testing.T) {
 	testCheckpointData(t, "pebble")
 }
 
-func TestMemEngCheckpointData(t *testing.T) {
+func TestMemEngBtreeCheckpointData(t *testing.T) {
+	useSkiplist = false
+	defer func() {
+		useSkiplist = true
+	}()
+	testCheckpointData(t, "mem")
+}
+func TestMemEngSkiplistCheckpointData(t *testing.T) {
 	testCheckpointData(t, "mem")
 }
 
@@ -106,7 +113,15 @@ func testCheckpointData(t *testing.T, engType string) {
 	time.Sleep(time.Second)
 }
 
-func TestMemEngIterator(t *testing.T) {
+func TestMemEngBtreeIterator(t *testing.T) {
+	useSkiplist = false
+	defer func() {
+		useSkiplist = true
+	}()
+	testKVIterator(t, "mem")
+}
+
+func TestMemEngSkiplistIterator(t *testing.T) {
 	testKVIterator(t, "mem")
 }
 

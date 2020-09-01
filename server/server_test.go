@@ -31,7 +31,7 @@ import (
 var clusterName = "cluster-unittest-server"
 
 const (
-	testEngineType = "pebble"
+	testEngineType = "mem"
 )
 
 type fakeClusterInfo struct {

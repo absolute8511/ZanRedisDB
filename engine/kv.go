@@ -13,8 +13,11 @@ var (
 )
 
 type RefSlice interface {
+	// ref data
 	Data() []byte
 	Free()
+	// copied data if need
+	Bytes() []byte
 }
 
 const (

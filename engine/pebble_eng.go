@@ -31,6 +31,15 @@ func (rs *pebbleRefSlice) Free() {
 	}
 }
 
+func (rs *pebbleRefSlice) Bytes() []byte {
+	if rs.b == nil {
+		return nil
+	}
+	b := make([]byte, len(rs.b))
+	copy(b, rs.b)
+	return b
+}
+
 func (rs *pebbleRefSlice) Data() []byte {
 	return rs.b
 }
@@ -406,9 +415,7 @@ func (pe *PebbleEng) GetBytesNoLock(key []byte) ([]byte, error) {
 	if val.Data() == nil {
 		return nil, nil
 	}
-	b := make([]byte, len(val.Data()))
-	copy(b, val.Data())
-	return b, nil
+	return val.Bytes(), nil
 }
 
 func (pe *PebbleEng) GetBytes(key []byte) ([]byte, error) {

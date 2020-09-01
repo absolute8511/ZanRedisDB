@@ -39,7 +39,61 @@ func (wb *memWriteBatch) Destroy() {
 	wb.ops = wb.ops[:0]
 }
 
+func (wb *memWriteBatch) commitSkiplist() error {
+	defer wb.Clear()
+	var err error
+	for _, w := range wb.ops {
+		switch w.op {
+		case DeleteOp:
+			err = wb.db.slEng.Delete(w.key)
+		case PutOp:
+			err = wb.db.slEng.Set(w.key, w.value)
+		case DeleteRangeOp:
+			it := wb.db.slEng.NewIterator()
+			it.Seek(w.key)
+			keys := make([][]byte, 0, 100)
+			for ; it.Valid(); it.Next() {
+				k := it.Key()
+				if w.value != nil && bytes.Compare(k, w.value) >= 0 {
+					break
+				}
+				keys = append(keys, k)
+			}
+			it.Close()
+			for _, k := range keys {
+				wb.db.slEng.Delete(k)
+			}
+		case MergeOp:
+			cur, err := GetRocksdbUint64(wb.db.GetBytesNoLock(w.key))
+			if err != nil {
+				return err
+			}
+			vint, err := GetRocksdbUint64(w.value, nil)
+			if err != nil {
+				return err
+			}
+			nv := cur + vint
+			buf := make([]byte, 8)
+			binary.LittleEndian.PutUint64(buf, nv)
+			err = wb.db.slEng.Set(w.key, buf)
+		default:
+			return errors.New("unknown write operation")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (wb *memWriteBatch) Commit() error {
+	if useSkiplist {
+		return wb.commitSkiplist()
+	}
+	return wb.commitBtree()
+}
+
+func (wb *memWriteBatch) commitBtree() error {
 	wb.db.rwmutex.Lock()
 	defer wb.db.rwmutex.Unlock()
 	defer wb.Clear()

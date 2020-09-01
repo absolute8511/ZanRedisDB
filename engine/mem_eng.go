@@ -18,15 +18,29 @@ const (
 	defBucket = "default"
 )
 
+var useSkiplist = true
+
 type memRefSlice struct {
-	b []byte
+	b        []byte
+	needCopy bool
 }
 
 func (rs *memRefSlice) Free() {
 }
 
+// ref data
 func (rs *memRefSlice) Data() []byte {
 	return rs.b
+}
+
+// copied data if need
+func (rs *memRefSlice) Bytes() []byte {
+	if !rs.needCopy || rs.b == nil {
+		return rs.b
+	}
+	d := make([]byte, len(rs.b))
+	copy(d, rs.b)
+	return d
 }
 
 type sharedMemConfig struct {
@@ -47,6 +61,7 @@ type memEng struct {
 	rwmutex     sync.RWMutex
 	cfg         *RockEngConfig
 	eng         *btree
+	slEng       *skipList
 	engOpened   int32
 	lastCompact int64
 	deletedCnt  int64
@@ -108,6 +123,10 @@ func (pe *memEng) CheckDBEngForRead(fullPath string) error {
 	return nil
 }
 
+func (pe *memEng) getDataFileName() string {
+	return path.Join(pe.GetDataDir(), "mem.dat")
+}
+
 func (pe *memEng) OpenEng() error {
 	if !pe.IsClosed() {
 		dbLog.Warningf("engine already opened: %v, should close it before reopen", pe.GetDataDir())
@@ -115,16 +134,36 @@ func (pe *memEng) OpenEng() error {
 	}
 	pe.rwmutex.Lock()
 	defer pe.rwmutex.Unlock()
-	eng := &btree{
-		cmp: cmpItem,
+	os.MkdirAll(pe.GetDataDir(), common.DIR_PERM)
+	if useSkiplist {
+		sleng := NewSkipList()
+		err := loadMemDBFromFile(pe.getDataFileName(), func(key []byte, value []byte) error {
+			return sleng.Set(key, value)
+		})
+		if err != nil {
+			return err
+		}
+		pe.slEng = sleng
+	} else {
+		eng := &btree{
+			cmp: cmpItem,
+		}
+		err := loadMemDBFromFile(pe.getDataFileName(), func(key []byte, value []byte) error {
+			item := &kvitem{
+				key:   make([]byte, len(key)),
+				value: make([]byte, len(value)),
+			}
+			copy(item.key, key)
+			copy(item.value, value)
+			eng.Set(item)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		pe.eng = eng
 	}
 
-	os.MkdirAll(pe.GetDataDir(), common.DIR_PERM)
-	err := LoadBtreeFromFile(eng, pe.GetDataDir())
-	if err != nil {
-		return err
-	}
-	pe.eng = eng
 	atomic.StoreInt32(&pe.engOpened, 1)
 	dbLog.Infof("engine opened: %v", pe.GetDataDir())
 	return nil
@@ -156,6 +195,9 @@ func (pe *memEng) CompactAllRange() {
 func (pe *memEng) GetApproximateTotalKeyNum() int {
 	pe.rwmutex.RLock()
 	defer pe.rwmutex.RUnlock()
+	if useSkiplist {
+		return int(pe.slEng.Len())
+	}
 	return pe.eng.Len()
 }
 
@@ -190,7 +232,11 @@ func (pe *memEng) CloseEng() bool {
 	defer pe.rwmutex.Unlock()
 	if pe.eng != nil {
 		if atomic.CompareAndSwapInt32(&pe.engOpened, 1, 0) {
-			pe.eng.Reset()
+			if useSkiplist {
+				pe.slEng.Destroy()
+			} else {
+				pe.eng.Destroy()
+			}
 			dbLog.Infof("engine closed: %v", pe.GetDataDir())
 			return true
 		}
@@ -232,8 +278,7 @@ func (pe *memEng) GetBytesNoLock(key []byte) ([]byte, error) {
 		return nil, err
 	}
 	if v != nil {
-		value := make([]byte, len(v.Data()))
-		copy(value, v.Data())
+		value := v.Bytes()
 		v.Free()
 		return value, nil
 	}
@@ -277,14 +322,23 @@ func (pe *memEng) ExistNoLock(key []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if v != nil {
-		v.Free()
-		return true, nil
+	if v == nil {
+		return false, nil
 	}
-	return false, nil
+	ok := v.Data() != nil
+	v.Free()
+	return ok, nil
 }
 
 func (pe *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
+	if useSkiplist {
+		v, err := pe.slEng.Get(key)
+		if err != nil {
+			return nil, err
+		}
+		return &memRefSlice{b: v, needCopy: false}, nil
+	}
+
 	bt := pe.eng
 	bi := bt.MakeIter()
 
@@ -294,7 +348,7 @@ func (pe *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
 	}
 	item := bi.Cur()
 	if bytes.Equal(item.key, key) {
-		return &memRefSlice{b: item.value}, nil
+		return &memRefSlice{b: item.value, needCopy: true}, nil
 	}
 	return nil, nil
 }
@@ -355,20 +409,30 @@ type memEngCheckpoint struct {
 }
 
 func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
-	pck.pe.rwmutex.RLock()
-	if pck.pe.IsClosed() {
-		pck.pe.rwmutex.RUnlock()
-		return errDBEngClosed
+	tmpFile := path.Join(cpath, "mem.dat.tmp")
+	err := os.Mkdir(cpath, common.DIR_PERM)
+	if err != nil && !os.IsExist(err) {
+		return err
 	}
-	cbt := pck.pe.eng.Clone()
-	defer cbt.Reset()
-	// cloned btree will be immutable, so we notify we can continue do write
+	it, err := pck.pe.GetIterator(IteratorOpts{})
+	if err != nil {
+		return err
+	}
+	var dataNum int64
+	if useSkiplist {
+		dataNum = pck.pe.slEng.Len()
+	} else {
+		dataNum = int64(pck.pe.eng.Len())
+	}
+
+	it.SeekToFirst()
 	if notify != nil {
 		close(notify)
 	}
-	n, fs, err := saveBtreeToFile(&cbt, cpath)
+
+	n, fs, err := saveMemDBToFile(it, tmpFile, dataNum)
 	// release the lock early to avoid blocking while sync file
-	pck.pe.rwmutex.RUnlock()
+	it.Close()
 
 	if err != nil {
 		dbLog.Infof("save checkpoint to %v failed: %s", cpath, err.Error())
@@ -382,7 +446,7 @@ func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
 		}
 		fs.Close()
 	}
-	err = os.Rename(path.Join(cpath, "btree.dat.tmp"), path.Join(cpath, "btree.dat"))
+	err = os.Rename(tmpFile, path.Join(cpath, "mem.dat"))
 	if err != nil {
 		dbLog.Errorf("save checkpoint to %v failed: %v ", cpath, err.Error())
 	} else {
@@ -391,9 +455,9 @@ func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
 	return err
 }
 
-func LoadBtreeFromFile(eng *btree, dir string) error {
+func loadMemDBFromFile(fileName string, loader func([]byte, []byte) error) error {
 	// read from checkpoint file
-	fs, err := os.Open(path.Join(dir, "btree.dat"))
+	fs, err := os.Open(fileName)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -406,7 +470,8 @@ func LoadBtreeFromFile(eng *btree, dir string) error {
 		return err
 	}
 	lenBuf := make([]byte, 8)
-	dataBuf := make([]byte, 0, 1024)
+	dataKeyBuf := make([]byte, 0, 1024)
+	dataValueBuf := make([]byte, 0, 1024)
 	for {
 		_, err := fs.Read(lenBuf)
 		if err == io.EOF {
@@ -416,42 +481,37 @@ func LoadBtreeFromFile(eng *btree, dir string) error {
 			return err
 		}
 		vl := binary.BigEndian.Uint64(lenBuf)
-		if uint64(len(dataBuf)) < vl {
-			dataBuf = make([]byte, vl)
+		if uint64(len(dataKeyBuf)) < vl {
+			dataKeyBuf = make([]byte, vl)
 		}
-		_, err = fs.Read(dataBuf[:vl])
+		_, err = fs.Read(dataKeyBuf[:vl])
 		if err != nil {
 			return err
 		}
-		item := &kvitem{
-			key: make([]byte, vl),
-		}
-		copy(item.key, dataBuf[:vl])
+		key := dataKeyBuf[:vl]
 		_, err = fs.Read(lenBuf)
 		if err != nil {
 			return err
 		}
 		vl = binary.BigEndian.Uint64(lenBuf)
-		if uint64(len(dataBuf)) < vl {
-			dataBuf = make([]byte, vl)
+		if uint64(len(dataValueBuf)) < vl {
+			dataValueBuf = make([]byte, vl)
 		}
-		_, err = fs.Read(dataBuf[:vl])
+		_, err = fs.Read(dataValueBuf[:vl])
 		if err != nil {
 			return err
 		}
-		item.value = make([]byte, vl)
-		copy(item.value, dataBuf[:vl])
-		eng.Set(item)
+		value := dataValueBuf[:vl]
+		err = loader(key, value)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func saveBtreeToFile(cbt *btree, dir string) (int64, *os.File, error) {
-	err := os.Mkdir(dir, common.DIR_PERM)
-	if err != nil && !os.IsExist(err) {
-		return 0, nil, err
-	}
-	fs, err := os.OpenFile(path.Join(dir, "btree.dat.tmp"), os.O_CREATE|os.O_WRONLY, common.FILE_PERM)
+func saveMemDBToFile(it Iterator, fileName string, dataNum int64) (int64, *os.File, error) {
+	fs, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY, common.FILE_PERM)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -467,36 +527,36 @@ func saveBtreeToFile(cbt *btree, dir string) (int64, *os.File, error) {
 		return total, nil, err
 	}
 	total += int64(n)
-	n, err = fs.Write([]byte(fmt.Sprintf("%016d\n", cbt.Len())))
+	n, err = fs.Write([]byte(fmt.Sprintf("%016d\n", dataNum)))
 	if err != nil {
 		return total, nil, err
 	}
 	total += int64(n)
-	bi := cbt.MakeIter()
 	buf := make([]byte, 8)
-	for bi.First(); bi.Valid(); bi.Next() {
-		item := bi.Cur()
+	for it.SeekToFirst(); it.Valid(); it.Next() {
+		k := it.RefKey()
 		// save item to path
-		vlen := uint64(len(item.key))
+		vlen := uint64(len(k))
 		binary.BigEndian.PutUint64(buf, vlen)
 		n, err = fs.Write(buf[:8])
 		if err != nil {
 			return total, nil, err
 		}
 		total += int64(n)
-		n, err = fs.Write(item.key)
+		n, err = fs.Write(k)
 		if err != nil {
 			return total, nil, err
 		}
 		total += int64(n)
-		vlen = uint64(len(item.value))
+		v := it.RefValue()
+		vlen = uint64(len(v))
 		binary.BigEndian.PutUint64(buf, vlen)
 		n, err = fs.Write(buf[:8])
 		if err != nil {
 			return total, nil, err
 		}
 		total += int64(n)
-		n, err = fs.Write(item.value)
+		n, err = fs.Write(v)
 		if err != nil {
 			return total, nil, err
 		}

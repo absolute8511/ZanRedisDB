@@ -60,7 +60,7 @@ func (iter *SkipListIterator) Prev() {
 }
 
 // SeekToFirst moves the iterator to the first key in the database.
-func (iter *SkipListIterator) SeekToFirst() {
+func (iter *SkipListIterator) First() {
 	if iter.cursor != nil {
 		C.skiplist_release_node(iter.cursor)
 	}
@@ -68,7 +68,7 @@ func (iter *SkipListIterator) SeekToFirst() {
 }
 
 // SeekToLast moves the iterator to the last key in the database.
-func (iter *SkipListIterator) SeekToLast() {
+func (iter *SkipListIterator) Last() {
 	if iter.cursor != nil {
 		C.skiplist_release_node(iter.cursor)
 	}
@@ -97,7 +97,6 @@ func (iter *SkipListIterator) SeekForPrev(key []byte) {
 
 // Close closes the iterator.
 func (iter *SkipListIterator) Close() {
-	iter.sl.mutex.RUnlock()
 	if iter.cursor == nil {
 		return
 	}

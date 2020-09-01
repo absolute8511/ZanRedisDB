@@ -22,6 +22,10 @@ func (rs *rockRefSlice) Free() {
 	rs.v.Free()
 }
 
+func (rs *rockRefSlice) Bytes() []byte {
+	return rs.v.Bytes()
+}
+
 func (rs *rockRefSlice) Data() []byte {
 	return rs.v.Data()
 }
