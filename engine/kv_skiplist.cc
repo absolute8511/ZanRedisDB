@@ -74,9 +74,7 @@ char* kv_skiplist_get(skiplist_raw* l, const char* key, size_t ksz, size_t* vsz)
     if (!cur) {
         return NULL;
     }
-    kv_node* found = _get_entry(cur, kv_node, snode);
-    *vsz = found->value_sz;
-    char* v = copyString(found->value, found->value_sz);
+    char* v = kv_skiplist_get_node_value(cur, vsz);
     skiplist_release_node(cur);
     return v;
 }

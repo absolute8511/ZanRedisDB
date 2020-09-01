@@ -31,7 +31,11 @@ static int kv_cmp(skiplist_node* a, skiplist_node* b, void* aux) {
     if (bb->key_sz < sz) {
         sz = bb->key_sz;
     }
-    return memcmp(aa->key, bb->key, sz);
+    int ret = memcmp(aa->key, bb->key, sz);
+    if (ret != 0 || aa->key_sz == bb->key_sz) {
+        return ret;
+    }
+    return aa->key_sz < bb->key_sz?-1:1;
 }
 
 skiplist_raw* kv_skiplist_create(); 
