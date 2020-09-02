@@ -230,16 +230,14 @@ func (pe *memEng) IsClosed() bool {
 func (pe *memEng) CloseEng() bool {
 	pe.rwmutex.Lock()
 	defer pe.rwmutex.Unlock()
-	if pe.eng != nil {
-		if atomic.CompareAndSwapInt32(&pe.engOpened, 1, 0) {
-			if useSkiplist {
-				pe.slEng.Destroy()
-			} else {
-				pe.eng.Destroy()
-			}
-			dbLog.Infof("engine closed: %v", pe.GetDataDir())
-			return true
+	if atomic.CompareAndSwapInt32(&pe.engOpened, 1, 0) {
+		if useSkiplist && pe.slEng != nil {
+			pe.slEng.Destroy()
+		} else if pe.eng != nil {
+			pe.eng.Destroy()
 		}
+		dbLog.Infof("engine closed: %v", pe.GetDataDir())
+		return true
 	}
 	return false
 }
