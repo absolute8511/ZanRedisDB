@@ -281,7 +281,7 @@ func TestKVExpire(t *testing.T) {
 	defer c.Close()
 
 	key1 := "default:test:expa"
-	ttl := 3
+	ttl := 2
 
 	if ok, err := goredis.String(c.Do("setex", key1, ttl, "hello")); err != nil {
 		t.Fatal(err)
@@ -569,7 +569,7 @@ func TestKVBitExpire(t *testing.T) {
 	defer c.Close()
 
 	key1 := "default:test:bit_exp"
-	ttl := 3
+	ttl := 2
 
 	if n, err := goredis.Int(c.Do("setbitv2", key1, 1, 1)); err != nil {
 		t.Fatal(err)

@@ -720,7 +720,7 @@ func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
 	snaps, err := wal.ValidSnapshotEntries(raftConf.WALDir)
 	t.Logf("truncating the wal: %s", lastWAL)
 	t.Logf("snaps in the wal: %v", snaps)
-	for i := 140; i > 0; i++ {
+	for i := 140; i > 0; i-- {
 		os.Truncate(lastWAL, int64(i*1000))
 		snaps2, err := wal.ValidSnapshotEntries(raftConf.WALDir)
 		assert.Nil(t, err)
@@ -823,7 +823,7 @@ func TestFollowRestartWithTailWALLogLost(t *testing.T) {
 	lastWAL := filepath.Join(raftConf.WALDir, names[len(names)-1])
 	t.Logf("truncating the wal: %s", lastWAL)
 	snaps, err := wal.ValidSnapshotEntries(raftConf.WALDir)
-	for i := 140; i > 0; i++ {
+	for i := 140; i > 0; i-- {
 		os.Truncate(lastWAL, int64(i*1000))
 		snaps2, err := wal.ValidSnapshotEntries(raftConf.WALDir)
 		assert.Nil(t, err)

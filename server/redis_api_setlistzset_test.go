@@ -718,7 +718,7 @@ func TestSetSPopSAddConcurrent(t *testing.T) {
 		defer client.Close()
 		go func(c *goredis.PoolConn) {
 			defer wg.Done()
-			for loop := 0; loop < 1000; loop++ {
+			for loop := 0; loop < 400; loop++ {
 				key1 := "default:test:testdb_spop_sadd_concurrency" + strconv.Itoa(loop)
 				binaryStr := make([]byte, 10)
 				binaryStr = []byte("binary" + string(binaryStr) + "bb")
@@ -750,7 +750,7 @@ func TestSetExpire(t *testing.T) {
 	f3 := "f3"
 	f4 := "f4"
 	f5 := "f5"
-	ttl := 3
+	ttl := 2
 
 	n, err := goredis.Int(c.Do("sadd", key1, f1))
 	assert.Nil(t, err)
