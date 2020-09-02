@@ -17,14 +17,7 @@ void kv_skiplist_remove_node(skiplist_raw* l, kv_node* entry) {
     skiplist_release_node(&entry->snode);
     skiplist_wait_for_free(&entry->snode);
     // Free `entry` after it becomes safe.
-    skiplist_free_node(&entry->snode);
-    if (entry->key) {
-        free(entry->key);
-    }
-    if (entry->value) {
-        free(entry->value);
-    }
-    free(entry);
+    kv_skiplist_node_free(entry);
 }
 
 skiplist_raw* kv_skiplist_create() {
@@ -50,6 +43,7 @@ kv_node* kv_skiplist_node_create(const char* key, size_t ksz, const char* value,
     kv_node *n;
     n = (kv_node*)malloc(sizeof(kv_node));
     skiplist_init_node(&n->snode);
+    pthread_mutex_init(&n->dlock, NULL);
     n->key = copyString(key, ksz);
     n->key_sz = ksz;
     n->value = copyString(value, vsz);
@@ -57,13 +51,46 @@ kv_node* kv_skiplist_node_create(const char* key, size_t ksz, const char* value,
     return n;
 }
 
-int kv_skiplist_insert(skiplist_raw* l, const char* key, size_t ksz, const char* value, size_t vsz) {
-    kv_node* n = kv_skiplist_node_create(key, ksz, value, vsz);
-    return kv_skiplist_insert_node(l, n);
+void kv_skiplist_node_free(kv_node *n) {
+    skiplist_free_node(&n->snode);
+    if (n->key) {
+        free(n->key);
+    }
+    if (n->value) {
+        free(n->value);
+    }
+    pthread_mutex_destroy(&n->dlock);
+    free(n);
 }
 
-int kv_skiplist_insert_node(skiplist_raw* l, kv_node* n) {
-    return skiplist_insert(l, &n->snode);
+int kv_skiplist_insert(skiplist_raw* l, const char* key, size_t ksz, const char* value, size_t vsz) {
+    kv_node* n = kv_skiplist_node_create(key, ksz, value, vsz);
+    return skiplist_insert_nodup(l, &n->snode);
+}
+
+int kv_skiplist_update(skiplist_raw* l, const char* key, size_t ksz, const char* value, size_t vsz) {
+    kv_node* n = kv_skiplist_node_create(key, ksz, value, vsz);
+    int ret = skiplist_insert_nodup(l, &n->snode);
+    if (ret == 0) {
+        return 0;
+    }
+    kv_skiplist_node_free(n);
+
+    kv_node q;
+    q.key = copyString(key, ksz);
+    q.key_sz = ksz;
+    // the key already exist, we remove it and reinsert
+    skiplist_node* cur = skiplist_find(l, &q.snode);
+    if (!cur) {
+        return -1;
+    }
+    kv_node* found = _get_entry(cur, kv_node, snode);
+    pthread_mutex_lock(&found->dlock);
+    found->value = copyString(value, vsz);
+    found->value_sz = vsz;
+    skiplist_release_node(&found->snode);
+    pthread_mutex_unlock(&found->dlock);
+    return 0;
 }
 
 char* kv_skiplist_get(skiplist_raw* l, const char* key, size_t ksz, size_t* vsz) {
@@ -81,15 +108,19 @@ char* kv_skiplist_get(skiplist_raw* l, const char* key, size_t ksz, size_t* vsz)
 
 char* kv_skiplist_get_node_value(skiplist_node* n, size_t* sz) {
     kv_node* found = _get_entry(n, kv_node, snode);
+    pthread_mutex_lock(&found->dlock);
     *sz = found->value_sz;
     char* v = copyString(found->value, found->value_sz);
+    pthread_mutex_unlock(&found->dlock);
     return v;
 }
 
 char* kv_skiplist_get_node_key(skiplist_node* n, size_t* sz) {
     kv_node* found = _get_entry(n, kv_node, snode);
+    pthread_mutex_lock(&found->dlock);
     *sz = found->key_sz;
     char* v = copyString(found->key, found->key_sz);
+    pthread_mutex_unlock(&found->dlock);
     return v;
 }
 

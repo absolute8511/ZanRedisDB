@@ -170,11 +170,13 @@ func TestDBList(t *testing.T) {
 
 	key := []byte("test:testdb_list_a")
 
-	if n, err := db.RPush(0, key, []byte("1"), []byte("2"), []byte("3")); err != nil {
-		t.Fatal(err)
-	} else if n != 3 {
-		t.Fatal(n)
-	}
+	n, err := db.RPush(0, key, []byte("1"), []byte("2"), []byte("3"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+
+	llen, err := db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), llen)
 
 	if ay, err := db.LRange(key, 0, -1); err != nil {
 		t.Fatal(err)
@@ -188,23 +190,27 @@ func TestDBList(t *testing.T) {
 		}
 	}
 
-	if k, err := db.RPop(0, key); err != nil {
-		t.Fatal(err)
-	} else if string(k) != "3" {
-		t.Fatal(string(k))
-	}
+	k, err := db.RPop(0, key)
+	assert.Nil(t, err)
+	assert.Equal(t, "3", string(k))
 
-	if k, err := db.LPop(0, key); err != nil {
-		t.Fatal(err)
-	} else if string(k) != "1" {
-		t.Fatal(string(k))
-	}
+	llen, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), llen)
 
-	if llen, err := db.LLen(key); err != nil {
-		t.Fatal(err)
-	} else if llen != 1 {
-		t.Fatal(llen)
-	}
+	k, err = db.LPop(0, key)
+	assert.Nil(t, err)
+	assert.Equal(t, "1", string(k))
+
+	ay, err := db.LRange(key, 0, -1)
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 1, len(ay))
+	assert.Equal(t, "2", string(ay[0]))
+
+	llen, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), llen)
 
 	if num, err := db.LClear(0, key); err != nil {
 		t.Fatal(err)
@@ -212,9 +218,9 @@ func TestDBList(t *testing.T) {
 		t.Error(num)
 	}
 
-	if llen, _ := db.LLen(key); llen != 0 {
-		t.Fatal(llen)
-	}
+	llen, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), llen)
 	// TODO: LSet
 }
 

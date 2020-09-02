@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,7 @@ typedef struct {
     // Metadata for skiplist node.
     skiplist_node snode;
     // My data here: {int, int} pair.
+    pthread_mutex_t dlock;
     char* key;
     size_t key_sz;
     char* value;
@@ -41,9 +43,10 @@ static int kv_cmp(skiplist_node* a, skiplist_node* b, void* aux) {
 skiplist_raw* kv_skiplist_create(); 
 void kv_skiplist_destroy(skiplist_raw* slist);
 kv_node* kv_skiplist_node_create(const char* key, size_t ksz, const char* value, size_t vsz);
+void kv_skiplist_node_free(kv_node *n);
 
 int kv_skiplist_insert(skiplist_raw* l, const char* key, size_t ksz, const char* value, size_t vsz);
-int kv_skiplist_insert_node(skiplist_raw* l, kv_node* n);
+int kv_skiplist_update(skiplist_raw* l, const char* key, size_t ksz, const char* value, size_t vsz);
 
 char* kv_skiplist_get(skiplist_raw* l, const char* key, size_t ksz, size_t* vsz);
 int kv_skiplist_del(skiplist_raw* l, const char* key, size_t ksz);

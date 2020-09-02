@@ -69,7 +69,7 @@ func (sl *skipList) Set(key []byte, value []byte) error {
 		cKey   = byteToChar(key)
 		cValue = byteToChar(value)
 	)
-	C.kv_skiplist_insert(sl.csl, cKey, C.size_t(len(key)), cValue, C.size_t(len(value)))
+	C.kv_skiplist_update(sl.csl, cKey, C.size_t(len(key)), cValue, C.size_t(len(value)))
 	return nil
 }
 

@@ -21,7 +21,22 @@ func TestSkipListOp(t *testing.T) {
 	v, err = sl.Get(key)
 	assert.Nil(t, err)
 	assert.Equal(t, key, v)
+
+	v[0] = 'd'
+	sl.Set(key, v)
+	v2, err := sl.Get(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v, v2)
+	v2[0] = 'e'
+	sl.Set(key, v2)
+	v3, err := sl.Get(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v2, v3)
+
 	sl.Delete(key)
+	v, err = sl.Get(key)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
 }
 
 func TestSkipListIterator(t *testing.T) {
