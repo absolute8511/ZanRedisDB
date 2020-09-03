@@ -31,7 +31,7 @@ import (
 var clusterName = "cluster-unittest-server"
 
 const (
-	testEngineType = "mem"
+	testEngineType = "rocksdb"
 )
 
 type fakeClusterInfo struct {
@@ -560,6 +560,7 @@ func TestRestartFollower(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
 
+	time.Sleep(time.Second)
 	follower, err = followerS.server.InitKVNamespace(m.ID, followerS.nsConf, true)
 	assert.Nil(t, err)
 	follower.Start(false)
@@ -587,6 +588,7 @@ func TestRestartCluster(t *testing.T) {
 		node := s.server.GetNamespaceFromFullName("default-0")
 		node.Close()
 	}
+	time.Sleep(time.Second)
 
 	for _, s := range kvsCluster {
 		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
@@ -729,6 +731,8 @@ func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
 			break
 		}
 	}
+	// wait namespace deleted by callback
+	time.Sleep(time.Second)
 
 	for _, s := range kvs {
 		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
@@ -832,6 +836,8 @@ func TestFollowRestartWithTailWALLogLost(t *testing.T) {
 			break
 		}
 	}
+	// wait namespace deleted by callback
+	time.Sleep(time.Second)
 
 	for _, s := range kvs {
 		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
