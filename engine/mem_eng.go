@@ -18,7 +18,7 @@ const (
 	defBucket = "default"
 )
 
-var useSkiplist = true
+var useSkiplist = false
 
 type memRefSlice struct {
 	b        []byte
