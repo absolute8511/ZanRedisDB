@@ -1,5 +1,6 @@
 package engine
 
+//#cgo CXXFLAGS: -std=c++11
 // #include <stdlib.h>
 // #include "skiplist.h"
 // #include "kv_skiplist.h"
