@@ -222,8 +222,8 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot, readOld bool) (*wal.WAL, 
 			meta, st, ents, err := w.ReadAll()
 			if err != nil {
 				w.Close()
-				nodeLog.Errorf("failed to read WAL (%v)", err)
-				if repaired || err != io.ErrUnexpectedEOF {
+				nodeLog.Errorf("failed to read WAL (%s)", err)
+				if repaired {
 					nodeLog.Errorf("read wal error and cannot be repaire")
 				} else {
 					if !wal.Repair(rc.config.WALDir) {
@@ -696,6 +696,11 @@ func (rc *raftNode) beginSnapshot(snapTerm uint64, snapi uint64, confState raftp
 		// SaveSnap saves the snapshot to file and appends the corresponding WAL entry.
 		if err := rc.persistStorage.SaveSnap(snap); err != nil {
 			rc.Errorf("save snapshot at index %v failed: %v", snap.Metadata, err)
+			return
+		}
+		err = rc.persistStorage.Sync()
+		if err != nil {
+			rc.Errorf("failed to sync wal: %s", err)
 			return
 		}
 		if err = rc.persistStorage.Release(snap); err != nil {

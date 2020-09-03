@@ -281,7 +281,7 @@ func TestKVExpire(t *testing.T) {
 	defer c.Close()
 
 	key1 := "default:test:expa"
-	ttl := 3
+	ttl := 2
 
 	if ok, err := goredis.String(c.Do("setex", key1, ttl, "hello")); err != nil {
 		t.Fatal(err)
@@ -569,7 +569,7 @@ func TestKVBitExpire(t *testing.T) {
 	defer c.Close()
 
 	key1 := "default:test:bit_exp"
-	ttl := 3
+	ttl := 2
 
 	if n, err := goredis.Int(c.Do("setbitv2", key1, 1, 1)); err != nil {
 		t.Fatal(err)
@@ -1099,7 +1099,7 @@ func TestSlowLimiterCommand(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
-	key1 := "default:test:slowa"
+	key1 := "default:test_slowlimiter:slowa"
 
 	_, err := goredis.String(c.Do("slowwrite1s_test", key1, "12345"))
 	assert.Nil(t, err)
@@ -1173,7 +1173,7 @@ func TestSlowLimiterCommand(t *testing.T) {
 	assert.True(t, passedAfterRefused > 0)
 	wg.Wait()
 	counter := metric.SlowLimiterRefusedCnt.With(ps.Labels{
-		"table": "test",
+		"table": "test_slowlimiter",
 		"cmd":   "slowwrite1s_test",
 	})
 	out := io_prometheus_clients.Metric{}

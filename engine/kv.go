@@ -7,9 +7,17 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
+var (
+	errDBEngClosed = errors.New("db engine is closed")
+	errIntNumber   = errors.New("invalid integer")
+)
+
 type RefSlice interface {
+	// ref data
 	Data() []byte
 	Free()
+	// copied data if need
+	Bytes() []byte
 }
 
 const (
@@ -184,6 +192,7 @@ type KVEngine interface {
 	Exist(key []byte) (bool, error)
 	ExistNoLock(key []byte) (bool, error)
 	GetRef(key []byte) (RefSlice, error)
+	GetRefNoLock(key []byte) (RefSlice, error)
 	GetValueWithOp(key []byte, op func([]byte) error) error
 	GetValueWithOpNoLock(key []byte, op func([]byte) error) error
 	DeleteFilesInRange(rg CRange)
@@ -197,6 +206,8 @@ func NewKVEng(cfg *RockEngConfig) (KVEngine, error) {
 		return NewRockEng(cfg)
 	} else if cfg.EngineType == "pebble" {
 		return NewPebbleEng(cfg)
+	} else if cfg.EngineType == "mem" {
+		return NewMemEng(cfg)
 	}
 	return nil, errors.New("unknown engine type for: " + cfg.EngineType)
 }
@@ -206,6 +217,8 @@ func NewSharedEngConfig(cfg RockOptions) (SharedRockConfig, error) {
 		return newSharedRockConfig(cfg), nil
 	} else if cfg.EngineType == "pebble" {
 		return newSharedPebblekConfig(cfg), nil
+	} else if cfg.EngineType == "mem" {
+		return newSharedMemConfig(cfg), nil
 	}
 	return nil, errors.New("unknown engine type for: " + cfg.EngineType)
 }

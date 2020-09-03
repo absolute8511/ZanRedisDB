@@ -53,8 +53,8 @@ func Repair(dirpath string) bool {
 			continue
 		case io.EOF:
 			return true
-		case io.ErrUnexpectedEOF:
-			plog.Infof("repairing %v", f.Name())
+		case io.ErrUnexpectedEOF, ErrMaxWALEntrySizeLimitExceeded:
+			plog.Infof("repairing %v for err: %s", f.Name(), err)
 			bf, bferr := os.Create(f.Name() + ".broken")
 			if bferr != nil {
 				plog.Errorf("could not repair %v, failed to create backup file", f.Name())

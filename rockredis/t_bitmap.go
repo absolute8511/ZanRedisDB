@@ -388,11 +388,11 @@ func (db *RockDB) BitClear(ts int64, key []byte) (int64, error) {
 			if err != nil {
 				return 0, err
 			}
-			defer it.Close()
 			for ; it.Valid(); it.Next() {
 				rawk := it.RefKey()
 				wb.Delete(rawk)
 			}
+			it.Close()
 		}
 
 		db.delExpire(BitmapType, key, nil, false, wb)

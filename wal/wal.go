@@ -516,7 +516,7 @@ func ValidSnapshotEntries(walDir string) ([]walpb.Snapshot, error) {
 	}
 	// We do not have to read out all the WAL entries
 	// as the decoder is opened in read mode.
-	if err != io.EOF && err != io.ErrUnexpectedEOF {
+	if err != io.EOF && err != io.ErrUnexpectedEOF && err != ErrMaxWALEntrySizeLimitExceeded {
 		return nil, err
 	}
 

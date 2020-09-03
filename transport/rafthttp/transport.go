@@ -36,6 +36,11 @@ import (
 
 var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewGLogger()))
 
+func SetLogger(level int32, logger common.Logger) {
+	plog.Logger = logger
+	plog.SetLevel(int32(level))
+}
+
 func SetLogLevel(level int) {
 	plog.SetLevel(int32(level))
 }

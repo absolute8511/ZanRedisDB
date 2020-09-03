@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,13 +18,21 @@ import (
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/pkg/fileutil"
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/slow"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
+	"github.com/youzan/ZanRedisDB/wal"
 )
 
 var clusterName = "cluster-unittest-server"
+
+const (
+	testEngineType = "rocksdb"
+)
 
 type fakeClusterInfo struct {
 	clusterName string
@@ -55,25 +64,35 @@ var learnerServers []*Server
 var gtmpClusterDir string
 var seedNodes []node.ReplicaInfo
 var remoteClusterBasePort = 22345
+var fullscanTestPortBase = 52345
+var mergeTestPortBase = 42345
+var redisAPITestPortBase = 12345
+var localClusterTestPortBase = 24345
+var tmpUsedClusterPortBase = 23345
 
 //
 var testSnap = 10
 var testSnapCatchup = 3
 
 func TestMain(m *testing.M) {
-	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
+	SetLogger(int32(common.LOG_INFO), nil)
+	rockredis.SetLogger(int32(common.LOG_INFO), nil)
+	slow.SetLogger(int32(common.LOG_INFO), nil)
+	node.SetLogger(int32(common.LOG_INFO), nil)
+	engine.SetLogger(int32(common.LOG_INFO), nil)
+	rafthttp.SetLogger(int32(common.LOG_INFO), nil)
 	node.EnableForTest()
 	node.EnableSlowLimiterTest(true)
 
 	flag.Parse()
 
-	common.InitDefaultForGLogger("")
 	if testing.Verbose() {
-		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
-		node.SetLogLevel(int(common.LOG_DETAIL))
-		sLog.SetLevel(int32(common.LOG_DETAIL))
+		common.InitDefaultForGLogger("")
+		SetLogger(int32(common.LOG_DETAIL), common.NewGLogger())
+		rockredis.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
+		slow.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
+		node.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
+		engine.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
 	}
 
 	ret := m.Run()
@@ -112,8 +131,8 @@ func TestMain(m *testing.M) {
 }
 
 func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string) {
-	rport := 24345
-	kvs, ns, servers, path, err := startTestClusterWithBasePort(rport, replicaNum, syncLearnerNum, false)
+	rport := localClusterTestPortBase
+	kvs, ns, servers, path, err := startTestClusterWithBasePort("unit-test-localcluster", rport, replicaNum, syncLearnerNum, false)
 	if err != nil {
 		t.Fatalf("init cluster failed: %v", err)
 	}
@@ -121,11 +140,11 @@ func startTestCluster(t *testing.T, replicaNum int, syncLearnerNum int) ([]testC
 }
 
 func startTestClusterWithEmptySM(replicaNum int) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string, error) {
-	rport := 23345
-	return startTestClusterWithBasePort(rport, replicaNum, 0, true)
+	rport := tmpUsedClusterPortBase
+	return startTestClusterWithBasePort("unit-test-emptysm", rport, replicaNum, 0, true)
 }
 
-func startTestClusterWithBasePort(portBase int, replicaNum int,
+func startTestClusterWithBasePort(cid string, portBase int, replicaNum int,
 	syncLearnerNum int, useEmptySM bool) ([]testClusterInfo, []node.ReplicaInfo, []*Server, string, error) {
 	ctmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	if err != nil {
@@ -170,7 +189,7 @@ func startTestClusterWithBasePort(portBase int, replicaNum int,
 		replica.ReplicaID = uint64(1 + index)
 		replica.RaftAddr = raftAddr
 		kvOpts := ServerConfig{
-			ClusterID:      "unit-test-cluster",
+			ClusterID:      cid,
 			DataDir:        tmpDir,
 			RedisAPIPort:   redisport,
 			GrpcAPIPort:    grpcPort,
@@ -183,7 +202,7 @@ func startTestClusterWithBasePort(portBase int, replicaNum int,
 			SharedRocksWAL: true,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-		kvOpts.RocksDBOpts.EngineType = "pebble"
+		kvOpts.RocksDBOpts.EngineType = testEngineType
 
 		if index >= replicaNum {
 			kvOpts.LearnerRole = common.LearnerRoleLogSyncer
@@ -338,7 +357,7 @@ func TestStartClusterWithLogSyncer(t *testing.T) {
 	//SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//rockredis.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
 	//node.SetLogger(int32(common.LOG_INFO), newTestLogger(t))
-	remoteServers, _, _, remoteDir, err := startTestClusterWithBasePort(remoteClusterBasePort, 1, 0, false)
+	remoteServers, _, _, remoteDir, err := startTestClusterWithBasePort("unit-test-remotecluster", remoteClusterBasePort, 1, 0, false)
 	defer func() {
 		for _, remote := range remoteServers {
 			remote.server.Stop()
@@ -541,6 +560,7 @@ func TestRestartFollower(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, OK, rsp)
 
+	time.Sleep(time.Second)
 	follower, err = followerS.server.InitKVNamespace(m.ID, followerS.nsConf, true)
 	assert.Nil(t, err)
 	follower.Start(false)
@@ -568,6 +588,7 @@ func TestRestartCluster(t *testing.T) {
 		node := s.server.GetNamespaceFromFullName("default-0")
 		node.Close()
 	}
+	time.Sleep(time.Second)
 
 	for _, s := range kvsCluster {
 		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
@@ -612,6 +633,242 @@ func TestCompactCancelAfterStopped(t *testing.T) {
 
 	leaderNode := waitForLeader(t, time.Minute)
 	assert.NotNil(t, leaderNode)
+}
+
+func readWALNames(dirpath string) []string {
+	names, err := fileutil.ReadDir(dirpath)
+	if err != nil {
+		return nil
+	}
+	wnames := checkWalNames(names)
+	if len(wnames) == 0 {
+		return nil
+	}
+	return wnames
+}
+func checkWalNames(names []string) []string {
+	wnames := make([]string, 0)
+	for _, name := range names {
+		if _, _, err := parseWALName(name); err != nil {
+			// don't complain about left over tmp files
+			if !strings.HasSuffix(name, ".tmp") {
+			}
+			continue
+		}
+		wnames = append(wnames, name)
+	}
+	return wnames
+}
+
+func parseWALName(str string) (seq, index uint64, err error) {
+	if !strings.HasSuffix(str, ".wal") {
+		return 0, 0, errors.New("bad wal file")
+	}
+	_, err = fmt.Sscanf(str, "%016x-%016x.wal", &seq, &index)
+	return seq, index, err
+}
+
+func TestLeaderRestartWithTailWALLogLost(t *testing.T) {
+	// stop all nodes in cluster and start one by one
+	kvs, _, _, path, err := startTestClusterWithBasePort("unit-test-leaderwallost", tmpUsedClusterPortBase, 1, 0, false)
+	if err != nil {
+		t.Fatalf("init cluster failed: %v", err)
+	}
+	if path != "" {
+		defer os.RemoveAll(path)
+	}
+	time.Sleep(time.Second)
+	defer func() {
+		for _, n := range kvs {
+			n.server.Stop()
+		}
+	}()
+	leaderNode, err := waitForLeaderForClusters(time.Minute, kvs)
+	assert.Nil(t, err)
+	assert.NotNil(t, leaderNode)
+	rport := kvs[0].redisPort
+
+	client := goredis.NewClient("127.0.0.1:"+strconv.Itoa(rport), "")
+	client.SetMaxIdleConns(4)
+	defer client.Close()
+	c, err := client.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	assert.Equal(t, 1, len(kvs))
+
+	key := "default:test-cluster:a"
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, rsp)
+	for i := 0; i < testSnap*100; i++ {
+		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)+"aaaaa"))
+		assert.Nil(t, err)
+		assert.Equal(t, OK, rsp)
+	}
+
+	ci := leaderNode.Node.GetAppliedIndex()
+	for _, s := range kvs {
+		node := s.server.GetNamespaceFromFullName("default-0")
+		node.Close()
+	}
+	// truncate the leader logs
+	// note we only truncate the logs which will keep recent valid snapshot
+	raftConf := leaderNode.Node.GetRaftConfig()
+	names := readWALNames(raftConf.WALDir)
+	lastWAL := filepath.Join(raftConf.WALDir, names[len(names)-1])
+	snaps, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+	t.Logf("truncating the wal: %s", lastWAL)
+	t.Logf("snaps in the wal: %v", snaps)
+	for i := 140; i > 0; i-- {
+		os.Truncate(lastWAL, int64(i*1000))
+		snaps2, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+		assert.Nil(t, err)
+		if len(snaps2) < len(snaps)-1 {
+			t.Logf("snaps in the wal after truncate: %v", snaps2)
+			break
+		}
+	}
+	// wait namespace deleted by callback
+	time.Sleep(time.Second)
+
+	for _, s := range kvs {
+		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
+		assert.Nil(t, err)
+		assert.NotNil(t, node)
+		err = node.Start(false)
+		assert.Nil(t, err)
+		if err != nil {
+			return
+		}
+	}
+	time.Sleep(time.Second * 2)
+
+	hasLeader := false
+	newci := uint64(0)
+	for _, s := range kvs {
+		replicaNode := s.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		newci = replicaNode.Node.GetAppliedIndex()
+		t.Logf("restarted ci: %v, old %v", newci, ci)
+		assert.True(t, newci < ci)
+		if replicaNode.Node.IsLead() {
+			hasLeader = true
+		}
+	}
+	assert.Equal(t, true, hasLeader)
+	rsp, err = goredis.String(c.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, strconv.Itoa(testSnap*100-int(ci+2-newci))+"aaaaa", rsp)
+}
+
+func TestFollowRestartWithTailWALLogLost(t *testing.T) {
+	// stop all nodes in cluster and start one by one
+	kvs, _, _, path, err := startTestClusterWithBasePort("unit-test-follower-wallost", tmpUsedClusterPortBase, 2, 0, false)
+	if err != nil {
+		t.Fatalf("init cluster failed: %v", err)
+	}
+	if path != "" {
+		defer os.RemoveAll(path)
+	}
+	time.Sleep(time.Second)
+	defer func() {
+		for _, n := range kvs {
+			n.server.Stop()
+		}
+	}()
+	leaderNode, err := waitForLeaderForClusters(time.Minute, kvs)
+	assert.Nil(t, err)
+	assert.NotNil(t, leaderNode)
+	var follower *node.NamespaceNode
+	rport := 0
+	for _, n := range kvs {
+		replicaNode := n.server.GetNamespaceFromFullName("default-0")
+		if !replicaNode.Node.IsLead() {
+			follower = replicaNode
+		} else {
+			rport = n.redisPort
+		}
+	}
+
+	client := goredis.NewClient("127.0.0.1:"+strconv.Itoa(rport), "")
+	client.SetMaxIdleConns(4)
+	defer client.Close()
+	c, err := client.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	assert.Equal(t, 2, len(kvs))
+
+	key := "default:test-cluster:a"
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, OK, rsp)
+	for i := 0; i < testSnap*100; i++ {
+		rsp, err := goredis.String(c.Do("set", key, strconv.Itoa(i)+"aaaaa"))
+		assert.Nil(t, err)
+		assert.Equal(t, OK, rsp)
+	}
+
+	time.Sleep(time.Second)
+	ci := leaderNode.Node.GetAppliedIndex()
+	raftConf := follower.Node.GetRaftConfig()
+	for _, s := range kvs {
+		node := s.server.GetNamespaceFromFullName("default-0")
+		node.Close()
+	}
+	// truncate the logs
+	// note we only truncate the logs which will keep recent valid snapshot
+	names := readWALNames(raftConf.WALDir)
+	lastWAL := filepath.Join(raftConf.WALDir, names[len(names)-1])
+	t.Logf("truncating the wal: %s", lastWAL)
+	snaps, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+	for i := 140; i > 0; i-- {
+		os.Truncate(lastWAL, int64(i*1000))
+		snaps2, err := wal.ValidSnapshotEntries(raftConf.WALDir)
+		assert.Nil(t, err)
+		if len(snaps2) < len(snaps)-1 {
+			t.Logf("snaps in the wal after truncate: %v", snaps2)
+			break
+		}
+	}
+	// wait namespace deleted by callback
+	time.Sleep(time.Second)
+
+	for _, s := range kvs {
+		node, err := s.server.InitKVNamespace(s.replicaID, s.nsConf, true)
+		assert.Nil(t, err)
+		assert.NotNil(t, node)
+		err = node.Start(false)
+		assert.Nil(t, err)
+		if err != nil {
+			return
+		}
+	}
+	time.Sleep(time.Second * 2)
+
+	hasLeader := false
+	leaderNode, err = waitForLeaderForClusters(time.Second*10, kvs)
+	assert.Nil(t, err)
+	assert.NotNil(t, leaderNode)
+	newci := uint64(0)
+	for _, s := range kvs {
+		replicaNode := s.server.GetNamespaceFromFullName("default-0")
+		assert.NotNil(t, replicaNode)
+		newci = replicaNode.Node.GetAppliedIndex()
+		assert.Equal(t, ci+1, newci)
+		if replicaNode.Node.IsLead() {
+			hasLeader = true
+		}
+	}
+	assert.Equal(t, true, hasLeader)
+	rsp, err = goredis.String(c.Do("stale.get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, strconv.Itoa(testSnap*100-1)+"aaaaa", rsp)
 }
 
 func BenchmarkWriteToClusterWithEmptySM(b *testing.B) {
@@ -686,7 +943,7 @@ func BenchmarkGetOpWithLockAndNoLock(b *testing.B) {
 	raft.SetLogger(nil)
 	rafthttp.SetLogLevel(0)
 
-	kvs, _, _, dir, err := startTestClusterWithBasePort(23355, 1, 0, false)
+	kvs, _, _, dir, err := startTestClusterWithBasePort("bench-test-get", tmpUsedClusterPortBase, 1, 0, false)
 	if err != nil {
 		panic(err)
 	}

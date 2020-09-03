@@ -25,6 +25,7 @@ require (
 	github.com/dgryski/go-farm v0.0.0-20190104051053-3adb47b1fb0f // indirect
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
+	github.com/felixge/fgprof v0.9.1
 	github.com/go-ole/go-ole v1.2.1 // indirect
 	github.com/gobwas/glob v0.2.3
 	github.com/gogo/protobuf v1.3.1

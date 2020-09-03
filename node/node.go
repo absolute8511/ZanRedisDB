@@ -295,6 +295,10 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 	return s, nil
 }
 
+func (nd *KVNode) GetRaftConfig() *RaftConfig {
+	return nd.rn.config
+}
+
 func (nd *KVNode) GetLearnerRole() string {
 	return nd.machineConfig.LearnerRole
 }

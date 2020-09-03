@@ -359,6 +359,7 @@ func (r *RockDB) ExistNoLock(key []byte) (bool, error) {
 	return r.rockEng.ExistNoLock(key)
 }
 
+// make sure close all the iterator before do any write on engine, since it may have lock on read/iterator
 func (r *RockDB) NewDBRangeIterator(min []byte, max []byte, rtype uint8,
 	reverse bool) (*engine.RangeLimitedIterator, error) {
 	opts := engine.IteratorOpts{

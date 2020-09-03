@@ -22,6 +22,10 @@ func (rs *rockRefSlice) Free() {
 	rs.v.Free()
 }
 
+func (rs *rockRefSlice) Bytes() []byte {
+	return rs.v.Bytes()
+}
+
 func (rs *rockRefSlice) Data() []byte {
 	return rs.v.Data()
 }
@@ -509,6 +513,14 @@ func (r *RockEng) ExistNoLock(key []byte) (bool, error) {
 	return r.eng.ExistNoLock(r.defaultReadOpts, key)
 }
 
+func (r *RockEng) GetRefNoLock(key []byte) (RefSlice, error) {
+	v, err := r.eng.GetNoLock(r.defaultReadOpts, key)
+	if err != nil {
+		return nil, err
+	}
+	return &rockRefSlice{v: v}, nil
+}
+
 func (r *RockEng) GetRef(key []byte) (RefSlice, error) {
 	v, err := r.eng.Get(r.defaultReadOpts, key)
 	if err != nil {
@@ -572,9 +584,11 @@ func (rck *rockEngCheckpoint) Save(path string, notify chan struct{}) error {
 	rck.eng.RLock()
 	defer rck.eng.RUnlock()
 	if rck.eng.IsOpened() {
-		time.AfterFunc(time.Millisecond*20, func() {
-			close(notify)
-		})
+		if notify != nil {
+			time.AfterFunc(time.Millisecond*20, func() {
+				close(notify)
+			})
+		}
 		return rck.ck.Save(path, math.MaxUint64)
 	}
 	return errDBEngClosed

@@ -72,7 +72,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 	replica.ReplicaID = 1
 	replica.RaftAddr = raftAddr
 	kvOpts := ServerConfig{
-		ClusterID:      "test",
+		ClusterID:      "unit-test-api",
 		DataDir:        tmpDir,
 		RedisAPIPort:   redisport,
 		HttpAPIPort:    redisport + 1,
@@ -85,7 +85,7 @@ func startTestServer(t *testing.T, port int) (*Server, int, string) {
 		UseRedisV2:     true,
 	}
 	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-	kvOpts.WALRocksDBOpts.EngineType = "pebble"
+	kvOpts.WALRocksDBOpts.EngineType = testEngineType
 
 	nsConf := node.NewNSConfig()
 	nsConf.Name = "default-0"
@@ -127,7 +127,7 @@ func waitServerForLeader(t *testing.T, w time.Duration) {
 
 func getTestConn(t *testing.T) *goredis.PoolConn {
 	testOnce.Do(func() {
-		gkvs, gredisport, gtmpDir = startTestServer(t, 12345)
+		gkvs, gredisport, gtmpDir = startTestServer(t, redisAPITestPortBase)
 		waitServerForLeader(t, time.Second*10)
 	},
 	)

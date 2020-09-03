@@ -270,7 +270,7 @@ func TestHashExpire(t *testing.T) {
 	f3 := "f3"
 	f4 := "f4"
 	fint := "fint"
-	ttl := 3
+	ttl := 2
 
 	n, err := goredis.Int(c.Do("hset", key1, f1, "hello"))
 	assert.Nil(t, err)

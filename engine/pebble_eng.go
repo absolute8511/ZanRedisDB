@@ -16,11 +16,6 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
-var (
-	errDBEngClosed = errors.New("db engine is closed")
-	errIntNumber   = errors.New("invalid integer")
-)
-
 const (
 	numOfLevels = 7
 )
@@ -31,6 +26,18 @@ type pebbleRefSlice struct {
 }
 
 func (rs *pebbleRefSlice) Free() {
+	if rs.c != nil {
+		rs.c.Close()
+	}
+}
+
+func (rs *pebbleRefSlice) Bytes() []byte {
+	if rs.b == nil {
+		return nil
+	}
+	b := make([]byte, len(rs.b))
+	copy(b, rs.b)
+	return b
 }
 
 func (rs *pebbleRefSlice) Data() []byte {
@@ -397,21 +404,18 @@ func (pe *PebbleEng) GetInternalPropertyStatus(p string) string {
 }
 
 func (pe *PebbleEng) GetBytesNoLock(key []byte) ([]byte, error) {
-	val, c, err := pe.eng.Get(key)
-	if err != nil && err != pebble.ErrNotFound {
+	val, err := pe.GetRefNoLock(key)
+	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if c != nil {
-			c.Close()
-		}
-	}()
 	if val == nil {
 		return nil, nil
 	}
-	b := make([]byte, len(val))
-	copy(b, val)
-	return b, nil
+	defer val.Free()
+	if val.Data() == nil {
+		return nil, nil
+	}
+	return val.Bytes(), nil
 }
 
 func (pe *PebbleEng) GetBytes(key []byte) ([]byte, error) {
@@ -447,16 +451,24 @@ func (pe *PebbleEng) Exist(key []byte) (bool, error) {
 }
 
 func (pe *PebbleEng) ExistNoLock(key []byte) (bool, error) {
-	val, c, err := pe.eng.Get(key)
-	if err != nil && err != pebble.ErrNotFound {
+	val, err := pe.GetRefNoLock(key)
+	if err != nil {
 		return false, err
 	}
-	defer func() {
-		if c != nil {
-			c.Close()
-		}
-	}()
-	return val != nil, nil
+	if val == nil {
+		return false, nil
+	}
+	ok := val.Data() != nil
+	val.Free()
+	return ok, nil
+}
+
+func (pe *PebbleEng) GetRefNoLock(key []byte) (RefSlice, error) {
+	val, c, err := pe.eng.Get(key)
+	if err != nil && err != pebble.ErrNotFound {
+		return nil, err
+	}
+	return &pebbleRefSlice{b: val, c: c}, nil
 }
 
 func (pe *PebbleEng) GetRef(key []byte) (RefSlice, error) {
@@ -465,11 +477,7 @@ func (pe *PebbleEng) GetRef(key []byte) (RefSlice, error) {
 	if pe.IsClosed() {
 		return nil, errDBEngClosed
 	}
-	val, c, err := pe.eng.Get(key)
-	if err != nil && err != pebble.ErrNotFound {
-		return nil, err
-	}
-	return &pebbleRefSlice{b: val, c: c}, nil
+	return pe.GetRefNoLock(key)
 }
 
 func (pe *PebbleEng) GetValueWithOp(key []byte,
@@ -479,30 +487,20 @@ func (pe *PebbleEng) GetValueWithOp(key []byte,
 	if pe.IsClosed() {
 		return errDBEngClosed
 	}
-	val, c, err := pe.eng.Get(key)
-	if err != nil && err != pebble.ErrNotFound {
-		return err
-	}
-	defer func() {
-		if c != nil {
-			c.Close()
-		}
-	}()
-	return op(val)
+	return pe.GetValueWithOpNoLock(key, op)
 }
 
 func (pe *PebbleEng) GetValueWithOpNoLock(key []byte,
 	op func([]byte) error) error {
-	val, c, err := pe.eng.Get(key)
-	if err != nil && err != pebble.ErrNotFound {
+	val, err := pe.GetRef(key)
+	if err != nil {
 		return err
 	}
-	defer func() {
-		if c != nil {
-			c.Close()
-		}
-	}()
-	return op(val)
+	if val == nil {
+		return op(nil)
+	}
+	defer val.Free()
+	return op(val.Data())
 }
 
 func (pe *PebbleEng) DeleteFilesInRange(rg CRange) {
@@ -533,8 +531,10 @@ func (pck *pebbleEngCheckpoint) Save(path string, notify chan struct{}) error {
 	if pck.pe.IsClosed() {
 		return errDBEngClosed
 	}
-	time.AfterFunc(time.Millisecond*20, func() {
-		close(notify)
-	})
+	if notify != nil {
+		time.AfterFunc(time.Millisecond*20, func() {
+			close(notify)
+		})
+	}
 	return pck.pe.eng.Checkpoint(path)
 }

@@ -198,7 +198,7 @@ func rangeLimitIterator(i Iterator, r *Range, l *Limit, reverse bool) *RangeLimi
 		} else {
 			it.Iterator.Seek(r.Min)
 			if r.Type&common.RangeLOpen > 0 {
-				if it.Iterator.Valid() && bytes.Equal(it.Iterator.RefKey(), r.Min) {
+				if it.Iterator.Valid() && bytes.Compare(it.Iterator.RefKey(), r.Min) <= 0 {
 					it.Iterator.Next()
 				}
 			}
@@ -209,25 +209,26 @@ func rangeLimitIterator(i Iterator, r *Range, l *Limit, reverse bool) *RangeLimi
 		} else {
 			it.Iterator.SeekForPrev(r.Max)
 			if !it.Iterator.Valid() {
-				it.Iterator.SeekToLast()
+				it.Iterator.SeekToFirst()
 				if it.Iterator.Valid() && bytes.Compare(it.Iterator.RefKey(), r.Max) == 1 {
 					dbLog.Infof("iterator seek to last key %v should not great than seek to max %v", it.Iterator.RefKey(), r.Max)
 				}
 			}
 			if r.Type&common.RangeROpen > 0 {
-				if it.Iterator.Valid() && bytes.Equal(it.Iterator.RefKey(), r.Max) {
+				if it.Iterator.Valid() && bytes.Compare(it.Iterator.RefKey(), r.Max) >= 0 {
 					it.Iterator.Prev()
 				}
 			}
 		}
 	}
 	for i := 0; i < l.Offset; i++ {
-		if it.Iterator.Valid() {
-			if !it.reverse {
-				it.Iterator.Next()
-			} else {
-				it.Iterator.Prev()
-			}
+		if !it.Valid() {
+			break
+		}
+		if !it.reverse {
+			it.Iterator.Next()
+		} else {
+			it.Iterator.Prev()
 		}
 	}
 	return it

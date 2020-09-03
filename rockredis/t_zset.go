@@ -460,6 +460,9 @@ func (db *RockDB) ZScore(key []byte, member []byte) (float64, error) {
 	if err != nil {
 		return score, err
 	}
+	if refv == nil {
+		return score, errScoreMiss
+	}
 	defer refv.Free()
 	if refv.Data() == nil {
 		return score, errScoreMiss
@@ -1133,20 +1136,7 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 	return ay, nil
 }
 
-func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, rangeType uint8) (int64, error) {
-	wb := db.wb
-	defer wb.Clear()
-	if min == nil && max == nil {
-		cnt, err := db.zRemAll(ts, key, wb)
-		if err != nil {
-			return 0, err
-		}
-		if err := db.rockEng.Write(wb); err != nil {
-			return 0, err
-		}
-		return cnt, nil
-	}
-
+func (db *RockDB) internalZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, rangeType uint8, wb engine.WriteBatch) (int64, error) {
 	keyInfo, err := db.getZSetForRangeWithMinMax(ts, key, min, max, false)
 	if err != nil {
 		return 0, err
@@ -1182,6 +1172,28 @@ func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, r
 	}
 
 	db.topLargeCollKeys.Update(key, int(newNum))
+	return num, nil
+}
+
+func (db *RockDB) ZRemRangeByLex(ts int64, key []byte, min []byte, max []byte, rangeType uint8) (int64, error) {
+	wb := db.wb
+	defer wb.Clear()
+	if min == nil && max == nil {
+		cnt, err := db.zRemAll(ts, key, wb)
+		if err != nil {
+			return 0, err
+		}
+		if err := db.rockEng.Write(wb); err != nil {
+			return 0, err
+		}
+		return cnt, nil
+	}
+
+	num, err := db.internalZRemRangeByLex(ts, key, min, max, rangeType, wb)
+	if err != nil {
+		return 0, err
+	}
+
 	if err := db.rockEng.Write(wb); err != nil {
 		return 0, err
 	}
