@@ -6,6 +6,7 @@ package engine
 // #include "kv_skiplist.h"
 import "C"
 import (
+	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -21,6 +22,7 @@ func byteToChar(b []byte) *C.char {
 
 type skipList struct {
 	csl    *C.skiplist_raw
+	wl     sync.Mutex
 	closed int32
 }
 
@@ -70,11 +72,15 @@ func (sl *skipList) Set(key []byte, value []byte) error {
 		cKey   = byteToChar(key)
 		cValue = byteToChar(value)
 	)
+	sl.wl.Lock()
+	defer sl.wl.Unlock()
 	C.kv_skiplist_update(sl.csl, cKey, C.size_t(len(key)), cValue, C.size_t(len(value)))
 	return nil
 }
 
 func (sl *skipList) Delete(key []byte) error {
+	sl.wl.Lock()
+	defer sl.wl.Unlock()
 	cKey := byteToChar(key)
 	C.kv_skiplist_del(sl.csl, cKey, C.size_t(len(key)))
 	return nil
