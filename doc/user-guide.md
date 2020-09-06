@@ -6,7 +6,7 @@
 - key本身的长度尽可能短, 最长不要超过1KB.
 - 子key里面的单个value大小不能大于8MB, 子key总数不限制。
 - 默认使用“非一致性本地删除”策略进行数据过期，数据过期功能仅保证数据不会被提前删除，不保证删除的实时性。不支持使用TTL指令获取数据生存时间，和persist指令持久化数据, 只支持固定的过期时间, 不支持动态调整过期, 过期时间一旦确定, 不能变更. 即使key发生了后继更新操作(set, setex), 过期时间依然保持第一次的不变, 如果需要动态调整TTL, 需要在创建namespace时指定使用一致性过期删除策略.
-- del, expire 操作仅用于kv类型数据, 对其他类型数据无效, 其他数据类型因为是集合类型, 针对key的删除, 需要删除整个集合的所有数据, 因此需要使用对应类型的扩展命令(hclear, hexpire, sclear, zclear, zexpire等)
+- del, expire, persist, ttl, exists 操作仅用于kv类型数据, 对其他类型数据无效, 其他数据类型因为是集合类型, 针对key的删除, 需要删除整个集合的所有数据, 因此需要使用对应类型的扩展命令(hclear, hexpire, hkeyexist,httl,hpersist, sclear, zclear, zexpire等)
 - 为了防止一次获取太多数据, 对HASH (hgetall, hmget, hkeys, hvals等), list(lrange等), set (smembers等), zset (zrange等) 集合类型的数据批量获取命令做了最大限制(服务端目前配置最大一次性获取5000, 超过会直接返回错误信息), 如果需要超过此限制, 建议使用分页hscan, sscan, zscan等操作, 限制每一次获取的数据数量.
 
 ## 协议兼容性
@@ -51,6 +51,7 @@
 |hexpire|扩展命令|
 |httl	|扩展命令|
 |hpersist|扩展命令|
+|hkeyexist|扩展命令|
 
 #### List数据类型
 
@@ -69,6 +70,7 @@
 |lexpire|扩展命令|
 |lttl|扩展命令|
 |lpersist|扩展命令|
+|lkeyexist|扩展命令|
 
 #### Set 数据类型
 
@@ -86,6 +88,7 @@
 |sexpire|扩展命令|
 |sttl|扩展命令|
 |spersist|扩展命令|
+|skeyexist|扩展命令|
 
 #### Zset 数据类型
 
@@ -112,8 +115,11 @@
 |zexpire|扩展命令|
 |zttl|扩展命令|
 |zpersist|扩展命令|
+|zkeyexist|扩展命令|
 
 #### HyperLogLog数据类型
+
+共享kv类型命令
 
 |Command|说明|
 | ---- | ---- |
@@ -121,6 +127,8 @@
 |pfcount|√|
 
 #### GeoHash数据类型
+
+共享zset类型命令
 
 |Command|说明|
 | ---- | ---- |
@@ -136,7 +144,7 @@
 |Command|说明|
 | ---- | ---- |
 |scan|仅支持扫描kv数据的key|
-|advscan|扩展命令|
+|advscan|扩展命令, 支持扫描其他类型数据的key列表|
 |hscan|√|
 |sscan|√|
 |zscan|√|
