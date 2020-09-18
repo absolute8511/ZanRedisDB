@@ -29,6 +29,9 @@ LATEST="zankv-latest.$os-$arch.$goversion"
 GOOS=$os GOARCH=$arch ROCKSDB=$ROCKSDB \
     make DESTDIR=$BUILD PREFIX=/$TARGET install
 pushd $BUILD
+if [ "$os" == "linux" ]; then
+    cp -r $TARGET/bin $DIR/dist/docker/
+fi
 tar czvf $TARGET.tar.gz $TARGET
 mv $TARGET.tar.gz $DIR/dist/
 mv $TARGET $LATEST
@@ -38,3 +41,6 @@ rm -rf $LATEST
 popd
 make clean
 rm -r $BUILD
+
+docker build -t xxx.xxx.com/youzan/zankv:v$version .
+docker push xxx.xxx.com/youzan/zankv:v$version
