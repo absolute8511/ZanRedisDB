@@ -70,7 +70,7 @@ func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan stru
 		log.Printf("copy from remote :%v/%v to local: %v\n", remote, srcPath, dstPath)
 		// limit rate in kilobytes
 		limitStr := fmt.Sprintf("--bwlimit=%v", atomic.LoadInt64(&rsyncLimit))
-		cmd = exec.Command("rsync", "-avP", "--delete", limitStr,
+		cmd = exec.Command("rsync", "--timeout=300", "-avP", "--delete", limitStr,
 			"rsync://"+remote+"/"+srcPath, dstPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
