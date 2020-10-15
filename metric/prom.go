@@ -72,6 +72,16 @@ var (
 		Help: "the important event counter for internal event",
 	}, []string{"namespace", "event_name"})
 
+	TableKeyNum = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "table_key_num",
+		Help: "the key number stats for each table",
+	}, []string{"table", "group"})
+
+	TableDiskUsage = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "table_disk_usage",
+		Help: "the disk usage stats for each table",
+	}, []string{"table", "group"})
+
 	ReadCmdCounter = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "read_cmd_total",
 		Help: "redis read command total counter",

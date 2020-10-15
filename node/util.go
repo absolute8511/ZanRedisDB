@@ -14,6 +14,7 @@ import (
 
 var nodeLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
 var syncerOnly int32
+var logMaybeConflictDisabled int32
 var syncerOnlyChangedTs int64
 
 func SetLogLevel(level int) {
@@ -32,6 +33,18 @@ func SetSyncerOnly(enable bool) {
 		atomic.StoreInt32(&syncerOnly, 0)
 		atomic.StoreInt64(&syncerOnlyChangedTs, time.Now().UnixNano())
 	}
+}
+
+func SwitchDisableMaybeConflictLog(disable bool) {
+	if disable {
+		atomic.StoreInt32(&logMaybeConflictDisabled, 1)
+	} else {
+		atomic.StoreInt32(&logMaybeConflictDisabled, 0)
+	}
+}
+
+func MaybeConflictLogDisabled() bool {
+	return atomic.LoadInt32(&logMaybeConflictDisabled) == 1
 }
 
 func GetSyncedOnlyChangedTs() int64 {

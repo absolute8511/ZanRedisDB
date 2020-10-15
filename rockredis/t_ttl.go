@@ -254,6 +254,7 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 	}
 	defer it.Close()
 
+	tableStats := make(map[string]int, 100)
 	for ; it.Valid(); it.Next() {
 		if scanned%100 == 0 {
 			select {
@@ -297,13 +298,23 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 			nc = now
 			break
 		}
+		table, _, err := extractTableFromRedisKey(k)
+		if err == nil && len(tableStats) < 100 {
+			n, _ := tableStats[string(table)]
+			n++
+			tableStats[string(table)] = n
+		}
 	}
 
 	c.setNextCheckTime(nc, true)
 
-	checkCost := time.Since(checkStart).Nanoseconds() / 1000
-	if dbLog.Level() >= common.LOG_DEBUG || eCount > 10000 || checkCost >= time.Second.Nanoseconds() {
-		dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%d us", eCount, scanned, checkCost)
+	checkCost := time.Since(checkStart)
+	if dbLog.Level() >= common.LOG_DEBUG || eCount > 10000 || checkCost >= time.Second {
+		dbLog.Infof("[%d/%d] keys have expired during ttl checking, cost:%s, tables: %v", eCount, scanned, checkCost, len(tableStats))
+		// only log the stats if the expired data is in small tables (which means most are in the same table)
+		if len(tableStats) < 10 || dbLog.Level() >= common.LOG_DEBUG {
+			dbLog.Infof("expired table stats %v", tableStats)
+		}
 	}
 
 	return err

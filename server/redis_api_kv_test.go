@@ -1127,11 +1127,13 @@ func TestSlowLimiterCommand(t *testing.T) {
 				if c2 > time.Millisecond*500 {
 					atomic.AddInt64(&slowed, 1)
 				}
-				assert.Nil(t, err)
-				atomic.AddInt64(&total, 1)
 				if err != nil {
-					return
+					if err.Error() == node.ErrSlowLimiterRefused.Error() {
+					} else {
+						assert.Nil(t, err)
+					}
 				}
+				atomic.AddInt64(&total, 1)
 				select {
 				case <-done:
 					return
@@ -1206,7 +1208,7 @@ func TestSlowLimiterCommand(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("slow loop cnt: %v, refused: %v, %v at %v",
+	t.Logf("slow loop cnt: %v, refused: %v, passed after refused %v at %v",
 		loop, refused, passedAfterRefused, time.Now())
 	assert.True(t, refused > 1)
 	assert.True(t, passedAfterRefused < 5)

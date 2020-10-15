@@ -20,6 +20,7 @@ import (
 	"github.com/youzan/ZanRedisDB/slow"
 
 	"github.com/absolute8511/redcon"
+	ps "github.com/prometheus/client_golang/prometheus"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
 	"github.com/youzan/ZanRedisDB/common"
@@ -426,7 +427,17 @@ func (s *Server) Start() {
 		defer s.wg.Done()
 		s.serveGRPCAPI(s.conf.GrpcAPIPort, s.stopC)
 	}()
-
+	// start http api first to allow manager before all started
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.serveHttpAPI(s.conf.HttpAPIPort, s.stopC)
+	}()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.metricLoop(s.stopC)
+	}()
 	if s.dataCoord != nil {
 		err := s.dataCoord.Start()
 		if err != nil {
@@ -435,12 +446,6 @@ func (s *Server) Start() {
 	} else {
 		s.nsMgr.Start()
 	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.serveHttpAPI(s.conf.HttpAPIPort, s.stopC)
-	}()
 }
 
 func GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []byte, int, error) {
@@ -724,5 +729,32 @@ func (s *Server) handleRedisWrite(cmdName string, kvn *node.KVNode,
 	default:
 		// Do we have any other resp arrays for write command which is not [][]byte?
 		conn.WriteError("Invalid response type")
+	}
+}
+
+func (s *Server) metricLoop(stopC chan struct{}) {
+	ticker := time.NewTicker(time.Second * 10)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stopC:
+			return
+		case <-ticker.C:
+			stats := s.nsMgr.GetStats(true, "", true)
+			for _, stat := range stats {
+				ns := stat.Name
+				for _, ts := range stat.TStats {
+					metric.TableKeyNum.With(ps.Labels{
+						"table": ts.Name,
+						"group": ns,
+					}).Set(float64(ts.KeyNum))
+
+					metric.TableDiskUsage.With(ps.Labels{
+						"table": ts.Name,
+						"group": ns,
+					}).Set(float64(ts.DiskBytesUsage))
+				}
+			}
+		}
 	}
 }

@@ -2,11 +2,13 @@ package rockredis
 
 import (
 	"os"
+	"path"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func convertRedisKeyToDBSKey(key []byte, member []byte) ([]byte, error) {
@@ -378,12 +380,32 @@ func BenchmarkSAddAndSPop(b *testing.B) {
 
 	b.ResetTimer()
 
+	stopC := make(chan bool)
+	go func() {
+		tmp := path.Join(db.cfg.DataDir, "snapshot")
+		os.MkdirAll(tmp, common.DIR_PERM)
+		for i := 0; ; i++ {
+			db.SIsMember(key, []byte("hello"+strconv.Itoa(i%b.N)))
+			db.SMembers(key)
+			ck, _ := db.rockEng.NewCheckpoint()
+			ck.Save(tmp, nil)
+			select {
+			case <-stopC:
+				return
+			default:
+			}
+		}
+	}()
 	for i := 0; i < b.N+1000; i++ {
 		db.SAdd(0, key, []byte("hello"+strconv.Itoa(i)))
+		if i%121 == 0 {
+			db.SPop(0, key, 100)
+		}
 	}
 
 	for i := 0; i < b.N; i++ {
 		db.SPop(0, key, 100)
 	}
+	close(stopC)
 	b.StopTimer()
 }
