@@ -271,12 +271,20 @@ func (kvsm *kvStoreSM) registerConflictHandlers() {
 	// bitmap
 	kvsm.cRouter.Register("setbitv2", kvsm.checkBitmapConflict)
 	kvsm.cRouter.Register("setbit", kvsm.checkBitmapConflict)
+	kvsm.cRouter.Register("bitclear", kvsm.checkBitmapConflict)
+	kvsm.cRouter.Register("bexpire", kvsm.checkBitmapConflict)
+	kvsm.cRouter.Register("bpersist", kvsm.checkBitmapConflict)
 	// hash
 	kvsm.cRouter.Register("hset", kvsm.checkHashKFVConflict)
 	kvsm.cRouter.Register("hsetnx", kvsm.checkHashKFVConflict)
 	kvsm.cRouter.Register("hincrby", kvsm.checkHashKFVConflict)
 	kvsm.cRouter.Register("hmset", kvsm.checkHashKFVConflict)
 	kvsm.cRouter.Register("hdel", kvsm.checkHashKFFConflict)
+	kvsm.cRouter.Register("hincrby", kvsm.checkHashKFVConflict)
+	// no field can be checked in these commands
+	//kvsm.cRouter.Register("hclear", kvsm.localHclearCommand)
+	//kvsm.cRouter.Register("hexpire", kvsm.localHashExpireCommand)
+	//kvsm.cRouter.Register("hpersist", kvsm.localHashPersistCommand)
 
 	// list
 	kvsm.cRouter.Register("lpop", kvsm.checkListConflict)
@@ -285,6 +293,9 @@ func (kvsm *kvStoreSM) registerConflictHandlers() {
 	kvsm.cRouter.Register("ltrim", kvsm.checkListConflict)
 	kvsm.cRouter.Register("rpop", kvsm.checkListConflict)
 	kvsm.cRouter.Register("rpush", kvsm.checkListConflict)
+	kvsm.cRouter.Register("lclear", kvsm.checkListConflict)
+	kvsm.cRouter.Register("lexpire", kvsm.checkListConflict)
+	kvsm.cRouter.Register("lpersist", kvsm.checkListConflict)
 	// zset
 	kvsm.cRouter.Register("zadd", kvsm.checkZSetConflict)
 	kvsm.cRouter.Register("zincrby", kvsm.checkZSetConflict)
@@ -292,12 +303,19 @@ func (kvsm *kvStoreSM) registerConflictHandlers() {
 	kvsm.cRouter.Register("zremrangebyrank", kvsm.checkZSetConflict)
 	kvsm.cRouter.Register("zremrangebyscore", kvsm.checkZSetConflict)
 	kvsm.cRouter.Register("zremrangebylex", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zclear", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zexpire", kvsm.checkZSetConflict)
+	kvsm.cRouter.Register("zpersist", kvsm.checkZSetConflict)
 	// set
 	kvsm.cRouter.Register("sadd", kvsm.checkSetConflict)
 	kvsm.cRouter.Register("srem", kvsm.checkSetConflict)
 	kvsm.cRouter.Register("spop", kvsm.checkSetConflict)
+	kvsm.cRouter.Register("sclear", kvsm.checkSetConflict)
+	kvsm.cRouter.Register("sexpire", kvsm.checkSetConflict)
+	kvsm.cRouter.Register("spersist", kvsm.checkSetConflict)
 	// expire
 	kvsm.cRouter.Register("setex", kvsm.checkKVConflict)
 	kvsm.cRouter.Register("expire", kvsm.checkKVConflict)
 	kvsm.cRouter.Register("persist", kvsm.checkKVConflict)
+	// for json
 }

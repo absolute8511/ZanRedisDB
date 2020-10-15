@@ -533,6 +533,21 @@ func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps ht
 	return nil, nil
 }
 
+func (s *Server) doSwitchDisableConflictLog(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	param := reqParams.Get("disable")
+	if param == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	}
+	boolParam := toBoolParam(param)
+	sLog.Infof("disable log conflict state changed to : %v", param)
+	node.SwitchDisableMaybeConflictLog(boolParam)
+	return nil, nil
+}
+
 func (s *Server) doSetDynamicConf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -882,6 +897,7 @@ func (s *Server) initHttpHandler() {
 	router.Handle("POST", "/rsynclimit", common.Decorate(s.doSetRsyncLimit, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
 	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
+	router.Handle("POST", "/disableconflictlog", common.Decorate(s.doSwitchDisableConflictLog, log, common.V1))
 	router.Handle("GET", "/synceronly", common.Decorate(s.getSyncerOnlyState, log, common.V1))
 	router.Handle("POST", "/conf/set", common.Decorate(s.doSetDynamicConf, log, common.V1))
 	router.Handle("GET", "/conf/get", common.Decorate(s.doGetDynamicConf, log, common.V1))
