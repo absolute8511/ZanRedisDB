@@ -14,7 +14,7 @@ Build the rocksdb with jemalloc
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
 git checkout v6.4.6-patched
-PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
+PORTABLE=1 USE_SSE=1 USE_PCLMUL=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 </pre>
 
 Install the dependency (for old go version only, if using go1.13+, it will be done in go modules):
@@ -136,7 +136,7 @@ placedriver has several HTTP APIs to manager the namespace
 - query the namespace meta info: `GET /query/namespace_name`
 - create the namespace (handle only by leader) : `POST /cluster/namespace/create?namespace=test_p16&partition_num=16&replicator=3`
 - create the namespace with the new dynamic ttl support (handle only by leader) : `POST /cluster/namespace/create?namespace=test_p16&partition_num=16&replicator=3&data_version=value_header_v1&expiration_policy=wait_compact`
-- delete the namespace (handle only by leader): `POST /cluster/namespace/delete?namespace=test_p16&partition=**`
+- delete the namespace (handle only by leader): `DELETE /cluster/namespace/delete?namespace=test_p16&partition=**`
 
 storage server HTTP APIs for stats:
 

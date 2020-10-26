@@ -26,7 +26,7 @@ Build the rocksdb with jemalloc
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
 git checkout v6.4.6-patched
-PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
+PORTABLE=1 USE_SSE=1 USE_PCLMUL=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 </pre>
 
 Install the dependency (for old go version only, if using go1.13+, it will be done in go modules):

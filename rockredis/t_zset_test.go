@@ -190,6 +190,34 @@ func TestDBZSet(t *testing.T) {
 	}
 }
 
+func TestDBZSetIncrby(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := bin("test:testdb_zset_incr")
+
+	// {'a':0, 'b':1, 'c':2, 'd':3}
+	if n, err := db.ZAdd(0, key, pair("a", 0), pair("b", 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	s, err := db.ZScore(key, bin("b"))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(1), s)
+	_, err = db.ZScore(key, bin("c"))
+	assert.Equal(t, errScoreMiss, err)
+
+	s, err = db.ZIncrBy(0, key, 3, bin("b"))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(4), s)
+	s, err = db.ZIncrBy(0, key, 1, bin("c"))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(1), s)
+}
+
 func TestZSetOrder(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)

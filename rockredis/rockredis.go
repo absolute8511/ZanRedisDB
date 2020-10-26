@@ -614,7 +614,7 @@ func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end [
 		}
 	}
 	keyNum := int64(r.rockEng.GetApproximateKeyNum(filteredRgs))
-	dbLog.Debugf("total db key num: %v, table key num %v, %v", num, keyNum, sList)
+	dbLog.Debugf("total db key num: %v, table %s key num %v, %v", num, table, keyNum, sList)
 	// use GetApproximateSizes and estimate-keys-num in property
 	// refer: https://github.com/facebook/mysql-5.6/commit/4ca34d2498e8d16ede73a7955d1ab101a91f102f
 	// range records = estimate-keys-num * GetApproximateSizes(range) / GetApproximateSizes (total)
