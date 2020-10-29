@@ -285,8 +285,16 @@ func (r *RockDB) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error 
 	return r.rockEng.SetMaxBackgroundOptions(maxCompact, maxBackJobs)
 }
 
-func (r *RockDB) CompactRange() {
+func (r *RockDB) CompactAllRange() {
 	r.rockEng.CompactAllRange()
+}
+
+func (r *RockDB) CompactRange(minKey []byte, maxKey []byte) {
+	var rg engine.CRange
+	rg.Start = minKey
+	rg.Limit = maxKey
+	dbLog.Infof("compacting range: %v, %v", minKey, maxKey)
+	r.rockEng.CompactRange(rg)
 }
 
 func (r *RockDB) closeEng() {

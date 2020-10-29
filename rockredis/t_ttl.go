@@ -214,6 +214,14 @@ func (c *TTLChecker) setNextCheckTime(when int64, force bool) {
 	c.Unlock()
 }
 
+// do not run while iterator or in other db read lock
+func (c *TTLChecker) compactTTLMeta() {
+	now := time.Now().Unix()
+	minKey := expEncodeTimeKey(NoneType, nil, 0)
+	maxKey := expEncodeTimeKey(maxDataType, nil, now)
+	c.db.CompactRange(minKey, maxKey)
+}
+
 func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -298,8 +306,8 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 			nc = now
 			break
 		}
-		table, _, err := extractTableFromRedisKey(k)
-		if err == nil && len(tableStats) < 100 {
+		table, _, inerr := extractTableFromRedisKey(k)
+		if inerr == nil && len(tableStats) < 100 {
 			n, _ := tableStats[string(table)]
 			n++
 			tableStats[string(table)] = n
@@ -314,6 +322,10 @@ func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (er
 		// only log the stats if the expired data is in small tables (which means most are in the same table)
 		if len(tableStats) < 10 || dbLog.Level() >= common.LOG_DEBUG {
 			dbLog.Infof("expired table stats %v", tableStats)
+		}
+		if checkCost > time.Minute/2 {
+			// too long scan, maybe compact to reduce the cpu cost
+			err = errTTLCheckTooLong
 		}
 	}
 
