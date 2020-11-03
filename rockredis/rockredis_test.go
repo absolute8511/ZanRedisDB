@@ -139,7 +139,7 @@ func TestDBCompact(t *testing.T) {
 		db.DelKeys([]byte(string(key) + strconv.Itoa(i)))
 	}
 
-	db.CompactRange()
+	db.CompactAllRange()
 
 	v, err = db.KVGet(key)
 	assert.Nil(t, err)
