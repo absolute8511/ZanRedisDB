@@ -21,6 +21,7 @@ const (
 var (
 	ErrLocalBatchFullToCommit = errors.New("batched is fully filled and should commit right now")
 	ErrLocalBatchedBuffFull   = errors.New("the local batched buffer is fully filled")
+	errTTLCheckTooLong        = errors.New("the local ttl scan take too long")
 	errChangeTTLNotSupported  = errors.New("change ttl is not supported in current expire policy")
 )
 
@@ -147,6 +148,9 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 					// avoid 100% cpu
 					time.Sleep(time.Millisecond)
 					continue
+				} else if err == errTTLCheckTooLong {
+					// do compact for ttl
+					checker.compactTTLMeta()
 				} else if err != nil {
 					dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
 				}

@@ -216,6 +216,7 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		cfg.EnableTableCounter = false
 	}
 	// TODO: add avoid_unnecessary_blocking_io option for db
+	// See http://smalldatum.blogspot.com/2018/09/5-things-to-set-when-configuring.html
 	// level_compaction_dynamic_level_bytes
 	if cfg.LevelCompactionDynamicLevelBytes {
 		opts.SetLevelCompactionDynamicLevelBytes(true)
@@ -377,15 +378,16 @@ func (r *RockEng) LastCompactTime() int64 {
 
 func (r *RockEng) CompactRange(rg CRange) {
 	atomic.StoreInt64(&r.lastCompact, time.Now().Unix())
-	atomic.StoreInt64(&r.deletedCnt, 0)
+	dbLog.Infof("compact rocksdb %v begin: %v", r.GetDataDir(), rg)
+	defer dbLog.Infof("compact rocksdb %v done", r.GetDataDir())
 	var rrg gorocksdb.Range
 	rrg.Start = rg.Start
 	rrg.Limit = rg.Limit
 	r.eng.CompactRange(rrg)
-	dbLog.Infof("compact rocksdb %v done", r.GetDataDir())
 }
 
 func (r *RockEng) CompactAllRange() {
+	atomic.StoreInt64(&r.deletedCnt, 0)
 	r.CompactRange(CRange{})
 }
 

@@ -357,7 +357,7 @@ func (kvsm *kvStoreSM) GetBatchOperator() IBatchOperator {
 
 func (kvsm *kvStoreSM) Optimize(table string) {
 	if table == "" {
-		kvsm.store.CompactRange()
+		kvsm.store.CompactAllRange()
 	} else {
 		kvsm.store.CompactTableRange(table)
 	}
