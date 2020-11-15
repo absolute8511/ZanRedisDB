@@ -111,8 +111,8 @@ const (
 )
 
 var (
-	DefaultSnapCount   = 400000
-	DefaultSnapCatchup = 300000
+	DefaultSnapCount   = 600000
+	DefaultSnapCatchup = 500000
 )
 
 func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
