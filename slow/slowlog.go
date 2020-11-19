@@ -30,7 +30,7 @@ func SetRemoteLogger(remote string) {
 	}
 }
 
-var sl = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
+var sl = common.NewLevelLogger(common.LOG_INFO, common.NewLogger())
 
 func SetLogger(level int32, logger common.Logger) {
 	sl.SetLevel(level)

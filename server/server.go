@@ -43,7 +43,7 @@ const (
 	slowPreWaitQueueTime    = time.Second * 2
 )
 
-var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
+var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewLogger())
 
 func SetLogger(level int32, logger common.Logger) {
 	sLog.SetLevel(level)

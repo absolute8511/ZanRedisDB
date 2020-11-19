@@ -24,7 +24,7 @@ const (
 	compactThreshold = 5000000
 )
 
-var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
+var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewLogger())
 
 func SetLogLevel(level int32) {
 	dbLog.SetLevel(level)

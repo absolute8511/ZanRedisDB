@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,10 +12,26 @@ import (
 	"github.com/absolute8511/glog"
 )
 
+var inTestNoGlog bool
+
+func init() {
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "-test") {
+		inTestNoGlog = true
+		log.Printf("using no glog for test, %s\n", os.Args[1])
+	}
+}
+
 type Logger interface {
 	Output(maxdepth int, s string) error
 	OutputErr(maxdepth int, s string) error
 	OutputWarning(maxdepth int, s string) error
+}
+
+func NewLogger() Logger {
+	if inTestNoGlog {
+		return NewDefaultLogger("test")
+	}
+	return newGLogger()
 }
 
 type defaultLogger struct {
@@ -49,7 +66,7 @@ func (dl *defaultLogger) OutputWarning(maxdepth int, s string) error {
 type gLogger struct {
 }
 
-func NewGLogger() *gLogger {
+func newGLogger() *gLogger {
 	return &gLogger{}
 }
 

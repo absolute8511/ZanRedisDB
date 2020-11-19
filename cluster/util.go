@@ -4,7 +4,7 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
-var coordLog = common.NewLevelLogger(common.LOG_INFO, common.NewGLogger())
+var coordLog = common.NewLevelLogger(common.LOG_INFO, common.NewLogger())
 
 func CoordLog() *common.LevelLogger {
 	return coordLog
