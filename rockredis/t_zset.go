@@ -703,15 +703,16 @@ func (db *RockDB) zRemAll(ts int64, key []byte, wb engine.WriteBatch) (int64, er
 		db.delExpire(ZSetType, key, nil, false, wb)
 		wb.Delete(sk)
 	} else {
-		// remove all scan can ignore deleted to speed up scan
-		rmCnt, err := db.zRemRangeBytes(ts, key, keyInfo, 0, -1, wb, true)
+		// remove all scan can ignore deleted to speed up scan.
+		// update: no ignore deleted is needed, and it may costly if too much deleted
+		rmCnt, err := db.zRemRangeBytes(ts, key, keyInfo, 0, -1, wb)
 		return rmCnt, err
 	}
 	return num, nil
 }
 
 func (db *RockDB) zRemRangeBytes(ts int64, key []byte, keyInfo collVerKeyInfo, offset int,
-	count int, wb engine.WriteBatch, ignoreDel bool) (int64, error) {
+	count int, wb engine.WriteBatch) (int64, error) {
 	if len(key) > MaxKeySize {
 		return 0, errKeySize
 	}
@@ -737,10 +738,9 @@ func (db *RockDB) zRemRangeBytes(ts int64, key []byte, keyInfo collVerKeyInfo, o
 	maxKey := keyInfo.RangeEnd
 
 	opts := engine.IteratorOpts{
-		Range:     engine.Range{Min: minKey, Max: maxKey, Type: common.RangeClose},
-		Limit:     engine.Limit{Offset: offset, Count: count},
-		Reverse:   false,
-		IgnoreDel: ignoreDel,
+		Range:   engine.Range{Min: minKey, Max: maxKey, Type: common.RangeClose},
+		Limit:   engine.Limit{Offset: offset, Count: count},
+		Reverse: false,
 	}
 	it, err := db.NewDBRangeLimitIteratorWithOpts(opts)
 	if err != nil {
@@ -784,7 +784,7 @@ func (db *RockDB) zRemRange(ts int64, key []byte, min float64, max float64, offs
 		return 0, err
 	}
 
-	return db.zRemRangeBytes(ts, key, keyInfo, offset, count, wb, false)
+	return db.zRemRangeBytes(ts, key, keyInfo, offset, count, wb)
 }
 
 func (db *RockDB) zRangeBytes(ts int64, preCheckCnt bool, key []byte, minKey []byte, maxKey []byte, offset int, count int, reverse bool) ([]common.ScorePair, error) {
@@ -996,7 +996,7 @@ func (db *RockDB) ZRemRangeByRank(ts int64, key []byte, start int, stop int) (in
 	var rmCnt int64
 	defer db.wb.Clear()
 
-	rmCnt, err = db.zRemRangeBytes(ts, key, keyInfo, offset, count, db.wb, false)
+	rmCnt, err = db.zRemRangeBytes(ts, key, keyInfo, offset, count, db.wb)
 	if err == nil {
 		err = db.rockEng.Write(db.wb)
 	}

@@ -127,8 +127,8 @@ based on this golang sdk if you want use the redis client in other language.
   - [x] Extand redis commands for advance scan
 * Others (maybe)
   - [ ] Support configure for Column storage friendly for OLAP
-  - [ ] Pebble as the storage engine
-  - [ ] Lua scripts support
+  - [x] Pebble as the storage engine
+  - [x] Support other memory storage engine
   - [ ] Support export data to other systems
 
 

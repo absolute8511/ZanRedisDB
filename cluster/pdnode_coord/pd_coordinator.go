@@ -100,6 +100,7 @@ func NewPDCoordinator(clusterID string, n *cluster.NodeInfo, opts *cluster.Optio
 		if opts.AutoBalanceAndMigrate {
 			coord.autoBalance = 1
 		}
+		coord.dpm.balanceVer = opts.BalanceVer
 		coord.dataDir = opts.DataDir
 		nss := strings.Split(opts.FilterNamespaces, ",")
 		for _, ns := range nss {

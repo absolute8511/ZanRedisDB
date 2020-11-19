@@ -75,24 +75,17 @@ var testSnap = 10
 var testSnapCatchup = 3
 
 func TestMain(m *testing.M) {
-	SetLogger(int32(common.LOG_INFO), nil)
-	rockredis.SetLogger(int32(common.LOG_INFO), nil)
-	slow.SetLogger(int32(common.LOG_INFO), nil)
-	node.SetLogger(int32(common.LOG_INFO), nil)
-	engine.SetLogger(int32(common.LOG_INFO), nil)
-	rafthttp.SetLogger(int32(common.LOG_INFO), nil)
 	node.EnableForTest()
 	node.EnableSlowLimiterTest(true)
 
 	flag.Parse()
 
 	if testing.Verbose() {
-		common.InitDefaultForGLogger("")
-		SetLogger(int32(common.LOG_DETAIL), common.NewGLogger())
-		rockredis.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
-		slow.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
-		node.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
-		engine.SetLogger(int32(common.LOG_DEBUG), common.NewGLogger())
+		SetLogger(int32(common.LOG_DETAIL), common.NewLogger())
+		rockredis.SetLogger(int32(common.LOG_DEBUG), common.NewLogger())
+		slow.SetLogger(int32(common.LOG_DEBUG), common.NewLogger())
+		node.SetLogger(int32(common.LOG_DEBUG), common.NewLogger())
+		engine.SetLogger(int32(common.LOG_DEBUG), common.NewLogger())
 	}
 
 	ret := m.Run()

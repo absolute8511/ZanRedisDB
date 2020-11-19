@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/xiang90/probing"
-	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/pkg/testutil"
 	"github.com/youzan/ZanRedisDB/pkg/types"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
@@ -30,7 +29,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	common.InitDefaultForGLogger("")
 	ret := m.Run()
 	os.Exit(ret)
 }

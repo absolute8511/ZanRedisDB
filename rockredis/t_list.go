@@ -514,9 +514,7 @@ func (db *RockDB) lDelete(ts int64, key []byte, wb engine.WriteBatch) int64 {
 		wb.DeleteRange(startKey, stopKey)
 	} else {
 		opts := engine.IteratorOpts{
-			Range:     engine.Range{Min: startKey, Max: stopKey, Type: common.RangeClose},
-			Reverse:   false,
-			IgnoreDel: true,
+			Range: engine.Range{Min: startKey, Max: stopKey, Type: common.RangeClose},
 		}
 		rit, err := db.NewDBRangeIteratorWithOpts(opts)
 		if err != nil {

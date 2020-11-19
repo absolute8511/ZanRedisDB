@@ -9,7 +9,6 @@ import (
 )
 
 func TestSlowLogLevel(t *testing.T) {
-	SetLogger(common.LOG_INFO, common.NewDefaultLogger("test"))
 	str, logged := LogLargeCollection(collectionLargeLen, NewSlowLogInfo("", "test", ""))
 	t.Log(str)
 	assert.Equal(t, true, logged)
@@ -74,7 +73,6 @@ func TestSlowLogLevel(t *testing.T) {
 }
 
 func TestSlowLogRemote(t *testing.T) {
-	SetLogger(common.LOG_INFO, common.NewDefaultLogger("test"))
 	SetRemoteLogger("127.0.0.1:5140")
 	str, logged := LogSlowDBWrite(dbWriteSlow, NewSlowLogInfo("test", "testkey", "slow db write note"))
 	t.Log(str)

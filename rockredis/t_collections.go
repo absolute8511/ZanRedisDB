@@ -133,6 +133,8 @@ func (db *RockDB) prepareCollKeyForWrite(ts int64, dt byte, key []byte, field []
 	return keyInfo, nil
 }
 
+// TODO: maybe we do not need read the meta if only expired is needed and we use the local_deletion policy,
+// since the ttl is not available in local_deletion policy (can reduce 1 get to db)
 func (db *RockDB) collHeaderMeta(ts int64, dt byte, key []byte, useLock bool) (*headerMetaValue, bool, error) {
 	var sizeKey []byte
 	switch dt {

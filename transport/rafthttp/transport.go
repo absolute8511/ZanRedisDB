@@ -34,7 +34,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewGLogger()))
+var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewLogger()))
 
 func SetLogger(level int32, logger common.Logger) {
 	plog.Logger = logger

@@ -165,6 +165,7 @@ var (
 	ErrNamespaceConfInvalid           = NewCoordErrWithCode("namespace config is invalid", CoordClusterErr, RpcNoErr)
 	ErrNamespaceWaitingSync           = NewCoordErrWithCode("namespace is still waiting sync", CoordTmpErr, RpcNoErr)
 	ErrRegisterServiceUnstable        = NewCoordErr("the register service is unstable", CoordTmpErr)
+	ErrNoCoordRegister                = NewCoordErr("pd coordinator register is not set", CoordLocalErr)
 )
 
 func GenNodeID(n *NodeInfo, extra string) string {
@@ -251,6 +252,7 @@ type Options struct {
 	AutoBalanceAndMigrate bool
 	BalanceStart          int
 	BalanceEnd            int
+	BalanceVer            string
 	DataDir               string
 	FilterNamespaces      string
 }

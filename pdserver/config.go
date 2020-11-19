@@ -23,6 +23,7 @@ type ServerConfig struct {
 	DataDir          string `flag:"data-dir" cfg:"data_dir"`
 	LearnerRole      string `flag:"learner-role" cfg:"learner_role"`
 	FilterNamespaces string `flag:"filter-namespaces" cfg:"filter_namespaces"`
+	BalanceVer       string `flag:"balance-ver" cfg:"balance_ver"`
 }
 
 func NewServerConfig() *ServerConfig {

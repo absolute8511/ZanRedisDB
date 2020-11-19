@@ -38,6 +38,7 @@ var (
 	dataDir          = flagSet.String("data-dir", "", "directory for data")
 	learnerRole      = flagSet.String("learner-role", "", "learner role for pd")
 	filterNamespaces = flagSet.String("filter-namespaces", "", "filter namespaces while in learner role for pd")
+	balanceVer       = flagSet.String("balance-ver", "", "balance strategy version")
 	balanceInterval  = common.StringArray{}
 )
 
@@ -85,7 +86,10 @@ func (p *program) Start() error {
 	opts := pdserver.NewServerConfig()
 	options.Resolve(opts, flagSet, cfg)
 	common.InitDefaultForGLogger(opts.LogDir)
-	daemon := pdserver.NewServer(opts)
+	daemon, err := pdserver.NewServer(opts)
+	if err != nil {
+		return err
+	}
 
 	daemon.Start()
 	p.placedriver = daemon

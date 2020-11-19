@@ -10,19 +10,11 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/rockredis"
-	"github.com/youzan/ZanRedisDB/slow"
-	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 )
 
 func TestMain(m *testing.M) {
-	SetLogger(int32(common.LOG_INFO), nil)
-	rockredis.SetLogger(int32(common.LOG_INFO), nil)
-	slow.SetLogger(int32(common.LOG_INFO), nil)
-	engine.SetLogger(int32(common.LOG_INFO), nil)
-	rafthttp.SetLogger(int32(common.LOG_INFO), nil)
 	flag.Parse()
 	if testing.Verbose() {
-		common.InitDefaultForGLogger("")
 		SetLogLevel(int(common.LOG_DETAIL))
 		rockredis.SetLogLevel(int32(common.LOG_DETAIL))
 		engine.SetLogLevel(int32(common.LOG_DETAIL))

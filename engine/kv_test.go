@@ -14,10 +14,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	SetLogger(int32(common.LOG_INFO), nil)
 	flag.Parse()
 	if testing.Verbose() {
-		common.InitDefaultForGLogger("")
 		SetLogLevel(int32(common.LOG_DETAIL))
 	}
 	ret := m.Run()
