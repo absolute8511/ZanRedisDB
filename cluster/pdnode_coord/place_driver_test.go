@@ -53,7 +53,7 @@ func checkPartitionNodesBalance(t *testing.T, balanceVer string, partitionNodes 
 			cnt++
 			replicaNodesMap[n] = cnt
 		}
-		assert.Equal(t, len(nlist), len(nameMap))
+		assert.Equal(t, len(nlist), len(nameMap), nlist)
 	}
 
 	maxL := 0
@@ -66,10 +66,8 @@ func checkPartitionNodesBalance(t *testing.T, balanceVer string, partitionNodes 
 			minL = cnt
 		}
 	}
-	t.Logf("max vs min: %v, %v", maxL, minL)
-	if balanceVer != "v3" {
-		assert.True(t, maxL-minL <= 1, partitionNodes)
-	}
+	t.Logf("leader max vs min: %v, %v", maxL, minL)
+	assert.True(t, maxL-minL <= 1, partitionNodes)
 
 	maxL = 0
 	minL = math.MaxInt32
@@ -81,10 +79,7 @@ func checkPartitionNodesBalance(t *testing.T, balanceVer string, partitionNodes 
 			minL = cnt
 		}
 	}
-	t.Logf("max vs min: %v, %v", maxL, minL)
-	if balanceVer == "v3" {
-		return
-	}
+	t.Logf("replica max vs min: %v, %v", maxL, minL)
 	if balanceVer == "" {
 		// default balance may not have balanced replicas
 		assert.True(t, maxL-minL <= 3, partitionNodes)
@@ -121,19 +116,21 @@ func testClusterNodesPlacementAcrossDC(t *testing.T, balanceVer string) {
 		n.Tags[cluster.DCInfoTag] = "2"
 		nodes[nid] = n
 	}
+	partitionNum := 8
+	replicator := 3
 	nodeNameList := getNodeNameList(nodes)
 	assert.Equal(t, nodeNameList, getNodeNameList(nodes))
 	t.Log(nodeNameList)
 	placementNodes, err := getRebalancedPartitionsFromNameList("test",
-		8, 3, nodeNameList, balanceVer)
+		partitionNum, replicator, nil, nodeNameList, balanceVer)
 	assert.Nil(t, err)
 	t.Log(placementNodes)
 	t.Log(nodeNameList)
-	assert.Equal(t, 8, len(placementNodes))
+	assert.Equal(t, partitionNum, len(placementNodes))
 	checkPartitionNodesBalance(t, balanceVer, placementNodes)
 
 	placementNodes2, err := getRebalancedPartitionsFromNameList("test",
-		8, 3, nodeNameList, balanceVer)
+		partitionNum, replicator, placementNodes, nodeNameList, balanceVer)
 	assert.Nil(t, err)
 	t.Log(placementNodes2)
 	assert.Equal(t, placementNodes, placementNodes2)
@@ -141,7 +138,7 @@ func testClusterNodesPlacementAcrossDC(t *testing.T, balanceVer string) {
 	checkPartitionNodesBalance(t, balanceVer, placementNodes2)
 
 	for _, v := range placementNodes {
-		assert.Equal(t, 3, len(v))
+		assert.Equal(t, replicator, len(v))
 		dc1Cnt := 0
 		dc2Cnt := 0
 		for _, n := range v {
@@ -152,13 +149,13 @@ func testClusterNodesPlacementAcrossDC(t *testing.T, balanceVer string) {
 				dc2Cnt++
 			}
 		}
-		assert.Equal(t, true, dc1Cnt > 0)
-		assert.Equal(t, true, dc2Cnt > 0)
+		assert.Equal(t, true, dc1Cnt > 0, v)
+		assert.Equal(t, true, dc2Cnt > 0, v)
 		diff := dc2Cnt - dc1Cnt
 		if diff < 0 {
 			diff = -1 * diff
 		}
-		assert.Equal(t, 1, diff)
+		assert.Equal(t, 1, diff, v)
 	}
 	dc1Nodes = SortableStrings{"11", "12", "13", "14", "15", "16"}
 	dc2Nodes = SortableStrings{"21", "22", "23", "24", "25", "26"}
@@ -167,13 +164,13 @@ func testClusterNodesPlacementAcrossDC(t *testing.T, balanceVer string) {
 	nodeNameList = make([]SortableStrings, 0)
 	nodeNameList = append(nodeNameList, dc1Nodes, dc2Nodes, dc3Nodes)
 	placementNodes, err = getRebalancedPartitionsFromNameList("test",
-		8, 3, nodeNameList, balanceVer)
+		partitionNum, replicator, nil, nodeNameList, balanceVer)
 	assert.Nil(t, err)
 	t.Log(placementNodes)
-	assert.Equal(t, 8, len(placementNodes))
+	assert.Equal(t, partitionNum, len(placementNodes))
 	checkPartitionNodesBalance(t, balanceVer, placementNodes)
 	for _, v := range placementNodes {
-		assert.Equal(t, 3, len(v))
+		assert.Equal(t, replicator, len(v))
 		dc1Cnt := 0
 		dc2Cnt := 0
 		dc3Cnt := 0
@@ -200,14 +197,14 @@ func testClusterNodesPlacementAcrossDC(t *testing.T, balanceVer string) {
 	nodeNameList = make([]SortableStrings, 0)
 	nodeNameList = append(nodeNameList, dc1Nodes, dc2Nodes)
 	placementNodes, err = getRebalancedPartitionsFromNameList("test",
-		8, 3, nodeNameList, balanceVer)
+		partitionNum, replicator, nil, nodeNameList, balanceVer)
 	assert.Nil(t, err)
 	t.Log(placementNodes)
-	assert.Equal(t, 8, len(placementNodes))
+	assert.Equal(t, partitionNum, len(placementNodes))
 	checkPartitionNodesBalance(t, balanceVer, placementNodes)
 	dc2NoReplicas := 0
 	for _, v := range placementNodes {
-		assert.Equal(t, 3, len(v))
+		assert.Equal(t, replicator, len(v))
 		dc1Cnt := 0
 		dc2Cnt := 0
 		for _, n := range v {
@@ -235,26 +232,26 @@ func testClusterNodesPlacementAcrossDC(t *testing.T, balanceVer string) {
 	nodeNameList = make([]SortableStrings, 0)
 	nodeNameList = append(nodeNameList, dc1Nodes, dc2Nodes)
 	placementNodes, err = getRebalancedPartitionsFromNameList("test",
-		8, 3, nodeNameList, balanceVer)
+		partitionNum, replicator, nil, nodeNameList, balanceVer)
 	assert.Nil(t, err)
 	t.Log(placementNodes)
-	assert.Equal(t, 8, len(placementNodes))
+	assert.Equal(t, partitionNum, len(placementNodes))
 	checkPartitionNodesBalance(t, balanceVer, placementNodes)
 	for _, v := range placementNodes {
-		assert.Equal(t, 3, len(v))
+		assert.Equal(t, replicator, len(v))
 	}
 
 	dc1Nodes = SortableStrings{"11", "12", "13", "14", "15", "16"}
 	nodeNameList = make([]SortableStrings, 0)
 	nodeNameList = append(nodeNameList, dc1Nodes)
 	placementNodes2, err = getRebalancedPartitionsFromNameList("test",
-		8, 3, nodeNameList, balanceVer)
+		partitionNum, replicator, nil, nodeNameList, balanceVer)
 	t.Log(placementNodes2)
 	assert.Nil(t, err)
-	assert.Equal(t, 8, len(placementNodes2))
+	assert.Equal(t, partitionNum, len(placementNodes2))
 	checkPartitionNodesBalance(t, balanceVer, placementNodes2)
 	for _, v := range placementNodes2 {
-		assert.Equal(t, 3, len(v))
+		assert.Equal(t, replicator, len(v))
 	}
 	assert.Equal(t, placementNodes, placementNodes2)
 	checkPartitionNodesBalance(t, balanceVer, placementNodes2)
@@ -267,11 +264,6 @@ func TestClusterNodesPlacementWithMigrateV1(t *testing.T) {
 func TestClusterNodesPlacementWithMigrateV2(t *testing.T) {
 	testClusterNodesPlacementWithMigrateIn1DC(t, "v2")
 	testClusterNodesPlacementWithMigrateIn2DC(t, "v2")
-}
-
-func TestClusterNodesPlacementWithMigrateV3(t *testing.T) {
-	testClusterNodesPlacementWithMigrateIn1DC(t, "v3")
-	testClusterNodesPlacementWithMigrateIn2DC(t, "v3")
 }
 
 func computeTheMigrateCost(oldParts [][]string, newParts [][]string) (int, int, int) {
@@ -338,6 +330,7 @@ func testClusterNodesPlacementWithMigrate(t *testing.T, balanceVer string,
 	dc1Nodes SortableStrings, dc2Nodes SortableStrings,
 	addedList1 SortableStrings, addedList2 SortableStrings) {
 
+	cluster.SetLogger(2, newTestLogger(t))
 	nodes := make(map[string]cluster.NodeInfo)
 	nodes = genClusterNodes(dc1Nodes, "1", nodes)
 	nodes = genClusterNodes(dc2Nodes, "2", nodes)
@@ -346,15 +339,17 @@ func testClusterNodesPlacementWithMigrate(t *testing.T, balanceVer string,
 	replicator := 3
 	nodeNameList := getNodeNameList(nodes)
 	placementNodes, err := getRebalancedPartitionsFromNameList("test",
-		partitionNum, replicator, nodeNameList, balanceVer)
+		partitionNum, replicator, nil, nodeNameList, balanceVer)
 	t.Log(placementNodes)
 	assert.Nil(t, err)
 	assert.Equal(t, partitionNum, len(placementNodes))
 	checkPartitionNodesBalance(t, balanceVer, placementNodes)
 
 	allNodes := make([]cluster.NodeInfo, 0)
-	for _, n := range nodes {
-		allNodes = append(allNodes, n)
+	for _, nlist := range nodeNameList {
+		for _, n := range nlist {
+			allNodes = append(allNodes, nodes[n])
+		}
 	}
 	// try remove any of node, and check the migrated partitions
 	for removeIndex := 0; removeIndex < len(allNodes); removeIndex++ {
@@ -367,7 +362,7 @@ func testClusterNodesPlacementWithMigrate(t *testing.T, balanceVer string,
 		}
 		nodeNameList := getNodeNameList(newNodes)
 		placementNodes2, err := getRebalancedPartitionsFromNameList("test",
-			partitionNum, replicator, nodeNameList, balanceVer)
+			partitionNum, replicator, placementNodes, nodeNameList, balanceVer)
 		t.Log(placementNodes2)
 		assert.Nil(t, err)
 		assert.Equal(t, partitionNum, len(placementNodes2))
@@ -388,7 +383,7 @@ func testClusterNodesPlacementWithMigrate(t *testing.T, balanceVer string,
 		newNodes[added] = n
 		nodeNameList := getNodeNameList(newNodes)
 		placementNodes2, err := getRebalancedPartitionsFromNameList("test",
-			partitionNum, replicator, nodeNameList, balanceVer)
+			partitionNum, replicator, placementNodes, nodeNameList, balanceVer)
 		t.Log(placementNodes2)
 		assert.Nil(t, err)
 		assert.Equal(t, partitionNum, len(placementNodes2))
@@ -408,7 +403,7 @@ func testClusterNodesPlacementWithMigrate(t *testing.T, balanceVer string,
 		newNodes[added] = n
 		nodeNameList := getNodeNameList(newNodes)
 		placementNodes2, err := getRebalancedPartitionsFromNameList("test",
-			partitionNum, replicator, nodeNameList, balanceVer)
+			partitionNum, replicator, placementNodes, nodeNameList, balanceVer)
 		t.Log(placementNodes2)
 		assert.Nil(t, err)
 		assert.Equal(t, partitionNum, len(placementNodes2))
@@ -419,7 +414,7 @@ func testClusterNodesPlacementWithMigrate(t *testing.T, balanceVer string,
 
 	// try increase replica, and check the migrated partitions
 	placementNodes2, err := getRebalancedPartitionsFromNameList("test",
-		partitionNum, replicator+1, nodeNameList, balanceVer)
+		partitionNum, replicator+1, placementNodes, nodeNameList, balanceVer)
 	t.Log(placementNodes2)
 	assert.Nil(t, err)
 	assert.Equal(t, partitionNum, len(placementNodes2))
@@ -428,11 +423,42 @@ func testClusterNodesPlacementWithMigrate(t *testing.T, balanceVer string,
 	t.Logf("replica increased, leader changed: %v, replica added: %v, deleted: %v", lcost, fadded, deleted)
 	// try decrease replica, and check the migrated partitions
 	placementNodes2, err = getRebalancedPartitionsFromNameList("test",
-		partitionNum, replicator-1, nodeNameList, balanceVer)
+		partitionNum, replicator-1, placementNodes, nodeNameList, balanceVer)
 	t.Log(placementNodes2)
 	assert.Nil(t, err)
 	assert.Equal(t, partitionNum, len(placementNodes2))
 	checkPartitionNodesBalance(t, balanceVer, placementNodes2)
 	lcost, fadded, deleted = computeTheMigrateCost(placementNodes, placementNodes2)
 	t.Logf("replica decreased, leader changed: %v, replica added: %v, deleted: %v", lcost, fadded, deleted)
+}
+
+func TestClusterMigrateWhileBalanceChanged(t *testing.T) {
+	// check change the default balance to v2
+	cluster.SetLogger(2, newTestLogger(t))
+	nodes := make(map[string]cluster.NodeInfo)
+	dc1Nodes := SortableStrings{"110", "120", "130", "140", "150"}
+	nodes = genClusterNodes(dc1Nodes, "1", nodes)
+
+	partitionNum := 8
+	replicator := 3
+	nodeNameList := getNodeNameList(nodes)
+	placementNodes, err := getRebalancedPartitionsFromNameList("test",
+		partitionNum, replicator, nil, nodeNameList, "")
+	t.Log(placementNodes)
+	assert.Nil(t, err)
+	assert.Equal(t, partitionNum, len(placementNodes))
+	checkPartitionNodesBalance(t, "", placementNodes)
+
+	placementNodes2, err := getRebalancedPartitionsFromNameList("test",
+		partitionNum, replicator, placementNodes, nodeNameList, "v2")
+	t.Log(placementNodes2)
+	assert.Nil(t, err)
+	assert.Equal(t, partitionNum, len(placementNodes2))
+	checkPartitionNodesBalance(t, "v2", placementNodes2)
+	lcost, fadded, deleted := computeTheMigrateCost(placementNodes, placementNodes2)
+	t.Logf("leader changed: %v, replica added: %v, deleted: %v", lcost, fadded, deleted)
+	assert.True(t, lcost <= 0, lcost)
+	assert.True(t, fadded <= 1, fadded)
+	assert.True(t, deleted <= 1, deleted)
+	assert.True(t, fadded+deleted > 0, fadded, deleted)
 }

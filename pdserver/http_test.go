@@ -56,6 +56,7 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 	opts.ClusterID = "unit-test"
 	opts.ClusterLeadershipAddresses = testEtcdServers
 	opts.BalanceInterval = []string{"0", "24"}
+	opts.BalanceVer = "v2"
 	opts.LearnerRole = common.LearnerRoleLogSyncer
 	pd := NewServer(opts)
 	pd.Start()
@@ -169,6 +170,7 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 	opts.ClusterID = clusterName
 	opts.ClusterLeadershipAddresses = testEtcdServers
 	opts.BalanceInterval = []string{"0", "24"}
+	opts.BalanceVer = "v2"
 	pd := NewServer(opts)
 	pd.Start()
 
