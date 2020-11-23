@@ -42,5 +42,8 @@ popd
 make clean
 rm -r $BUILD
 
-docker build -t xxx.xxx.com/youzan/zankv:v$version .
-docker push xxx.xxx.com/youzan/zankv:v$version
+IMAGE_URL="image.example.com"
+if [ "$os" == "linux" ]; then
+  docker build -t $IMAGE_URL/youzan/zankv:v$version .
+  docker push $IMAGE_URL/youzan/zankv:v$version
+fi

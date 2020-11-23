@@ -1075,7 +1075,10 @@ func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 	ensureNamespace(t, pduri, ns, partNum, 3)
 	defer ensureDeleteNamespace(t, pduri, ns)
 
-	nodeWrapper, nsNode := waitForLeader(t, ns, 0)
+	allNodes := []dataNodeWrapper{}
+	allNodes = append(allNodes, gkvList...)
+	allNodes = append(allNodes, newNodes...)
+	nodeWrapper, nsNode := waitForLeaderFromNodes(t, ns, 0, allNodes)
 	followerWrap, _ := getFollowerNode(t, ns, 0)
 	follower := followerWrap.s
 	leader := nodeWrapper.s
@@ -1108,11 +1111,15 @@ func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 	waitBalancedLeader(t, ns, 0)
 	newNsInfo := getNsInfo(t, ns, 0)
 	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
-	nodeWrapper, _ = waitForLeader(t, ns, 0)
+	nodeWrapper, _ = waitForLeaderFromNodes(t, ns, 0, allNodes)
 	newLeader := nodeWrapper.s
 	assert.NotNil(t, newLeader)
-	newLeaderID := newLeader.GetCoord().GetMyID()
-	assert.Equal(t, leaderID, newLeaderID)
+	if balanceVer == "v2" {
+		// v2 balance may change the leader after node restarted
+	} else {
+		newLeaderID := newLeader.GetCoord().GetMyID()
+		assert.Equal(t, leaderID, newLeaderID)
+	}
 }
 
 func TestMarkAsRemovingWhileOthersNotSynced(t *testing.T) {
@@ -1247,11 +1254,16 @@ func TestRestartCluster(t *testing.T) {
 
 	waitEnoughReplica(t, ns, 0)
 	waitForAllFullReady(t, ns, 0)
-	waitBalancedAndExpectedLeader(t, ns, 0, leader.GetCoord().GetMyID())
+	waitBalancedAndJoined(t, ns, 0, leader.GetCoord().GetMyID())
 
 	newNs := getNsInfo(t, ns, 0)
 	test.Equal(t, oldNs.GetISR(), newNs.GetISR())
-	test.Equal(t, oldNs.GetRealLeader(), newNs.GetRealLeader())
+	if balanceVer == "v2" {
+		// it may happend the leader changed after restart all
+		assert.True(t, newNs.GetRealLeader() != "", newNs.GetRealLeader())
+	} else {
+		test.Equal(t, oldNs.GetRealLeader(), newNs.GetRealLeader())
+	}
 }
 
 func TestClusterBalanceToNewNode(t *testing.T) {
@@ -1443,7 +1455,18 @@ func TestClusterBalanceToNewNode(t *testing.T) {
 		sort.Sort(sort.StringSlice(oldISR))
 		newISR := newNs.GetISR()
 		sort.Sort(sort.StringSlice(newISR))
-		assert.Equal(t, oldISR, newISR)
+		if balanceVer == "v2" {
+			// to reduce data migrate in v2, it may happend the old isr is not the same
+			// so we only check if any old not removed
+			for _, nn := range newDataNodes {
+				nid := nn.s.GetCoord().GetMyID()
+				for _, n := range newISR {
+					assert.NotEqual(t, n, nid)
+				}
+			}
+		} else {
+			assert.Equal(t, oldISR, newISR)
+		}
 	}
 
 	for i := 0; i < partNum; i++ {

@@ -31,6 +31,7 @@ const (
 	testEngineType            = "pebble"
 )
 
+var balanceVer = "v2"
 var testEtcdServers = "http://127.0.0.1:2379"
 var testOnce sync.Once
 var gpdServer *Server
@@ -56,7 +57,7 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 	opts.ClusterID = "unit-test"
 	opts.ClusterLeadershipAddresses = testEtcdServers
 	opts.BalanceInterval = []string{"0", "24"}
-	opts.BalanceVer = "v2"
+	opts.BalanceVer = balanceVer
 	opts.LearnerRole = common.LearnerRoleLogSyncer
 	pd, err := NewServer(opts)
 	assert.Nil(t, err)
@@ -171,7 +172,7 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 	opts.ClusterID = clusterName
 	opts.ClusterLeadershipAddresses = testEtcdServers
 	opts.BalanceInterval = []string{"0", "24"}
-	opts.BalanceVer = "v2"
+	opts.BalanceVer = balanceVer
 	pd, err := NewServer(opts)
 	assert.Nil(t, err)
 	pd.Start()
