@@ -109,18 +109,19 @@ func exchangeNodeValue(c *EtcdClient, nodePath string, initValue string,
 type EtcdRegister struct {
 	nsMutex sync.Mutex
 
-	client               *EtcdClient
-	clusterID            string
-	namespaceRoot        string
-	clusterPath          string
-	pdNodeRootPath       string
-	allNamespaceInfos    map[string]map[int]PartitionMetaInfo
-	nsEpoch              EpochType
-	ifNamespaceChanged   int32
-	watchNamespaceStopCh chan struct{}
-	nsChangedChan        chan struct{}
-	triggerScanCh        chan struct{}
-	wg                   sync.WaitGroup
+	client                *EtcdClient
+	clusterID             string
+	namespaceRoot         string
+	clusterPath           string
+	pdNodeRootPath        string
+	allNamespaceInfos     map[string]map[int]PartitionMetaInfo
+	nsEpoch               EpochType
+	ifNamespaceChanged    int32
+	watchNamespaceStopCh  chan struct{}
+	nsChangedChan         chan struct{}
+	triggerScanCh         chan struct{}
+	wg                    sync.WaitGroup
+	watchedNsClusterIndex uint64
 }
 
 func NewEtcdRegister(host string) (*EtcdRegister, error) {
@@ -240,6 +241,7 @@ func (etcdReg *EtcdRegister) refreshNamespaces(stopC <-chan struct{}) {
 		case <-etcdReg.triggerScanCh:
 			if atomic.LoadInt32(&etcdReg.ifNamespaceChanged) == 1 {
 				etcdReg.scanNamespaces()
+				time.Sleep(time.Millisecond * 100)
 			}
 		case <-ticker.C:
 			if atomic.LoadInt32(&etcdReg.ifNamespaceChanged) == 1 {
@@ -259,14 +261,14 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 		}
 	}()
 	for {
-		_, err := watcher.Next(ctx)
+		rsp, err := watcher.Next(ctx)
 		if err != nil {
 			if err == context.Canceled {
 				coordLog.Infof("watch key[%s] canceled.", etcdReg.namespaceRoot)
 				return
 			}
 			atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
-			coordLog.Errorf("watcher key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
+			coordLog.Warningf("watcher key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
 			if IsEtcdWatchExpired(err) {
 				rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, false, true)
 				if err != nil {
@@ -274,15 +276,18 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 					time.Sleep(time.Second)
 					continue
 				}
-				coordLog.Errorf("watch expired key[%s] : %v", etcdReg.namespaceRoot, rsp)
+				coordLog.Infof("watch expired, rewatch namespace change at cluster index %v", rsp.Index)
+				atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
 				watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index+1, true)
 				// watch expired should be treated as changed of node
 			} else {
 				time.Sleep(5 * time.Second)
 				continue
 			}
+		} else {
+			atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
+			coordLog.Infof("namespace changed %v, cluster index %v", rsp, rsp.Index)
 		}
-		coordLog.Debugf("namespace changed.")
 		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		select {
 		case etcdReg.triggerScanCh <- struct{}{}:
@@ -301,7 +306,7 @@ func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaI
 
 	// since the scan is triggered by watch, we need get newest from quorum
 	// to avoid get the old data from follower and no any more update event on leader.
-	rsp, err := etcdReg.client.GetNewest(etcdReg.namespaceRoot, true, true)
+	rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, false, true)
 	if err != nil {
 		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		if client.IsKeyNotFound(err) {
@@ -318,12 +323,18 @@ func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaI
 	metaMap := make(map[string]NamespaceMetaInfo)
 	replicasMap := make(map[string]map[string]PartitionReplicaInfo)
 	leaderMap := make(map[string]map[string]RealLeader)
-	maxEpoch := etcdReg.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap, leaderMap)
+	err = etcdReg.processNamespaceNode(rsp.Node.Nodes, metaMap, replicasMap, leaderMap)
+	if err != nil {
+		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+		etcdReg.nsMutex.Lock()
+		nsInfos := etcdReg.allNamespaceInfos
+		nsEpoch := etcdReg.nsEpoch
+		etcdReg.nsMutex.Unlock()
+		coordLog.Infof("refreshing namespaces failed: %v, use old info instead", err)
+		return nsInfos, nsEpoch, err
+	}
 
 	nsInfos := make(map[string]map[int]PartitionMetaInfo)
-	if EpochType(rsp.Node.ModifiedIndex) > maxEpoch {
-		maxEpoch = EpochType(rsp.Node.ModifiedIndex)
-	}
 	for k, v := range replicasMap {
 		meta, ok := metaMap[k]
 		if !ok {
@@ -356,11 +367,22 @@ func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaI
 	}
 
 	etcdReg.nsMutex.Lock()
-	etcdReg.allNamespaceInfos = nsInfos
-	if maxEpoch != etcdReg.nsEpoch {
-		coordLog.Infof("ns epoch changed from %v to : %v ", etcdReg.nsEpoch, maxEpoch)
+	// here we must use the cluster index for the whole, since the delete for the node may decrease the modified index for the whole tree
+	maxEpoch := EpochType(rsp.Index)
+	if maxEpoch > etcdReg.nsEpoch {
+		etcdReg.allNamespaceInfos = nsInfos
+		coordLog.Infof("ns epoch changed from %v to : %v , watched: %v", etcdReg.nsEpoch, maxEpoch, atomic.LoadUint64(&etcdReg.watchedNsClusterIndex))
+		etcdReg.nsEpoch = maxEpoch
+	} else {
+		coordLog.Infof("ns epoch changed %v not newer than current: %v , watched: %v", maxEpoch, etcdReg.nsEpoch, atomic.LoadUint64(&etcdReg.watchedNsClusterIndex))
+		nsInfos = etcdReg.allNamespaceInfos
+		maxEpoch = etcdReg.nsEpoch
 	}
-	etcdReg.nsEpoch = maxEpoch
+	if rsp.Index < atomic.LoadUint64(&etcdReg.watchedNsClusterIndex) {
+		// need scan next time since the cluster index is older than the watched newest
+		// note it may happen the reponse index larger than watched, because other non-namespace root changes may increase the cluster index
+		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+	}
 	etcdReg.nsMutex.Unlock()
 
 	return nsInfos, maxEpoch, nil
@@ -369,19 +391,14 @@ func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaI
 func (etcdReg *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 	metaMap map[string]NamespaceMetaInfo,
 	replicasMap map[string]map[string]PartitionReplicaInfo,
-	leaderMap map[string]map[string]RealLeader) EpochType {
-	maxEpoch := EpochType(0)
+	leaderMap map[string]map[string]RealLeader) error {
 	for _, node := range nodes {
 		if node.Nodes != nil {
-			newEpoch := etcdReg.processNamespaceNode(node.Nodes, metaMap, replicasMap, leaderMap)
-			if newEpoch > maxEpoch {
-				maxEpoch = newEpoch
+			err := etcdReg.processNamespaceNode(node.Nodes, metaMap, replicasMap, leaderMap)
+			if err != nil {
+				return err
 			}
 		}
-		if EpochType(node.ModifiedIndex) > maxEpoch {
-			maxEpoch = EpochType(node.ModifiedIndex)
-		}
-
 		if node.Dir {
 			continue
 		}
@@ -444,7 +461,7 @@ func (etcdReg *EtcdRegister) processNamespaceNode(nodes client.Nodes,
 			}
 		}
 	}
-	return maxEpoch
+	return nil
 }
 
 func (etcdReg *EtcdRegister) GetNamespacePartInfo(ns string, partition int) (*PartitionMetaInfo, error) {
