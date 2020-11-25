@@ -13,6 +13,7 @@ import (
 	"github.com/siddontang/goredis"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/internal/test"
 	zanredisdb "github.com/youzan/go-zanredisdb"
 
@@ -24,6 +25,7 @@ import (
 func TestMain(m *testing.M) {
 	pdnode_coord.ChangeIntervalForTest()
 	datanode_coord.ChangeIntervalForTest()
+	cluster.SetLogLevel(int(common.LOG_DEBUG))
 
 	ret := m.Run()
 
@@ -252,7 +254,7 @@ func waitBalancedAndExpectedLeader(t *testing.T, ns string, part int, expected s
 func waitBalancedAndJoined(t *testing.T, ns string, part int, expected string) {
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Minute*2 {
+		if time.Since(start) > time.Minute {
 			t.Errorf("timeout while waiting expected node become isr")
 			break
 		}
@@ -424,21 +426,30 @@ func TestLeaderLost(t *testing.T) {
 		assert.False(t, nsNode.Node.IsLead())
 	}
 
-	waitBalancedAndExpectedLeader(t, ns, 0, leaderID)
-
-	// should keep leader
-	nsNode = leader.GetNamespaceFromFullName(ns + "-0")
-
-	assert.NotNil(t, nsNode)
-	assert.True(t, nsNode.Node.IsLead())
-	assert.NotEqual(t, oldRaftReplicaID, nsNode.Node.GetLocalMemberInfo().ID)
+	if balanceVer == "v2" {
+		time.Sleep(time.Second * 10)
+		waitBalancedLeader(t, ns, 0)
+		nodeWrapper, _ := waitForLeader(t, ns, 0)
+		nleader := nodeWrapper.s
+		assert.NotNil(t, nleader)
+		if nleader.GetCoord().GetMyID() == leaderID {
+			nsNode := nleader.GetNamespaceFromFullName(ns + "-0")
+			assert.NotNil(t, nsNode)
+			assert.NotEqual(t, oldRaftReplicaID, nsNode.Node.GetLocalMemberInfo().ID)
+		}
+	} else {
+		waitBalancedAndExpectedLeader(t, ns, 0, leaderID)
+		// should keep leader
+		nsNode = leader.GetNamespaceFromFullName(ns + "-0")
+		assert.NotNil(t, nsNode)
+		assert.True(t, nsNode.Node.IsLead())
+		assert.NotEqual(t, oldRaftReplicaID, nsNode.Node.GetLocalMemberInfo().ID)
+	}
 }
 
 func TestFollowerLost(t *testing.T) {
 	// test follower lost should keep old leader
-
 	ensureClusterReady(t, 4)
-
 	time.Sleep(time.Second)
 	ns := "test_follower_lost"
 	partNum := 1
@@ -460,6 +471,7 @@ func TestFollowerLost(t *testing.T) {
 	follower := followerWrap.s
 	oldFollowerReplicaID := followerNode.GetRaftID()
 	followerID := follower.GetCoord().GetMyID()
+	t.Logf("stopping %v, old replica id: %v", followerID, oldFollowerReplicaID)
 	follower.Stop()
 
 	// should keep leader
@@ -481,12 +493,25 @@ func TestFollowerLost(t *testing.T) {
 	// restart old follower and wait balance
 	// the follower should be balanced to join with different replica id
 	time.Sleep(time.Second * 5)
+	allInfo, _, err := gpdServer.pdCoord.GetAllNamespaces()
+	assert.Nil(t, err)
+	t.Logf("all namespace: %v", allInfo)
 	follower.Start()
 
-	waitBalancedAndJoined(t, ns, 0, followerID)
+	time.Sleep(time.Second * 5)
+	waitForAllFullReady(t, ns, 0)
 
+	if balanceVer == "v2" {
+		// it may not move back to the origin node for v2 balance
+		time.Sleep(time.Second * 10)
+	} else {
+		waitBalancedAndJoined(t, ns, 0, followerID)
+	}
 	// should have different replica id
 	followerNode = follower.GetNamespaceFromFullName(ns + "-0")
+	if balanceVer == "v2" && followerNode == nil {
+		return
+	}
 	assert.NotEqual(t, followerNode.GetRaftID(), oldFollowerReplicaID)
 }
 

@@ -149,6 +149,11 @@ func (etcdReg *EtcdRegister) InitClusterID(id string) {
 
 func (etcdReg *EtcdRegister) Start() {
 	etcdReg.watchNamespaceStopCh = make(chan struct{})
+	etcdReg.nsMutex.Lock()
+	etcdReg.ifNamespaceChanged = 1
+	etcdReg.allNamespaceInfos = make(map[string]map[int]PartitionMetaInfo)
+	etcdReg.nsEpoch = 0
+	etcdReg.nsMutex.Unlock()
 	etcdReg.wg.Add(2)
 	go func() {
 		defer etcdReg.wg.Done()
