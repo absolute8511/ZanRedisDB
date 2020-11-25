@@ -40,9 +40,10 @@ var (
 var perfLevel int32
 
 type NamespaceNode struct {
-	Node  *KVNode
-	conf  *NamespaceConfig
-	ready int32
+	Node      *KVNode
+	conf      *NamespaceConfig
+	ready     int32
+	magicCode int64
 }
 
 func (nn *NamespaceNode) IsReady() bool {
@@ -61,7 +62,22 @@ func (nn *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 	nn.Node.SetDynamicInfo(dync)
 }
 
+func (nn *NamespaceNode) GetMagicCode() int64 {
+	return atomic.LoadInt64(&nn.magicCode)
+}
+
 func (nn *NamespaceNode) SetMagicCode(magic int64) error {
+	// check if already magic code is different, if conflicted should report error
+	if nn.GetMagicCode() != 0 && nn.GetMagicCode() != magic {
+		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.GetMagicCode())
+	}
+	if nn.GetMagicCode() == magic {
+		return nil
+	}
+	changed := atomic.CompareAndSwapInt64(&nn.magicCode, 0, magic)
+	if !changed {
+		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.GetMagicCode())
+	}
 	return nil
 }
 
@@ -279,6 +295,11 @@ func (nsm *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 		common.FILE_PERM)
 }
 
+func (nsm *NamespaceMgr) CheckLocalNamespaces() []*NamespaceNode {
+	// scan local namespace and magic number
+	return nil
+}
+
 func (nsm *NamespaceMgr) Start() {
 	nsm.stopC = make(chan struct{})
 	atomic.StoreInt32(&nsm.stopping, 0)
@@ -316,6 +337,18 @@ func (nsm *NamespaceMgr) Stop() {
 		n.Close()
 	}
 	nsm.wg.Wait()
+	start := time.Now()
+	for {
+		// wait stopped callback done
+		time.Sleep(time.Second)
+		if len(nsm.GetNamespaces()) == 0 {
+			break
+		}
+		if time.Since(start) > time.Second*10 {
+			nodeLog.Warningf("some namespace not stopped while waiting timeout")
+			break
+		}
+	}
 	if nsm.machineConf.RocksDBSharedConfig != nil {
 		nsm.machineConf.RocksDBSharedConfig.Destroy()
 	}
@@ -511,7 +544,7 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 	raftConf.SetEng(rs)
 
 	kv, err := NewKVNode(kvOpts, raftConf, nsm.raftTransport,
-		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),
+		join, nsm.onNamespaceStopped(raftConf.GroupID, conf.Name),
 		nsm.clusterInfo, nsm.newLeaderChan)
 	if err != nil {
 		return nil, err
@@ -795,44 +828,75 @@ func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) error {
 	return nil
 }
 
-func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
+// this is used to clean some shared namespace data bewteen all partitions, only remove them until
+// all the partitions are removed and the whole namespace is deleted from cluster
+func (nsm *NamespaceMgr) CleanSharedNsFiles(baseNS string) error {
+	nsm.mutex.Lock()
+	defer nsm.mutex.Unlock()
+	// check if all parts of this namespace is deleted, if so we should remove meta
+	for fullName, _ := range nsm.kvNodes {
+		n, _ := common.GetNamespaceAndPartition(fullName)
+		if n == baseNS {
+			err := fmt.Errorf("some node is still running while clean namespace files: %s, %s", baseNS, fullName)
+			nodeLog.Info(err.Error())
+			return err
+		}
+	}
+	nodeLog.Infof("all partitions of namespace %v stopped, removing shared data", baseNS)
+	meta, ok := nsm.nsMetas[baseNS]
+	if ok && meta.walEng != nil {
+		meta.walEng.CloseAll()
+	}
+	delete(nsm.nsMetas, baseNS)
+	if nsm.machineConf.UseRocksWAL && baseNS != "" {
+		// clean the rock wal files
+		rsDir := path.Join(nsm.machineConf.DataRootDir, "rswal", baseNS)
+		ts := strconv.Itoa(int(time.Now().UnixNano()))
+		err := os.Rename(rsDir,
+			rsDir+"-deleted-"+ts)
+		if err != nil {
+			nodeLog.Warningf("remove shared data failed: %s", err.Error())
+			return err
+		}
+		nodeLog.Infof("remove shared wal data for namespace: %s", baseNS)
+	}
+	return nil
+}
+
+func (nsm *NamespaceMgr) onNamespaceStopped(gid uint64, ns string) func() {
 	return func() {
 		nsm.mutex.Lock()
+		defer nsm.mutex.Unlock()
 		_, ok := nsm.kvNodes[ns]
-		if ok {
-			nodeLog.Infof("namespace deleted: %v-%v", ns, gid)
-			nsm.kvNodes[ns] = nil
-			delete(nsm.kvNodes, ns)
-			delete(nsm.groups, gid)
-			baseNS, _ := common.GetNamespaceAndPartition(ns)
-			meta, ok := nsm.nsMetas[baseNS]
-			if ok {
-				found := false
-				// check if all parts of this namespace is deleted, if so we should remove meta
-				for fullName, _ := range nsm.kvNodes {
-					n, _ := common.GetNamespaceAndPartition(fullName)
-					if n == baseNS {
-						found = true
-						break
-					}
-				}
-				if !found {
-					nodeLog.Infof("all partitions of namespace %v deleted, removing meta", baseNS)
-					if meta.walEng != nil {
-						meta.walEng.CloseAll()
-					}
-					if nsm.machineConf.UseRocksWAL && baseNS != "" {
-						// clean the rock wal files
-						rsDir := path.Join(nsm.machineConf.DataRootDir, "rswal", baseNS)
-						ts := strconv.Itoa(int(time.Now().UnixNano()))
-						os.Rename(rsDir,
-							rsDir+"-deleted-"+ts)
-					}
-					delete(nsm.nsMetas, baseNS)
-				}
+		if !ok {
+			return
+		}
+		// note we should not delete any data here, since it is not known we just stopped or it is destroyed
+		nodeLog.Infof("namespace stopped: %v-%v", ns, gid)
+		nsm.kvNodes[ns] = nil
+		delete(nsm.kvNodes, ns)
+		delete(nsm.groups, gid)
+		baseNS, _ := common.GetNamespaceAndPartition(ns)
+		meta, ok := nsm.nsMetas[baseNS]
+		if !ok {
+			return
+		}
+		found := false
+		// check if all parts of this namespace is deleted, if so we should remove meta
+		for fullName, _ := range nsm.kvNodes {
+			n, _ := common.GetNamespaceAndPartition(fullName)
+			if n == baseNS {
+				found = true
+				break
 			}
 		}
-		nsm.mutex.Unlock()
+		if !found {
+			nodeLog.Infof("all partitions of namespace %v stopped, removing meta", baseNS)
+			if meta.walEng != nil {
+				meta.walEng.CloseAll()
+			}
+			delete(nsm.nsMetas, baseNS)
+		}
 	}
 }
 

@@ -192,7 +192,7 @@ type KVNode struct {
 	stopDone           chan struct{}
 	w                  wait.Wait
 	router             *common.CmdRouter
-	deleteCb           func()
+	stopCb             func()
 	clusterWriteStats  metric.WriteStats
 	ns                 string
 	machineConfig      *MachineConfig
@@ -235,7 +235,7 @@ func (si *KVSnapInfo) GetData() ([]byte, error) {
 }
 
 func NewKVNode(kvopts *KVOptions, config *RaftConfig,
-	transport *rafthttp.Transport, join bool, deleteCb func(),
+	transport *rafthttp.Transport, join bool, stopCb func(),
 	clusterInfo common.IClusterInfo, newLeaderChan chan string) (*KVNode, error) {
 	config.WALDir = path.Join(config.DataDir, fmt.Sprintf("wal-%d", config.ID))
 	config.SnapDir = path.Join(config.DataDir, fmt.Sprintf("snap-%d", config.ID))
@@ -255,7 +255,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		sm:                 sm,
 		w:                  w,
 		router:             common.NewCmdRouter(),
-		deleteCb:           deleteCb,
+		stopCb:             stopCb,
 		ns:                 config.GroupName,
 		machineConfig:      config.nodeConfig,
 		expirationPolicy:   kvopts.ExpirationPolicy,
@@ -357,7 +357,7 @@ func (nd *KVNode) Stop() {
 	nd.sm.Close()
 	// deleted cb should be called after stopped, otherwise it
 	// may init the same node after deleted while the node is stopping.
-	go nd.deleteCb()
+	go nd.stopCb()
 	nd.slowLimiter.Stop()
 	nd.rn.Infof("node %v stopped", nd.ns)
 }
