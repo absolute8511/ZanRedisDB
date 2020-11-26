@@ -4,6 +4,7 @@ import (
 	"fmt"
 	io "io"
 	"io/ioutil"
+	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -36,7 +37,7 @@ func (fr *fakeRaft) ReportUnreachable(id uint64, group raftpb.Group) {
 func (fr *fakeRaft) ReportSnapshot(id uint64, group raftpb.Group, status raft.SnapshotStatus) {
 }
 
-func TestInitNodeWithSharedRocksdb(t *testing.T) {
+func getTestNamespaceMgr(t *testing.T) (*NamespaceMgr, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +61,12 @@ func TestInitNodeWithSharedRocksdb(t *testing.T) {
 		ErrorC:      nil,
 	}
 	nsMgr := NewNamespaceMgr(raftTransport, mconf)
+	return nsMgr, tmpDir
+}
+
+func TestInitNodeWithSharedRocksdb(t *testing.T) {
+	nsMgr, tmpDir := getTestNamespaceMgr(t)
+	defer os.RemoveAll(tmpDir)
 	nsMgr.Start()
 	defer nsMgr.Stop()
 
@@ -110,6 +117,75 @@ func TestInitNodeWithSharedRocksdb(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, n0Rock.Eng(), n1Rock.Eng())
 	assert.Equal(t, n0Rock.Eng(), n2Rock.Eng())
+}
+
+func TestLoadLocalMagicList(t *testing.T) {
+	nsMgr, tmpDir := getTestNamespaceMgr(t)
+	defer os.RemoveAll(tmpDir)
+	nsMgr.Start()
+	defer nsMgr.Stop()
+
+	var replica ReplicaInfo
+	replica.NodeID = 1
+	replica.ReplicaID = 1
+	replica.RaftAddr = "127.0.0.1:1111"
+
+	nsConf := NewNSConfig()
+	nsConf.Name = "default-0"
+	nsConf.BaseName = "default"
+	nsConf.EngType = rockredis.EngType
+	nsConf.PartitionNum = 3
+	nsConf.Replicator = 1
+	nsConf.RaftGroupConf.GroupID = 1000
+	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+
+	n0, err := nsMgr.InitNamespaceNode(nsConf, 1, false)
+	assert.Nil(t, err)
+	magicCode := 12345
+	err = n0.SetMagicCode(int64(magicCode))
+	assert.Nil(t, err)
+	// set same should be ok
+	err = n0.SetMagicCode(int64(magicCode))
+	assert.Nil(t, err)
+	// set different should be error
+	err = n0.SetMagicCode(int64(magicCode + 1))
+	assert.NotNil(t, err)
+
+	nsConf1 := NewNSConfig()
+	nsConf1.Name = "default-1"
+	nsConf1.BaseName = "default"
+	nsConf1.EngType = rockredis.EngType
+	nsConf1.PartitionNum = 3
+	nsConf1.Replicator = 1
+	nsConf1.RaftGroupConf.GroupID = 1001
+	nsConf1.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	n1, err := nsMgr.InitNamespaceNode(nsConf1, 1, false)
+	assert.Nil(t, err)
+	err = n1.SetMagicCode(int64(magicCode))
+	assert.Nil(t, err)
+
+	nsConf2 := NewNSConfig()
+	nsConf2.Name = "default-2"
+	nsConf2.BaseName = "default"
+	nsConf2.EngType = rockredis.EngType
+	nsConf2.PartitionNum = 3
+	nsConf2.Replicator = 1
+	nsConf2.RaftGroupConf.GroupID = 1002
+	nsConf2.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+	n2, err := nsMgr.InitNamespaceNode(nsConf2, 1, false)
+	assert.Nil(t, err)
+	err = n2.SetMagicCode(int64(magicCode))
+	assert.Nil(t, err)
+
+	magicList := nsMgr.CheckLocalNamespaces()
+	assert.Equal(t, 3, len(magicList))
+	for ns, code := range magicList {
+		baseNs, part := common.GetNamespaceAndPartition(ns)
+		assert.Equal(t, "default", baseNs)
+		assert.True(t, part < 3, part)
+		assert.True(t, part >= 0, part)
+		assert.Equal(t, int64(magicCode), code)
+	}
 }
 
 type testMapGet struct {

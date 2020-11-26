@@ -204,6 +204,30 @@ func (dc *DataCoordinator) Start() error {
 	}
 	if dc.localNSMgr != nil {
 		dc.localNSMgr.Start()
+		localNsMagics := dc.localNSMgr.CheckLocalNamespaces()
+		checkFailed := false
+		for ns, localMagic := range localNsMagics {
+			namespace, _ := common.GetNamespaceAndPartition(ns)
+			if namespace == "" {
+				continue
+			}
+			// check if the magic code mismatch or if already removed by cluster
+			nsMeta, err := dc.register.GetNamespaceMetaInfo(namespace)
+			if err != nil && err != cluster.ErrKeyNotFound {
+				cluster.CoordLog().Warningf("failed to get namespace meta %s from register : %v", ns, err.Error())
+				return err
+			}
+			if err == cluster.ErrKeyNotFound {
+				dc.localNSMgr.CleanSharedNsFiles(namespace)
+			} else if nsMeta.MagicCode > 0 && localMagic > 0 && localMagic != nsMeta.MagicCode {
+				cluster.CoordLog().Errorf("clean left namespace %v data, since magic code not match : %v, %v", ns, localMagic, nsMeta.MagicCode)
+				// we can not clean shared namespace data here, since it may only parts of namespace mismatched
+				checkFailed = true
+			}
+		}
+		if checkFailed {
+			return errors.New("start failed since local data check failed")
+		}
 	}
 	dc.wg.Add(1)
 	go dc.watchPD()
@@ -265,18 +289,6 @@ func (dc *DataCoordinator) watchPD() {
 	}
 }
 
-func (dc *DataCoordinator) checkLocalNamespaceMagicCode(nsInfo *cluster.PartitionMetaInfo, tryFix bool) error {
-	if nsInfo.MagicCode <= 0 {
-		return nil
-	}
-	err := dc.localNSMgr.CheckMagicCode(nsInfo.GetDesp(), nsInfo.MagicCode, tryFix)
-	if err != nil {
-		cluster.CoordLog().Infof("namespace %v check magic code error: %v", nsInfo.GetDesp(), err)
-		return err
-	}
-	return nil
-}
-
 func (dc *DataCoordinator) loadLocalNamespaceData() error {
 	if dc.localNSMgr == nil {
 		cluster.CoordLog().Infof("no namespace manager")
@@ -320,13 +332,8 @@ func (dc *DataCoordinator) loadLocalNamespaceData() error {
 				cluster.CoordLog().Debugf("%v namespace %v already loaded", dc.GetMyID(), nsInfo.GetDesp())
 				continue
 			}
-			cluster.CoordLog().Infof("loading namespace: %v", nsInfo.GetDesp())
+			cluster.CoordLog().Infof("mynode %v loading namespace: %v, %v", dc.GetMyID(), nsInfo.GetDesp(), nsInfo)
 			if namespaceName == "" {
-				continue
-			}
-			checkErr := dc.checkLocalNamespaceMagicCode(&nsInfo, true)
-			if checkErr != nil {
-				cluster.CoordLog().Errorf("failed to check namespace :%v, err:%v", nsInfo.GetDesp(), checkErr)
 				continue
 			}
 
@@ -336,10 +343,6 @@ func (dc *DataCoordinator) loadLocalNamespaceData() error {
 				continue
 			}
 
-			dyConf := &node.NamespaceDynamicConf{
-				nsInfo.Replica,
-			}
-			localNamespace.SetDynamicInfo(*dyConf)
 			localErr := dc.checkAndFixLocalNamespaceData(&nsInfo, localNamespace)
 			if localErr != nil {
 				cluster.CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)
@@ -717,6 +720,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 					_, err = dc.register.GetNamespaceMetaInfo(namespace)
 					if err == cluster.ErrKeyNotFound {
 						dc.forceRemoveLocalNamespace(localNamespace)
+						dc.localNSMgr.CleanSharedNsFiles(namespace)
 					}
 				} else {
 					dc.tryCheckNamespacesIn(time.Second * 5)

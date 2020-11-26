@@ -91,11 +91,6 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 			if namespaceName == "" {
 				continue
 			}
-			checkErr := dc.checkLocalNamespaceMagicCode(&nsInfo, true)
-			if checkErr != nil {
-				cluster.CoordLog().Errorf("failed to check namespace :%v, err:%v", nsInfo.GetDesp(), checkErr)
-				continue
-			}
 
 			localNamespace, coordErr := dc.updateLocalNamespace(&nsInfo, false)
 			if coordErr != nil {
@@ -103,10 +98,6 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 				continue
 			}
 
-			dyConf := &node.NamespaceDynamicConf{
-				nsInfo.Replica,
-			}
-			localNamespace.SetDynamicInfo(*dyConf)
 			localErr := dc.checkAndFixLocalNamespaceData(&nsInfo, localNamespace)
 			if localErr != nil {
 				cluster.CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)

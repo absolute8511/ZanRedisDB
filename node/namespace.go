@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,9 +41,11 @@ var (
 var perfLevel int32
 
 type NamespaceNode struct {
-	Node  *KVNode
-	conf  *NamespaceConfig
-	ready int32
+	Node      *KVNode
+	conf      *NamespaceConfig
+	ready     int32
+	magicCode int64
+	nsDataDir string
 }
 
 func (nn *NamespaceNode) IsReady() bool {
@@ -61,8 +64,77 @@ func (nn *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 	nn.Node.SetDynamicInfo(dync)
 }
 
-func (nn *NamespaceNode) SetMagicCode(magic int64) error {
+func getMagicCodeFileName(dataPath string, grp string) string {
+	return path.Join(dataPath, "magic_"+grp)
+}
+
+func saveMagicCode(fileName string, magicCode int64) error {
+	var f *os.File
+	var err error
+
+	f, err = os.OpenFile(fileName, os.O_RDWR|os.O_CREATE, common.FILE_PERM)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = fmt.Fprintf(f, "%d\n",
+		magicCode)
+	if err != nil {
+		return err
+	}
+	f.Sync()
 	return nil
+}
+
+func loadMagicCode(fileName string) (int64, error) {
+	var f *os.File
+	var err error
+
+	f, err = os.OpenFile(fileName, os.O_RDONLY, common.FILE_PERM)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+
+	var code int64
+	_, err = fmt.Fscanf(f, "%d\n",
+		&code)
+	if err != nil {
+		return 0, err
+	}
+	return code, nil
+}
+
+func (nn *NamespaceNode) getMagicCode() int64 {
+	return atomic.LoadInt64(&nn.magicCode)
+}
+
+func (nn *NamespaceNode) SetMagicCode(magic int64) error {
+	fileName := getMagicCodeFileName(nn.nsDataDir, nn.conf.Name)
+	if nn.getMagicCode() == 0 {
+		// try read old magic code from file
+		mc, err := loadMagicCode(fileName)
+		if err != nil {
+			return err
+		}
+		atomic.CompareAndSwapInt64(&nn.magicCode, 0, mc)
+	}
+	// check if already magic code is different, if conflicted should report error
+	if nn.getMagicCode() != 0 && nn.getMagicCode() != magic {
+		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.getMagicCode())
+	}
+	if nn.getMagicCode() == magic {
+		return nil
+	}
+	changed := atomic.CompareAndSwapInt64(&nn.magicCode, 0, magic)
+	if !changed {
+		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.getMagicCode())
+	}
+	return saveMagicCode(fileName, magic)
 }
 
 func (nn *NamespaceNode) SetDataFixState(needFix bool) {
@@ -279,6 +351,32 @@ func (nsm *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 		common.FILE_PERM)
 }
 
+func (nsm *NamespaceMgr) CheckLocalNamespaces() map[string]int64 {
+	// scan local namespace and magic number
+	scanDir := nsm.machineConf.DataRootDir
+	// scan all local undeleted ns-part dirs and read the magic code
+	dirList, err := filepath.Glob(path.Join(scanDir, "*-*"))
+	if err != nil {
+		nodeLog.Infof("found local data root %s error: %v", scanDir, err.Error())
+		return nil
+	}
+	magicList := make(map[string]int64)
+	for _, dir := range dirList {
+		nodeLog.Infof("found local dir in data root: %v", dir)
+		grpName := path.Base(dir)
+		ns, _ := common.GetNamespaceAndPartition(grpName)
+		if ns != "" {
+			code, err := loadMagicCode(getMagicCodeFileName(dir, grpName))
+			if err != nil {
+				continue
+			}
+			nodeLog.Infof("add valid namespace magic : %v, %v", grpName, code)
+			magicList[grpName] = code
+		}
+	}
+	return magicList
+}
+
 func (nsm *NamespaceMgr) Start() {
 	nsm.stopC = make(chan struct{})
 	atomic.StoreInt32(&nsm.stopping, 0)
@@ -316,6 +414,18 @@ func (nsm *NamespaceMgr) Stop() {
 		n.Close()
 	}
 	nsm.wg.Wait()
+	start := time.Now()
+	for {
+		// wait stopped callback done
+		time.Sleep(time.Second)
+		if len(nsm.GetNamespaces()) == 0 {
+			break
+		}
+		if time.Since(start) > time.Second*10 {
+			nodeLog.Warningf("some namespace not stopped while waiting timeout")
+			break
+		}
+	}
 	if nsm.machineConf.RocksDBSharedConfig != nil {
 		nsm.machineConf.RocksDBSharedConfig.Destroy()
 	}
@@ -511,15 +621,16 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 	raftConf.SetEng(rs)
 
 	kv, err := NewKVNode(kvOpts, raftConf, nsm.raftTransport,
-		join, nsm.onNamespaceDeleted(raftConf.GroupID, conf.Name),
+		join, nsm.onNamespaceStopped(raftConf.GroupID, conf.Name),
 		nsm.clusterInfo, nsm.newLeaderChan)
 	if err != nil {
 		return nil, err
 	}
 
 	n := &NamespaceNode{
-		Node: kv,
-		conf: conf,
+		Node:      kv,
+		conf:      conf,
+		nsDataDir: kvOpts.DataDir,
 	}
 
 	nsm.kvNodes[conf.Name] = n
@@ -795,44 +906,75 @@ func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) error {
 	return nil
 }
 
-func (nsm *NamespaceMgr) onNamespaceDeleted(gid uint64, ns string) func() {
+// this is used to clean some shared namespace data bewteen all partitions, only remove them until
+// all the partitions are removed and the whole namespace is deleted from cluster
+func (nsm *NamespaceMgr) CleanSharedNsFiles(baseNS string) error {
+	nsm.mutex.Lock()
+	defer nsm.mutex.Unlock()
+	// check if all parts of this namespace is deleted, if so we should remove meta
+	for fullName, _ := range nsm.kvNodes {
+		n, _ := common.GetNamespaceAndPartition(fullName)
+		if n == baseNS {
+			err := fmt.Errorf("some node is still running while clean namespace files: %s, %s", baseNS, fullName)
+			nodeLog.Info(err.Error())
+			return err
+		}
+	}
+	meta, ok := nsm.nsMetas[baseNS]
+	if ok && meta.walEng != nil {
+		nodeLog.Infof("all partitions of namespace %v stopped, removing shared data", baseNS)
+		meta.walEng.CloseAll()
+	}
+	delete(nsm.nsMetas, baseNS)
+	if nsm.machineConf.UseRocksWAL && baseNS != "" {
+		// clean the rock wal files
+		rsDir := path.Join(nsm.machineConf.DataRootDir, "rswal", baseNS)
+		ts := strconv.Itoa(int(time.Now().UnixNano()))
+		err := os.Rename(rsDir,
+			rsDir+"-deleted-"+ts)
+		if err != nil {
+			nodeLog.Warningf("remove shared data failed: %s", err.Error())
+			return err
+		}
+		nodeLog.Infof("remove shared wal data for namespace: %s", baseNS)
+	}
+	return nil
+}
+
+func (nsm *NamespaceMgr) onNamespaceStopped(gid uint64, ns string) func() {
 	return func() {
 		nsm.mutex.Lock()
+		defer nsm.mutex.Unlock()
 		_, ok := nsm.kvNodes[ns]
-		if ok {
-			nodeLog.Infof("namespace deleted: %v-%v", ns, gid)
-			nsm.kvNodes[ns] = nil
-			delete(nsm.kvNodes, ns)
-			delete(nsm.groups, gid)
-			baseNS, _ := common.GetNamespaceAndPartition(ns)
-			meta, ok := nsm.nsMetas[baseNS]
-			if ok {
-				found := false
-				// check if all parts of this namespace is deleted, if so we should remove meta
-				for fullName, _ := range nsm.kvNodes {
-					n, _ := common.GetNamespaceAndPartition(fullName)
-					if n == baseNS {
-						found = true
-						break
-					}
-				}
-				if !found {
-					nodeLog.Infof("all partitions of namespace %v deleted, removing meta", baseNS)
-					if meta.walEng != nil {
-						meta.walEng.CloseAll()
-					}
-					if nsm.machineConf.UseRocksWAL && baseNS != "" {
-						// clean the rock wal files
-						rsDir := path.Join(nsm.machineConf.DataRootDir, "rswal", baseNS)
-						ts := strconv.Itoa(int(time.Now().UnixNano()))
-						os.Rename(rsDir,
-							rsDir+"-deleted-"+ts)
-					}
-					delete(nsm.nsMetas, baseNS)
-				}
+		if !ok {
+			return
+		}
+		// note we should not delete any data here, since it is not known we just stopped or it is destroyed
+		nodeLog.Infof("namespace stopped: %v-%v", ns, gid)
+		nsm.kvNodes[ns] = nil
+		delete(nsm.kvNodes, ns)
+		delete(nsm.groups, gid)
+		baseNS, _ := common.GetNamespaceAndPartition(ns)
+		meta, ok := nsm.nsMetas[baseNS]
+		if !ok {
+			return
+		}
+		found := false
+		// check if all parts of this namespace is deleted, if so we should remove meta
+		for fullName, _ := range nsm.kvNodes {
+			n, _ := common.GetNamespaceAndPartition(fullName)
+			if n == baseNS {
+				found = true
+				break
 			}
 		}
-		nsm.mutex.Unlock()
+		if !found {
+			nodeLog.Infof("all partitions of namespace %v stopped, removing meta", baseNS)
+			if meta.walEng != nil {
+				meta.walEng.CloseAll()
+			}
+			delete(nsm.nsMetas, baseNS)
+		}
 	}
 }
 
@@ -859,15 +1001,6 @@ func (nsm *NamespaceMgr) processRaftTick() {
 			return
 		}
 	}
-}
-
-// TODO:
-func (nsm *NamespaceMgr) SetNamespaceMagicCode(node *NamespaceNode, magic int64) error {
-	return nil
-}
-
-func (nsm *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error {
-	return nil
 }
 
 func (nsm *NamespaceMgr) checkNamespaceRaftLeader() {
