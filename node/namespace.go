@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,7 @@ type NamespaceNode struct {
 	conf      *NamespaceConfig
 	ready     int32
 	magicCode int64
+	nsDataDir string
 }
 
 func (nn *NamespaceNode) IsReady() bool {
@@ -62,23 +64,77 @@ func (nn *NamespaceNode) SetDynamicInfo(dync NamespaceDynamicConf) {
 	nn.Node.SetDynamicInfo(dync)
 }
 
-func (nn *NamespaceNode) GetMagicCode() int64 {
+func getMagicCodeFileName(dataPath string, grp string) string {
+	return path.Join(dataPath, "magic_"+grp)
+}
+
+func saveMagicCode(fileName string, magicCode int64) error {
+	var f *os.File
+	var err error
+
+	f, err = os.OpenFile(fileName, os.O_RDWR|os.O_CREATE, common.FILE_PERM)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = fmt.Fprintf(f, "%d\n",
+		magicCode)
+	if err != nil {
+		return err
+	}
+	f.Sync()
+	return nil
+}
+
+func loadMagicCode(fileName string) (int64, error) {
+	var f *os.File
+	var err error
+
+	f, err = os.OpenFile(fileName, os.O_RDONLY, common.FILE_PERM)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+
+	var code int64
+	_, err = fmt.Fscanf(f, "%d\n",
+		&code)
+	if err != nil {
+		return 0, err
+	}
+	return code, nil
+}
+
+func (nn *NamespaceNode) getMagicCode() int64 {
 	return atomic.LoadInt64(&nn.magicCode)
 }
 
 func (nn *NamespaceNode) SetMagicCode(magic int64) error {
-	// check if already magic code is different, if conflicted should report error
-	if nn.GetMagicCode() != 0 && nn.GetMagicCode() != magic {
-		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.GetMagicCode())
+	fileName := getMagicCodeFileName(nn.nsDataDir, nn.conf.Name)
+	if nn.getMagicCode() == 0 {
+		// try read old magic code from file
+		mc, err := loadMagicCode(fileName)
+		if err != nil {
+			return err
+		}
+		atomic.CompareAndSwapInt64(&nn.magicCode, 0, mc)
 	}
-	if nn.GetMagicCode() == magic {
+	// check if already magic code is different, if conflicted should report error
+	if nn.getMagicCode() != 0 && nn.getMagicCode() != magic {
+		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.getMagicCode())
+	}
+	if nn.getMagicCode() == magic {
 		return nil
 	}
 	changed := atomic.CompareAndSwapInt64(&nn.magicCode, 0, magic)
 	if !changed {
-		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.GetMagicCode())
+		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.getMagicCode())
 	}
-	return nil
+	return saveMagicCode(fileName, magic)
 }
 
 func (nn *NamespaceNode) SetDataFixState(needFix bool) {
@@ -295,9 +351,30 @@ func (nsm *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 		common.FILE_PERM)
 }
 
-func (nsm *NamespaceMgr) CheckLocalNamespaces() []*NamespaceNode {
+func (nsm *NamespaceMgr) CheckLocalNamespaces() map[string]int64 {
 	// scan local namespace and magic number
-	return nil
+	scanDir := nsm.machineConf.DataRootDir
+	// scan all local undeleted ns-part dirs and read the magic code
+	dirList, err := filepath.Glob(path.Join(scanDir, "*-*"))
+	if err != nil {
+		nodeLog.Infof("found local data root %s error: %v", scanDir, err.Error())
+		return nil
+	}
+	magicList := make(map[string]int64)
+	for _, dir := range dirList {
+		nodeLog.Infof("found local dir in data root: %v", dir)
+		grpName := path.Base(dir)
+		ns, _ := common.GetNamespaceAndPartition(grpName)
+		if ns != "" {
+			code, err := loadMagicCode(getMagicCodeFileName(dir, grpName))
+			if err != nil {
+				continue
+			}
+			nodeLog.Infof("add valid namespace magic : %v, %v", grpName, code)
+			magicList[grpName] = code
+		}
+	}
+	return magicList
 }
 
 func (nsm *NamespaceMgr) Start() {
@@ -551,8 +628,9 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 	}
 
 	n := &NamespaceNode{
-		Node: kv,
-		conf: conf,
+		Node:      kv,
+		conf:      conf,
+		nsDataDir: kvOpts.DataDir,
 	}
 
 	nsm.kvNodes[conf.Name] = n
@@ -842,9 +920,9 @@ func (nsm *NamespaceMgr) CleanSharedNsFiles(baseNS string) error {
 			return err
 		}
 	}
-	nodeLog.Infof("all partitions of namespace %v stopped, removing shared data", baseNS)
 	meta, ok := nsm.nsMetas[baseNS]
 	if ok && meta.walEng != nil {
+		nodeLog.Infof("all partitions of namespace %v stopped, removing shared data", baseNS)
 		meta.walEng.CloseAll()
 	}
 	delete(nsm.nsMetas, baseNS)
@@ -923,15 +1001,6 @@ func (nsm *NamespaceMgr) processRaftTick() {
 			return
 		}
 	}
-}
-
-// TODO:
-func (nsm *NamespaceMgr) SetNamespaceMagicCode(node *NamespaceNode, magic int64) error {
-	return nil
-}
-
-func (nsm *NamespaceMgr) CheckMagicCode(ns string, magic int64, fix bool) error {
-	return nil
 }
 
 func (nsm *NamespaceMgr) checkNamespaceRaftLeader() {

@@ -51,7 +51,8 @@ func GetIPv4ForInterfaceName(ifname string) string {
 	return ""
 }
 
-var validNamespaceTableNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// do not use middle '-' which is used as join for name and partition
+var validNamespaceTableNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 const (
 	InternalPrefix = "##"
