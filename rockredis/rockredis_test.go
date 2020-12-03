@@ -104,10 +104,12 @@ func TestMain(m *testing.M) {
 	slow.SetLogger(int32(common.LOG_INFO), nil)
 	flag.Parse()
 	if testing.Verbose() {
-		common.InitDefaultForGLogger("")
+		SetLogger(int32(common.LOG_DEBUG), common.NewLogger())
 		SetLogLevel(int32(common.LOG_DETAIL))
 		engine.SetLogLevel(int32(common.LOG_DETAIL))
 	}
+	lazyCleanExpired = time.Second * 3
+	timeUpdateFreq = 1
 	ret := m.Run()
 	os.Exit(ret)
 }
@@ -135,6 +137,9 @@ func TestDBCompact(t *testing.T) {
 	v, err := db.KVGet(key)
 	assert.Nil(t, err)
 	assert.Equal(t, string(value), string(v))
+
+	db.CompactAllRange()
+
 	for i := 0; i < 50; i++ {
 		db.DelKeys([]byte(string(key) + strconv.Itoa(i)))
 	}

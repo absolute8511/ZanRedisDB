@@ -245,6 +245,10 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	return db, nil
 }
 
+func (r *RockEng) SetCompactionFilter(filter ICompactFilter) {
+	r.dbOpts.SetCompactionFilter(filter)
+}
+
 func (r *RockEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
 	/*
 			all options we can change is in MutableDBOptions

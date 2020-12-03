@@ -384,6 +384,7 @@ func (kvsm *kvStoreSM) ClearTopn() {
 func (kvsm *kvStoreSM) GetStats(table string, needDetail bool) metric.NamespaceStats {
 	var ns metric.NamespaceStats
 	ns.InternalStats = kvsm.store.GetInternalStatus()
+	ns.DBCompactStats = kvsm.store.GetCompactFilterStats()
 	ns.DBWriteStats = kvsm.dbWriteStats.Copy()
 	if needDetail || len(table) > 0 {
 		var tbs [][]byte

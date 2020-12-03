@@ -316,11 +316,7 @@ func encodeFullScanMinKey(storeDataType byte, table, key, cursor []byte) ([]byte
 func encodeFullScanKey(storeDataType byte, table, key, cursor []byte) ([]byte, error) {
 	switch storeDataType {
 	case KVType:
-		var newKey []byte
-		newKey = append(newKey, table...)
-		newKey = append(newKey, []byte(":")...)
-		newKey = append(newKey, key...)
-		return encodeKVKey(newKey), nil
+		return encodeKVKey(packRedisKey(table, key)), nil
 	case ListType:
 		var seq int64
 		var err error

@@ -109,6 +109,9 @@ func (db *RockDB) prepareKVValueForWrite(ts int64, rawKey []byte, reset bool) (v
 		// we need delete expire meta for kv type to avoid expire the new rewrite data
 		db.expiration.renewOnExpired(ts, KVType, rawKey, keyInfo.OldHeader)
 	}
+	if realV == nil {
+		return keyInfo, nil, nil
+	}
 	return keyInfo, realV, nil
 }
 
@@ -176,6 +179,9 @@ func (db *RockDB) getDBKVRealValueAndHeader(ts int64, rawKey []byte, useLock boo
 	realV, keyInfo.OldHeader, err = db.decodeDBRawValueToRealValue(v)
 	if err != nil {
 		return keyInfo, nil, err
+	}
+	if realV == nil {
+		return keyInfo, nil, nil
 	}
 	return keyInfo, realV, nil
 }
@@ -442,7 +448,7 @@ func (db *RockDB) KVGet(key []byte) ([]byte, error) {
 	if keyInfo.Expired || v == nil {
 		return nil, nil
 	}
-	return v, err
+	return v, nil
 }
 
 func (db *RockDB) Incr(ts int64, key []byte) (int64, error) {
@@ -604,11 +610,20 @@ func (db *RockDB) KVGetSet(ts int64, rawKey []byte, value []byte) ([]byte, error
 		realOldV = nil
 	}
 	value, err = db.resetWithNewKVValue(ts, rawKey, value, 0, db.wb)
+	if err != nil {
+		return nil, err
+	}
 	db.wb.Put(keyInfo.VerKey, value)
 
 	err = db.MaybeCommitBatch()
+	if err != nil {
+		return nil, err
+	}
+	if realOldV == nil {
+		return nil, nil
+	}
 
-	return realOldV, err
+	return realOldV, nil
 }
 
 func (db *RockDB) SetEx(ts int64, rawKey []byte, duration int64, value []byte) error {

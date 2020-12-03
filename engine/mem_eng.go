@@ -96,59 +96,61 @@ func NewMemEng(cfg *RockEngConfig) (*memEng, error) {
 	return db, nil
 }
 
-func (pe *memEng) NewWriteBatch() WriteBatch {
-	wb, err := newMemWriteBatch(pe)
+func (me *memEng) NewWriteBatch() WriteBatch {
+	wb, err := newMemWriteBatch(me)
 	if err != nil {
 		return nil
 	}
 	return wb
 }
 
-func (pe *memEng) DefaultWriteBatch() WriteBatch {
-	return pe.NewWriteBatch()
+func (me *memEng) DefaultWriteBatch() WriteBatch {
+	return me.NewWriteBatch()
 }
 
-func (pe *memEng) GetDataDir() string {
-	return path.Join(pe.cfg.DataDir, "mem")
+func (me *memEng) GetDataDir() string {
+	return path.Join(me.cfg.DataDir, "mem")
 }
 
-func (pe *memEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
+func (me *memEng) SetCompactionFilter(ICompactFilter) {
+}
+func (me *memEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
 	return nil
 }
 
-func (pe *memEng) compactLoop() {
+func (me *memEng) compactLoop() {
 }
 
-func (pe *memEng) CheckDBEngForRead(fullPath string) error {
+func (me *memEng) CheckDBEngForRead(fullPath string) error {
 	return nil
 }
 
-func (pe *memEng) getDataFileName() string {
-	return path.Join(pe.GetDataDir(), "mem.dat")
+func (me *memEng) getDataFileName() string {
+	return path.Join(me.GetDataDir(), "mem.dat")
 }
 
-func (pe *memEng) OpenEng() error {
-	if !pe.IsClosed() {
-		dbLog.Warningf("engine already opened: %v, should close it before reopen", pe.GetDataDir())
+func (me *memEng) OpenEng() error {
+	if !me.IsClosed() {
+		dbLog.Warningf("engine already opened: %v, should close it before reopen", me.GetDataDir())
 		return errors.New("open failed since not closed")
 	}
-	pe.rwmutex.Lock()
-	defer pe.rwmutex.Unlock()
-	os.MkdirAll(pe.GetDataDir(), common.DIR_PERM)
+	me.rwmutex.Lock()
+	defer me.rwmutex.Unlock()
+	os.MkdirAll(me.GetDataDir(), common.DIR_PERM)
 	if useSkiplist {
 		sleng := NewSkipList()
-		err := loadMemDBFromFile(pe.getDataFileName(), func(key []byte, value []byte) error {
+		err := loadMemDBFromFile(me.getDataFileName(), func(key []byte, value []byte) error {
 			return sleng.Set(key, value)
 		})
 		if err != nil {
 			return err
 		}
-		pe.slEng = sleng
+		me.slEng = sleng
 	} else {
 		eng := &btree{
 			cmp: cmpItem,
 		}
-		err := loadMemDBFromFile(pe.getDataFileName(), func(key []byte, value []byte) error {
+		err := loadMemDBFromFile(me.getDataFileName(), func(key []byte, value []byte) error {
 			item := &kvitem{
 				key:   make([]byte, len(key)),
 				value: make([]byte, len(value)),
@@ -161,117 +163,117 @@ func (pe *memEng) OpenEng() error {
 		if err != nil {
 			return err
 		}
-		pe.eng = eng
+		me.eng = eng
 	}
 
-	atomic.StoreInt32(&pe.engOpened, 1)
-	dbLog.Infof("engine opened: %v", pe.GetDataDir())
+	atomic.StoreInt32(&me.engOpened, 1)
+	dbLog.Infof("engine opened: %v", me.GetDataDir())
 	return nil
 }
 
-func (pe *memEng) Write(wb WriteBatch) error {
+func (me *memEng) Write(wb WriteBatch) error {
 	return wb.Commit()
 }
 
-func (pe *memEng) DeletedBeforeCompact() int64 {
-	return atomic.LoadInt64(&pe.deletedCnt)
+func (me *memEng) DeletedBeforeCompact() int64 {
+	return atomic.LoadInt64(&me.deletedCnt)
 }
 
-func (pe *memEng) AddDeletedCnt(c int64) {
-	atomic.AddInt64(&pe.deletedCnt, c)
+func (me *memEng) AddDeletedCnt(c int64) {
+	atomic.AddInt64(&me.deletedCnt, c)
 }
 
-func (pe *memEng) LastCompactTime() int64 {
-	return atomic.LoadInt64(&pe.lastCompact)
+func (me *memEng) LastCompactTime() int64 {
+	return atomic.LoadInt64(&me.lastCompact)
 }
 
-func (pe *memEng) CompactRange(rg CRange) {
+func (me *memEng) CompactRange(rg CRange) {
 }
 
-func (pe *memEng) CompactAllRange() {
-	pe.CompactRange(CRange{})
+func (me *memEng) CompactAllRange() {
+	me.CompactRange(CRange{})
 }
 
-func (pe *memEng) GetApproximateTotalKeyNum() int {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
+func (me *memEng) GetApproximateTotalKeyNum() int {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
 	if useSkiplist {
-		return int(pe.slEng.Len())
+		return int(me.slEng.Len())
 	}
-	return pe.eng.Len()
+	return me.eng.Len()
 }
 
-func (pe *memEng) GetApproximateKeyNum(ranges []CRange) uint64 {
+func (me *memEng) GetApproximateKeyNum(ranges []CRange) uint64 {
 	return 0
 }
 
-func (pe *memEng) SetOptsForLogStorage() {
+func (me *memEng) SetOptsForLogStorage() {
 	return
 }
 
-func (pe *memEng) GetApproximateSizes(ranges []CRange, includeMem bool) []uint64 {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
+func (me *memEng) GetApproximateSizes(ranges []CRange, includeMem bool) []uint64 {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
 	sizeList := make([]uint64, len(ranges))
-	if pe.IsClosed() {
+	if me.IsClosed() {
 		return sizeList
 	}
 	// TODO: estimate the size
 	return sizeList
 }
 
-func (pe *memEng) IsClosed() bool {
-	if atomic.LoadInt32(&pe.engOpened) == 0 {
+func (me *memEng) IsClosed() bool {
+	if atomic.LoadInt32(&me.engOpened) == 0 {
 		return true
 	}
 	return false
 }
 
-func (pe *memEng) CloseEng() bool {
-	pe.rwmutex.Lock()
-	defer pe.rwmutex.Unlock()
-	if atomic.CompareAndSwapInt32(&pe.engOpened, 1, 0) {
-		if useSkiplist && pe.slEng != nil {
-			pe.slEng.Destroy()
-		} else if pe.eng != nil {
-			pe.eng.Destroy()
+func (me *memEng) CloseEng() bool {
+	me.rwmutex.Lock()
+	defer me.rwmutex.Unlock()
+	if atomic.CompareAndSwapInt32(&me.engOpened, 1, 0) {
+		if useSkiplist && me.slEng != nil {
+			me.slEng.Destroy()
+		} else if me.eng != nil {
+			me.eng.Destroy()
 		}
-		dbLog.Infof("engine closed: %v", pe.GetDataDir())
+		dbLog.Infof("engine closed: %v", me.GetDataDir())
 		return true
 	}
 	return false
 }
 
-func (pe *memEng) CloseAll() {
+func (me *memEng) CloseAll() {
 	select {
-	case <-pe.quit:
+	case <-me.quit:
 	default:
-		close(pe.quit)
+		close(me.quit)
 	}
-	pe.CloseEng()
+	me.CloseEng()
 }
 
-func (pe *memEng) GetStatistics() string {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
-	if pe.IsClosed() {
+func (me *memEng) GetStatistics() string {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
+	if me.IsClosed() {
 		return ""
 	}
 	return ""
 }
 
-func (pe *memEng) GetInternalStatus() map[string]interface{} {
+func (me *memEng) GetInternalStatus() map[string]interface{} {
 	s := make(map[string]interface{})
-	s["internal"] = pe.GetStatistics()
+	s["internal"] = me.GetStatistics()
 	return s
 }
 
-func (pe *memEng) GetInternalPropertyStatus(p string) string {
+func (me *memEng) GetInternalPropertyStatus(p string) string {
 	return p
 }
 
-func (pe *memEng) GetBytesNoLock(key []byte) ([]byte, error) {
-	v, err := pe.GetRefNoLock(key)
+func (me *memEng) GetBytesNoLock(key []byte) ([]byte, error) {
+	v, err := me.GetRefNoLock(key)
 	if err != nil {
 		return nil, err
 	}
@@ -283,40 +285,40 @@ func (pe *memEng) GetBytesNoLock(key []byte) ([]byte, error) {
 	return nil, nil
 }
 
-func (pe *memEng) GetBytes(key []byte) ([]byte, error) {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
-	if pe.IsClosed() {
+func (me *memEng) GetBytes(key []byte) ([]byte, error) {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
+	if me.IsClosed() {
 		return nil, errDBEngClosed
 	}
-	return pe.GetBytesNoLock(key)
+	return me.GetBytesNoLock(key)
 }
 
-func (pe *memEng) MultiGetBytes(keyList [][]byte, values [][]byte, errs []error) {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
-	if pe.IsClosed() {
+func (me *memEng) MultiGetBytes(keyList [][]byte, values [][]byte, errs []error) {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
+	if me.IsClosed() {
 		for i, _ := range errs {
 			errs[i] = errDBEngClosed
 		}
 		return
 	}
 	for i, k := range keyList {
-		values[i], errs[i] = pe.GetBytesNoLock(k)
+		values[i], errs[i] = me.GetBytesNoLock(k)
 	}
 }
 
-func (pe *memEng) Exist(key []byte) (bool, error) {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
-	if pe.IsClosed() {
+func (me *memEng) Exist(key []byte) (bool, error) {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
+	if me.IsClosed() {
 		return false, errDBEngClosed
 	}
-	return pe.ExistNoLock(key)
+	return me.ExistNoLock(key)
 }
 
-func (pe *memEng) ExistNoLock(key []byte) (bool, error) {
-	v, err := pe.GetRefNoLock(key)
+func (me *memEng) ExistNoLock(key []byte) (bool, error) {
+	v, err := me.GetRefNoLock(key)
 	if err != nil {
 		return false, err
 	}
@@ -328,16 +330,16 @@ func (pe *memEng) ExistNoLock(key []byte) (bool, error) {
 	return ok, nil
 }
 
-func (pe *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
+func (me *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
 	if useSkiplist {
-		v, err := pe.slEng.Get(key)
+		v, err := me.slEng.Get(key)
 		if err != nil {
 			return nil, err
 		}
 		return &memRefSlice{b: v, needCopy: false}, nil
 	}
 
-	bt := pe.eng
+	bt := me.eng
 	bi := bt.MakeIter()
 
 	bi.SeekGE(&kvitem{key: key})
@@ -351,29 +353,29 @@ func (pe *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
 	return nil, nil
 }
 
-func (pe *memEng) GetRef(key []byte) (RefSlice, error) {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
-	if pe.IsClosed() {
+func (me *memEng) GetRef(key []byte) (RefSlice, error) {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
+	if me.IsClosed() {
 		return nil, errDBEngClosed
 	}
-	return pe.GetRefNoLock(key)
+	return me.GetRefNoLock(key)
 }
 
-func (pe *memEng) GetValueWithOp(key []byte,
+func (me *memEng) GetValueWithOp(key []byte,
 	op func([]byte) error) error {
-	pe.rwmutex.RLock()
-	defer pe.rwmutex.RUnlock()
-	if pe.IsClosed() {
+	me.rwmutex.RLock()
+	defer me.rwmutex.RUnlock()
+	if me.IsClosed() {
 		return errDBEngClosed
 	}
 
-	return pe.GetValueWithOpNoLock(key, op)
+	return me.GetValueWithOpNoLock(key, op)
 }
 
-func (pe *memEng) GetValueWithOpNoLock(key []byte,
+func (me *memEng) GetValueWithOpNoLock(key []byte,
 	op func([]byte) error) error {
-	val, err := pe.GetRef(key)
+	val, err := me.GetRef(key)
 	if err != nil {
 		return err
 	}
@@ -384,26 +386,26 @@ func (pe *memEng) GetValueWithOpNoLock(key []byte,
 	return op(nil)
 }
 
-func (pe *memEng) DeleteFilesInRange(rg CRange) {
+func (me *memEng) DeleteFilesInRange(rg CRange) {
 	return
 }
 
-func (pe *memEng) GetIterator(opts IteratorOpts) (Iterator, error) {
-	mit, err := newMemIterator(pe, opts)
+func (me *memEng) GetIterator(opts IteratorOpts) (Iterator, error) {
+	mit, err := newMemIterator(me, opts)
 	if err != nil {
 		return nil, err
 	}
 	return mit, nil
 }
 
-func (pe *memEng) NewCheckpoint() (KVCheckpoint, error) {
+func (me *memEng) NewCheckpoint() (KVCheckpoint, error) {
 	return &memEngCheckpoint{
-		pe: pe,
+		me: me,
 	}, nil
 }
 
 type memEngCheckpoint struct {
-	pe *memEng
+	me *memEng
 }
 
 func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
@@ -412,15 +414,15 @@ func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
 	if err != nil && !os.IsExist(err) {
 		return err
 	}
-	it, err := pck.pe.GetIterator(IteratorOpts{})
+	it, err := pck.me.GetIterator(IteratorOpts{})
 	if err != nil {
 		return err
 	}
 	var dataNum int64
 	if useSkiplist {
-		dataNum = pck.pe.slEng.Len()
+		dataNum = pck.me.slEng.Len()
 	} else {
-		dataNum = int64(pck.pe.eng.Len())
+		dataNum = int64(pck.me.eng.Len())
 	}
 
 	it.SeekToFirst()

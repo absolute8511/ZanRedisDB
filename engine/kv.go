@@ -164,6 +164,11 @@ type KVCheckpoint interface {
 	Save(path string, notify chan struct{}) error
 }
 
+type ICompactFilter interface {
+	Name() string
+	Filter(level int, key, value []byte) (bool, []byte)
+}
+
 type KVEngine interface {
 	NewWriteBatch() WriteBatch
 	DefaultWriteBatch() WriteBatch
@@ -199,6 +204,7 @@ type KVEngine interface {
 	GetIterator(opts IteratorOpts) (Iterator, error)
 	NewCheckpoint() (KVCheckpoint, error)
 	SetOptsForLogStorage()
+	SetCompactionFilter(ICompactFilter)
 }
 
 func NewKVEng(cfg *RockEngConfig) (KVEngine, error) {

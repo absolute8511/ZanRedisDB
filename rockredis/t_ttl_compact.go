@@ -13,6 +13,7 @@ import (
 var errHeaderMetaValue = errors.New("invalid header meta value")
 var errHeaderVersion = errors.New("invalid header version")
 var errExpOverflow = errors.New("expiration time overflow")
+var errInvalidVerKey = errors.New("invalid versioned key")
 
 const headerV1Len = 1 + 4 + 8
 
@@ -137,6 +138,20 @@ func encodeVerKey(h *headerMetaValue, key []byte) []byte {
 	return b
 }
 
+func decodeVerKey(b []byte) ([]byte, int64, error) {
+	vals, err := Decode(b, len(b))
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(vals) < 4 {
+		return nil, 0, errInvalidVerKey
+	}
+	// key, sep, value version, sep
+	key := vals[0].([]byte)
+	ver := vals[2].(int64)
+	return key, ver, nil
+}
+
 func (exp *compactExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte {
 	switch dt {
 	case HashType, SetType, BitmapType, ListType, ZSetType:
@@ -149,17 +164,7 @@ func (exp *compactExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, ke
 func (exp *compactExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte, int64, error) {
 	switch dt {
 	case HashType, SetType, BitmapType, ListType, ZSetType:
-		vals, err := Decode(key, len(key))
-		if err != nil {
-			return nil, 0, err
-		}
-		if len(vals) < 4 {
-			return nil, 0, errors.New("error version key")
-		}
-		// key, sep, value version, sep
-		key := vals[0].([]byte)
-		ver := vals[2].(int64)
-		return key, ver, nil
+		return decodeVerKey(key)
 	default:
 		return exp.localExp.decodeFromVersionKey(dt, key)
 	}
@@ -199,9 +204,15 @@ func (exp *compactExpiration) getRawValueForHeader(ts int64, dataType byte, key 
 	switch dataType {
 	case KVType:
 		_, _, v, _, err := exp.db.getRawDBKVValue(ts, key, true)
-		return v, err
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		return v, nil
 	case HashType, SetType, BitmapType, ListType, ZSetType:
-		metaKey := encodeMetaKey(dataType, key)
+		metaKey, _ := encodeMetaKey(dataType, key)
 		return exp.db.GetBytes(metaKey)
 	default:
 		return exp.localExp.getRawValueForHeader(ts, dataType, key)
@@ -238,7 +249,10 @@ func (exp *compactExpiration) ExpireAt(dataType byte, key []byte, rawValue []byt
 		if err != nil {
 			return 0, err
 		}
-		key = encodeMetaKey(dataType, key)
+		key, err = encodeMetaKey(dataType, key)
+		if err != nil {
+			return 0, err
+		}
 		wb.Put(key, newValue)
 		if err := exp.db.rockEng.Write(wb); err != nil {
 			return 0, err

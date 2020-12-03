@@ -42,50 +42,17 @@ func sDecodeSizeKey(ek []byte) ([]byte, error) {
 }
 
 func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
-	buf := make([]byte, getDataTablePrefixBufLen(SetType, table)+len(key)+len(member)+1+2)
-
-	pos := encodeDataTablePrefixToBuf(buf, SetType, table)
-
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
-	pos += 2
-
-	copy(buf[pos:], key)
-	pos += len(key)
-
-	buf[pos] = collStartSep
-	pos++
-	copy(buf[pos:], member)
-
-	return buf
+	return encodeCollSubKey(SetType, table, key, member)
 }
 
 func sDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
-	table, pos, err := decodeDataTablePrefixFromBuf(ek, SetType)
-
+	dt, table, key, member, err := decodeCollSubKey(ek)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	if pos+2 > len(ek) {
-		return nil, nil, nil, errSetKey
+	if dt != SetType {
+		return table, key, member, errCollTypeMismatch
 	}
-
-	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-
-	if keyLen+pos > len(ek) {
-		return table, nil, nil, errSetKey
-	}
-
-	key := ek[pos : pos+keyLen]
-	pos += keyLen
-
-	if ek[pos] != collStartSep {
-		return table, nil, nil, errSetKey
-	}
-
-	pos++
-	member := ek[pos:]
 	return table, key, member, nil
 }
 

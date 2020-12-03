@@ -133,20 +133,7 @@ func encodeScanKeyTableEnd(storeDataType byte, key []byte) ([]byte, error) {
 }
 
 func encodeScanKey(storeDataType byte, key []byte) ([]byte, error) {
-	switch storeDataType {
-	case KVType:
-		return encodeKVKey(key), nil
-	case LMetaType:
-		return lEncodeMetaKey(key), nil
-	case HSizeType:
-		return hEncodeSizeKey(key), nil
-	case ZSizeType:
-		return zEncodeSizeKey(key), nil
-	case SSizeType:
-		return sEncodeSizeKey(key), nil
-	default:
-		return nil, errDataType
-	}
+	return encodeMetaKey(storeDataType, key)
 }
 
 func decodeScanKey(storeDataType byte, ek []byte) (key []byte, err error) {

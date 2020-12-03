@@ -231,6 +231,9 @@ func (pe *PebbleEng) GetDataDir() string {
 	return path.Join(pe.cfg.DataDir, "pebble")
 }
 
+func (pe *PebbleEng) SetCompactionFilter(ICompactFilter) {
+}
+
 func (pe *PebbleEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
 	return nil
 }
