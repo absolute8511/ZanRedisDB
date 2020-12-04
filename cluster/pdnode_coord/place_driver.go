@@ -17,6 +17,10 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
+const (
+	BalanceV2Str = "v2"
+)
+
 var (
 	ErrBalanceNodeUnavailable = errors.New("can not find a node to be balanced")
 	ErrClusterBalanceRunning  = errors.New("another balance is running, should wait")
@@ -693,7 +697,7 @@ func getRebalancedPartitionsFromNameList(ns string,
 		idx++
 	}
 
-	if balanceVer == "v2" {
+	if balanceVer == BalanceV2Str {
 		return fillPartitionMapV2(ns, partitionNum, replica, oldPartitionNodes, combined), nil
 	}
 	return fillPartitionMapV1(ns, partitionNum, replica, combined), nil
