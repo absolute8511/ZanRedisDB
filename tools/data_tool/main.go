@@ -39,8 +39,12 @@ func getRangeStr(dr DeleteTableRange) string {
 }
 
 func main() {
+	flag.Parse()
+	common.InitDefaultForGLogger("./")
+
 	switch *toolType {
 	case "gen_delrange":
+		log.Printf("test gen del range")
 		dr := DeleteTableRange{
 			StartFrom: []byte(*startFrom),
 			EndTo:     []byte(*endTo),
@@ -51,6 +55,7 @@ func main() {
 	case "scan_localttl":
 		checkLocalTTL()
 	default:
+		log.Printf("unknown action: %v", *toolType)
 	}
 }
 
@@ -96,6 +101,7 @@ func expDecodeTimeKey(tk []byte) (byte, []byte, int64, error) {
 }
 
 func checkLocalTTL() {
+	log.Printf("begin check ttl")
 	now := time.Now().Unix()
 
 	cfg := rockredis.NewRockRedisDBConfig()
