@@ -80,7 +80,10 @@ func (s *KVStore) Destroy() error {
 		return os.RemoveAll(dataPath)
 	} else {
 		if s.opts.EngType == rockredis.EngType {
-			f := rockredis.GetDataDirFromBase(s.opts.DataDir)
+			f, err := engine.GetDataDirFromBase(s.opts.RockOpts.EngineType, s.opts.DataDir)
+			if err != nil {
+				return err
+			}
 			return os.RemoveAll(f)
 		}
 	}

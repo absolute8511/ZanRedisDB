@@ -287,7 +287,13 @@ func (pe *PebbleEng) OpenEng() error {
 		defer cache.Unref()
 		pe.opts.Cache = cache
 	}
-	eng, err := pebble.Open(pe.GetDataDir(), pe.opts)
+	opt := pe.opts
+	if pe.cfg.ReadOnly {
+		opt = pe.opts.Clone()
+		opt.ErrorIfNotExists = true
+		opt.ReadOnly = true
+	}
+	eng, err := pebble.Open(pe.GetDataDir(), opt)
 	if err != nil {
 		return err
 	}

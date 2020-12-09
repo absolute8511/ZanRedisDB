@@ -353,11 +353,21 @@ func (r *RockEng) OpenEng() error {
 		dbLog.Warningf("rocksdb engine already opened: %v, should close it before reopen", r.GetDataDir())
 		return errors.New("rocksdb open failed since not closed")
 	}
-	eng, err := gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
-	if err != nil {
-		return err
+	if r.cfg.ReadOnly {
+		ro := *(r.GetOpts())
+		ro.SetCreateIfMissing(false)
+		eng, err := gorocksdb.OpenDbForReadOnly(&ro, r.GetDataDir(), false)
+		if err != nil {
+			return err
+		}
+		r.eng = eng
+	} else {
+		eng, err := gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
+		if err != nil {
+			return err
+		}
+		r.eng = eng
 	}
-	r.eng = eng
 	r.wb = newRocksWriteBatch(r.eng, r.defaultWriteOpts)
 	atomic.StoreInt32(&r.engOpened, 1)
 	dbLog.Infof("rocksdb engine opened: %v", r.GetDataDir())

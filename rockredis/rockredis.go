@@ -354,10 +354,6 @@ func (r *RockDB) GetBackupDir() string {
 	return GetBackupDir(r.cfg.DataDir)
 }
 
-func GetDataDirFromBase(base string) string {
-	return path.Join(base, "rocksdb")
-}
-
 func (r *RockDB) GetDataDir() string {
 	return r.rockEng.GetDataDir()
 }
