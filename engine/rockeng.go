@@ -356,7 +356,15 @@ func (r *RockEng) OpenEng() error {
 	if r.cfg.ReadOnly {
 		ro := *(r.GetOpts())
 		ro.SetCreateIfMissing(false)
-		eng, err := gorocksdb.OpenDbForReadOnly(&ro, r.GetDataDir(), false)
+		dfile := r.GetDataDir()
+		if r.cfg.DataTool {
+			_, err := os.Stat(dfile)
+			if os.IsNotExist(err) {
+				dfile = r.cfg.DataDir
+			}
+		}
+		dbLog.Infof("rocksdb engine open %v as read only", dfile)
+		eng, err := gorocksdb.OpenDbForReadOnly(&ro, dfile, false)
 		if err != nil {
 			return err
 		}

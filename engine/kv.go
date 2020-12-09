@@ -49,6 +49,7 @@ type SharedRockConfig interface {
 type RockEngConfig struct {
 	DataDir            string
 	ReadOnly           bool
+	DataTool           bool
 	SharedConfig       SharedRockConfig
 	EnableTableCounter bool
 	AutoCompacted      bool

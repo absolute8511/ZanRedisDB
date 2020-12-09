@@ -107,6 +107,7 @@ func checkLocalTTL() {
 	cfg := rockredis.NewRockRedisDBConfig()
 	cfg.DataDir = *dbFile
 	cfg.ReadOnly = true
+	cfg.DataTool = true
 	db, err := rockredis.OpenRockDB(cfg)
 	if err != nil {
 		log.Printf("open db failed: %s", err.Error())
