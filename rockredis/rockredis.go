@@ -319,7 +319,9 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 		return nil, err
 	}
 
-	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
+	if !cfg.ReadOnly {
+		os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
+	}
 
 	db.wg.Add(1)
 	go func() {

@@ -73,9 +73,11 @@ func NewMemEng(cfg *RockEngConfig) (*memEng, error) {
 		return nil, errors.New("config error")
 	}
 
-	err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
-	if err != nil {
-		return nil, err
+	if !cfg.ReadOnly {
+		err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if !cfg.DisableMergeCounter {
@@ -136,7 +138,9 @@ func (me *memEng) OpenEng() error {
 	}
 	me.rwmutex.Lock()
 	defer me.rwmutex.Unlock()
-	os.MkdirAll(me.GetDataDir(), common.DIR_PERM)
+	if !me.cfg.ReadOnly {
+		os.MkdirAll(me.GetDataDir(), common.DIR_PERM)
+	}
 	if useSkiplist {
 		sleng := NewSkipList()
 		err := loadMemDBFromFile(me.getDataFileName(), func(key []byte, value []byte) error {

@@ -222,9 +222,11 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		opts.SetLevelCompactionDynamicLevelBytes(true)
 	}
 
-	err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
-	if err != nil {
-		return nil, err
+	if !cfg.ReadOnly {
+		err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
+		if err != nil {
+			return nil, err
+		}
 	}
 	db := &RockEng{
 		cfg:              cfg,

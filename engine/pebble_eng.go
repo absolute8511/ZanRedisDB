@@ -148,9 +148,11 @@ func NewPebbleEng(cfg *RockEngConfig) (*PebbleEng, error) {
 		return nil, errors.New("config error")
 	}
 
-	err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
-	if err != nil {
-		return nil, err
+	if !cfg.ReadOnly {
+		err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
+		if err != nil {
+			return nil, err
+		}
 	}
 	lopts := make([]pebble.LevelOptions, 0)
 	for l := 0; l < numOfLevels; l++ {
