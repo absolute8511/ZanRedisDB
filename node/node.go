@@ -78,6 +78,9 @@ type DeleteTableRange struct {
 	// to avoid drop all table data, this is needed to delete all data in table
 	DeleteAll bool `json:"delete_all,omitempty"`
 	Dryrun    bool `json:"dryrun,omitempty"`
+	// TODO: add flag to indicate should this be replicated to the remote cluster
+	// to avoid delete too much by accident
+	NoReplayToRemoteCluster bool `json:"noreplay_to_remote_cluster"`
 }
 
 func (dtr DeleteTableRange) CheckValid() error {
@@ -381,6 +384,18 @@ func (nd *KVNode) BackupDB(checkLast bool) {
 	}
 	d, _ := json.Marshal(p)
 	nd.CustomPropose(d)
+}
+
+func (nd *KVNode) OptimizeDBExpire() {
+	if nd.IsStopping() {
+		return
+	}
+	nd.rn.Infof("node %v begin optimize db expire meta", nd.ns)
+	defer nd.rn.Infof("node %v end optimize db", nd.ns)
+	nd.sm.OptimizeExpire()
+	// since we can not know whether leader or follower is done on optimize
+	// we backup anyway after optimize
+	nd.BackupDB(false)
 }
 
 func (nd *KVNode) OptimizeDB(table string) {

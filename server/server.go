@@ -376,6 +376,10 @@ func (s *Server) OptimizeDB(ns string, table string) {
 	s.nsMgr.OptimizeDB(ns, table)
 }
 
+func (s *Server) OptimizeDBExpire(ns string) {
+	s.nsMgr.OptimizeDBExpire(ns)
+}
+
 func (s *Server) DeleteRange(ns string, dtr node.DeleteTableRange) error {
 	return s.nsMgr.DeleteRange(ns, dtr)
 }

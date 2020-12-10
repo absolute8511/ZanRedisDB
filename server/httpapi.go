@@ -112,6 +112,18 @@ func (s *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprou
 	return nil, nil
 }
 
+func (s *Server) doOptimizeNS(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.OptimizeDB(ns, "")
+	return nil, nil
+}
+
+func (s *Server) doOptimizeNSExpire(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.OptimizeDBExpire(ns)
+	return nil, nil
+}
+
 func (s *Server) doBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	s.nsMgr.BackupDB(ns, false)
@@ -879,6 +891,8 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isNsNodeFullReady, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
 	router.Handle("POST", "/kv/optimize/:namespace/:table", common.Decorate(s.doOptimize, log, common.V1))
+	router.Handle("POST", "/kv/optimize/:namespace", common.Decorate(s.doOptimizeNS, log, common.V1))
+	router.Handle("POST", "/kv/optimize_expire/:namespace", common.Decorate(s.doOptimizeNSExpire, log, common.V1))
 	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimizeAll, log, common.V1))
 	router.Handle("POST", "/kv/backup/:namespace", common.Decorate(s.doBackup, log, common.V1))
 	router.Handle("POST", "/kv/backup/", common.Decorate(s.doBackupAll, log, common.V1))

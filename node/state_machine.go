@@ -53,6 +53,7 @@ type StateMachine interface {
 	Destroy()
 	CleanData() error
 	Optimize(string)
+	OptimizeExpire()
 	GetStats(table string, needDetail bool) metric.NamespaceStats
 	EnableTopn(on bool)
 	ClearTopn()
@@ -265,7 +266,8 @@ func (esm *emptySM) CleanData() error {
 	return nil
 }
 func (esm *emptySM) Optimize(t string) {
-
+}
+func (esm *emptySM) OptimizeExpire() {
 }
 func (esm *emptySM) EnableTopn(on bool) {
 }
@@ -353,6 +355,10 @@ func (kvsm *kvStoreSM) GetBatchOperator() IBatchOperator {
 		dupCheckMap: make(map[string]bool),
 		kvsm:        kvsm,
 	}
+}
+
+func (kvsm *kvStoreSM) OptimizeExpire() {
+	kvsm.store.CompactOldExpireData()
 }
 
 func (kvsm *kvStoreSM) Optimize(table string) {

@@ -887,6 +887,18 @@ func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 	}
 }
 
+func (nsm *NamespaceMgr) OptimizeDBExpire(ns string) {
+	nodeList := nsm.getNsNodeList(ns)
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return
+		}
+		if n.IsReady() {
+			n.Node.OptimizeDBExpire()
+		}
+	}
+}
+
 func (nsm *NamespaceMgr) DeleteRange(ns string, dtr DeleteTableRange) error {
 	if ns == "" {
 		return errors.New("namespace can not be empty")
