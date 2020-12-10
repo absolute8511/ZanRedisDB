@@ -110,7 +110,7 @@ func expDecodeTimeKey(tk []byte) (byte, []byte, int64, error) {
 
 func checkLocalTTL() {
 	log.Printf("begin check ttl")
-	now := time.Now().Unix()
+	now := time.Now().Unix() - 3600
 
 	cfg := rockredis.NewRockRedisDBConfig()
 	cfg.DataDir = *dbFile
@@ -123,7 +123,7 @@ func checkLocalTTL() {
 	}
 	defer db.Close()
 	minKey := expEncodeTimeKey(rockredis.NoneType, nil, 0)
-	maxKey := expEncodeTimeKey(100, nil, now+600)
+	maxKey := expEncodeTimeKey(100, nil, now)
 
 	var eCount int64
 	var scanned int64
@@ -160,7 +160,7 @@ func checkLocalTTL() {
 		}
 
 		scanned += 1
-		if nt > now+600 {
+		if nt > now {
 			//the next ttl check time is nt!
 			log.Printf("ttl check end at key:[%s] of type:%s whose expire time is: %s", string(k),
 				rockredis.TypeName[dt], time.Unix(nt, 0).Format(logTimeFormatStr))
