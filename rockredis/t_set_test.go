@@ -99,6 +99,9 @@ func TestDBSetWithEmptyMember(t *testing.T) {
 	} else if len(v) != 0 {
 		t.Fatal(string(v[0]))
 	}
+	n, err := db.SCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 }
 
 func TestDBSet(t *testing.T) {
@@ -179,6 +182,13 @@ func TestDBSet(t *testing.T) {
 		t.Fatal(n)
 	}
 
+	n, err = db.SCard(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.SCard(key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
 	tbcnt, err = db.GetTableKeyCount([]byte("test"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), tbcnt)
@@ -187,6 +197,13 @@ func TestDBSet(t *testing.T) {
 	tbcnt, err = db.GetTableKeyCount([]byte("test"))
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), tbcnt)
+
+	n, err = db.SCard(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, err = db.SCard(key2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
 }
 
 func TestDBSetClearInCompactTTL(t *testing.T) {
@@ -272,6 +289,10 @@ func TestDBSetClearInCompactTTL(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(v))
 
+	n, err = db.SCard(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
 	ts = time.Now().UnixNano()
 	db.SAdd(ts, key1, member, memberNew)
 
@@ -350,6 +371,10 @@ func TestDBSPop(t *testing.T) {
 	if vals, _ := db.SMembers(key); len(vals) != 0 {
 		t.Errorf("should empty set")
 	}
+
+	n, err := db.SCard(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 }
 
 func BenchmarkSIsMember(b *testing.B) {
