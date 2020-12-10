@@ -1,5 +1,18 @@
 package node
 
+func getWriteCmdType(cmd string) string {
+	switch cmd {
+	case "zadd", "zfixkey", "zincrby", "zrem", "zremrangebyrank", "zremrangebyscore", "zremrangebylex", "zclear", "zmclear", "zexpire", "zpersist":
+		return "zset"
+	case "sadd", "srem", "sclear", "smclear", "spop", "sexpire", "spersist":
+		return "set"
+	case "lfixkey", "lpush", "lpop", "lset", "ltrim", "rpop", "rpush", "lclear", "lmclear", "lexpire", "lpersist":
+		return "list"
+	default:
+		return "default"
+	}
+}
+
 func (kvsm *kvStoreSM) registerHandlers() {
 
 	kvsm.router.RegisterInternal("noopwrite", kvsm.localNoOpWriteCommand)

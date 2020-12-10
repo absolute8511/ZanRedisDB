@@ -5,22 +5,28 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/absolute8511/glog"
+	"github.com/absolute8511/redigo/redis"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
-var ip = flag.String("ip", "127.0.0.1", "server ip")
-var port = flag.Int("port", 6380, "server port")
+var ipProxy = flag.String("ip_proxy", "127.0.0.1", "server ip")
+var portProxy = flag.Int("port_proxy", 3803, "server port")
 var toolType = flag.String("type", "", "data tool type: gen_delrange/compactdb/scan_localttl")
 var ns = flag.String("ns", "", "namespace for data")
 var table = flag.String("table", "", "table for data")
 var key = flag.String("key", "", "key for action")
+var cleanMatched = flag.Bool("clean_matched", false, "do del to proxy if matched")
 var maxScan = flag.Int("max_scan", 10000, "max scan db keys")
+var sleepBetween = flag.Duration("sleep_between", time.Millisecond, "")
 var startFrom = flag.String("start_from", "", "key range for data")
 var endTo = flag.String("end_to", "", "key range for data")
 var dbFile = flag.String("dbfile", "", "file path for rocksdb parent, the final will be dbFile/rocksdb")
@@ -131,6 +137,14 @@ func checkLocalTTL() {
 	}
 	defer it.Close()
 
+	clientConn, err := redis.Dial("tcp", net.JoinHostPort(*ipProxy, strconv.Itoa(*portProxy)), redis.DialConnectTimeout(time.Second))
+	if *cleanMatched {
+		if err != nil {
+			log.Printf("connect redis failed: %s", err.Error())
+			return
+		}
+	}
+
 	for ; it.Valid(); it.Next() {
 		if scanned > int64(*maxScan) {
 			break
@@ -159,6 +173,19 @@ func checkLocalTTL() {
 			if strings.HasPrefix(string(k), *key) {
 				log.Printf("found key %s(type: %v), expire time: %s\n", string(k), rockredis.TypeName[dt],
 					time.Unix(nt, 0).Format(logTimeFormatStr))
+				if *cleanMatched {
+					delKey := fmt.Sprintf("%s:%s", *ns, string(k))
+					n, err := redis.Int(clientConn.Do("del", delKey))
+					if err != nil {
+						log.Printf("del %s failed: %s", string(k), err.Error())
+					}
+					if n == 0 {
+						log.Printf("del %s not exist: %v", string(k), n)
+					}
+					if *sleepBetween > 0 {
+						time.Sleep(*sleepBetween)
+					}
+				}
 			}
 			continue
 		}

@@ -266,6 +266,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		wrPools:            newWaitReqPoolArray(),
 		slowLimiter:        sl,
 	}
+
 	if kvsm, ok := sm.(*kvStoreSM); ok {
 		s.store = kvsm.store
 	}
@@ -1314,6 +1315,9 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 }
 
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
+	// TODO: handle concurrent apply,
+	// if has conf change event or snapshot event, must wait all previous events done
+	// note if not the conf change event, then the confChanged flag must be false
 	nd.applySnapshot(np, applyEvent)
 	start := time.Now()
 	confChanged, forceBackup := nd.applyEntries(np, applyEvent)
@@ -1339,6 +1343,8 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	return confChanged, forceBackup
 }
 
+// TODO: maybe we can apply in concurrent for some storage engine to avoid a single slow write block others
+// we can use the same goroutine for the same table prefix, which can make sure we will be ordered in the same business data
 func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 	defer func() {
 		nd.rn.Infof("apply commit exit")
@@ -1424,6 +1430,7 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 		}
 	}
 
+	// TODO: need wait the concurrent apply buffer empty
 	nd.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
 	err := nd.rn.beginSnapshot(np.appliedt, np.appliedi, np.confState)
 	if err != nil {
