@@ -177,10 +177,9 @@ func checkLocalTTL() {
 					delKey := fmt.Sprintf("%s:%s", *ns, string(k))
 					n, err := redis.Int(clientConn.Do("del", delKey))
 					if err != nil {
-						log.Printf("del %s failed: %s", string(k), err.Error())
-					}
-					if n == 0 {
-						log.Printf("del %s not exist: %v", string(k), n)
+						log.Printf("del %s failed: %s", delKey, err.Error())
+					} else if n == 0 {
+						log.Printf("del %s not exist: %v", delKey, n)
 					}
 					if *sleepBetween > 0 {
 						time.Sleep(*sleepBetween)
