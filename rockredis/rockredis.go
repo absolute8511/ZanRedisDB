@@ -396,7 +396,9 @@ func (r *RockDB) reOpenEng() error {
 		r.rockEng.CloseEng()
 		return err
 	}
-	r.expiration.Start()
+	if r.expiration != nil && !r.cfg.ReadOnly {
+		r.expiration.Start()
+	}
 	atomic.StoreInt32(&r.engOpened, 1)
 	return nil
 }
@@ -410,8 +412,16 @@ func (r *RockDB) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error 
 	return r.rockEng.SetMaxBackgroundOptions(maxCompact, maxBackJobs)
 }
 
+// TODO: how to interrupt the manual compact to avoid stall too long?
 func (r *RockDB) CompactAllRange() {
 	r.rockEng.CompactAllRange()
+}
+
+func (r *RockDB) CompactOldExpireData() {
+	now := time.Now().Unix()
+	minKey := expEncodeTimeKey(NoneType, nil, 0)
+	maxKey := expEncodeTimeKey(maxDataType, nil, now)
+	r.CompactRange(minKey, maxKey)
 }
 
 func (r *RockDB) CompactRange(minKey []byte, maxKey []byte) {

@@ -216,10 +216,7 @@ func (c *TTLChecker) setNextCheckTime(when int64, force bool) {
 
 // do not run while iterator or in other db read lock
 func (c *TTLChecker) compactTTLMeta() {
-	now := time.Now().Unix()
-	minKey := expEncodeTimeKey(NoneType, nil, 0)
-	maxKey := expEncodeTimeKey(maxDataType, nil, now)
-	c.db.CompactRange(minKey, maxKey)
+	c.db.CompactOldExpireData()
 }
 
 func (c *TTLChecker) check(expiredBuf expiredMetaBuffer, stop chan struct{}) (err error) {

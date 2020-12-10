@@ -149,8 +149,8 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 					time.Sleep(time.Millisecond)
 					continue
 				} else if err == errTTLCheckTooLong {
-					// do compact for ttl
-					checker.compactTTLMeta()
+					// do not do manual compact ttl here, it may cause write stall
+					//
 				} else if err != nil {
 					dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
 				}
