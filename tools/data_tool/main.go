@@ -145,6 +145,8 @@ func checkLocalTTL() {
 		}
 	}
 
+	missed := 0
+	cleaned := 0
 	for ; it.Valid(); it.Next() {
 		if scanned > int64(*maxScan) {
 			break
@@ -173,16 +175,26 @@ func checkLocalTTL() {
 			if strings.HasPrefix(string(k), *key) {
 				log.Printf("found key %s(type: %v), expire time: %s\n", string(k), rockredis.TypeName[dt],
 					time.Unix(nt, 0).Format(logTimeFormatStr))
-				if *cleanMatched {
+				if *cleanMatched && dt == rockredis.KVType {
 					delKey := fmt.Sprintf("%s:%s", *ns, string(k))
-					n, err := redis.Int(clientConn.Do("del", delKey))
+					n, err := redis.Int(clientConn.Do("exists", delKey))
 					if err != nil {
 						log.Printf("del %s failed: %s", delKey, err.Error())
+					} else if n == 1 {
+						n, err := redis.Int(clientConn.Do("del", delKey))
+						if err != nil {
+							log.Printf("del %s failed: %s", delKey, err.Error())
+						} else if n == 0 {
+							log.Printf("del %s not exist: %v", delKey, n)
+							missed++
+						} else if n == 1 {
+							cleaned++
+						}
+						if *sleepBetween > 0 {
+							time.Sleep(*sleepBetween)
+						}
 					} else if n == 0 {
-						log.Printf("del %s not exist: %v", delKey, n)
-					}
-					if *sleepBetween > 0 {
-						time.Sleep(*sleepBetween)
+						missed++
 					}
 				}
 			}
@@ -193,7 +205,7 @@ func checkLocalTTL() {
 	}
 
 	checkCost := time.Since(checkStart)
-	log.Printf("[%d/%d] keys have expired during ttl checking, cost:%s", eCount, scanned, checkCost)
+	log.Printf("[%d/%d] keys have expired during ttl checking, cost:%s, clean %v, %v", eCount, scanned, checkCost, cleaned, missed)
 }
 
 func compactDB() {
