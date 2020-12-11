@@ -107,6 +107,10 @@ func (sm *logSyncerSM) Errorf(f string, args ...interface{}) {
 
 func (sm *logSyncerSM) Optimize(t string) {
 }
+func (sm *logSyncerSM) OptimizeAnyRange(CompactAPIRange) {
+}
+func (sm *logSyncerSM) DisableOptimize(bool) {
+}
 func (sm *logSyncerSM) OptimizeExpire() {
 }
 func (sm *logSyncerSM) ClearTopn() {

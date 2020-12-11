@@ -413,6 +413,10 @@ func (r *RockDB) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error 
 }
 
 // TODO: how to interrupt the manual compact to avoid stall too long?
+func (r *RockDB) DisableManualCompact(disable bool) {
+	r.rockEng.DisableManualCompact(disable)
+}
+
 func (r *RockDB) CompactAllRange() {
 	r.rockEng.CompactAllRange()
 }

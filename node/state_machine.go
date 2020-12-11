@@ -54,6 +54,8 @@ type StateMachine interface {
 	CleanData() error
 	Optimize(string)
 	OptimizeExpire()
+	OptimizeAnyRange(CompactAPIRange)
+	DisableOptimize(bool)
 	GetStats(table string, needDetail bool) metric.NamespaceStats
 	EnableTopn(on bool)
 	ClearTopn()
@@ -269,6 +271,10 @@ func (esm *emptySM) Optimize(t string) {
 }
 func (esm *emptySM) OptimizeExpire() {
 }
+func (esm *emptySM) OptimizeAnyRange(CompactAPIRange) {
+}
+func (esm *emptySM) DisableOptimize(bool) {
+}
 func (esm *emptySM) EnableTopn(on bool) {
 }
 func (esm *emptySM) ClearTopn() {
@@ -359,6 +365,14 @@ func (kvsm *kvStoreSM) GetBatchOperator() IBatchOperator {
 
 func (kvsm *kvStoreSM) OptimizeExpire() {
 	kvsm.store.CompactOldExpireData()
+}
+
+func (kvsm *kvStoreSM) OptimizeAnyRange(r CompactAPIRange) {
+	kvsm.store.CompactRange(r.StartFrom, r.EndTo)
+}
+
+func (kvsm *kvStoreSM) DisableOptimize(disable bool) {
+	kvsm.store.DisableManualCompact(disable)
 }
 
 func (kvsm *kvStoreSM) Optimize(table string) {
@@ -802,7 +816,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 			batch.CommitBatch()
 
 			if req.Header.DataType == int32(CustomReq) {
-				forceBackup, retErr = kvsm.handleCustomRequest(&req, reqID, stop)
+				forceBackup, retErr = kvsm.handleCustomRequest(reqList.Type == FromClusterSyncer, &req, reqID, stop)
 			} else if req.Header.DataType == int32(SchemaChangeReq) {
 				kvsm.Infof("handle schema change: %v", string(req.Data))
 				var sc SchemaChange
@@ -845,7 +859,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 	return forceBackup, retErr
 }
 
-func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint64, stop chan struct{}) (bool, error) {
+func (kvsm *kvStoreSM) handleCustomRequest(fromClusterSyncer bool, req *InternalRaftRequest, reqID uint64, stop chan struct{}) (bool, error) {
 	var p customProposeData
 	var forceBackup bool
 	var retErr error
@@ -865,7 +879,11 @@ func (kvsm *kvStoreSM) handleCustomRequest(req *InternalRaftRequest, reqID uint6
 		if err != nil {
 			kvsm.Infof("invalid delete table range data: %v", string(p.Data))
 		} else {
-			err = kvsm.store.DeleteTableRange(dr.Dryrun, dr.Table, dr.StartFrom, dr.EndTo)
+			if dr.NoReplayToRemoteCluster && fromClusterSyncer {
+				kvsm.Infof("ignore delete table range since noreplay: %v, %v", string(p.Data), dr)
+			} else {
+				err = kvsm.store.DeleteTableRange(dr.Dryrun, dr.Table, dr.StartFrom, dr.EndTo)
+			}
 		}
 		kvsm.w.Trigger(reqID, err)
 	} else if p.ProposeOp == ProposeOp_RemoteConfChange {

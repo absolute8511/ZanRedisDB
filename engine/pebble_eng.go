@@ -338,6 +338,9 @@ func (pe *PebbleEng) CompactAllRange() {
 	pe.CompactRange(CRange{})
 }
 
+func (pe *PebbleEng) DisableManualCompact(disable bool) {
+}
+
 func (pe *PebbleEng) GetApproximateTotalKeyNum() int {
 	return 0
 }

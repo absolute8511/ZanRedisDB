@@ -185,6 +185,7 @@ type KVEngine interface {
 	LastCompactTime() int64
 	CompactRange(rg CRange)
 	CompactAllRange()
+	DisableManualCompact(bool)
 	GetApproximateTotalKeyNum() int
 	GetApproximateKeyNum(ranges []CRange) uint64
 	GetApproximateSizes(ranges []CRange, includeMem bool) []uint64

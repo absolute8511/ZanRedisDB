@@ -415,6 +415,15 @@ func (r *RockEng) CompactAllRange() {
 	r.CompactRange(CRange{})
 }
 
+func (r *RockEng) DisableManualCompact(disable bool) {
+	//TODO: rocksdb 6.5 will support the disable and enable manual compaction
+	if disable {
+		//r.eng.DisableManualCompact(disable)
+	} else {
+		//r.eng.EnableManualCompact(disable)
+	}
+}
+
 func (r *RockEng) GetApproximateTotalKeyNum() int {
 	numStr := r.eng.GetProperty("rocksdb.estimate-num-keys")
 	num, err := strconv.Atoi(numStr)

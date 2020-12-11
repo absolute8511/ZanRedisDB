@@ -198,6 +198,9 @@ func (me *memEng) CompactAllRange() {
 	me.CompactRange(CRange{})
 }
 
+func (me *memEng) DisableManualCompact(disable bool) {
+}
+
 func (me *memEng) GetApproximateTotalKeyNum() int {
 	me.rwmutex.RLock()
 	defer me.rwmutex.RUnlock()

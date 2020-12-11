@@ -71,6 +71,12 @@ const (
 	ProposeOp_DeleteTable            int = 6
 )
 
+type CompactAPIRange struct {
+	StartFrom []byte `json:"start_from,omitempty"`
+	EndTo     []byte `json:"end_to,omitempty"`
+	Dryrun    bool   `json:"dryrun,omitempty"`
+}
+
 type DeleteTableRange struct {
 	Table     string `json:"table,omitempty"`
 	StartFrom []byte `json:"start_from,omitempty"`
@@ -398,6 +404,14 @@ func (nd *KVNode) OptimizeDBExpire() {
 	nd.BackupDB(false)
 }
 
+func (nd *KVNode) DisableOptimizeDB(disable bool) {
+	if nd.IsStopping() {
+		return
+	}
+	nd.rn.Infof("node %v disable optimize db flag %v", nd.ns, disable)
+	nd.sm.DisableOptimize(disable)
+}
+
 func (nd *KVNode) OptimizeDB(table string) {
 	if nd.IsStopping() {
 		return
@@ -412,6 +426,18 @@ func (nd *KVNode) OptimizeDB(table string) {
 		// we backup anyway after optimize
 		nd.BackupDB(false)
 	}
+}
+
+func (nd *KVNode) OptimizeDBAnyRange(r CompactAPIRange) {
+	if nd.IsStopping() {
+		return
+	}
+	nd.rn.Infof("node %v begin optimize db range %v", nd.ns, r)
+	defer nd.rn.Infof("node %v end optimize db range", nd.ns)
+	if r.Dryrun {
+		return
+	}
+	nd.sm.OptimizeAnyRange(r)
 }
 
 func (nd *KVNode) DeleteRange(drange DeleteTableRange) error {

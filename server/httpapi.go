@@ -105,22 +105,41 @@ func (s *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprouter.
 	}
 }
 
-func (s *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doOptimizeTable(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	table := ps.ByName("table")
-	s.OptimizeDB(ns, table)
+	s.nsMgr.OptimizeDB(ns, table)
 	return nil, nil
 }
 
 func (s *Server) doOptimizeNS(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	s.OptimizeDB(ns, "")
+	s.nsMgr.OptimizeDB(ns, "")
 	return nil, nil
 }
 
-func (s *Server) doOptimizeNSExpire(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doOptimizeExpire(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
-	s.OptimizeDBExpire(ns)
+	s.nsMgr.OptimizeDBExpire(ns)
+	return nil, nil
+}
+
+func (s *Server) doOptimizeAnyRange(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	sLog.Infof("got compact range: %v from remote: %v", string(data), req.RemoteAddr)
+	var anyRange node.CompactAPIRange
+	err = json.Unmarshal(data, &anyRange)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	if len(anyRange.StartFrom) == 0 && len(anyRange.EndTo) == 0 {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "compact range can not be both empty"}
+	}
+	s.nsMgr.OptimizeDBAnyRange(ns, anyRange)
 	return nil, nil
 }
 
@@ -136,7 +155,16 @@ func (s *Server) doBackupAll(w http.ResponseWriter, req *http.Request, ps httpro
 }
 
 func (s *Server) doOptimizeAll(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	s.OptimizeDB("", "")
+	s.nsMgr.OptimizeDB("", "")
+	return nil, nil
+}
+
+func (s *Server) disableOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	s.nsMgr.DisableOptimizeDB(true)
+	return nil, nil
+}
+func (s *Server) enableOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	s.nsMgr.DisableOptimizeDB(false)
 	return nil, nil
 }
 
@@ -890,10 +918,13 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, log, common.V1))
 	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isNsNodeFullReady, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
-	router.Handle("POST", "/kv/optimize/:namespace/:table", common.Decorate(s.doOptimize, log, common.V1))
+	router.Handle("POST", "/kv/optimize/:namespace/:table", common.Decorate(s.doOptimizeTable, log, common.V1))
 	router.Handle("POST", "/kv/optimize/:namespace", common.Decorate(s.doOptimizeNS, log, common.V1))
-	router.Handle("POST", "/kv/optimize_expire/:namespace", common.Decorate(s.doOptimizeNSExpire, log, common.V1))
+	router.Handle("POST", "/kv/optimize_expire/:namespace", common.Decorate(s.doOptimizeExpire, log, common.V1))
 	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimizeAll, log, common.V1))
+	router.Handle("POST", "/kv/optimize_anyrange/:namespace", common.Decorate(s.doOptimizeAnyRange, log, common.V1))
+	router.Handle("POST", "/kv/disable_optimize", common.Decorate(s.disableOptimize, log, common.V1))
+	router.Handle("POST", "/kv/enable_optimize", common.Decorate(s.enableOptimize, log, common.V1))
 	router.Handle("POST", "/kv/backup/:namespace", common.Decorate(s.doBackup, log, common.V1))
 	router.Handle("POST", "/kv/backup/", common.Decorate(s.doBackupAll, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
