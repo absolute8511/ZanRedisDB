@@ -646,10 +646,12 @@ func TestOptimizeExpireMeta(t *testing.T) {
 	for _, s := range kvsCluster {
 		s.server.nsMgr.DisableOptimizeDB(true)
 		s.server.nsMgr.OptimizeDBExpire("default")
+		s.server.nsMgr.OptimizeDBAnyRange("default", node.CompactAPIRange{StartFrom: []byte("start"), EndTo: []byte("end")})
 	}
 	for _, s := range kvsCluster {
 		s.server.nsMgr.DisableOptimizeDB(false)
 		s.server.nsMgr.OptimizeDBExpire("default")
+		s.server.nsMgr.OptimizeDBAnyRange("default", node.CompactAPIRange{StartFrom: []byte("start"), EndTo: []byte("end")})
 	}
 }
 

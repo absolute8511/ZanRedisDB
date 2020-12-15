@@ -778,6 +778,130 @@ func TestRemoteClusterLearnerRestartAndRestoreBackup(t *testing.T) {
 	waitRemoteClusterSync(t, ns, leaderNode, learnerSrvs, remoteSrvs)
 }
 
+func TestRemoteClusterLearnerNotIgnoreDeleteRangeAsConfig(t *testing.T) {
+	testRemoteClusterLearnerIgnoreDeleteRangeAsConfig(t, false)
+}
+func TestRemoteClusterLearnerIgnoreDeleteRangeAsConfig(t *testing.T) {
+	testRemoteClusterLearnerIgnoreDeleteRangeAsConfig(t, true)
+}
+func testRemoteClusterLearnerIgnoreDeleteRangeAsConfig(t *testing.T, ignoreDelRange bool) {
+	// restart, backup and restore from backup should keep remote cluster term-index
+	node.EnableForTest()
+	ensureClusterReady(t, 3)
+
+	time.Sleep(time.Second)
+	ns := "test_remote_cluster_syncer_delrange"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	dnw, leaderNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+
+	leaderNode.Node.OptimizeDB("")
+
+	// we set value before the remote syncer started, since the node syncer only is global var which will be changed if another is running as syncer
+	c := getTestRedisConn(t, gkvList[0].redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "test_remote_syncer:k1")
+	rsp, err := goredis.String(c.Do("set", key, key))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+	key2 := fmt.Sprintf("%s:%s", ns, "test_remote_syncer:k2")
+	rsp, err = goredis.String(c.Do("set", key2, key2))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+
+	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 1)
+	defer func() {
+		for _, kv := range remoteSrvs {
+			kv.s.Stop()
+		}
+		if remotePD != nil {
+			remotePD.Stop()
+		}
+		if strings.Contains(remoteTmpDir, "rocksdb-test") {
+			t.Logf("removing: %v", remoteTmpDir)
+			os.RemoveAll(remoteTmpDir)
+		}
+	}()
+	pduri = "http://127.0.0.1:" + pdRemoteHttpPort
+	ensureDataNodesReady(t, pduri, len(remoteSrvs))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 1)
+	defer ensureDeleteNamespace(t, pduri, ns)
+
+	learnerPD, learnerSrvs, tmpDir := startTestClusterForLearner(t, 1)
+	defer func() {
+		for _, kv := range learnerSrvs {
+			kv.s.Stop()
+		}
+		if learnerPD != nil {
+			learnerPD.Stop()
+		}
+		if strings.Contains(tmpDir, "learner-test") {
+			t.Logf("removing: %v", tmpDir)
+			os.RemoveAll(tmpDir)
+		}
+	}()
+
+	leaderNode.Node.OptimizeDB("")
+
+	time.Sleep(time.Second * 3)
+
+	waitRemoteClusterSync(t, ns, leaderNode, learnerSrvs, remoteSrvs)
+
+	addr := fmt.Sprintf("http://127.0.0.1:%v", remoteSrvs[0].httpPort)
+	enableStaleRead(t, addr, true)
+	defer enableStaleRead(t, addr, false)
+	remoteC := getTestRedisConn(t, remoteSrvs[0].redisPort)
+	defer remoteC.Close()
+	rsp, err = goredis.String(remoteC.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, key, rsp)
+	rsp, err = goredis.String(remoteC.Do("get", key2))
+	assert.Nil(t, err)
+	assert.Equal(t, key2, rsp)
+
+	err = leaderNode.Node.DeleteRange(node.DeleteTableRange{
+		Table:                   "test_remote_syncer",
+		DeleteAll:               true,
+		NoReplayToRemoteCluster: ignoreDelRange,
+	})
+	assert.Nil(t, err)
+	time.Sleep(time.Second)
+	waitRemoteClusterSync(t, ns, leaderNode, learnerSrvs, remoteSrvs)
+
+	rsp, err = goredis.String(c.Do("get", key))
+	assert.Equal(t, goredis.ErrNil, err)
+	assert.Equal(t, "", rsp)
+	rsp, err = goredis.String(c.Do("get", key2))
+	assert.Equal(t, goredis.ErrNil, err)
+	assert.Equal(t, "", rsp)
+
+	rsp, err = goredis.String(remoteC.Do("get", key))
+	if ignoreDelRange {
+		assert.Nil(t, err)
+		assert.Equal(t, key, rsp)
+	} else {
+		assert.Equal(t, goredis.ErrNil, err)
+		assert.Equal(t, "", rsp)
+	}
+	rsp, err = goredis.String(remoteC.Do("get", key2))
+	if ignoreDelRange {
+		assert.Nil(t, err)
+		assert.Equal(t, key2, rsp)
+	} else {
+		assert.Equal(t, goredis.ErrNil, err)
+		assert.Equal(t, "", rsp)
+	}
+}
+
 func TestClusterBalanceAcrossMultiDC(t *testing.T) {
 	// TODO:
 }
