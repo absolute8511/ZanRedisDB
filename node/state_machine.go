@@ -490,7 +490,7 @@ func handleReuseOldCheckpoint(srcInfo string, localPath string, term uint64, ind
 		for _, fn := range files {
 			nfn := path.Join(newPath, filepath.Base(fn))
 			nodeLog.Infof("hard link for: %v, %v", fn, nfn)
-			CopyFileForHardLink(fn, nfn)
+			common.CopyFileForHardLink(fn, nfn)
 		}
 	}
 	return reused, newPath

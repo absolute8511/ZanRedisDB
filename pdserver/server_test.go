@@ -725,6 +725,16 @@ func TestRemoteClusterLearnerRestartAndRestoreBackup(t *testing.T) {
 	assert.NotNil(t, leader)
 
 	leaderNode.Node.OptimizeDB("")
+	c := getTestRedisConn(t, gkvList[0].redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "test_remote_syncer:k1")
+	rsp, err := goredis.String(c.Do("set", key, key))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+	key2 := fmt.Sprintf("%s:%s", ns, "test_remote_syncer:k2")
+	rsp, err = goredis.String(c.Do("set", key2, key2))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
 
 	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 2)
 	defer func() {
@@ -776,6 +786,18 @@ func TestRemoteClusterLearnerRestartAndRestoreBackup(t *testing.T) {
 
 	leaderNode.Node.OptimizeDB("")
 	waitRemoteClusterSync(t, ns, leaderNode, learnerSrvs, remoteSrvs)
+
+	addr := fmt.Sprintf("http://127.0.0.1:%v", remoteSrvs[0].httpPort)
+	enableStaleRead(t, addr, true)
+	defer enableStaleRead(t, addr, false)
+	remoteC := getTestRedisConn(t, remoteSrvs[0].redisPort)
+	defer remoteC.Close()
+	rsp, err = goredis.String(remoteC.Do("get", key))
+	assert.Nil(t, err)
+	assert.Equal(t, key, rsp)
+	rsp, err = goredis.String(remoteC.Do("get", key2))
+	assert.Nil(t, err)
+	assert.Equal(t, key2, rsp)
 }
 
 func TestRemoteClusterLearnerNotIgnoreDeleteRangeAsConfig(t *testing.T) {

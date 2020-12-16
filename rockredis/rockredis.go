@@ -1001,6 +1001,7 @@ func isSameSSTFile(f1 string, f2 string) error {
 	if n2 != n1 {
 		return fmt.Errorf("sst file footer not match")
 	}
+	// TODO: add more check on header and middle of file
 	if bytes.Equal(b1[:n1], b2[:n2]) {
 		return nil
 	}
@@ -1073,7 +1074,8 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 			continue
 		}
 		dst := path.Join(r.GetDataDir(), path.Base(fn))
-		err := copyFile(fn, dst, false)
+		err := common.CopyFileForHardLink(fn, dst)
+		//err := copyFile(fn, dst, false)
 		if err != nil {
 			dbLog.Infof("copy %v to %v failed: %v", fn, dst, err)
 			return err
