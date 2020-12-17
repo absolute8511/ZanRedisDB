@@ -3,6 +3,8 @@ package pdserver
 import (
 	"log"
 	"os"
+
+	"github.com/youzan/ZanRedisDB/cluster/pdnode_coord"
 )
 
 type ServerConfig struct {
@@ -40,6 +42,7 @@ func NewServerConfig() *ServerConfig {
 
 		ClusterLeadershipAddresses: "",
 		ClusterID:                  "",
+		BalanceVer:                 pdnode_coord.BalanceV2Str,
 
 		LogLevel: 1,
 		LogDir:   "",

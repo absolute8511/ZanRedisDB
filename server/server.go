@@ -372,10 +372,6 @@ func (s *Server) GetWALDBStats(leaderOnly bool) map[string]map[string]interface{
 	return s.nsMgr.GetWALDBStats(leaderOnly)
 }
 
-func (s *Server) OptimizeDB(ns string, table string) {
-	s.nsMgr.OptimizeDB(ns, table)
-}
-
 func (s *Server) DeleteRange(ns string, dtr node.DeleteTableRange) error {
 	return s.nsMgr.DeleteRange(ns, dtr)
 }

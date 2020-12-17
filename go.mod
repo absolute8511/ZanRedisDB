@@ -12,7 +12,7 @@ require (
 	github.com/absolute8511/hyperloglog v0.0.0-20171127080255-5259284545fc
 	github.com/absolute8511/hyperloglog2 v0.1.1
 	github.com/absolute8511/redcon v0.9.1
-	github.com/absolute8511/redigo v1.3.3
+	github.com/absolute8511/redigo v1.4.3
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible // indirect
 	github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713
@@ -26,7 +26,7 @@ require (
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/emirpasic/gods v1.12.0
-	github.com/felixge/fgprof v0.9.1
+	github.com/felixge/fgprof v0.9.1 // indirect
 	github.com/go-ole/go-ole v1.2.1 // indirect
 	github.com/gobwas/glob v0.2.3
 	github.com/gogo/protobuf v1.3.1
@@ -50,8 +50,8 @@ require (
 	github.com/tidwall/sjson v1.0.0
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
-	github.com/youzan/go-zanredisdb v0.5.1
-	github.com/youzan/gorocksdb v0.0.0-20200621102424-7269d59fec5c
+	github.com/youzan/go-zanredisdb v0.5.9
+	github.com/youzan/gorocksdb v0.0.0-20201201080653-1a9b5c65c962
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
 	google.golang.org/genproto v0.0.0-20180518175338-11a468237815 // indirect

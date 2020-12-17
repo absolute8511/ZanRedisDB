@@ -595,6 +595,10 @@ func TestSet(t *testing.T) {
 	} else if len(n) != 4 {
 		t.Fatal(n)
 	}
+	n, err := goredis.Int(c.Do("scard", key2))
+	assert.Nil(t, err)
+	assert.Equal(t, int(4), n)
+
 	if n, err := goredis.Values(c.Do("srandmember", key2)); err != nil {
 		t.Fatal(err)
 	} else if len(n) != 1 {
@@ -631,6 +635,10 @@ func TestSet(t *testing.T) {
 	} else if len(n) != 0 {
 		t.Fatal(n)
 	}
+
+	n, err = goredis.Int(c.Do("scard", key2))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
 	if n, err := goredis.Values(c.Do("srandmember", key2, 10)); err != nil {
 		t.Fatal(err)
 	} else if len(n) != 0 {
@@ -677,6 +685,10 @@ func TestSet(t *testing.T) {
 	} else if n <= 0 {
 		t.Fatal(n)
 	}
+
+	n, err = goredis.Int(c.Do("scard", key2))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
 }
 
 func TestSetSPopCompatile(t *testing.T) {
@@ -779,6 +791,10 @@ func TestSetExpire(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 3, len(vlist))
 
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int(3), n)
+
 	n, err = goredis.Int(c.Do("srem", key1, f1))
 	assert.Nil(t, err)
 	assert.Equal(t, 1, n)
@@ -811,6 +827,10 @@ func TestSetExpire(t *testing.T) {
 	assert.Nil(t, err)
 	t.Logf("smembers: %v", vlist)
 	assert.Equal(t, 0, len(vlist))
+
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
 
 	realTtl, err = goredis.Int(c.Do("sttl", key1))
 	assert.Nil(t, err)
@@ -848,6 +868,7 @@ func TestSetExpire(t *testing.T) {
 	assert.Nil(t, err)
 	t.Logf("smembers: %v", vlist)
 	assert.Equal(t, 2, len(vlist))
+
 	n, err = goredis.Int(c.Do("scard", key1))
 	assert.Nil(t, err)
 	assert.Equal(t, 2, n)
@@ -898,6 +919,10 @@ func TestSetExpire(t *testing.T) {
 	assert.Nil(t, err)
 	t.Logf("smembers: %v", vlist)
 	assert.Equal(t, 0, len(vlist))
+
+	n, err = goredis.Int(c.Do("scard", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), n)
 
 	realTtl, err = goredis.Int(c.Do("sttl", key1))
 	assert.Nil(t, err)

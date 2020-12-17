@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"path"
 
 	"github.com/shirou/gopsutil/mem"
 	"github.com/youzan/ZanRedisDB/common"
@@ -47,6 +48,8 @@ type SharedRockConfig interface {
 
 type RockEngConfig struct {
 	DataDir            string
+	ReadOnly           bool
+	DataTool           bool
 	SharedConfig       SharedRockConfig
 	EnableTableCounter bool
 	AutoCompacted      bool
@@ -164,6 +167,11 @@ type KVCheckpoint interface {
 	Save(path string, notify chan struct{}) error
 }
 
+type ICompactFilter interface {
+	Name() string
+	Filter(level int, key, value []byte) (bool, []byte)
+}
+
 type KVEngine interface {
 	NewWriteBatch() WriteBatch
 	DefaultWriteBatch() WriteBatch
@@ -177,6 +185,7 @@ type KVEngine interface {
 	LastCompactTime() int64
 	CompactRange(rg CRange)
 	CompactAllRange()
+	DisableManualCompact(bool)
 	GetApproximateTotalKeyNum() int
 	GetApproximateKeyNum(ranges []CRange) uint64
 	GetApproximateSizes(ranges []CRange, includeMem bool) []uint64
@@ -199,6 +208,20 @@ type KVEngine interface {
 	GetIterator(opts IteratorOpts) (Iterator, error)
 	NewCheckpoint() (KVCheckpoint, error)
 	SetOptsForLogStorage()
+	SetCompactionFilter(ICompactFilter)
+}
+
+func GetDataDirFromBase(engType string, base string) (string, error) {
+	if engType == "" || engType == "rocksdb" {
+		return path.Join(base, "rocksdb"), nil
+	}
+	if engType == "pebble" {
+		return path.Join(base, "pebble"), nil
+	}
+	if engType == "mem" {
+		return path.Join(base, "mem"), nil
+	}
+	return "", errors.New("unknown engine type for: " + engType)
 }
 
 func NewKVEng(cfg *RockEngConfig) (KVEngine, error) {

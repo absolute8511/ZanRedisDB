@@ -473,6 +473,9 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 	}
 
 	dataVersion := reqParams.Get("data_version")
+	if dataVersion == "" {
+		dataVersion = common.ValueHeaderV1Str
+	}
 	dv, err := common.StringToDataVersionType(dataVersion)
 	if err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_DATA_VERSION"}

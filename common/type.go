@@ -138,12 +138,15 @@ const (
 )
 
 const (
-	ValueHeaderV1Str = "value_header_v1"
+	ValueHeaderV1Str      = "value_header_v1"
+	ValueHeaderDefaultStr = "default"
 )
 
 func StringToDataVersionType(s string) (DataVersionT, error) {
 	switch s {
 	case "":
+		return DefaultDataVer, nil
+	case ValueHeaderDefaultStr:
 		return DefaultDataVer, nil
 	case ValueHeaderV1Str:
 		return ValueHeaderV1, nil

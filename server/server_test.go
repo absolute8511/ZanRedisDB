@@ -628,6 +628,33 @@ func TestCompactCancelAfterStopped(t *testing.T) {
 	assert.NotNil(t, leaderNode)
 }
 
+func TestOptimizeExpireMeta(t *testing.T) {
+	c := getTestClusterConn(t, true)
+	defer c.Close()
+
+	assert.Equal(t, 3, len(kvsCluster))
+
+	leaderNode := waitForLeader(t, time.Minute)
+	assert.NotNil(t, leaderNode)
+	key1 := "default:test:exp_compact"
+	ttl := 2
+
+	for i := 0; i < 1000; i++ {
+		_, err := goredis.String(c.Do("setex", key1+strconv.Itoa(i), ttl, "hello"))
+		assert.Nil(t, err)
+	}
+	for _, s := range kvsCluster {
+		s.server.nsMgr.DisableOptimizeDB(true)
+		s.server.nsMgr.OptimizeDBExpire("default")
+		s.server.nsMgr.OptimizeDBAnyRange("default", node.CompactAPIRange{StartFrom: []byte("start"), EndTo: []byte("end")})
+	}
+	for _, s := range kvsCluster {
+		s.server.nsMgr.DisableOptimizeDB(false)
+		s.server.nsMgr.OptimizeDBExpire("default")
+		s.server.nsMgr.OptimizeDBAnyRange("default", node.CompactAPIRange{StartFrom: []byte("start"), EndTo: []byte("end")})
+	}
+}
+
 func readWALNames(dirpath string) []string {
 	names, err := fileutil.ReadDir(dirpath)
 	if err != nil {

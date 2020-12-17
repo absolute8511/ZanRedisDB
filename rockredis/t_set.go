@@ -42,50 +42,17 @@ func sDecodeSizeKey(ek []byte) ([]byte, error) {
 }
 
 func sEncodeSetKey(table []byte, key []byte, member []byte) []byte {
-	buf := make([]byte, getDataTablePrefixBufLen(SetType, table)+len(key)+len(member)+1+2)
-
-	pos := encodeDataTablePrefixToBuf(buf, SetType, table)
-
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
-	pos += 2
-
-	copy(buf[pos:], key)
-	pos += len(key)
-
-	buf[pos] = collStartSep
-	pos++
-	copy(buf[pos:], member)
-
-	return buf
+	return encodeCollSubKey(SetType, table, key, member)
 }
 
 func sDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
-	table, pos, err := decodeDataTablePrefixFromBuf(ek, SetType)
-
+	dt, table, key, member, err := decodeCollSubKey(ek)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	if pos+2 > len(ek) {
-		return nil, nil, nil, errSetKey
+	if dt != SetType {
+		return table, key, member, errCollTypeMismatch
 	}
-
-	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-
-	if keyLen+pos > len(ek) {
-		return table, nil, nil, errSetKey
-	}
-
-	key := ek[pos : pos+keyLen]
-	pos += keyLen
-
-	if ek[pos] != collStartSep {
-		return table, nil, nil, errSetKey
-	}
-
-	pos++
-	member := ek[pos:]
 	return table, key, member, nil
 }
 
@@ -99,22 +66,22 @@ func sEncodeStopKey(table []byte, key []byte) []byte {
 	return k
 }
 
-func (db *RockDB) sDelete(tn int64, key []byte, wb engine.WriteBatch) int64 {
+func (db *RockDB) sDelete(tn int64, key []byte, wb engine.WriteBatch) (int64, error) {
 	sk := sEncodeSizeKey(key)
 	keyInfo, err := db.getCollVerKeyForRange(tn, SetType, key, false)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	// no need delete if expired
 	if keyInfo.IsNotExistOrExpired() {
-		return 0
+		return 0, nil
 	}
 	num, err := db.sGetSize(tn, key, false)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	if num == 0 {
-		return 0
+		return 0, nil
 	}
 	if num > 0 {
 		db.IncrTableKeyCount(keyInfo.Table, -1, wb)
@@ -124,7 +91,7 @@ func (db *RockDB) sDelete(tn int64, key []byte, wb engine.WriteBatch) int64 {
 	db.topLargeCollKeys.Update(key, int(0))
 	if db.cfg.ExpirationPolicy == common.WaitCompact {
 		// for compact ttl , we can just delete the meta
-		return num
+		return num, nil
 	}
 	start := keyInfo.RangeStart
 	stop := keyInfo.RangeEnd
@@ -137,7 +104,7 @@ func (db *RockDB) sDelete(tn int64, key []byte, wb engine.WriteBatch) int64 {
 		}
 		it, err := db.NewDBRangeIteratorWithOpts(opts)
 		if err != nil {
-			return 0
+			return 0, err
 		}
 		for ; it.Valid(); it.Next() {
 			wb.Delete(it.RefKey())
@@ -145,9 +112,11 @@ func (db *RockDB) sDelete(tn int64, key []byte, wb engine.WriteBatch) int64 {
 		it.Close()
 	}
 
-	db.delExpire(SetType, key, nil, false, wb)
-
-	return num
+	_, err = db.delExpire(SetType, key, nil, false, wb)
+	if err != nil {
+		return 0, err
+	}
+	return num, nil
 }
 
 // size key include set size and set modify timestamp
@@ -388,6 +357,9 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 	if len(args) == 0 {
 		return 0, nil
 	}
+	if len(args) > MAX_BATCH_NUM {
+		return 0, errTooMuchBatchSize
+	}
 	wb := db.wb
 	defer wb.Clear()
 	keyInfo, err := db.GetCollVersionKey(ts, SetType, key, false)
@@ -407,7 +379,10 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 		}
 
 		ek = sEncodeSetKey(table, rk, args[i])
-		vok, _ := db.ExistNoLock(ek)
+		vok, err := db.ExistNoLock(ek)
+		if err != nil {
+			return 0, err
+		}
 		if !vok {
 			continue
 		} else {
@@ -425,7 +400,10 @@ func (db *RockDB) SRem(ts int64, key []byte, args ...[]byte) (int64, error) {
 		db.IncrTableKeyCount(table, -1, wb)
 	}
 	if newNum == 0 {
-		db.delExpire(SetType, key, nil, false, wb)
+		_, err := db.delExpire(SetType, key, nil, false, wb)
+		if err != nil {
+			return 0, err
+		}
 	}
 	db.topLargeCollKeys.Update(key, int(newNum))
 
@@ -438,8 +416,11 @@ func (db *RockDB) SClear(ts int64, key []byte) (int64, error) {
 		return 0, err
 	}
 
-	num := db.sDelete(ts, key, db.wb)
-	err := db.CommitBatchWrite()
+	num, err := db.sDelete(ts, key, db.wb)
+	if err != nil {
+		return 0, err
+	}
+	err = db.CommitBatchWrite()
 	if num > 0 {
 		return 1, err
 	}
@@ -452,15 +433,22 @@ func (db *RockDB) SMclear(keys ...[]byte) (int64, error) {
 	}
 	wb := db.rockEng.NewWriteBatch()
 	defer wb.Destroy()
+	cnt := 0
 	for _, key := range keys {
 		if err := checkKeySize(key); err != nil {
 			return 0, err
 		}
-		db.sDelete(0, key, wb)
+		n, err := db.sDelete(0, key, wb)
+		if err != nil {
+			return 0, err
+		}
+		if n > 0 {
+			cnt++
+		}
 	}
 
 	err := db.rockEng.Write(wb)
-	return int64(len(keys)), err
+	return int64(cnt), err
 }
 
 func (db *RockDB) sMclearWithBatch(wb engine.WriteBatch, keys ...[]byte) error {
@@ -471,7 +459,10 @@ func (db *RockDB) sMclearWithBatch(wb engine.WriteBatch, keys ...[]byte) error {
 		if err := checkKeySize(key); err != nil {
 			return err
 		}
-		db.sDelete(0, key, wb)
+		_, err := db.sDelete(0, key, wb)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

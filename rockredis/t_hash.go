@@ -2,7 +2,6 @@ package rockredis
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"time"
 
@@ -44,48 +43,17 @@ func hDecodeSizeKey(ek []byte) ([]byte, error) {
 }
 
 func hEncodeHashKey(table []byte, key []byte, field []byte) []byte {
-	buf := make([]byte, getDataTablePrefixBufLen(HashType, table)+len(key)+len(field)+1+2)
-
-	pos := encodeDataTablePrefixToBuf(buf, HashType, table)
-
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
-	pos += 2
-
-	copy(buf[pos:], key)
-	pos += len(key)
-
-	buf[pos] = collStartSep
-	pos++
-	copy(buf[pos:], field)
-	return buf
+	return encodeCollSubKey(HashType, table, key, field)
 }
 
 func hDecodeHashKey(ek []byte) ([]byte, []byte, []byte, error) {
-	table, pos, err := decodeDataTablePrefixFromBuf(ek, HashType)
+	dt, table, key, field, err := decodeCollSubKey(ek)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	if pos+2 > len(ek) {
-		return nil, nil, nil, errHashKey
+	if dt != HashType {
+		return table, key, field, errCollTypeMismatch
 	}
-
-	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	pos += 2
-
-	if keyLen+pos > len(ek) {
-		return nil, nil, nil, errHashKey
-	}
-
-	key := ek[pos : pos+keyLen]
-	pos += keyLen
-
-	if ek[pos] != collStartSep {
-		return nil, nil, nil, errHashKey
-	}
-
-	pos++
-	field := ek[pos:]
 	return table, key, field, nil
 }
 
@@ -308,11 +276,9 @@ func (db *RockDB) hGetRawFieldValue(ts int64, key []byte, field []byte, checkExp
 	ek := hEncodeHashKey(table, rk, field)
 
 	if useLock {
-		v, err := db.GetBytes(ek)
-		return v, err
+		return db.GetBytes(ek)
 	} else {
-		v, err := db.GetBytesNoLock(ek)
-		return v, err
+		return db.GetBytesNoLock(ek)
 	}
 }
 
@@ -377,10 +343,16 @@ func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) er
 func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
 	tn := time.Now().UnixNano()
 	v, err := db.hGetRawFieldValue(tn, key, field, true, true)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
 	if len(v) >= tsLen {
 		v = v[:len(v)-tsLen]
 	}
-	return v, err
+	return v, nil
 }
 
 func (db *RockDB) HExist(key []byte, field []byte) (bool, error) {

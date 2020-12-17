@@ -148,9 +148,11 @@ func NewPebbleEng(cfg *RockEngConfig) (*PebbleEng, error) {
 		return nil, errors.New("config error")
 	}
 
-	err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
-	if err != nil {
-		return nil, err
+	if !cfg.ReadOnly {
+		err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
+		if err != nil {
+			return nil, err
+		}
 	}
 	lopts := make([]pebble.LevelOptions, 0)
 	for l := 0; l < numOfLevels; l++ {
@@ -231,6 +233,9 @@ func (pe *PebbleEng) GetDataDir() string {
 	return path.Join(pe.cfg.DataDir, "pebble")
 }
 
+func (pe *PebbleEng) SetCompactionFilter(ICompactFilter) {
+}
+
 func (pe *PebbleEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
 	return nil
 }
@@ -284,7 +289,13 @@ func (pe *PebbleEng) OpenEng() error {
 		defer cache.Unref()
 		pe.opts.Cache = cache
 	}
-	eng, err := pebble.Open(pe.GetDataDir(), pe.opts)
+	opt := pe.opts
+	if pe.cfg.ReadOnly {
+		opt = pe.opts.Clone()
+		opt.ErrorIfNotExists = true
+		opt.ReadOnly = true
+	}
+	eng, err := pebble.Open(pe.GetDataDir(), opt)
 	if err != nil {
 		return err
 	}
@@ -325,6 +336,9 @@ func (pe *PebbleEng) CompactRange(rg CRange) {
 
 func (pe *PebbleEng) CompactAllRange() {
 	pe.CompactRange(CRange{})
+}
+
+func (pe *PebbleEng) DisableManualCompact(disable bool) {
 }
 
 func (pe *PebbleEng) GetApproximateTotalKeyNum() int {

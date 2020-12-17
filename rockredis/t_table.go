@@ -54,8 +54,7 @@ func extractTableFromRedisKey(key []byte) ([]byte, []byte, error) {
 }
 
 func packRedisKey(table, key []byte) []byte {
-	var newKey []byte
-
+	newKey := make([]byte, 0, len(table)+len(key)+1)
 	newKey = append(newKey, table...)
 	newKey = append(newKey, tableStartSep)
 	newKey = append(newKey, key...)

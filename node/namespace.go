@@ -875,6 +875,18 @@ func (nsm *NamespaceMgr) ClearTopn(ns string) {
 	}
 }
 
+func (nsm *NamespaceMgr) DisableOptimizeDB(disable bool) {
+	nodeList := nsm.getNsNodeList("")
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return
+		}
+		if n.IsReady() {
+			n.Node.DisableOptimizeDB(disable)
+		}
+	}
+}
+
 func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 	nodeList := nsm.getNsNodeList(ns)
 	for _, n := range nodeList {
@@ -883,6 +895,30 @@ func (nsm *NamespaceMgr) OptimizeDB(ns string, table string) {
 		}
 		if n.IsReady() {
 			n.Node.OptimizeDB(table)
+		}
+	}
+}
+
+func (nsm *NamespaceMgr) OptimizeDBExpire(ns string) {
+	nodeList := nsm.getNsNodeList(ns)
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return
+		}
+		if n.IsReady() {
+			n.Node.OptimizeDBExpire()
+		}
+	}
+}
+
+func (nsm *NamespaceMgr) OptimizeDBAnyRange(ns string, r CompactAPIRange) {
+	nodeList := nsm.getNsNodeList(ns)
+	for _, n := range nodeList {
+		if atomic.LoadInt32(&nsm.stopping) == 1 {
+			return
+		}
+		if n.IsReady() {
+			n.Node.OptimizeDBAnyRange(r)
 		}
 	}
 }

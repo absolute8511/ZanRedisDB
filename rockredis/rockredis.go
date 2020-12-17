@@ -30,6 +30,12 @@ const (
 	HLLReadCacheSize       = 1024
 	HLLWriteCacheSize      = 32
 	writeTmpSize           = 1024 * 512
+	minExpiredPossible     = 1500000000
+)
+
+var (
+	lazyCleanExpired = time.Hour * 48
+	timeUpdateFreq   = 10000
 )
 
 var dbLog = common.NewLevelLogger(common.LOG_INFO, common.NewLogger())
@@ -155,6 +161,111 @@ func purgeOldCheckpoint(keepNum int, checkpointDir string, latestSnapIndex uint6
 	}
 }
 
+type rockCompactFilter struct {
+	rdb           *RockDB
+	checkedCnt    int64
+	cachedTimeSec int64
+	metric.CompactFilterStats
+}
+
+func (cf *rockCompactFilter) Name() string {
+	return "rockredis.compactfilter"
+}
+
+func (cf *rockCompactFilter) Stats() metric.CompactFilterStats {
+	var s metric.CompactFilterStats
+	s.ExpiredCleanCnt = atomic.LoadInt64(&cf.ExpiredCleanCnt)
+	s.VersionCleanCnt = atomic.LoadInt64(&cf.VersionCleanCnt)
+	s.DelCleanCnt = atomic.LoadInt64(&cf.DelCleanCnt)
+	return s
+}
+
+func (cf *rockCompactFilter) lazyExpireCheck(h headerMetaValue, curCnt int64) bool {
+	if h.ExpireAt == 0 {
+		return false
+	}
+	if h.ExpireAt <= minExpiredPossible {
+		dbLog.Infof("db %s key %v has invalid small expired timestamp: %v", cf.rdb.GetDataDir(), h.UserData, h.ExpireAt)
+		return false
+	}
+	// avoid call now() too much, we cache the time for a while
+	ts := atomic.LoadInt64(&cf.cachedTimeSec)
+	if curCnt > int64(timeUpdateFreq) || ts <= 0 {
+		ts = time.Now().Unix()
+		atomic.StoreInt64(&cf.cachedTimeSec, ts)
+		atomic.StoreInt64(&cf.checkedCnt, 0)
+	}
+	if int64(h.ExpireAt)+lazyCleanExpired.Nanoseconds()/int64(time.Second) < ts {
+		//dbLog.Debugf("db %s key %v clean since expired timestamp: %v, %v", cf.rdb.GetDataDir(), h.UserData, h.ExpireAt, ts)
+		atomic.AddInt64(&cf.ExpiredCleanCnt, 1)
+		return true
+	}
+	return false
+}
+
+func (cf *rockCompactFilter) Filter(level int, key, value []byte) (bool, []byte) {
+	// dbLog.Debugf("db %v level %v compacting: %v, %s", cf.rdb.GetDataDir(), level, key, value)
+	// check key type
+	if len(key) < 1 {
+		return false, nil
+	}
+	newCnt := atomic.AddInt64(&cf.checkedCnt, 1)
+	switch key[0] {
+	case KVType, HSizeType, LMetaType, SSizeType, ZSizeType, BitmapMetaType:
+		var h headerMetaValue
+		_, err := h.decode(value)
+		if err != nil {
+			return false, nil
+		}
+		return cf.lazyExpireCheck(h, newCnt), nil
+	case HashType, ListType, SetType, ZSetType, ZScoreType, BitmapType:
+		dt, rawKey, ver, err := convertCollDBKeyToRawKey(key)
+		if err != nil {
+			return false, nil
+		}
+		if ver == 0 {
+			return false, nil
+		}
+		// the version is timestamp in nano, check lazy expire
+		ts := atomic.LoadInt64(&cf.cachedTimeSec)
+		if int64(ver)+lazyCleanExpired.Nanoseconds() >= ts*int64(time.Second) {
+			return false, nil
+		}
+		metak, err := encodeMetaKey(dt, rawKey)
+		if err != nil {
+			return false, nil
+		}
+		// maybe cache the meta value if the collection has too many subkeys
+		metav, err := cf.rdb.GetBytesNoLock(metak)
+		if err != nil {
+			return false, nil
+		}
+		if metav == nil {
+			// collection meta not found, it means the whole collection is deleted
+			//dbLog.Debugf("db %s key %v clean since meta not exist: %v, %v, %v", cf.rdb.GetDataDir(), key, metak, rawKey, ver)
+			atomic.AddInt64(&cf.DelCleanCnt, 1)
+			return true, nil
+		}
+		var h headerMetaValue
+		_, err = h.decode(metav)
+		if err != nil {
+			return false, nil
+		}
+		if h.ValueVersion == 0 {
+			// maybe no version?
+			return false, nil
+		}
+		// how to lazy clean for version mismatch?
+		if h.ValueVersion != ver {
+			//dbLog.Debugf("db %s key %v clean since mismatch version: %v, %v", cf.rdb.GetDataDir(), key, h, ver)
+			atomic.AddInt64(&cf.VersionCleanCnt, 1)
+			return true, nil
+		}
+		return cf.lazyExpireCheck(h, newCnt), nil
+	}
+	return false, nil
+}
+
 type RockDB struct {
 	expiration
 	cfg               *RockRedisDBConfig
@@ -173,6 +284,7 @@ type RockDB struct {
 	engOpened         int32
 	latestSnapIndex   uint64
 	topLargeCollKeys  *metric.CollSizeHeap
+	compactFilter     *rockCompactFilter
 }
 
 func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
@@ -196,8 +308,8 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 		db.expiration = newLocalExpiration(db)
 	case common.WaitCompact:
 		db.expiration = newCompactExpiration(db)
-	//TODO
-	//case common.PeriodicalRotation:
+		// register the compact callback to lazy clean the expired data
+		db.RegisterCompactCallback()
 	default:
 		return nil, errors.New("unsupported ExpirationPolicy")
 	}
@@ -207,7 +319,9 @@ func OpenRockDB(cfg *RockRedisDBConfig) (*RockDB, error) {
 		return nil, err
 	}
 
-	os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
+	if !cfg.ReadOnly {
+		os.MkdirAll(db.GetBackupDir(), common.DIR_PERM)
+	}
 
 	db.wg.Add(1)
 	go func() {
@@ -242,12 +356,23 @@ func (r *RockDB) GetBackupDir() string {
 	return GetBackupDir(r.cfg.DataDir)
 }
 
-func GetDataDirFromBase(base string) string {
-	return path.Join(base, "rocksdb")
-}
-
 func (r *RockDB) GetDataDir() string {
 	return r.rockEng.GetDataDir()
+}
+
+func (r *RockDB) GetCompactFilterStats() metric.CompactFilterStats {
+	if r.compactFilter != nil {
+		return r.compactFilter.Stats()
+	}
+	return metric.CompactFilterStats{}
+}
+
+func (r *RockDB) RegisterCompactCallback() {
+	filter := &rockCompactFilter{
+		rdb: r,
+	}
+	r.compactFilter = filter
+	r.rockEng.SetCompactionFilter(filter)
 }
 
 func (r *RockDB) reOpenEng() error {
@@ -271,7 +396,9 @@ func (r *RockDB) reOpenEng() error {
 		r.rockEng.CloseEng()
 		return err
 	}
-	r.expiration.Start()
+	if r.expiration != nil && !r.cfg.ReadOnly {
+		r.expiration.Start()
+	}
 	atomic.StoreInt32(&r.engOpened, 1)
 	return nil
 }
@@ -285,8 +412,20 @@ func (r *RockDB) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error 
 	return r.rockEng.SetMaxBackgroundOptions(maxCompact, maxBackJobs)
 }
 
+// TODO: how to interrupt the manual compact to avoid stall too long?
+func (r *RockDB) DisableManualCompact(disable bool) {
+	r.rockEng.DisableManualCompact(disable)
+}
+
 func (r *RockDB) CompactAllRange() {
 	r.rockEng.CompactAllRange()
+}
+
+func (r *RockDB) CompactOldExpireData() {
+	now := time.Now().Unix()
+	minKey := expEncodeTimeKey(NoneType, nil, 0)
+	maxKey := expEncodeTimeKey(maxDataType, nil, now)
+	r.CompactRange(minKey, maxKey)
 }
 
 func (r *RockDB) CompactRange(minKey []byte, maxKey []byte) {
@@ -699,17 +838,17 @@ func (r *RockDB) backupLoop() {
 				}
 				cost := time.Now().Sub(start)
 				dbLog.Infof("backup done (cost %v), check point to: %v\n", cost.String(), rsp.backupDir)
-				// purge some old checkpoint
-				r.checkpointDirLock.Lock()
-				keepNum := MaxCheckpointNum
-				if r.cfg.KeepBackup > 0 {
-					keepNum = r.cfg.KeepBackup
-				}
-				// avoid purge the checkpoint in the raft snapshot
-				purgeOldCheckpoint(keepNum, r.GetBackupDir(), atomic.LoadUint64(&r.latestSnapIndex))
-				purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote(), math.MaxUint64-1)
-				r.checkpointDirLock.Unlock()
 			}()
+			// purge some old checkpoint
+			r.checkpointDirLock.Lock()
+			keepNum := MaxCheckpointNum
+			if r.cfg.KeepBackup > 0 {
+				keepNum = r.cfg.KeepBackup
+			}
+			// avoid purge the checkpoint in the raft snapshot
+			purgeOldCheckpoint(keepNum, r.GetBackupDir(), atomic.LoadUint64(&r.latestSnapIndex))
+			purgeOldCheckpoint(MaxRemoteCheckpointNum, r.GetBackupDirForRemote(), math.MaxUint64-1)
+			r.checkpointDirLock.Unlock()
 		case <-r.quit:
 			return
 		}
@@ -862,6 +1001,7 @@ func isSameSSTFile(f1 string, f2 string) error {
 	if n2 != n1 {
 		return fmt.Errorf("sst file footer not match")
 	}
+	// TODO: add more check on header and middle of file
 	if bytes.Equal(b1[:n1], b2[:n2]) {
 		return nil
 	}
@@ -934,7 +1074,8 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 			continue
 		}
 		dst := path.Join(r.GetDataDir(), path.Base(fn))
-		err := copyFile(fn, dst, false)
+		err := common.CopyFileForHardLink(fn, dst)
+		//err := copyFile(fn, dst, false)
 		if err != nil {
 			dbLog.Infof("copy %v to %v failed: %v", fn, dst, err)
 			return err

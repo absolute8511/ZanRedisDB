@@ -166,6 +166,14 @@ func testKVIterator(t *testing.T, engType string) {
 	it, _ := eng.GetIterator(IteratorOpts{})
 	defer it.Close()
 	it.SeekToFirst()
+	// change value after iterator should not change the snapshot iterator?
+	if engType != "mem" {
+		// for btree, the write will be blocked while the iterator is open
+		// for skiplist, we do not support snapshot
+		wb.Put(key4, []byte(string(key4)+"update"))
+		eng.Write(wb)
+		wb.Clear()
+	}
 	assert.True(t, it.Valid())
 	assert.Equal(t, key, it.Key())
 	assert.Equal(t, key, it.Value())

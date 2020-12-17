@@ -71,6 +71,12 @@ const (
 	ProposeOp_DeleteTable            int = 6
 )
 
+type CompactAPIRange struct {
+	StartFrom []byte `json:"start_from,omitempty"`
+	EndTo     []byte `json:"end_to,omitempty"`
+	Dryrun    bool   `json:"dryrun,omitempty"`
+}
+
 type DeleteTableRange struct {
 	Table     string `json:"table,omitempty"`
 	StartFrom []byte `json:"start_from,omitempty"`
@@ -78,6 +84,9 @@ type DeleteTableRange struct {
 	// to avoid drop all table data, this is needed to delete all data in table
 	DeleteAll bool `json:"delete_all,omitempty"`
 	Dryrun    bool `json:"dryrun,omitempty"`
+	// TODO: add flag to indicate should this be replicated to the remote cluster
+	// to avoid delete too much by accident
+	NoReplayToRemoteCluster bool `json:"noreplay_to_remote_cluster"`
 }
 
 func (dtr DeleteTableRange) CheckValid() error {
@@ -266,6 +275,7 @@ func NewKVNode(kvopts *KVOptions, config *RaftConfig,
 		wrPools:            newWaitReqPoolArray(),
 		slowLimiter:        sl,
 	}
+
 	if kvsm, ok := sm.(*kvStoreSM); ok {
 		s.store = kvsm.store
 	}
@@ -382,6 +392,26 @@ func (nd *KVNode) BackupDB(checkLast bool) {
 	nd.CustomPropose(d)
 }
 
+func (nd *KVNode) OptimizeDBExpire() {
+	if nd.IsStopping() {
+		return
+	}
+	nd.rn.Infof("node %v begin optimize db expire meta", nd.ns)
+	defer nd.rn.Infof("node %v end optimize db", nd.ns)
+	nd.sm.OptimizeExpire()
+	// since we can not know whether leader or follower is done on optimize
+	// we backup anyway after optimize
+	nd.BackupDB(false)
+}
+
+func (nd *KVNode) DisableOptimizeDB(disable bool) {
+	if nd.IsStopping() {
+		return
+	}
+	nd.rn.Infof("node %v disable optimize db flag %v", nd.ns, disable)
+	nd.sm.DisableOptimize(disable)
+}
+
 func (nd *KVNode) OptimizeDB(table string) {
 	if nd.IsStopping() {
 		return
@@ -396,6 +426,18 @@ func (nd *KVNode) OptimizeDB(table string) {
 		// we backup anyway after optimize
 		nd.BackupDB(false)
 	}
+}
+
+func (nd *KVNode) OptimizeDBAnyRange(r CompactAPIRange) {
+	if nd.IsStopping() {
+		return
+	}
+	nd.rn.Infof("node %v begin optimize db range %v", nd.ns, r)
+	defer nd.rn.Infof("node %v end optimize db range", nd.ns)
+	if r.Dryrun {
+		return
+	}
+	nd.sm.OptimizeAnyRange(r)
 }
 
 func (nd *KVNode) DeleteRange(drange DeleteTableRange) error {
@@ -1314,6 +1356,9 @@ func (nd *KVNode) applyEntries(np *nodeProgress, applyEvent *applyInfo) (bool, b
 }
 
 func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool) {
+	// TODO: handle concurrent apply,
+	// if has conf change event or snapshot event, must wait all previous events done
+	// note if not the conf change event, then the confChanged flag must be false
 	nd.applySnapshot(np, applyEvent)
 	start := time.Now()
 	confChanged, forceBackup := nd.applyEntries(np, applyEvent)
@@ -1339,6 +1384,8 @@ func (nd *KVNode) applyAll(np *nodeProgress, applyEvent *applyInfo) (bool, bool)
 	return confChanged, forceBackup
 }
 
+// TODO: maybe we can apply in concurrent for some storage engine to avoid a single slow write block others
+// we can use the same goroutine for the same table prefix, which can make sure we will be ordered in the same business data
 func (nd *KVNode) applyCommits(commitC <-chan applyInfo) {
 	defer func() {
 		nd.rn.Infof("apply commit exit")
@@ -1424,6 +1471,7 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 		}
 	}
 
+	// TODO: need wait the concurrent apply buffer empty
 	nd.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
 	err := nd.rn.beginSnapshot(np.appliedt, np.appliedi, np.confState)
 	if err != nil {

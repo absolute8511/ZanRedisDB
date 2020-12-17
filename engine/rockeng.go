@@ -222,9 +222,11 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		opts.SetLevelCompactionDynamicLevelBytes(true)
 	}
 
-	err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
-	if err != nil {
-		return nil, err
+	if !cfg.ReadOnly {
+		err := os.MkdirAll(cfg.DataDir, common.DIR_PERM)
+		if err != nil {
+			return nil, err
+		}
 	}
 	db := &RockEng{
 		cfg:              cfg,
@@ -243,6 +245,10 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		go db.compactLoop()
 	}
 	return db, nil
+}
+
+func (r *RockEng) SetCompactionFilter(filter ICompactFilter) {
+	r.dbOpts.SetCompactionFilter(filter)
 }
 
 func (r *RockEng) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error {
@@ -349,11 +355,29 @@ func (r *RockEng) OpenEng() error {
 		dbLog.Warningf("rocksdb engine already opened: %v, should close it before reopen", r.GetDataDir())
 		return errors.New("rocksdb open failed since not closed")
 	}
-	eng, err := gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
-	if err != nil {
-		return err
+	if r.cfg.ReadOnly {
+		ro := *(r.GetOpts())
+		ro.SetCreateIfMissing(false)
+		dfile := r.GetDataDir()
+		if r.cfg.DataTool {
+			_, err := os.Stat(dfile)
+			if os.IsNotExist(err) {
+				dfile = r.cfg.DataDir
+			}
+		}
+		dbLog.Infof("rocksdb engine open %v as read only", dfile)
+		eng, err := gorocksdb.OpenDbForReadOnly(&ro, dfile, false)
+		if err != nil {
+			return err
+		}
+		r.eng = eng
+	} else {
+		eng, err := gorocksdb.OpenDb(r.dbOpts, r.GetDataDir())
+		if err != nil {
+			return err
+		}
+		r.eng = eng
 	}
-	r.eng = eng
 	r.wb = newRocksWriteBatch(r.eng, r.defaultWriteOpts)
 	atomic.StoreInt32(&r.engOpened, 1)
 	dbLog.Infof("rocksdb engine opened: %v", r.GetDataDir())
@@ -389,6 +413,15 @@ func (r *RockEng) CompactRange(rg CRange) {
 func (r *RockEng) CompactAllRange() {
 	atomic.StoreInt64(&r.deletedCnt, 0)
 	r.CompactRange(CRange{})
+}
+
+func (r *RockEng) DisableManualCompact(disable bool) {
+	//TODO: rocksdb 6.5 will support the disable and enable manual compaction
+	if disable {
+		//r.eng.DisableManualCompact(disable)
+	} else {
+		//r.eng.EnableManualCompact(disable)
+	}
 }
 
 func (r *RockEng) GetApproximateTotalKeyNum() int {

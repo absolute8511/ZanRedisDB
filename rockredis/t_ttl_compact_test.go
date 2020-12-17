@@ -13,6 +13,311 @@ import (
 	"github.com/youzan/ZanRedisDB/common"
 )
 
+func TestCompactionFilterInWaitCompact(t *testing.T) {
+	// test case need for
+	// 1. expired in ttl
+	// 2. meta not exist (coll delete)
+	// 3. version changed (coll update)
+	// 4. lazy check should be ensured
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	key1 := []byte("test:testdbTTL_compactfilter1")
+	key2 := []byte("test:testdbTTL_compactfilter2")
+	tn := time.Now().UnixNano()
+	err := db.KVSet(tn, key1, []byte("hello world 1"))
+	assert.Nil(t, err)
+	err = db.KVSet(tn, key2, []byte("hello world 2"))
+	assert.Nil(t, err)
+
+	hkeyKeep := []byte("test:testdbTTL_compactfilter_hashkeep")
+	hkeyDel := []byte("test:testdbTTL_compactfilter_hashdel")
+	hkeyUpdate := []byte("test:testdbTTL_compactfilter_hashudpate")
+	hkeyExpire := []byte("test:testdbTTL_compactfilter_hashexpire")
+	db.HSet(tn, false, hkeyKeep, []byte("test_hash_keep"), []byte("value_hash_keep"))
+	db.HSet(tn, false, hkeyDel, []byte("test_hash_del"), []byte("value_hash_del"))
+	db.HSet(tn, false, hkeyDel, []byte("test_hash_del2"), []byte("value_hash_del2"))
+	db.HSet(tn, false, hkeyUpdate, []byte("test_hash_update"), []byte("value_hash_update"))
+	db.HSet(tn, false, hkeyExpire, []byte("test_hash_expired"), []byte("value_hash_expire"))
+	db.HSet(tn, false, hkeyExpire, []byte("test_hash_expired2"), []byte("value_hash_expire2"))
+
+	db.Expire(tn, key1, 2)
+	db.Expire(tn, key2, 3)
+	db.HExpire(tn, hkeyExpire, 4)
+	// compact filter should hit all keys
+	db.CompactAllRange()
+	stats := db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+
+	time.Sleep(time.Millisecond)
+	tn = time.Now().UnixNano()
+	db.DelKeys(key1)
+	db.HClear(tn, hkeyDel)
+	db.HClear(tn, hkeyUpdate)
+	db.HSet(tn, false, hkeyUpdate, []byte("test_hash_update2"), []byte("value_hash_update2"))
+
+	// compact filter should hit all undeleted keys
+	db.CompactAllRange()
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	// should clean deleted until lazy period
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+	// wait ttl
+	time.Sleep(time.Second * 5)
+	db.CompactAllRange()
+	db.CompactAllRange()
+	// should clean expired until lazy period
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	// should clean deleted after lazy period (in test is 3s)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+
+	// wait lazy check
+	time.Sleep(lazyCleanExpired * 2)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(4), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+	hv, err := db.HGet(hkeyUpdate, []byte("test_hash_update2"))
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("value_hash_update2"), hv)
+	hv, err = db.HGet(hkeyUpdate, []byte("test_hash_update"))
+	assert.Nil(t, err)
+	assert.Nil(t, hv)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(4), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+}
+
+func TestCompactionFilterInWaitCompactForZSet(t *testing.T) {
+	// test case need for
+	// 1. expired in ttl
+	// 2. meta not exist (coll delete)
+	// 3. version changed (coll update)
+	// 4. lazy check should be ensured
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	tn := time.Now().UnixNano()
+	keyKeep := []byte("test:testdbTTL_compactfilter_keep")
+	keyDel := []byte("test:testdbTTL_compactfilter_del")
+	keyUpdate := []byte("test:testdbTTL_compactfilter_udpate")
+	keyExpire := []byte("test:testdbTTL_compactfilter_expire")
+	db.ZAdd(tn, keyKeep, common.ScorePair{Member: []byte("test_keep"), Score: 1})
+	db.ZAdd(tn, keyDel, common.ScorePair{Member: []byte("test_del"), Score: 1})
+	db.ZAdd(tn, keyDel, common.ScorePair{Member: []byte("test_del2"), Score: 2})
+	db.ZAdd(tn, keyUpdate, common.ScorePair{Member: []byte("test_update"), Score: 1})
+	db.ZAdd(tn, keyExpire, common.ScorePair{Member: []byte("test_expired"), Score: 1})
+	db.ZAdd(tn, keyExpire, common.ScorePair{Member: []byte("test_expired2"), Score: 2})
+
+	db.ZExpire(tn, keyExpire, 4)
+	// compact filter should hit all keys
+	db.CompactAllRange()
+	stats := db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+
+	time.Sleep(time.Millisecond)
+	tn = time.Now().UnixNano()
+	db.ZClear(tn, keyDel)
+	db.ZClear(tn, keyUpdate)
+	db.ZAdd(tn, keyUpdate, common.ScorePair{Member: []byte("test_update2"), Score: 2})
+
+	// compact filter should hit all undeleted keys
+	db.CompactAllRange()
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	// should clean deleted until lazy period
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+	// wait ttl
+	time.Sleep(time.Second * 5)
+	db.CompactAllRange()
+	db.CompactAllRange()
+	// should clean expired until lazy period
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	// should clean deleted after lazy period (in test is 3s)
+	assert.Equal(t, int64(4), stats.DelCleanCnt)
+	assert.Equal(t, int64(2), stats.VersionCleanCnt)
+
+	// wait lazy check
+	time.Sleep(lazyCleanExpired * 2)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(5), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(4), stats.DelCleanCnt)
+	assert.Equal(t, int64(2), stats.VersionCleanCnt)
+	hv, err := db.ZScore(keyUpdate, []byte("test_update2"))
+	assert.Nil(t, err)
+	assert.Equal(t, float64(2), hv)
+	hv, err = db.ZScore(keyUpdate, []byte("test_update"))
+	assert.Equal(t, errScoreMiss, err)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(5), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(4), stats.DelCleanCnt)
+	assert.Equal(t, int64(2), stats.VersionCleanCnt)
+}
+
+func TestCompactionFilterInWaitCompactForList(t *testing.T) {
+	// test case need for
+	// 1. expired in ttl
+	// 2. meta not exist (coll delete)
+	// 3. version changed (coll update)
+	// 4. lazy check should be ensured
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	tn := time.Now().UnixNano()
+
+	keyKeep := []byte("test:testdbTTL_compactfilter_keep")
+	keyDel := []byte("test:testdbTTL_compactfilter_del")
+	keyUpdate := []byte("test:testdbTTL_compactfilter_update")
+	keyExpire := []byte("test:testdbTTL_compactfilter_expire")
+	db.LPush(tn, keyKeep, []byte("test_keep"))
+	db.LPush(tn, keyDel, []byte("test_del"))
+	db.LPush(tn, keyDel, []byte("test_del2"))
+	db.LPush(tn, keyUpdate, []byte("test_update"))
+	db.LPush(tn, keyExpire, []byte("test_expired"))
+	db.LPush(tn, keyExpire, []byte("test_expired2"))
+
+	db.LExpire(tn, keyExpire, 4)
+	// compact filter should hit all keys
+	db.CompactAllRange()
+	stats := db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+
+	time.Sleep(time.Millisecond)
+	tn = time.Now().UnixNano()
+	db.LClear(tn, keyDel)
+	db.LClear(tn, keyUpdate)
+	db.LPush(tn, keyUpdate, []byte("test_update2"))
+
+	// compact filter should hit all undeleted keys
+	db.CompactAllRange()
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	// should clean deleted until lazy period
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+	// wait ttl
+	time.Sleep(time.Second * 5)
+	db.CompactAllRange()
+	db.CompactAllRange()
+	// should clean expired until lazy period
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	// should clean deleted after lazy period (in test is 3s)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+
+	// wait lazy check
+	time.Sleep(lazyCleanExpired * 2)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(3), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+	hv, err := db.LIndex(keyUpdate, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("test_update2"), hv)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(3), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+}
+
+func TestCompactionFilterInWaitCompactForBitmap(t *testing.T) {
+	// test case need for
+	// 1. expired in ttl
+	// 2. meta not exist (coll delete)
+	// 3. version changed (coll update)
+	// 4. lazy check should be ensured
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+	tn := time.Now().UnixNano()
+
+	keyKeep := []byte("test:testdbTTL_compactfilter_keep")
+	keyDel := []byte("test:testdbTTL_compactfilter_del")
+	keyUpdate := []byte("test:testdbTTL_compactfilter_udpate")
+	keyExpire := []byte("test:testdbTTL_compactfilter_expire")
+	db.BitSetV2(tn, keyKeep, 1, 1)
+	db.BitSetV2(tn, keyDel, 1, 1)
+	db.BitSetV2(tn, keyDel, 1024000, 1)
+	db.BitSetV2(tn, keyUpdate, 1, 1)
+	db.BitSetV2(tn, keyExpire, 1, 1)
+	db.BitSetV2(tn, keyExpire, 1024000, 1)
+
+	db.BitExpire(tn, keyExpire, 4)
+	// compact filter should hit all keys
+	db.CompactAllRange()
+	stats := db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+
+	time.Sleep(time.Millisecond)
+	tn = time.Now().UnixNano()
+	db.BitClear(tn, keyDel)
+	db.BitClear(tn, keyUpdate)
+	db.BitSetV2(tn, keyUpdate, 2, 1)
+
+	// compact filter should hit all undeleted keys
+	db.CompactAllRange()
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	// should clean deleted until lazy period
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(0), stats.DelCleanCnt)
+	assert.Equal(t, int64(0), stats.VersionCleanCnt)
+	// wait ttl
+	time.Sleep(time.Second * 5)
+	db.CompactAllRange()
+	db.CompactAllRange()
+	// should clean expired until lazy period
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(0), stats.ExpiredCleanCnt)
+	// should clean deleted after lazy period (in test is 3s)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+
+	// wait lazy check
+	time.Sleep(lazyCleanExpired * 2)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(3), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+	v, err := db.BitGetV2(keyUpdate, 2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), v)
+	v, err = db.BitGetV2(keyUpdate, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), v)
+	db.CompactAllRange()
+	stats = db.GetCompactFilterStats()
+	assert.Equal(t, int64(3), stats.ExpiredCleanCnt)
+	assert.Equal(t, int64(2), stats.DelCleanCnt)
+	assert.Equal(t, int64(1), stats.VersionCleanCnt)
+}
+
 func TestKVTTL_Compact(t *testing.T) {
 	db := getTestDBWithCompactTTL(t)
 	defer os.RemoveAll(db.cfg.DataDir)
@@ -138,6 +443,8 @@ func TestKVTTL_Compact(t *testing.T) {
 	v, err = db.KVTtl(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(-1), v)
+	// compact should clean all expired data
+	db.CompactAllRange()
 }
 
 func TestKVTTL_CompactKeepTTL(t *testing.T) {
@@ -409,6 +716,9 @@ func TestHashTTL_Compact(t *testing.T) {
 	} else if v != -1 {
 		t.Fatal("HashPersist do not clear the ttl")
 	}
+
+	// compact should clean all expired data
+	db.CompactAllRange()
 }
 
 func TestHashTTL_Compact_KeepTTL(t *testing.T) {

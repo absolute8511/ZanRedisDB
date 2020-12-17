@@ -1,6 +1,7 @@
 package rockredis
 
 import (
+	"encoding/binary"
 	"errors"
 	"time"
 )
@@ -10,6 +11,101 @@ const (
 	collStopSep               byte  = collStartSep + 1
 	collectionLengthForMetric int64 = 128
 )
+
+var (
+	errCollKey          = errors.New("invalid collection key")
+	errCollTypeMismatch = errors.New("decoded collection type mismatch")
+)
+
+// note for list/bitmap/zscore subkey is different
+func encodeCollSubKey(dt byte, table []byte, key []byte, subkey []byte) []byte {
+	if dt != HashType && dt != SetType && dt != ZSetType {
+		panic(errDataType)
+	}
+	buf := make([]byte, getDataTablePrefixBufLen(dt, table)+len(key)+len(subkey)+1+2)
+
+	pos := encodeDataTablePrefixToBuf(buf, dt, table)
+
+	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
+	pos += 2
+
+	copy(buf[pos:], key)
+	pos += len(key)
+
+	buf[pos] = collStartSep
+	pos++
+	copy(buf[pos:], subkey)
+
+	return buf
+}
+
+// note for list/bitmap/zscore subkey is different
+func decodeCollSubKey(dbk []byte) (byte, []byte, []byte, []byte, error) {
+	if len(dbk) < 0 {
+		return 0, nil, nil, nil, errDataType
+	}
+	dt := dbk[0]
+	if dt != HashType && dt != SetType && dt != ZSetType {
+		return dt, nil, nil, nil, errDataType
+	}
+	table, pos, err := decodeDataTablePrefixFromBuf(dbk, dt)
+	if err != nil {
+		return dt, nil, nil, nil, err
+	}
+
+	if pos+2 > len(dbk) {
+		return dt, nil, nil, nil, errCollKey
+	}
+
+	keyLen := int(binary.BigEndian.Uint16(dbk[pos:]))
+	pos += 2
+
+	if keyLen+pos > len(dbk) {
+		return dt, table, nil, nil, errCollKey
+	}
+
+	key := dbk[pos : pos+keyLen]
+	pos += keyLen
+
+	if dbk[pos] != collStartSep {
+		return dt, table, nil, nil, errCollKey
+	}
+	pos++
+	subkey := dbk[pos:]
+	return dt, table, key, subkey, nil
+}
+
+// decode the versioned collection key (in wait compact policy) and convert to raw redis key
+func convertCollDBKeyToRawKey(dbk []byte) (byte, []byte, int64, error) {
+	if len(dbk) < 0 {
+		return 0, nil, 0, errDataType
+	}
+	dt := dbk[0]
+	var table []byte
+	var verk []byte
+	var err error
+	switch dt {
+	case HashType, SetType, ZSetType:
+		_, table, verk, _, err = decodeCollSubKey(dbk)
+	case ListType:
+		table, verk, _, err = lDecodeListKey(dbk)
+	case ZScoreType:
+		table, verk, _, _, err = zDecodeScoreKey(dbk)
+	case BitmapType:
+		table, verk, _, err = decodeBitmapKey(dbk)
+	default:
+		return 0, nil, 0, errDataType
+	}
+	if err != nil {
+		return dt, nil, 0, err
+	}
+	rk, ver, err := decodeVerKey(verk)
+	if err != nil {
+		return dt, nil, 0, err
+	}
+	rawKey := packRedisKey(table, rk)
+	return dt, rawKey, ver, nil
+}
 
 type collVerKeyInfo struct {
 	OldHeader  *headerMetaValue
@@ -38,7 +134,7 @@ func checkCollKFSize(key []byte, field []byte) error {
 	return nil
 }
 
-func encodeMetaKey(dt byte, key []byte) []byte {
+func encodeMetaKey(dt byte, key []byte) ([]byte, error) {
 	switch dt {
 	case KVType:
 		key = encodeKVKey(key)
@@ -50,20 +146,12 @@ func encodeMetaKey(dt byte, key []byte) []byte {
 		key = bitEncodeMetaKey(key)
 	case ListType, LMetaType:
 		key = lEncodeMetaKey(key)
-	case ZSetType, ZSizeType:
+	case ZSetType, ZSizeType, ZScoreType:
 		key = zEncodeSizeKey(key)
 	default:
+		return nil, errDataType
 	}
-	return key
-}
-
-// in raft write loop should avoid lock.
-func (db *RockDB) getCollVerKey(ts int64, dt byte, key []byte, useLock bool) (collVerKeyInfo, error) {
-	info, err := db.GetCollVersionKey(ts, dt, key, useLock)
-	if err != nil {
-		return info, err
-	}
-	return info, nil
+	return key, nil
 }
 
 func (db *RockDB) getCollVerKeyForRange(ts int64, dt byte, key []byte, useLock bool) (collVerKeyInfo, error) {
@@ -86,6 +174,7 @@ func (db *RockDB) getCollVerKeyForRange(ts int64, dt byte, key []byte, useLock b
 	return info, nil
 }
 
+// if run in raft write loop should avoid lock.
 func (db *RockDB) GetCollVersionKey(ts int64, dt byte, key []byte, useLock bool) (collVerKeyInfo, error) {
 	var keyInfo collVerKeyInfo
 	table, rk, err := extractTableFromRedisKey(key)
@@ -137,22 +226,11 @@ func (db *RockDB) prepareCollKeyForWrite(ts int64, dt byte, key []byte, field []
 // since the ttl is not available in local_deletion policy (can reduce 1 get to db)
 func (db *RockDB) collHeaderMeta(ts int64, dt byte, key []byte, useLock bool) (*headerMetaValue, bool, error) {
 	var sizeKey []byte
-	switch dt {
-	case HashType:
-		sizeKey = hEncodeSizeKey(key)
-	case SetType:
-		sizeKey = sEncodeSizeKey(key)
-	case BitmapType:
-		sizeKey = bitEncodeMetaKey(key)
-	case ListType:
-		sizeKey = lEncodeMetaKey(key)
-	case ZSetType:
-		sizeKey = zEncodeSizeKey(key)
-	default:
-		return nil, false, errors.New("unsupported collection type")
+	sizeKey, err := encodeMetaKey(dt, key)
+	if err != nil {
+		return nil, false, err
 	}
 	var v []byte
-	var err error
 	if useLock {
 		v, err = db.GetBytes(sizeKey)
 	} else {

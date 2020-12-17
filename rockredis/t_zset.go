@@ -61,47 +61,17 @@ func zDecodeSizeKey(ek []byte) ([]byte, error) {
 }
 
 func zEncodeSetKey(table []byte, key []byte, member []byte) []byte {
-	buf := make([]byte, getDataTablePrefixBufLen(ZSetType, table)+len(key)+len(member)+3)
-	pos := 0
-	pos = encodeDataTablePrefixToBuf(buf, ZSetType, table)
-
-	binary.BigEndian.PutUint16(buf[pos:], uint16(len(key)))
-	pos += 2
-
-	copy(buf[pos:], key)
-	pos += len(key)
-
-	buf[pos] = zsetMemSep
-	pos++
-
-	copy(buf[pos:], member)
-	return buf
+	return encodeCollSubKey(ZSetType, table, key, member)
 }
 
 func zDecodeSetKey(ek []byte) ([]byte, []byte, []byte, error) {
-	table, pos, err := decodeDataTablePrefixFromBuf(ek, ZSetType)
+	dt, table, key, member, err := decodeCollSubKey(ek)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	if pos+2 > len(ek) {
-		return table, nil, nil, errZSetKey
+	if dt != ZSetType {
+		return table, key, member, errCollTypeMismatch
 	}
-
-	keyLen := int(binary.BigEndian.Uint16(ek[pos:]))
-	if keyLen+pos > len(ek) {
-		return table, nil, nil, errZSetKey
-	}
-
-	pos += 2
-	key := ek[pos : pos+keyLen]
-
-	if ek[pos+keyLen] != zsetMemSep {
-		return table, nil, nil, errZSetKey
-	}
-	pos++
-
-	member := ek[pos+keyLen:]
 	return table, key, member, nil
 }
 
