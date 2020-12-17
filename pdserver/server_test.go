@@ -1794,6 +1794,17 @@ func TestInstallSnapshotOnFollower(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		nsNode.Node.OptimizeDB("")
 	}
+	c := getTestRedisConn(t, dnw.redisPort)
+	defer c.Close()
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("%s:%s:%v", ns, "snap_transfer:k1", i)
+		rsp, err := goredis.String(c.Do("set", key, key))
+		assert.Nil(t, err)
+		assert.Equal(t, "OK", rsp)
+	}
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
 	oldNs := getNsInfo(t, ns, 0)
 	t.Logf("old isr is: %v", oldNs)
 	assert.Equal(t, 3, len(oldNs.GetISR()))
@@ -1803,19 +1814,25 @@ func TestInstallSnapshotOnFollower(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		nsNode.Node.OptimizeDB("")
 	}
-	c := getTestRedisConn(t, dnw.redisPort)
-	defer c.Close()
-	key := fmt.Sprintf("%s:%s", ns, "snap_transfer:k1")
-	rsp, err := goredis.String(c.Do("set", key, "1234"))
-	assert.Nil(t, err)
-	assert.Equal(t, "OK", rsp)
-
+	for i := 0; i < 50; i++ {
+		key := fmt.Sprintf("%s:%s:%v", ns, "snap_transfer:k1", i)
+		rsp, err := goredis.String(c.Do("set", key, "updated"+key))
+		assert.Nil(t, err)
+		assert.Equal(t, "OK", rsp)
+	}
 	for i := 0; i < 50; i++ {
 		nsNode.Node.OptimizeDB("")
 	}
-	leaderV, err := goredis.String(c.Do("get", key))
-	assert.True(t, err == nil || err == goredis.ErrNil)
-	assert.Equal(t, "1234", leaderV)
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("%s:%s:%v", ns, "snap_transfer:k1", i)
+		leaderV, err := goredis.String(c.Do("get", key))
+		assert.True(t, err == nil || err == goredis.ErrNil)
+		if i < 50 {
+			assert.Equal(t, "updated"+key, leaderV)
+		} else {
+			assert.Equal(t, key, leaderV)
+		}
+	}
 
 	foWrap.s.Start()
 	time.Sleep(time.Second * 10)
@@ -1827,9 +1844,16 @@ func TestInstallSnapshotOnFollower(t *testing.T) {
 	waitForAllFullReady(t, ns, 0)
 	time.Sleep(time.Second * 3)
 
-	getV, err := goredis.String(followerConn.Do("get", key))
-	assert.True(t, err == nil || err == goredis.ErrNil)
-	assert.Equal(t, "1234", getV)
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("%s:%s:%v", ns, "snap_transfer:k1", i)
+		getV, err := goredis.String(followerConn.Do("get", key))
+		assert.True(t, err == nil || err == goredis.ErrNil)
+		if i < 50 {
+			assert.Equal(t, "updated"+key, getV)
+		} else {
+			assert.Equal(t, key, getV)
+		}
+	}
 	enableStaleRead(t, addr, false)
 }
 
