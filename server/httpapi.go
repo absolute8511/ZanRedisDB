@@ -966,7 +966,7 @@ func (s *Server) initHttpHandler() {
 
 	router.Handle("POST", "/debug/setblockrate", common.Decorate(setBlockRateHandler, log, common.V1))
 	router.Handle("POST", "/debug/setmutexrate", common.Decorate(setMutexProfileHandler, log, common.V1))
-	router.Handler("GET", "/metric", promhttp.Handler())
+	router.Handler("GET", "/metrics", promhttp.Handler())
 	s.router = router
 }
 

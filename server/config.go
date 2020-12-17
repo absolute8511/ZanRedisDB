@@ -11,6 +11,7 @@ type ServerConfig struct {
 	EtcdClusterAddresses string            `json:"etcd_cluster_addresses"`
 	BroadcastInterface   string            `json:"broadcast_interface"`
 	BroadcastAddr        string            `json:"broadcast_addr"`
+	MetricAddr           string            `json:"metric_addr"`
 	RedisAPIPort         int               `json:"redis_api_port"`
 	HttpAPIPort          int               `json:"http_api_port"`
 	GrpcAPIPort          int               `json:"grpc_api_port"`
