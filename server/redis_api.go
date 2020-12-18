@@ -46,7 +46,6 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	case "ping":
 		conn.WriteString("PONG")
 	case "auth":
-		// TODO: add auth here
 		conn.WriteString("OK")
 	case "quit":
 		conn.WriteString("OK")

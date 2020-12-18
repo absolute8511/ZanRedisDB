@@ -185,7 +185,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterWrite("zfixkey", wrapWriteCommandK(nd, checkOKRsp))
 	nd.router.RegisterWrite("zadd", nd.zaddCommand)
 	nd.router.RegisterWrite("zincrby", nd.zincrbyCommand)
-	nd.router.RegisterWrite("zrem", wrapWriteCommandKSubkeySubkey(nd, checkAndRewriteIntRsp))
+	nd.router.RegisterWrite("zrem", nd.zremCommand)
 	nd.router.RegisterWrite("zremrangebyrank", nd.zremrangebyrankCommand)
 	nd.router.RegisterWrite("zremrangebyscore", nd.zremrangebyscoreCommand)
 	nd.router.RegisterWrite("zremrangebylex", nd.zremrangebylexCommand)
@@ -197,7 +197,7 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterRead("srandmember", wrapReadCommandKAnySubkey(nd.srandmembersCommand))
 	nd.router.RegisterWrite("spop", nd.spopCommand)
 	nd.router.RegisterWrite("sadd", nd.saddCommand)
-	nd.router.RegisterWrite("srem", wrapWriteCommandKSubkeySubkey(nd, checkAndRewriteIntRsp))
+	nd.router.RegisterWrite("srem", nd.sremCommand)
 	nd.router.RegisterWrite("sclear", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	// for ttl
 	nd.router.RegisterRead("ttl", wrapReadCommandK(nd.ttlCommand))

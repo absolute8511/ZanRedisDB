@@ -412,7 +412,7 @@ func (r *RockDB) SetMaxBackgroundOptions(maxCompact int, maxBackJobs int) error 
 	return r.rockEng.SetMaxBackgroundOptions(maxCompact, maxBackJobs)
 }
 
-// TODO: how to interrupt the manual compact to avoid stall too long?
+// interrupt the manual compact to avoid stall too long?
 func (r *RockDB) DisableManualCompact(disable bool) {
 	r.rockEng.DisableManualCompact(disable)
 }
@@ -1001,7 +1001,7 @@ func isSameSSTFile(f1 string, f2 string) error {
 	if n2 != n1 {
 		return fmt.Errorf("sst file footer not match")
 	}
-	// TODO: add more check on header and middle of file
+	// TODO: maybe add more check on header and middle of file
 	if bytes.Equal(b1[:n1], b2[:n2]) {
 		return nil
 	}

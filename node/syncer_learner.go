@@ -646,7 +646,6 @@ func (sm *logSyncerSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 			break
 		}
 	}
-	// TODO: stats latency raft write begin to begin sync.
 	for _, req := range reqList.Reqs {
 		if req.Header.DataType == int32(CustomReq) {
 			var p customProposeData

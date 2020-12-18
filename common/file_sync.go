@@ -36,7 +36,7 @@ func SetRsyncLimit(limit int64) {
 // used in rocksdb should not be changed )
 // So with hard link sync, we make sure we do unlink on the file before we update it. (rsync just do it)
 func RunFileSync(remote string, srcPath string, dstPath string, stopCh chan struct{}) error {
-	// TODO: retrict the running number of rsync may cause transfer snapshot again and again.
+	// retrict the running number of rsync may cause transfer snapshot again and again.
 	// Because there are many partitions waiting transfer, 1->2->3->4.
 	// The later partition may wait too much time, in this case the snapshot maybe
 	// already out of date.

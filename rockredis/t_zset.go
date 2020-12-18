@@ -39,6 +39,13 @@ const (
 	zsetMemSep   byte = ':'
 )
 
+func IsMemberNotExist(err error) bool {
+	if err == errScoreMiss {
+		return true
+	}
+	return false
+}
+
 func zEncodeSizeKey(key []byte) []byte {
 	buf := make([]byte, len(key)+1+len(metaPrefix))
 	pos := 0
@@ -1093,7 +1100,6 @@ func (db *RockDB) ZRangeByLex(key []byte, min []byte, max []byte, rangeType uint
 		} else {
 			dbLog.Infof("key %v : error %v", rawk, err)
 		}
-		// TODO: err for iterator step would match the final count?
 		if count >= 0 && len(ay) >= count {
 			break
 		}

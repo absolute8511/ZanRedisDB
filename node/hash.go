@@ -127,8 +127,6 @@ func (kvsm *kvStoreSM) localHIncrbyCommand(cmd redcon.Command, ts int64) (interf
 }
 
 func (kvsm *kvStoreSM) localHDelCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	// TODO: delete should only handled on the old value, if the value is newer than the timestamp proposal
-	// we should ignore delete
 	n, err := kvsm.store.HDel(ts, cmd.Args[1], cmd.Args[2:]...)
 	if err != nil {
 		// leader write need response

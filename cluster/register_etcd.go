@@ -791,7 +791,6 @@ func (etcdReg *PDEtcdRegister) processMasterEvents(master Master, leader chan *N
 				var node NodeInfo
 				leader <- &node
 			} else {
-				// TODO: lock error.
 				coordLog.Infof("unexpected event: %v", e)
 			}
 		case <-stop:

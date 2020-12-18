@@ -9,7 +9,6 @@ func TestIsValidNamespace(t *testing.T) {
 		args string
 		want bool
 	}{
-		// TODO: Add test cases.
 		{"test", "test", true},
 		{"test", "test_$%", false},
 		{"test", "", false},

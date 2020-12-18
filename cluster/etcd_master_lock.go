@@ -226,7 +226,6 @@ func (self *EtcdLock) acquire() (ret error) {
 		self.Unlock()
 
 		var preIdx uint64
-		// TODO: maybe change with etcd change
 		if rsp.Index < rsp.Node.ModifiedIndex {
 			preIdx = rsp.Node.ModifiedIndex + 1
 		} else {

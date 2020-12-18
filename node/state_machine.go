@@ -921,8 +921,6 @@ func (kvsm *kvStoreSM) handleCustomRequest(fromClusterSyncer bool, req *Internal
 			if err != nil {
 				kvsm.Infof("transfer remote snap request: %v to local: %v failed: %v", p, localPath, err)
 			} else {
-				// TODO: check the transferred snapshot file
-				//rockredis.IsLocalBackupOK()
 				retErr = nil
 			}
 		}
