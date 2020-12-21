@@ -137,6 +137,7 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	bbto.SetCacheIndexAndFilterBlocks(cfg.CacheIndexAndFilterBlocks)
 	// set pin_l0_filter_and_index_blocks_in_cache = true if cache index is true to improve performance on read
 	// and see this https://github.com/facebook/rocksdb/pull/3692 if partitioned filter is on
+	// TODO: no need set after 6.15
 	bbto.SetPinL0FilterAndIndexBlocksInCache(true)
 
 	if cfg.EnablePartitionedIndexFilter {
@@ -147,6 +148,7 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 		bbto.SetMetaDataBlockSize(1024 * 8)
 		bbto.SetCacheIndexAndFilterBlocks(true)
 	}
+	// TODO: set to 5 for version after 6.6
 	bbto.SetFormatVersion(4)
 	bbto.SetIndexBlockRestartInterval(16)
 
@@ -215,7 +217,8 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	} else {
 		cfg.EnableTableCounter = false
 	}
-	// TODO: add avoid_unnecessary_blocking_io option for db
+	// TODO: add avoid_unnecessary_blocking_io option for db after 6.14
+
 	// See http://smalldatum.blogspot.com/2018/09/5-things-to-set-when-configuring.html
 	// level_compaction_dynamic_level_bytes
 	if cfg.LevelCompactionDynamicLevelBytes {
