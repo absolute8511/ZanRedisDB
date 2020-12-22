@@ -67,13 +67,11 @@ func (s *RemoteLogSender) getZanCluster() *zanredisdb.Cluster {
 	if s.remoteClusterAddr == "" || strings.HasPrefix(s.remoteClusterAddr, "test://") {
 		return nil
 	}
-	conf := &zanredisdb.Conf{
-		DialTimeout:  rpcTimeout,
-		ReadTimeout:  rpcTimeout,
-		WriteTimeout: rpcTimeout,
-		TendInterval: 5,
-		Namespace:    s.ns,
-	}
+	conf := zanredisdb.NewDefaultConf()
+	conf.DialTimeout = rpcTimeout
+	conf.ReadTimeout = rpcTimeout
+	conf.WriteTimeout = rpcTimeout
+	conf.Namespace = s.ns
 	conf.LookupList = append(conf.LookupList, s.remoteClusterAddr)
 	s.zanCluster = zanredisdb.NewCluster(conf, nil)
 	return s.zanCluster
