@@ -37,7 +37,6 @@ type Master interface {
 	GetEventsChan() <-chan *MasterEvent
 	GetKey() string
 	GetMaster() string
-	TryAcquire() (ret error)
 }
 
 type EtcdLock struct {
@@ -123,49 +122,6 @@ func (self *EtcdLock) GetMaster() string {
 	return self.master
 }
 
-func (self *EtcdLock) TryAcquire() (ret error) {
-	defer func() {
-		if r := recover(); r != nil {
-			callers := ""
-			for i := 0; true; i++ {
-				_, file, line, ok := runtime.Caller(i)
-				if !ok {
-					break
-				}
-				callers = callers + fmt.Sprintf("%v:%v\n", file, line)
-			}
-			errMsg := fmt.Sprintf("[EtcdLock][TryAcquire] Recovered from panic: %#v (%v)\n%v", r, r, callers)
-			coordLog.Errorf("%v", errMsg)
-			ret = errors.New(errMsg)
-		}
-	}()
-
-	rsp, err := self.client.Get(self.name, false, false)
-	if err != nil {
-		if client.IsKeyNotFound(err) {
-			coordLog.Infof("[EtcdLock][TryAcquire] try to acquire lock[%s]", self.name)
-			rsp, err = self.client.Create(self.name, self.id, self.ttl)
-			if err != nil {
-				coordLog.Errorf("[EtcdLock][TryAcquire] etcd create lock[%s] error: %s", self.name, err.Error())
-				return err
-			}
-		} else {
-			coordLog.Errorf("[EtcdLock][TryAcquire] etcd get lock[%s] error: %s", self.name, err.Error())
-			return err
-		}
-	}
-
-	if rsp.Node.Value == self.id {
-		coordLog.Infof("[EtcdLock][TryAcquire] acquire lock: %s", self.name)
-		self.ifHolding = true
-		go self.refresh()
-	} else {
-		return fmt.Errorf("Master[%s] has locked, value[%s]", self.name, rsp.Node.Value)
-	}
-
-	return nil
-}
-
 func (self *EtcdLock) acquire() (ret error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -200,7 +156,7 @@ func (self *EtcdLock) acquire() (ret error) {
 			break
 		}
 
-		if err != nil || rsp.Node.Value == "" {
+		if err != nil || rsp == nil || rsp.Node == nil || rsp.Node.Value == "" {
 			rsp, err = self.client.Get(self.name, false, false)
 			if err != nil {
 				if client.IsKeyNotFound(err) {
@@ -225,13 +181,7 @@ func (self *EtcdLock) acquire() (ret error) {
 		self.modifiedIndex = rsp.Node.ModifiedIndex
 		self.Unlock()
 
-		var preIdx uint64
-		if rsp.Index < rsp.Node.ModifiedIndex {
-			preIdx = rsp.Node.ModifiedIndex + 1
-		} else {
-			preIdx = rsp.Index + 1
-		}
-		watcher := self.client.Watch(self.name, preIdx, false)
+		watcher := self.client.Watch(self.name, rsp.Index, false)
 		rsp, err = watcher.Next(ctx)
 		if err != nil {
 			if err == context.Canceled {

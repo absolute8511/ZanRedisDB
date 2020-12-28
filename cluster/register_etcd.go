@@ -283,7 +283,7 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 				}
 				coordLog.Infof("watch expired, rewatch namespace change at cluster index %v", rsp.Index)
 				atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
-				watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index+1, true)
+				watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index, true)
 				// watch expired should be treated as changed of node
 			} else {
 				time.Sleep(5 * time.Second)
@@ -855,7 +855,7 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 					continue
 				}
 				coordLog.Errorf("watch expired key[%s] : %v", key, rsp)
-				watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
+				watcher = etcdReg.client.Watch(key, rsp.Index, true)
 				// should get the nodes to notify watcher since last watch is expired
 			} else {
 				time.Sleep(5 * time.Second)
@@ -1269,7 +1269,7 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 					continue
 				}
 				coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
-				watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
+				watcher = etcdReg.client.Watch(key, rsp.Index, true)
 			} else {
 				time.Sleep(5 * time.Second)
 				continue
