@@ -95,6 +95,14 @@ func TestDBKV(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, "Hello Redis", string(v))
 
+	v, err = db.KVGetExpired(key3)
+	assert.Nil(t, err)
+	assert.Equal(t, "Hello Redis", string(v))
+
+	n, err = db.KVGetVer(key3)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
 	key4 := []byte("test:testdb_kv_range_none")
 	n, err = db.SetRange(0, key4, 6, []byte("Redis"))
 	assert.Nil(t, err)

@@ -108,6 +108,28 @@ func (nd *KVNode) getCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+func (nd *KVNode) getVerCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, err := nd.store.KVGetVer(cmd.Args[1])
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	conn.WriteInt64(val)
+}
+
+func (nd *KVNode) getExpiredCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, err := nd.store.KVGetExpired(cmd.Args[1])
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+	if val == nil {
+		conn.WriteNull()
+	} else {
+		conn.WriteBulk(val)
+	}
+}
+
 func (nd *KVNode) getRangeCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 4 {
 		conn.WriteError(errWrongNumberArgs.Error())

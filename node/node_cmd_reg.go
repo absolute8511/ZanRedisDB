@@ -110,6 +110,8 @@ func (nd *KVNode) registerHandler() {
 	// for kv
 	nd.router.RegisterRead("get", wrapReadCommandK(nd.getCommand))
 	nd.router.RegisterRead("stale.get", wrapReadCommandK(nd.getCommand))
+	nd.router.RegisterRead("stale.getversion", wrapReadCommandK(nd.getVerCommand))
+	nd.router.RegisterRead("stale.getexpired", wrapReadCommandK(nd.getExpiredCommand))
 	nd.router.RegisterRead("strlen", wrapReadCommandK(nd.strlenCommand))
 	nd.router.RegisterRead("getrange", wrapReadCommandKAnySubkeyN(nd.getRangeCommand, 2))
 	nd.router.RegisterRead("getnolock", wrapReadCommandK(nd.getNoLockCommand))
@@ -132,6 +134,9 @@ func (nd *KVNode) registerHandler() {
 	nd.router.RegisterWrite("bitclear", wrapWriteCommandK(nd, checkAndRewriteIntRsp))
 	// for hash
 	nd.router.RegisterRead("hget", wrapReadCommandKSubkey(nd.hgetCommand))
+	nd.router.RegisterRead("stale.hget.version", wrapReadCommandKSubkey(nd.hgetVerCommand))
+	nd.router.RegisterRead("stale.hgetall.expired", wrapReadCommandK(nd.hgetallExpiredCommand))
+	nd.router.RegisterRead("stale.hmget.expired", wrapReadCommandKSubkeySubkey(nd.hmgetExpiredCommand))
 	nd.router.RegisterRead("hgetall", wrapReadCommandK(nd.hgetallCommand))
 	nd.router.RegisterRead("hkeys", wrapReadCommandK(nd.hkeysCommand))
 	nd.router.RegisterRead("hvals", wrapReadCommandK(nd.hvalsCommand))

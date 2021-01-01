@@ -24,6 +24,28 @@ func (nd *KVNode) hgetCommand(conn redcon.Conn, cmd redcon.Command) {
 	return
 }
 
+func (nd *KVNode) hgetVerCommand(conn redcon.Conn, cmd redcon.Command) {
+	val, err := nd.store.HGetVer(cmd.Args[1], cmd.Args[2])
+	if err != nil {
+		conn.WriteError("ERR for " + string(cmd.Args[0]) + " command: " + err.Error())
+		return
+	}
+	conn.WriteInt64(val)
+}
+
+func (nd *KVNode) hgetallExpiredCommand(conn redcon.Conn, cmd redcon.Command) {
+	_, vals, err := nd.store.HGetAllExpired(cmd.Args[1])
+	if err != nil {
+		conn.WriteError("ERR for " + string(cmd.Args[0]) + " command: " + err.Error())
+		return
+	}
+	conn.WriteArray(len(vals) * 2)
+	for _, v := range vals {
+		conn.WriteBulk(v.Rec.Key)
+		conn.WriteBulk(v.Rec.Value)
+	}
+}
+
 func (nd *KVNode) hgetallCommand(conn redcon.Conn, cmd redcon.Command) {
 	_, vals, err := nd.store.HGetAll(cmd.Args[1])
 	if err != nil {
@@ -67,6 +89,18 @@ func (nd *KVNode) hexistsCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteInt(0)
 	} else {
 		conn.WriteInt(1)
+	}
+}
+
+func (nd *KVNode) hmgetExpiredCommand(conn redcon.Conn, cmd redcon.Command) {
+	vals, _ := nd.store.HMgetExpired(cmd.Args[1], cmd.Args[2:]...)
+	conn.WriteArray(len(vals))
+	for _, v := range vals {
+		if v == nil {
+			conn.WriteNull()
+		} else {
+			conn.WriteBulk(v)
+		}
 	}
 }
 

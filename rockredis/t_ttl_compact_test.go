@@ -356,9 +356,9 @@ func TestKVTTL_Compact(t *testing.T) {
 	}
 
 	// test change ttl
-	v, err := db.Expire(tn, key1, ttl2)
+	n, err := db.Expire(tn, key1, ttl2)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(1), v)
+	assert.Equal(t, int64(1), n)
 
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
@@ -395,44 +395,50 @@ func TestKVTTL_Compact(t *testing.T) {
 	} else if v != ttl1 {
 		t.Fatalf("ttl != setex: %v vs %v", v, ttl1)
 	}
+	n, err = db.KVGetVer(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, tn, n)
+	v, err := db.KVGetExpired(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, testValue, v)
 
 	err = db.SetEx(tn, key1, ttl2, testValue)
 	assert.Nil(t, err)
 
-	v, err = db.KVTtl(key1)
+	n, err = db.KVTtl(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl2, v)
+	assert.Equal(t, ttl2, n)
 	// set, setnx, mset should clean ttl
 	err = db.KVSet(0, key1, testValue)
 	assert.Nil(t, err)
-	v, err = db.KVTtl(key1)
+	n, err = db.KVTtl(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), v)
+	assert.Equal(t, int64(-1), n)
 
 	err = db.SetEx(tn, key1, ttl2, testValue)
 	assert.Nil(t, err)
-	v, err = db.KVTtl(key1)
+	n, err = db.KVTtl(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl2, v)
+	assert.Equal(t, ttl2, n)
 
 	// set not success should keep ttl
 	changed, err := db.SetNX(0, key1, testValue)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), changed)
-	v, err = db.KVTtl(key1)
+	n, err = db.KVTtl(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, ttl2, v)
+	assert.Equal(t, ttl2, n)
 
 	db.MSet(0, common.KVRecord{Key: key1, Value: testValue})
-	v, err = db.KVTtl(key1)
+	n, err = db.KVTtl(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), v)
+	assert.Equal(t, int64(-1), n)
 
 	err = db.SetEx(tn, key1, 1, testValue)
 	assert.Nil(t, err)
-	v, err = db.KVTtl(key1)
+	n, err = db.KVTtl(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(1), v)
+	assert.Equal(t, int64(1), n)
 
 	time.Sleep(time.Second * 2)
 	// set success should clean ttl
@@ -440,9 +446,9 @@ func TestKVTTL_Compact(t *testing.T) {
 	changed, err = db.SetNX(tn, key1, testValue)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), changed)
-	v, err = db.KVTtl(key1)
+	n, err = db.KVTtl(key1)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(-1), v)
+	assert.Equal(t, int64(-1), n)
 	// compact should clean all expired data
 	db.CompactAllRange()
 }
@@ -529,7 +535,7 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	key1 := []byte("test:testdbTTL_kv_compact_ttlexpire")
 	var ttl1 int64 = int64(2)
 	tn := time.Now().UnixNano()
-	if c, err := db.Incr(0, key1); err != nil {
+	if c, err := db.Incr(tn, key1); err != nil {
 		t.Fatal(err)
 	} else {
 		assert.Equal(t, int64(1), c)
@@ -546,7 +552,7 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 		t.Fatal("ttl != expire")
 	}
 	// incr should keep ttl
-	if c, err := db.Incr(0, key1); err != nil {
+	if c, err := db.Incr(tn, key1); err != nil {
 		t.Fatal(err)
 	} else {
 		assert.Equal(t, int64(2), c)
@@ -564,6 +570,13 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(ttl1), n)
 
+	n, err = db.KVGetVer(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, tn, n)
+	v, err := db.KVGetExpired(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("2"), v)
+
 	time.Sleep(time.Second * time.Duration(ttl1+1))
 	if v, err := db.KVTtl(key1); err != nil {
 		t.Fatal(err)
@@ -573,9 +586,17 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	exist, err := db.KVExists(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), exist)
-	v, err := db.KVGet(key1)
+	v, err = db.KVGet(key1)
 	assert.Nil(t, err)
 	assert.Nil(t, v)
+
+	n, err = db.KVGetVer(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, tn, n)
+	v, err = db.KVGetExpired(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("2"), v)
+
 	vlist, errs := db.MGet(key1)
 	assert.Nil(t, errs[0])
 	assert.Nil(t, vlist[0])
@@ -589,6 +610,13 @@ func TestKVTTL_Compact_TTLExpired(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(-1), n)
 	v, err = db.KVGet(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("new1"), v)
+
+	n, err = db.KVGetVer(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, tn, n)
+	v, err = db.KVGetExpired(key1)
 	assert.Nil(t, err)
 	assert.Equal(t, []byte("new1"), v)
 
@@ -795,6 +823,21 @@ func TestHashTTL_Compact_TTLExpired(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, hashTTL, n)
 
+	// test hash get exipred
+	n, err = db.HGetVer(hashKey, hash_val[0].Key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(tn), n)
+	tn1 := tn
+
+	n, vals, err := db.HGetAll(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+	assert.Equal(t, 3, len(vals))
+	n, vals, err = db.HGetAllExpired(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+	assert.Equal(t, 3, len(vals))
+
 	time.Sleep(time.Second * time.Duration(hashTTL+1))
 	dbLog.Infof("wait expired done")
 	n, err = db.HashTtl(hashKey)
@@ -812,6 +855,11 @@ func TestHashTTL_Compact_TTLExpired(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Nil(t, vlist[0])
 	assert.Nil(t, vlist[1])
+	vlist, err = db.HMgetExpired(hashKey, hash_val[0].Key, hash_val[1].Key)
+	assert.Nil(t, err)
+	assert.Equal(t, hash_val[0].Value, vlist[0])
+	assert.Equal(t, hash_val[1].Value, vlist[1])
+
 	n, recs, err := db.HGetAll(hashKey)
 	assert.Equal(t, int64(0), n)
 	assert.Equal(t, 0, len(recs))
@@ -824,6 +872,17 @@ func TestHashTTL_Compact_TTLExpired(t *testing.T) {
 	n, err = db.HLen(hashKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
+
+	// test hash get exipred
+	n, err = db.HGetVer(hashKey, hash_val[0].Key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(tn1), n)
+
+	n, vals2, err := db.HGetAllExpired(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+	assert.Equal(t, 3, len(vals2))
+	assert.Equal(t, vals, vals2)
 
 	// renew hash
 	hash_val2 := []common.KVRecord{
@@ -853,6 +912,16 @@ func TestHashTTL_Compact_TTLExpired(t *testing.T) {
 	n, err = db.HKeyExists(hashKey)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
+
+	n, err = db.HGetVer(hashKey, hash_val2[0].Key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(tn), n)
+
+	n, vals2, err = db.HGetAllExpired(hashKey)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+	assert.Equal(t, 2, len(vals2))
+	assert.NotEqual(t, vals, vals2)
 
 	vlist, err = db.HMget(hashKey, hash_val2[0].Key, hash_val2[1].Key)
 	assert.Nil(t, err)

@@ -282,6 +282,7 @@ func TestKVExpire(t *testing.T) {
 
 	key1 := "default:test:expa"
 	ttl := 2
+	tn := time.Now()
 
 	if ok, err := goredis.String(c.Do("setex", key1, ttl, "hello")); err != nil {
 		t.Fatal(err)
@@ -307,6 +308,14 @@ func TestKVExpire(t *testing.T) {
 	} else if v != "hello world" {
 		t.Fatal(v)
 	}
+	n, err := goredis.Int(c.Do("stale.getversion", key1))
+	assert.Nil(t, err)
+	t.Logf("key ver: %v", n)
+	assert.True(t, n >= int(tn.UnixNano()), n)
+	v, err := goredis.String(c.Do("stale.getexpired", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "hello world", v)
+
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
 	assertTTLNear(t, ttl, realTtl)
@@ -329,6 +338,14 @@ func TestKVExpire(t *testing.T) {
 		t.Fatalf("expired key should be expired: %v, %v", v, err)
 	}
 
+	n, err = goredis.Int(c.Do("stale.getversion", key1))
+	assert.Nil(t, err)
+	t.Logf("key ver: %v", n)
+	assert.True(t, n >= int(tn.UnixNano()), n)
+	v, err = goredis.String(c.Do("stale.getexpired", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "hrangeworld", v)
+
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
 	assert.Equal(t, -1, realTtl)
@@ -343,6 +360,14 @@ func TestKVExpire(t *testing.T) {
 	} else if v != "1" {
 		t.Fatal(v)
 	}
+	n, err = goredis.Int(c.Do("stale.getversion", key1))
+	assert.Nil(t, err)
+	t.Logf("key ver: %v", n)
+	assert.True(t, n >= int(tn.UnixNano()), n)
+	v, err = goredis.String(c.Do("stale.getexpired", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "1", v)
+
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
 	assertTTLNear(t, ttl, realTtl)
@@ -374,6 +399,14 @@ func TestKVExpire(t *testing.T) {
 	if v, err := goredis.String(c.Do("get", key1)); err != goredis.ErrNil {
 		t.Fatalf("expired key should be expired: %v, %v", v, err)
 	}
+	n, err = goredis.Int(c.Do("stale.getversion", key1))
+	assert.Nil(t, err)
+	t.Logf("key ver: %v", n)
+	assert.True(t, n >= int(tn.UnixNano()), n)
+	v, err = goredis.String(c.Do("stale.getexpired", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, "2", v)
+
 	realTtl, err = goredis.Int(c.Do("ttl", key1))
 	assert.Nil(t, err)
 	assert.Equal(t, -1, realTtl)
