@@ -181,13 +181,24 @@ func (self *EtcdLock) acquire() (ret error) {
 		self.modifiedIndex = rsp.Node.ModifiedIndex
 		self.Unlock()
 
-		watcher := self.client.Watch(self.name, rsp.Index, false)
-		rsp, err = watcher.Next(ctx)
+		// normally it should use modifiedIndex, while for error index is outdated and cleared,
+		// we should use cluster index instead (anyway we should use the larger one)
+		wi := rsp.Node.ModifiedIndex
+		if rsp.Index > wi {
+			wi = rsp.Index
+			coordLog.Infof("[EtcdLock] watch lock[%s] at cluster index: %v, modify index: %v", self.name, rsp.Index, rsp.Node.ModifiedIndex)
+		}
+		ctxTo, cancelTo := context.WithTimeout(ctx, WatchEtcdTimeout)
+		watcher := self.client.Watch(self.name, wi, false)
+		rsp, err = watcher.Next(ctxTo)
+		cancelTo()
 		if err != nil {
 			if err == context.Canceled {
 				coordLog.Infof("[EtcdLock][acquire] watch lock[%s] stop by user.", self.name)
+			} else if err == context.DeadlineExceeded {
+				coordLog.Infof("[EtcdLock][acquire] watch lock[%s] timeout.", self.name)
 			} else {
-				coordLog.Errorf("[EtcdLock][acquire] failed to watch lock[%s] error: %s", self.name, err.Error())
+				coordLog.Infof("[EtcdLock][acquire] failed to watch lock[%s] error: %s", self.name, err.Error())
 			}
 		}
 	}

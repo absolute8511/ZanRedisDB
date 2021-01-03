@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -8,6 +9,29 @@ import (
 )
 
 var testEtcdServers = "http://127.0.0.1:2379"
+
+type testLogger struct {
+	t *testing.T
+}
+
+func newTestLogger(t *testing.T) *testLogger {
+	return &testLogger{t: t}
+}
+
+func (l *testLogger) Output(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputErr(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputWarning(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
 
 func TestRegisterEtcd(t *testing.T) {
 	clusterID := "unittest-zankv-cluster-test-register"
@@ -126,4 +150,93 @@ func TestRegisterEtcd(t *testing.T) {
 	time.Sleep(time.Millisecond)
 	_, nepoch, err = reg.GetAllNamespaces()
 	assert.Equal(t, epoch, nepoch)
+}
+
+func TestRegisterTimeoutInDeadConn(t *testing.T) {
+	SetLogger(3, newTestLogger(t))
+	WatchEtcdTimeout = time.Second
+	defer func() {
+		WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*2)
+	}()
+	clusterID := "unittest-zankv-cluster-test-register"
+	reg, err := NewPDEtcdRegister(testEtcdServers)
+	assert.Nil(t, err)
+	reg.InitClusterID(clusterID)
+	nodeInfo := &NodeInfo{
+		NodeIP: "127.0.0.1",
+	}
+	nodeInfo.ID = GenNodeID(nodeInfo, "pd")
+	reg.Start()
+	reg.Register(nodeInfo)
+	defer reg.Unregister(nodeInfo)
+
+	stopC := make(chan struct{}, 1)
+	leaderChan := make(chan *NodeInfo, 10)
+	// watch pd leader and acquire leader
+	reg.AcquireAndWatchLeader(leaderChan, stopC)
+	pdLeaderChanged := int32(0)
+	go func() {
+		for {
+			select {
+			case n := <-leaderChan:
+				t.Logf("in pd register pd leader changed to : %v", n)
+				atomic.AddInt32(&pdLeaderChanged, 1)
+			case <-stopC:
+				return
+			}
+		}
+	}()
+	// watch data nodes
+	dnChan := make(chan []NodeInfo, 10)
+	go reg.WatchDataNodes(dnChan, stopC)
+	dataNodeChanged := int32(0)
+	go func() {
+		for {
+			select {
+			case n, ok := <-dnChan:
+				if !ok {
+					return
+				}
+				t.Logf("nodes changed to %v", n)
+				atomic.AddInt32(&dataNodeChanged, 1)
+			case <-stopC:
+				return
+			}
+		}
+	}()
+
+	// watch pd leader
+	nodeReg, err := NewDNEtcdRegister(testEtcdServers)
+	assert.Nil(t, err)
+	nodeReg.InitClusterID(clusterID)
+	nodeInfo2 := &NodeInfo{
+		NodeIP: "127.0.0.1",
+	}
+	nodeInfo2.ID = GenNodeID(nodeInfo2, "datanode")
+	nodeReg.Start()
+	nodeReg.Register(nodeInfo2)
+	defer nodeReg.Unregister(nodeInfo2)
+	leaderChan2 := make(chan *NodeInfo, 10)
+	go nodeReg.WatchPDLeader(leaderChan2, stopC)
+	timer := time.NewTimer(time.Second * time.Duration(EtcdTTL+1))
+	for {
+		select {
+		case n, ok := <-leaderChan2:
+			if !ok {
+				return
+			}
+			t.Logf("in data register pd leader changed to %v", n)
+			atomic.AddInt32(&pdLeaderChanged, 1)
+		case <-timer.C:
+			close(stopC)
+			t.Logf("changed: %v , %v", dataNodeChanged, pdLeaderChanged)
+			assert.Equal(t, int32(3), dataNodeChanged)
+			assert.Equal(t, int32(4), pdLeaderChanged)
+			return
+		}
+	}
+}
+
+func TestRegisterWatchExpired(t *testing.T) {
+	// TODO: test watch when etcd returned index cleared
 }
