@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -153,7 +154,6 @@ func TestRegisterEtcd(t *testing.T) {
 }
 
 func TestRegisterTimeoutInDeadConn(t *testing.T) {
-	SetLogger(3, newTestLogger(t))
 	WatchEtcdTimeout = time.Second
 	defer func() {
 		WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*2)
@@ -167,6 +167,7 @@ func TestRegisterTimeoutInDeadConn(t *testing.T) {
 	}
 	nodeInfo.ID = GenNodeID(nodeInfo, "pd")
 	reg.Start()
+	defer reg.Stop()
 	reg.Register(nodeInfo)
 	defer reg.Unregister(nodeInfo)
 
@@ -175,7 +176,10 @@ func TestRegisterTimeoutInDeadConn(t *testing.T) {
 	// watch pd leader and acquire leader
 	reg.AcquireAndWatchLeader(leaderChan, stopC)
 	pdLeaderChanged := int32(0)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case n := <-leaderChan:
@@ -188,9 +192,15 @@ func TestRegisterTimeoutInDeadConn(t *testing.T) {
 	}()
 	// watch data nodes
 	dnChan := make(chan []NodeInfo, 10)
-	go reg.WatchDataNodes(dnChan, stopC)
-	dataNodeChanged := int32(0)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		reg.WatchDataNodes(dnChan, stopC)
+	}()
+	dataNodeChanged := int32(0)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case n, ok := <-dnChan:
@@ -214,10 +224,15 @@ func TestRegisterTimeoutInDeadConn(t *testing.T) {
 	}
 	nodeInfo2.ID = GenNodeID(nodeInfo2, "datanode")
 	nodeReg.Start()
+	defer nodeReg.Stop()
 	nodeReg.Register(nodeInfo2)
 	defer nodeReg.Unregister(nodeInfo2)
 	leaderChan2 := make(chan *NodeInfo, 10)
-	go nodeReg.WatchPDLeader(leaderChan2, stopC)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		nodeReg.WatchPDLeader(leaderChan2, stopC)
+	}()
 	timer := time.NewTimer(time.Second * time.Duration(EtcdTTL+1))
 	for {
 		select {
@@ -229,9 +244,12 @@ func TestRegisterTimeoutInDeadConn(t *testing.T) {
 			atomic.AddInt32(&pdLeaderChanged, 1)
 		case <-timer.C:
 			close(stopC)
-			t.Logf("changed: %v , %v", dataNodeChanged, pdLeaderChanged)
-			assert.Equal(t, int32(3), dataNodeChanged)
-			assert.Equal(t, int32(4), pdLeaderChanged)
+			wg.Wait()
+			t.Logf("changed: %v , %v", atomic.LoadInt32(&pdLeaderChanged), atomic.LoadInt32(&dataNodeChanged))
+			assert.True(t, atomic.LoadInt32(&dataNodeChanged) >= 2)
+			assert.True(t, atomic.LoadInt32(&dataNodeChanged) <= 4)
+			assert.True(t, atomic.LoadInt32(&pdLeaderChanged) <= 4)
+			assert.True(t, atomic.LoadInt32(&pdLeaderChanged) >= 2)
 			return
 		}
 	}

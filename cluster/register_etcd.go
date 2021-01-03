@@ -22,7 +22,7 @@ const (
 
 var (
 	EtcdTTL          = 60
-	WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*2)
+	WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*3)
 )
 
 const (
@@ -124,6 +124,7 @@ func watchWaitAndDo(ctx context.Context, client *EtcdClient,
 	for {
 		// to avoid dead connection issues, we add timeout for watch connection to wake up watch if too long no
 		// any event
+		start := time.Now()
 		ctxTo, cancelTo := context.WithTimeout(ctx, WatchEtcdTimeout)
 		rsp, err := watcher.Next(ctxTo)
 		cancelTo()
@@ -132,12 +133,14 @@ func watchWaitAndDo(ctx context.Context, client *EtcdClient,
 				coordLog.Infof("watch key[%s] cancelled.", key)
 				return
 			} else if err == context.DeadlineExceeded {
-				coordLog.Debugf("watcher key[%s] timeout: %s", key, err.Error())
+				coordLog.Debugf("watcher key[%s] timeout: %s, cost: %s", key, err.Error(), time.Since(start))
+				// since after timeout the cluster index may changed much, we need watch using new index to avoid index expired
+
 				continue
 			} else {
-				coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
-				//rewatch
+				// rewatch
 				if IsEtcdWatchExpired(err) {
+					coordLog.Debugf("watcher key[%s] error: %s", key, err.Error())
 					if watchExpiredCb != nil {
 						watchExpiredCb()
 					}
@@ -151,6 +154,7 @@ func watchWaitAndDo(ctx context.Context, client *EtcdClient,
 					watcher = client.Watch(key, rsp.Index, recursive)
 					// watch expired should be treated as changed of node
 				} else {
+					coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
 					time.Sleep(5 * time.Second)
 					continue
 				}
@@ -320,9 +324,11 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 		}
 	}()
 	watchWaitAndDo(ctx, etcdReg.client, key, true, func(rsp *client.Response) {
+		if rsp.Index != atomic.LoadUint64(&etcdReg.watchedNsClusterIndex) {
+			atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+		}
 		atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
 		coordLog.Infof("namespace changed at cluster index %v", rsp.Index)
-		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		select {
 		case etcdReg.triggerScanCh <- struct{}{}:
 		default:
@@ -331,9 +337,7 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 		case etcdReg.nsChangedChan <- struct{}{}:
 		default:
 		}
-	}, func() {
-		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
-	})
+	}, nil)
 }
 
 func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
@@ -1289,9 +1293,7 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 		case <-stop:
 			return
 		}
-	}, func() {
-		isMissing = true
-	})
+	}, nil)
 	return nil
 }
 
