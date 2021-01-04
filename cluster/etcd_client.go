@@ -1,12 +1,25 @@
 package cluster
 
 import (
+	"net"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/coreos/etcd/client"
 	"golang.org/x/net/context"
 )
+
+var etcdTransport client.CancelableTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	Dial: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).Dial,
+	TLSHandshakeTimeout: 10 * time.Second,
+	WriteBufferSize:     1024,
+	ReadBufferSize:      1024,
+}
 
 type EtcdClient struct {
 	client  client.Client
@@ -19,7 +32,7 @@ func NewEClient(host string) (*EtcdClient, error) {
 	initEtcdPeers(machines)
 	cfg := client.Config{
 		Endpoints:               machines,
-		Transport:               client.DefaultTransport,
+		Transport:               etcdTransport,
 		HeaderTimeoutPerRequest: time.Second * 5,
 	}
 

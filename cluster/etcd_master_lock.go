@@ -188,10 +188,8 @@ func (self *EtcdLock) acquire() (ret error) {
 			wi = rsp.Index
 			coordLog.Infof("[EtcdLock] watch lock[%s] at cluster index: %v, modify index: %v", self.name, rsp.Index, rsp.Node.ModifiedIndex)
 		}
-		ctxTo, cancelTo := context.WithTimeout(ctx, WatchEtcdTimeout)
 		watcher := self.client.Watch(self.name, wi, false)
-		rsp, err = watcher.Next(ctxTo)
-		cancelTo()
+		rsp, err = watcher.Next(ctx)
 		if err != nil {
 			if err == context.Canceled {
 				coordLog.Infof("[EtcdLock][acquire] watch lock[%s] stop by user.", self.name)
