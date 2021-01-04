@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -153,7 +154,19 @@ func TestRegisterEtcd(t *testing.T) {
 	assert.Equal(t, epoch, nepoch)
 }
 
-func TestRegisterTimeoutInDeadConn(t *testing.T) {
+func TestEtcdRegisterGetSetTimeout(t *testing.T) {
+	client, err := NewEClient(testEtcdServers)
+	assert.Nil(t, err)
+	client.timeout = time.Microsecond
+
+	testKey := "/zankv_test/unittest-zankv-cluster-test-register/timeouttest"
+	_, err = client.Set(testKey, "testvalue", 10)
+	assert.Equal(t, err, context.DeadlineExceeded)
+	_, err = client.Get(testKey, false, false)
+	assert.Equal(t, err, context.DeadlineExceeded)
+}
+
+func TestRegisterWatchTimeoutInDeadConn(t *testing.T) {
 	WatchEtcdTimeout = time.Second
 	defer func() {
 		WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*2)
