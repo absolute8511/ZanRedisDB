@@ -1275,16 +1275,17 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 		} else {
 			if isMissing {
 				coordLog.Infof("key[%s] new data : %s", key, rsp.Node.String())
-				err := json.Unmarshal([]byte(rsp.Node.Value), &node)
-				if err != nil {
-					return
-				}
-				if node.ID != "" {
-					isMissing = false
-				}
-			} else {
+			}
+			err := json.Unmarshal([]byte(rsp.Node.Value), &node)
+			if err != nil {
 				return
 			}
+			if node.ID != "" {
+				isMissing = false
+			}
+		}
+		if node.ID == "" {
+			isMissing = true
 		}
 		select {
 		case leader <- &node:
