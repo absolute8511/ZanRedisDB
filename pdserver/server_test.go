@@ -521,7 +521,7 @@ func waitRemoteClusterSync(t *testing.T, ns string, leaderNode *node.NamespaceNo
 		time.Sleep(time.Second)
 		if time.Since(start) > time.Minute {
 			t.Errorf("timeout waiting add learner")
-			break
+			return
 		}
 		commitID := leaderNode.Node.GetAppliedIndex()
 		done := 0

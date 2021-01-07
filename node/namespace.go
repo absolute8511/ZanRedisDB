@@ -36,6 +36,7 @@ var (
 	ErrRaftGroupNotReady          = errors.New("ERR_CLUSTER_CHANGED: raft group not ready")
 	ErrProposalCanceled           = errors.New("ERR_CLUSTER_CHANGED: raft proposal " + context.Canceled.Error())
 	errNamespaceConfInvalid       = errors.New("namespace config is invalid")
+	ErrLocalMagicCodeConflict     = errors.New("namespace magic code conflict on local")
 )
 
 var perfLevel int32
@@ -125,7 +126,8 @@ func (nn *NamespaceNode) SetMagicCode(magic int64) error {
 	}
 	// check if already magic code is different, if conflicted should report error
 	if nn.getMagicCode() != 0 && nn.getMagicCode() != magic {
-		return fmt.Errorf("set magic code to %v conflict on local: %v", magic, nn.getMagicCode())
+		nodeLog.Warningf("set magic code to %v conflict on local: %v", magic, nn.getMagicCode())
+		return ErrLocalMagicCodeConflict
 	}
 	if nn.getMagicCode() == magic {
 		return nil
