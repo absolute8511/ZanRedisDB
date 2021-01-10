@@ -88,7 +88,7 @@ func saveMagicCode(fileName string, magicCode int64) error {
 	return nil
 }
 
-func loadMagicCode(fileName string) (int64, error) {
+func LoadMagicCode(fileName string) (int64, error) {
 	var f *os.File
 	var err error
 
@@ -118,7 +118,7 @@ func (nn *NamespaceNode) SetMagicCode(magic int64) error {
 	fileName := getMagicCodeFileName(nn.nsDataDir, nn.conf.Name)
 	if nn.getMagicCode() == 0 {
 		// try read old magic code from file
-		mc, err := loadMagicCode(fileName)
+		mc, err := LoadMagicCode(fileName)
 		if err != nil {
 			return err
 		}
@@ -353,6 +353,10 @@ func (nsm *NamespaceMgr) SaveMachineRegID(regID uint64) error {
 		common.FILE_PERM)
 }
 
+func (nsm *NamespaceMgr) GetDataRoot() string {
+	return nsm.machineConf.DataRootDir
+}
+
 func (nsm *NamespaceMgr) CheckLocalNamespaces() map[string]int64 {
 	// scan local namespace and magic number
 	scanDir := nsm.machineConf.DataRootDir
@@ -368,7 +372,7 @@ func (nsm *NamespaceMgr) CheckLocalNamespaces() map[string]int64 {
 		grpName := path.Base(dir)
 		ns, _ := common.GetNamespaceAndPartition(grpName)
 		if ns != "" {
-			code, err := loadMagicCode(getMagicCodeFileName(dir, grpName))
+			code, err := LoadMagicCode(getMagicCodeFileName(dir, grpName))
 			if err != nil {
 				continue
 			}

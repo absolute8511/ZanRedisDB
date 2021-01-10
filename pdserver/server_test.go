@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -529,7 +531,7 @@ func waitRemoteClusterSync(t *testing.T, ns string, leaderNode *node.NamespaceNo
 			nsNode := srv.s.GetNamespaceFromFullName(ns + "-0")
 			if nsNode != nil {
 				lrns := nsNode.GetLearners()
-				t.Log(lrns)
+				t.Logf("current learners: %v", lrns)
 				if len(lrns) == len(learnerSrvs) {
 					found := false
 					for _, l := range lrns {
@@ -648,6 +650,8 @@ func TestRemoteClusterLearnerContinueAfterSrcRestart(t *testing.T) {
 	leader := dnw.s
 	assert.NotNil(t, leader)
 
+	node.SetSyncerOnly(true)
+	defer node.SetSyncerOnly(false)
 	remotePD, remoteSrvs, remoteTmpDir := startRemoteSyncTestCluster(t, 1)
 	defer func() {
 		for _, kv := range remoteSrvs {
@@ -662,6 +666,9 @@ func TestRemoteClusterLearnerContinueAfterSrcRestart(t *testing.T) {
 		}
 	}()
 	pduri = "http://127.0.0.1:" + pdRemoteHttpPort
+	for _, lrnSrv := range remoteSrvs {
+		lrnSrv.s.GetCoord().UpdateSyncerWriteOnly(true)
+	}
 	ensureDataNodesReady(t, pduri, len(remoteSrvs))
 	enableAutoBalance(t, pduri, true)
 	ensureNamespace(t, pduri, ns, partNum, 1)
@@ -686,6 +693,7 @@ func TestRemoteClusterLearnerContinueAfterSrcRestart(t *testing.T) {
 
 	leaderNode.Node.OptimizeDB("")
 
+	t.Logf("begin wait first before restart")
 	waitRemoteClusterSync(t, ns, leaderNode, learnerSrvs, remoteSrvs)
 
 	// restart leader
@@ -693,6 +701,8 @@ func TestRemoteClusterLearnerContinueAfterSrcRestart(t *testing.T) {
 	time.Sleep(time.Second)
 
 	leader.Start()
+	// start will reset syncer write only state from remote, so we need set it again to allow learner node running
+	node.SetSyncerOnly(true)
 	waitEnoughReplica(t, ns, 0)
 	waitForAllFullReady(t, ns, 0)
 
@@ -702,6 +712,7 @@ func TestRemoteClusterLearnerContinueAfterSrcRestart(t *testing.T) {
 	leaderNode.Node.OptimizeDB("")
 	time.Sleep(time.Second * 3)
 
+	t.Logf("begin wait after source restart")
 	waitRemoteClusterSync(t, ns, leaderNode, learnerSrvs, remoteSrvs)
 }
 
@@ -1437,7 +1448,23 @@ func TestRestartCluster(t *testing.T) {
 	}
 }
 
-func TestClusterBalanceToNewNode(t *testing.T) {
+func getDeletedNs(t *testing.T, scanDir string) map[string]int64 {
+	// scan all local undeleted ns-part dirs and read the magic code
+	dirList, err := filepath.Glob(path.Join(scanDir, "*-*"))
+	assert.Nil(t, err)
+	magicList := make(map[string]int64)
+	for _, dir := range dirList {
+		t.Logf("found local dir in data root: %v", dir)
+		grpName := path.Base(dir)
+		if strings.Contains(grpName, "deleted") {
+			code, _ := node.LoadMagicCode(path.Join(dir, "magic_"+grpName))
+			magicList[grpName] = code
+		}
+	}
+	return magicList
+}
+
+func TestClusterBalanceToNewNodeAndBack(t *testing.T) {
 	// It should wait raft synced before we can start to balance
 	// and new data should be balanced to new node
 	ensureClusterReady(t, 4)
@@ -1465,6 +1492,15 @@ func TestClusterBalanceToNewNode(t *testing.T) {
 		t.Logf("part %v isr is %v", i, oldNs.GetISR())
 		oldNsList = append(oldNsList, oldNs)
 	}
+	t.Logf("cluster data dir: %v", gtmpDir)
+	serverDatas := make(map[string]map[string]int64)
+	for _, srv := range gkvList {
+		serverDatas[srv.dataPath] = srv.s.GetNsMgr().CheckLocalNamespaces()
+		deletedNs := getDeletedNs(t, srv.dataPath)
+		t.Logf("%v deleted ns: %v", srv.s.GetCoord().GetMyID(), deletedNs)
+		assert.Equal(t, 0, len(deletedNs))
+	}
+	t.Logf("server datas: %v", serverDatas)
 
 	newDataNodes, dataDir := addMoreTestDataNodeToCluster(t, 2)
 	defer cleanDataNodes(newDataNodes, dataDir)
@@ -1548,6 +1584,15 @@ func TestClusterBalanceToNewNode(t *testing.T) {
 			break
 		}
 	}
+	totalDeleted := 0
+	for _, srv := range gkvList {
+		deletedNs := getDeletedNs(t, srv.dataPath)
+		t.Logf("%v deleted ns: %v", srv.s.GetCoord().GetMyID(), deletedNs)
+		totalDeleted += len(deletedNs)
+	}
+
+	t.Logf("after balanced server datas deleted: %v", totalDeleted)
+	assert.True(t, totalDeleted > 1)
 
 	for _, nn := range newDataNodes {
 		t.Logf("begin stopping new added node: %v", nn.s.GetCoord().GetMyID())
@@ -2201,4 +2246,57 @@ func testSyncerWriteOnlyLoadFromRegister(t *testing.T, syncerOnly bool) {
 	leader = dnw.s
 	assert.NotNil(t, leader)
 	test.Equal(t, !syncerOnly, node.IsSyncerOnly())
+}
+
+func TestNamespaceMagicCodeChangedAfterRecreate(t *testing.T) {
+	ensureClusterReady(t, 3)
+	time.Sleep(time.Second)
+	ns := "test_cluster_ns_recreate"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 10; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	serverDatas := make(map[string]map[string]int64)
+	for _, srv := range gkvList {
+		serverDatas[srv.dataPath] = srv.s.GetNsMgr().CheckLocalNamespaces()
+	}
+	t.Logf("server datas: %v", serverDatas)
+
+	ensureDeleteNamespace(t, pduri, ns)
+	time.Sleep(time.Second * 5)
+
+	serverDatas2 := make(map[string]map[string]int64)
+	for _, srv := range gkvList {
+		serverDatas2[srv.dataPath] = srv.s.GetNsMgr().CheckLocalNamespaces()
+		assert.Equal(t, 0, len(serverDatas2[srv.dataPath]))
+		deletedNs := getDeletedNs(t, srv.dataPath)
+		t.Logf("%v server ns deleted: %v", srv.dataPath, deletedNs)
+		assert.Equal(t, len(serverDatas[srv.dataPath]), len(deletedNs))
+	}
+	t.Logf("server datas after ns deleted: %v", serverDatas2)
+
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	waitForLeader(t, ns, 0)
+
+	for _, srv := range gkvList {
+		recreatedNsList := srv.s.GetNsMgr().CheckLocalNamespaces()
+		oldNs := serverDatas[srv.dataPath]
+		for name, nsMagic := range recreatedNsList {
+			oldMagic := oldNs[name]
+			t.Logf("ns %v magic: %v, %v", name, oldMagic, nsMagic)
+			assert.NotEqual(t, int64(0), oldMagic)
+			assert.NotEqual(t, oldMagic, nsMagic)
+		}
+		assert.True(t, len(recreatedNsList) > 0)
+	}
 }
