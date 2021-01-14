@@ -24,6 +24,7 @@ var (
 	showVersion = flagSet.Bool("version", false, "print version string")
 
 	httpAddress        = flagSet.String("http-address", "0.0.0.0:18001", "<addr>:<port> to listen on for HTTP clients")
+	metricAddress      = flagSet.String("metric-address", ":8800", "<addr>:<port> to listen on for HTTP metric clients")
 	broadcastAddress   = flagSet.String("broadcast-address", "", "address of this lookupd node, (default to the OS hostname)")
 	broadcastInterface = flagSet.String("broadcast-interface", "", "address of this lookupd node, (default to the OS hostname)")
 	reverseProxyPort   = flagSet.String("reverse-proxy-port", "", "<port> for reverse proxy")

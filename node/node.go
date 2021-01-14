@@ -84,7 +84,7 @@ type DeleteTableRange struct {
 	// to avoid drop all table data, this is needed to delete all data in table
 	DeleteAll bool `json:"delete_all,omitempty"`
 	Dryrun    bool `json:"dryrun,omitempty"`
-	// TODO: add flag to indicate should this be replicated to the remote cluster
+	// flag to indicate should this be replicated to the remote cluster
 	// to avoid delete too much by accident
 	NoReplayToRemoteCluster bool `json:"noreplay_to_remote_cluster"`
 }

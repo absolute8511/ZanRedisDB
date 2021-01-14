@@ -9,6 +9,7 @@ import (
 
 type ServerConfig struct {
 	HTTPAddress        string `flag:"http-address"`
+	MetricAddress      string `flag:"metric-address"`
 	BroadcastAddr      string `flag:"broadcast-address"`
 	BroadcastInterface string `flag:"broadcast-interface"`
 

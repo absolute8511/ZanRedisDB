@@ -9,6 +9,7 @@ import (
 
 	"github.com/absolute8511/redcon"
 	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 var (
@@ -361,12 +362,40 @@ func (nd *KVNode) zaddCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	// TODO: optimize check exist before propose to raft if we later support nx/xx options
 
 	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+func (nd *KVNode) zremCommand(cmd redcon.Command) (interface{}, error) {
+	if len(cmd.Args) < 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
+	}
+	// optimize check exist before propose to raft
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	needChange := false
+	for _, m := range cmd.Args[2:] {
+		_, err := nd.store.ZScore(key, m)
+		if !rockredis.IsMemberNotExist(err) {
+			// found a member, we need do raft proposal
+			needChange = true
+			break
+		}
+	}
+	if !needChange {
+		return int64(0), nil
+	}
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	return rsp, err
 }
 
 func (nd *KVNode) zincrbyCommand(cmd redcon.Command) (interface{}, error) {

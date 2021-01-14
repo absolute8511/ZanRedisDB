@@ -315,7 +315,7 @@ func (dc *DataCoordinator) loadLocalNamespaceData() error {
 			shouldLoad := dc.isNamespaceShouldStart(nsInfo, localNamespace)
 			if !shouldLoad {
 				if len(nsInfo.GetISR()) >= nsInfo.Replica && localNamespace != nil {
-					dc.removeLocalNamespaceFromRaft(localNamespace, false)
+					dc.forceRemoveLocalNamespace(localNamespace)
 				}
 				if localNamespace != nil {
 					cluster.CoordLog().Infof("%v namespace %v ignore to load ", dc.GetMyID(), nsInfo.GetDesp())
@@ -747,7 +747,14 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 							dc.GetMyID(), localRID, namespaceMeta.GetDesp())
 						inRaft = true
 					}
-					dc.removeLocalNamespaceFromRaft(localNamespace, inRaft)
+					if inRaft {
+						dc.removeLocalNamespaceFromRaft(localNamespace)
+					} else {
+						// since this node will be joined in other raft id, maybe we can just stop without clean old data
+						if localNamespace != nil {
+							localNamespace.Close()
+						}
+					}
 				}
 				continue
 			}
@@ -908,31 +915,29 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 }
 
 func (dc *DataCoordinator) forceRemoveLocalNamespace(localNamespace *node.NamespaceNode) {
+	if localNamespace == nil {
+		return
+	}
+	cluster.CoordLog().Infof("force remove local data: %v", localNamespace.FullName())
 	err := localNamespace.Destroy()
 	if err != nil {
 		cluster.CoordLog().Infof("failed to force remove local data: %v", err)
 	}
 }
 
-func (dc *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.NamespaceNode, removeFromRaft bool) *cluster.CoordErr {
-	if removeFromRaft {
-		if !localNamespace.IsReady() {
-			return ErrNamespaceNotReady
-		}
-		m := localNamespace.Node.GetLocalMemberInfo()
-		cluster.CoordLog().Infof("propose remove %v from namespace : %v", m.ID, m.GroupName)
-
-		localErr := localNamespace.Node.ProposeRemoveMember(*m)
-		if localErr != nil {
-			cluster.CoordLog().Infof("propose remove dc %v failed : %v", m, localErr)
-			return &cluster.CoordErr{ErrMsg: localErr.Error(), ErrCode: cluster.RpcCommonErr, ErrType: cluster.CoordLocalErr}
-		}
-	} else {
-		if localNamespace == nil {
-			return cluster.ErrNamespaceNotCreated
-		}
-		localNamespace.Close()
+func (dc *DataCoordinator) removeLocalNamespaceFromRaft(localNamespace *node.NamespaceNode) *cluster.CoordErr {
+	if !localNamespace.IsReady() {
+		return ErrNamespaceNotReady
 	}
+	m := localNamespace.Node.GetLocalMemberInfo()
+	cluster.CoordLog().Infof("propose remove %v from namespace : %v", m.ID, m.GroupName)
+
+	localErr := localNamespace.Node.ProposeRemoveMember(*m)
+	if localErr != nil {
+		cluster.CoordLog().Infof("propose remove dc %v failed : %v", m, localErr)
+		return &cluster.CoordErr{ErrMsg: localErr.Error(), ErrCode: cluster.RpcCommonErr, ErrType: cluster.CoordLocalErr}
+	}
+
 	return nil
 }
 
@@ -1225,6 +1230,9 @@ func (dc *DataCoordinator) updateLocalNamespace(nsInfo *cluster.PartitionMetaInf
 	localErr = localNode.SetMagicCode(nsInfo.MagicCode)
 	if localErr != nil {
 		cluster.CoordLog().Warningf("local namespace %v init magic code failed: %v", nsInfo.GetDesp(), localErr)
+		if localErr == node.ErrLocalMagicCodeConflict {
+			dc.forceRemoveLocalNamespace(localNode)
+		}
 		return localNode, cluster.ErrLocalInitNamespaceFailed
 	}
 	dyConf := &node.NamespaceDynamicConf{

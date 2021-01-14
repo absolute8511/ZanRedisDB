@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -8,9 +10,21 @@ import (
 	"golang.org/x/net/context"
 )
 
+var etcdTransport client.CancelableTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	Dial: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).Dial,
+	TLSHandshakeTimeout: 10 * time.Second,
+	WriteBufferSize:     1024,
+	ReadBufferSize:      1024,
+}
+
 type EtcdClient struct {
-	client client.Client
-	kapi   client.KeysAPI
+	client  client.Client
+	kapi    client.KeysAPI
+	timeout time.Duration
 }
 
 func NewEClient(host string) (*EtcdClient, error) {
@@ -18,8 +32,8 @@ func NewEClient(host string) (*EtcdClient, error) {
 	initEtcdPeers(machines)
 	cfg := client.Config{
 		Endpoints:               machines,
-		Transport:               client.DefaultTransport,
-		HeaderTimeoutPerRequest: time.Second,
+		Transport:               etcdTransport,
+		HeaderTimeoutPerRequest: time.Second * 5,
 	}
 
 	c, err := client.New(cfg)
@@ -28,8 +42,9 @@ func NewEClient(host string) (*EtcdClient, error) {
 	}
 
 	return &EtcdClient{
-		client: c,
-		kapi:   client.NewKeysAPI(c),
+		client:  c,
+		kapi:    client.NewKeysAPI(c),
+		timeout: time.Second * 10,
 	}, nil
 }
 
@@ -39,7 +54,9 @@ func (self *EtcdClient) GetNewest(key string, sort, recursive bool) (*client.Res
 		Sort:      sort,
 		Quorum:    true,
 	}
-	return self.kapi.Get(context.Background(), key, getOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Get(ctx, key, getOptions)
 }
 
 func (self *EtcdClient) Get(key string, sort, recursive bool) (*client.Response, error) {
@@ -47,7 +64,9 @@ func (self *EtcdClient) Get(key string, sort, recursive bool) (*client.Response,
 		Recursive: recursive,
 		Sort:      sort,
 	}
-	return self.kapi.Get(context.Background(), key, getOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Get(ctx, key, getOptions)
 }
 
 func (self *EtcdClient) Create(key string, value string, ttl uint64) (*client.Response, error) {
@@ -55,14 +74,18 @@ func (self *EtcdClient) Create(key string, value string, ttl uint64) (*client.Re
 		TTL:       time.Duration(ttl) * time.Second,
 		PrevExist: client.PrevNoExist,
 	}
-	return self.kapi.Set(context.Background(), key, value, setOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Set(ctx, key, value, setOptions)
 }
 
 func (self *EtcdClient) Delete(key string, recursive bool) (*client.Response, error) {
 	delOptions := &client.DeleteOptions{
 		Recursive: recursive,
 	}
-	return self.kapi.Delete(context.Background(), key, delOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Delete(ctx, key, delOptions)
 }
 
 func (self *EtcdClient) CreateDir(key string, ttl uint64) (*client.Response, error) {
@@ -70,21 +93,27 @@ func (self *EtcdClient) CreateDir(key string, ttl uint64) (*client.Response, err
 		TTL: time.Duration(ttl) * time.Second,
 		Dir: true,
 	}
-	return self.kapi.Set(context.Background(), key, "", setOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Set(ctx, key, "", setOptions)
 }
 
 func (self *EtcdClient) CreateInOrder(dir string, value string, ttl uint64) (*client.Response, error) {
 	cirOptions := &client.CreateInOrderOptions{
 		TTL: time.Duration(ttl) * time.Second,
 	}
-	return self.kapi.CreateInOrder(context.Background(), dir, value, cirOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.CreateInOrder(ctx, dir, value, cirOptions)
 }
 
 func (self *EtcdClient) Set(key string, value string, ttl uint64) (*client.Response, error) {
 	setOptions := &client.SetOptions{
 		TTL: time.Duration(ttl) * time.Second,
 	}
-	return self.kapi.Set(context.Background(), key, value, setOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Set(ctx, key, value, setOptions)
 }
 
 func (self *EtcdClient) SetWithTTL(key string, ttl uint64) (*client.Response, error) {
@@ -93,7 +122,9 @@ func (self *EtcdClient) SetWithTTL(key string, ttl uint64) (*client.Response, er
 		Refresh:   true,
 		PrevExist: client.PrevExist,
 	}
-	return self.kapi.Set(context.Background(), key, "", setOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Set(ctx, key, "", setOptions)
 }
 
 func (self *EtcdClient) Update(key string, value string, ttl uint64) (*client.Response, error) {
@@ -102,7 +133,9 @@ func (self *EtcdClient) Update(key string, value string, ttl uint64) (*client.Re
 		Refresh:   true,
 		PrevExist: client.PrevExist,
 	}
-	return self.kapi.Set(context.Background(), key, value, setOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Set(ctx, key, value, setOptions)
 }
 
 func (self *EtcdClient) CompareAndSwap(key string, value string, ttl uint64, prevValue string, prevIndex uint64) (*client.Response, error) {
@@ -111,7 +144,9 @@ func (self *EtcdClient) CompareAndSwap(key string, value string, ttl uint64, pre
 		PrevIndex: prevIndex,
 		TTL:       time.Duration(ttl) * time.Second,
 	}
-	return self.kapi.Set(context.Background(), key, value, setOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Set(ctx, key, value, setOptions)
 }
 
 func (self *EtcdClient) CompareAndDelete(key string, prevValue string, prevIndex uint64) (*client.Response, error) {
@@ -119,7 +154,9 @@ func (self *EtcdClient) CompareAndDelete(key string, prevValue string, prevIndex
 		PrevValue: prevValue,
 		PrevIndex: prevIndex,
 	}
-	return self.kapi.Delete(context.Background(), key, delOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), self.timeout)
+	defer cancel()
+	return self.kapi.Delete(ctx, key, delOptions)
 }
 
 func (self *EtcdClient) Watch(key string, waitIndex uint64, recursive bool) client.Watcher {

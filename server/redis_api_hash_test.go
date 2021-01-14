@@ -271,6 +271,7 @@ func TestHashExpire(t *testing.T) {
 	f4 := "f4"
 	fint := "fint"
 	ttl := 2
+	tn := time.Now().UnixNano()
 
 	n, err := goredis.Int(c.Do("hset", key1, f1, "hello"))
 	assert.Nil(t, err)
@@ -282,6 +283,10 @@ func TestHashExpire(t *testing.T) {
 	} else if v != "hello" {
 		t.Fatal(v)
 	}
+	n, err = goredis.Int(c.Do("stale.hget.version", key1, f1))
+	assert.Nil(t, err)
+	assert.True(t, n >= int(tn), "version should great than now")
+
 	n, err = goredis.Int(c.Do("hkeyexist", key1))
 	assert.Nil(t, err)
 	assert.Equal(t, 1, n)
@@ -309,6 +314,9 @@ func TestHashExpire(t *testing.T) {
 	vlist, err := goredis.MultiBulk(c.Do("hmget", key1, f1, f2, f3))
 	assert.Nil(t, err)
 	assert.Equal(t, 3, len(vlist))
+	vlist, err = goredis.MultiBulk(c.Do("stale.hmget.expired", key1, f1, f2, f3))
+	assert.Nil(t, err)
+	assert.Equal(t, 3, len(vlist))
 
 	n, err = goredis.Int(c.Do("hincrby", key1, fint, 1))
 	assert.Nil(t, err)
@@ -317,12 +325,23 @@ func TestHashExpire(t *testing.T) {
 	assert.Nil(t, err)
 	assertTTLNear(t, ttl, realTtl)
 
+	vlist, err = goredis.MultiBulk(c.Do("stale.hgetall.expired", key1))
+	assert.Nil(t, err)
+	assert.Equal(t, 10, len(vlist))
+
 	// wait expire
 	time.Sleep(time.Second * time.Duration(ttl+2))
 
 	if v, err := goredis.String(c.Do("hget", key1, f1)); err != goredis.ErrNil {
 		t.Fatalf("expired hash key should be expired: %v, %v", v, err)
 	}
+
+	vlist2, err := goredis.MultiBulk(c.Do("stale.hgetall.expired", key1))
+	assert.Nil(t, err)
+	t.Logf("hgetall expired: %v", vlist2)
+	assert.Equal(t, 10, len(vlist2))
+	assert.Equal(t, vlist, vlist2)
+
 	n, err = goredis.Int(c.Do("hkeyexist", key1))
 	assert.Nil(t, err)
 	assert.Equal(t, 0, n)
@@ -339,6 +358,12 @@ func TestHashExpire(t *testing.T) {
 	assert.Nil(t, vlist[0])
 	assert.Nil(t, vlist[1])
 	assert.Nil(t, vlist[2])
+	vlist, err = goredis.MultiBulk(c.Do("stale.hmget.expired", key1, f3, f4))
+	assert.Nil(t, err)
+	t.Logf("hmget : %v", vlist)
+	assert.Equal(t, 2, len(vlist))
+	assert.Equal(t, []byte(f3), vlist[0])
+	assert.Equal(t, []byte(f4), vlist[1])
 
 	vlist, err = goredis.MultiBulk(c.Do("hgetall", key1))
 	assert.Nil(t, err)

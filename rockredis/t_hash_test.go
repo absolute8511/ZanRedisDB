@@ -50,7 +50,21 @@ func TestDBHash(t *testing.T) {
 		Key:   []byte("b"),
 		Value: []byte("hello world 2"),
 	}
-	err := db.HMset(tn, key, r1, r2)
+	// test hget on not exist
+	n, err := db.HGetVer(key, []byte("a"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, vals, err := db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(vals))
+	n, vals, err = db.HGetAllExpired(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(vals))
+
+	err = db.HMset(tn, key, r1, r2)
 	assert.Nil(t, err)
 
 	if n, err := db.HSet(tn, false, key, []byte("d"), []byte("hello world 2")); err != nil {
@@ -76,6 +90,19 @@ func TestDBHash(t *testing.T) {
 	if string(v2) != string(ay[1]) {
 		t.Error(ay[1])
 	}
+	n, err = db.HGetVer(key, []byte("a"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(tn), n)
+
+	n, vals, err = db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+	assert.Equal(t, 3, len(vals))
+	n, vals2, err := db.HGetAllExpired(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+	assert.Equal(t, 3, len(vals2))
+	assert.Equal(t, vals, vals2)
 
 	length, err := db.HLen(key)
 	if err != nil {

@@ -340,9 +340,17 @@ func (db *RockDB) HGetWithOp(key []byte, field []byte, op func([]byte) error) er
 	})
 }
 
+func (db *RockDB) HGetExpired(key []byte, field []byte) ([]byte, error) {
+	return db.hgetWithFlag(key, field, true)
+}
+
 func (db *RockDB) HGet(key []byte, field []byte) ([]byte, error) {
+	return db.hgetWithFlag(key, field, false)
+}
+
+func (db *RockDB) hgetWithFlag(key []byte, field []byte, getExpired bool) ([]byte, error) {
 	tn := time.Now().UnixNano()
-	v, err := db.hGetRawFieldValue(tn, key, field, true, true)
+	v, err := db.hGetRawFieldValue(tn, key, field, !getExpired, true)
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +367,21 @@ func (db *RockDB) HExist(key []byte, field []byte) (bool, error) {
 	tn := time.Now().UnixNano()
 	vok, err := db.hExistRawField(tn, key, field, true, true)
 	return vok, err
+}
+
+func (db *RockDB) HMgetExpired(key []byte, args ...[]byte) ([][]byte, error) {
+	if len(args) > MAX_BATCH_NUM {
+		return nil, errTooMuchBatchSize
+	}
+	var err error
+	r := make([][]byte, len(args))
+	for i := 0; i < len(args); i++ {
+		r[i], err = db.HGetExpired(key, args[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return r, nil
 }
 
 func (db *RockDB) HMget(key []byte, args ...[]byte) ([][]byte, error) {
@@ -613,6 +636,14 @@ func (db *RockDB) HIncrBy(ts int64, key []byte, field []byte, delta int64) (int6
 }
 
 func (db *RockDB) HGetAll(key []byte) (int64, []common.KVRecordRet, error) {
+	return db.hGetAll(key, false)
+}
+
+func (db *RockDB) HGetAllExpired(key []byte) (int64, []common.KVRecordRet, error) {
+	return db.hGetAll(key, true)
+}
+
+func (db *RockDB) hGetAll(key []byte, getExpired bool) (int64, []common.KVRecordRet, error) {
 	if err := checkKeySize(key); err != nil {
 		return 0, nil, err
 	}
@@ -622,7 +653,7 @@ func (db *RockDB) HGetAll(key []byte) (int64, []common.KVRecordRet, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if keyInfo.IsNotExistOrExpired() {
+	if keyInfo.IsNotExistOrExpired() && !getExpired {
 		return 0, nil, nil
 	}
 	start := keyInfo.RangeStart

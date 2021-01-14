@@ -20,8 +20,9 @@ const (
 	EVENT_WATCH_L_DELETE
 )
 
-const (
-	ETCD_TTL = 60
+var (
+	EtcdTTL          = 60
+	WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*3)
 )
 
 const (
@@ -104,6 +105,61 @@ func exchangeNodeValue(c *EtcdClient, nodePath string, initValue string,
 		}
 	}
 	return err
+}
+
+func watchWaitAndDo(ctx context.Context, client *EtcdClient,
+	key string, recursive bool, callback func(rsp *client.Response),
+	watchExpiredCb func()) {
+	initIndex := uint64(0)
+	rsp, err := client.Get(key, false, recursive)
+	if err != nil {
+		coordLog.Errorf("get watched key[%s] error: %s", key, err.Error())
+	} else {
+		if rsp.Index > 0 {
+			initIndex = rsp.Index - 1
+		}
+		callback(rsp)
+	}
+	watcher := client.Watch(key, initIndex, recursive)
+	for {
+		// to avoid dead connection issues, we add timeout for watch connection to wake up watch if too long no
+		// any event
+		start := time.Now()
+		rsp, err := watcher.Next(ctx)
+		if err != nil {
+			if err == context.Canceled {
+				coordLog.Infof("watch key[%s] cancelled.", key)
+				return
+			} else if err == context.DeadlineExceeded {
+				coordLog.Debugf("watcher key[%s] timeout: %s, cost: %s", key, err.Error(), time.Since(start))
+				// since after timeout the cluster index may changed much, we need watch using new index to avoid index expired
+
+				continue
+			} else {
+				// rewatch
+				if IsEtcdWatchExpired(err) {
+					coordLog.Debugf("watcher key[%s] error: %s", key, err.Error())
+					if watchExpiredCb != nil {
+						watchExpiredCb()
+					}
+					rsp, err = client.Get(key, false, false)
+					if err != nil {
+						coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
+						time.Sleep(time.Second)
+						continue
+					}
+					// watch for v2 client should not +1 on index, since it is the after index (which will +1 in the method of watch)
+					watcher = client.Watch(key, rsp.Index, recursive)
+					// watch expired should be treated as changed of node
+				} else {
+					coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
+					time.Sleep(5 * time.Second)
+					continue
+				}
+			}
+		}
+		callback(rsp)
+	}
 }
 
 type EtcdRegister struct {
@@ -257,7 +313,7 @@ func (etcdReg *EtcdRegister) refreshNamespaces(stopC <-chan struct{}) {
 }
 
 func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
-	watcher := etcdReg.client.Watch(etcdReg.namespaceRoot, 0, true)
+	key := etcdReg.namespaceRoot
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -265,35 +321,12 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 			cancel()
 		}
 	}()
-	for {
-		rsp, err := watcher.Next(ctx)
-		if err != nil {
-			if err == context.Canceled {
-				coordLog.Infof("watch key[%s] canceled.", etcdReg.namespaceRoot)
-				return
-			}
+	watchWaitAndDo(ctx, etcdReg.client, key, true, func(rsp *client.Response) {
+		if rsp.Index != atomic.LoadUint64(&etcdReg.watchedNsClusterIndex) {
 			atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
-			coordLog.Warningf("watcher key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
-			if IsEtcdWatchExpired(err) {
-				rsp, err := etcdReg.client.Get(etcdReg.namespaceRoot, false, true)
-				if err != nil {
-					coordLog.Errorf("rewatch and get key[%s] error: %s", etcdReg.namespaceRoot, err.Error())
-					time.Sleep(time.Second)
-					continue
-				}
-				coordLog.Infof("watch expired, rewatch namespace change at cluster index %v", rsp.Index)
-				atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
-				watcher = etcdReg.client.Watch(etcdReg.namespaceRoot, rsp.Index+1, true)
-				// watch expired should be treated as changed of node
-			} else {
-				time.Sleep(5 * time.Second)
-				continue
-			}
-		} else {
-			atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
-			coordLog.Infof("namespace changed %v, cluster index %v", rsp, rsp.Index)
 		}
-		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+		atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
+		coordLog.Infof("namespace changed at cluster index %v", rsp.Index)
 		select {
 		case etcdReg.triggerScanCh <- struct{}{}:
 		default:
@@ -302,7 +335,7 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 		case etcdReg.nsChangedChan <- struct{}{}:
 		default:
 		}
-	}
+	}, nil)
 }
 
 func (etcdReg *EtcdRegister) scanNamespaces() (map[string]map[int]PartitionMetaInfo, EpochType, error) {
@@ -672,7 +705,7 @@ func (etcdReg *PDEtcdRegister) Register(value *NodeInfo) error {
 	etcdReg.leaderStr = string(valueB)
 	etcdReg.nodeKey = etcdReg.getPDNodePath(value)
 	etcdReg.nodeValue = string(valueB)
-	_, err = etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
+	_, err = etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, uint64(EtcdTTL))
 	if err != nil {
 		return err
 	}
@@ -688,11 +721,11 @@ func (etcdReg *PDEtcdRegister) refresh(stopC <-chan bool) {
 		select {
 		case <-stopC:
 			return
-		case <-time.After(time.Second * time.Duration(ETCD_TTL/10)):
-			_, err := etcdReg.client.SetWithTTL(etcdReg.nodeKey, ETCD_TTL)
+		case <-time.After(time.Second * time.Duration(EtcdTTL/10)):
+			_, err := etcdReg.client.SetWithTTL(etcdReg.nodeKey, uint64(EtcdTTL))
 			if err != nil {
 				coordLog.Errorf("update error: %s", err.Error())
-				_, err := etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
+				_, err := etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, uint64(EtcdTTL))
 				if err != nil {
 					coordLog.Errorf("set key error: %s", err.Error())
 				}
@@ -767,7 +800,7 @@ func (etcdReg *PDEtcdRegister) GetClusterEpoch() (EpochType, error) {
 }
 
 func (etcdReg *PDEtcdRegister) AcquireAndWatchLeader(leader chan *NodeInfo, stop chan struct{}) {
-	master := NewMaster(etcdReg.client, etcdReg.leaderSessionPath, etcdReg.leaderStr, ETCD_TTL)
+	master := NewMaster(etcdReg.client, etcdReg.leaderSessionPath, etcdReg.leaderStr, uint64(EtcdTTL))
 	go etcdReg.processMasterEvents(master, leader, stop)
 	master.Start()
 }
@@ -791,7 +824,6 @@ func (etcdReg *PDEtcdRegister) processMasterEvents(master Master, leader chan *N
 				var node NodeInfo
 				leader <- &node
 			} else {
-				// TODO: lock error.
 				coordLog.Infof("unexpected event: %v", e)
 			}
 		case <-stop:
@@ -819,18 +851,17 @@ func (etcdReg *PDEtcdRegister) GetDataNodes() ([]NodeInfo, error) {
 }
 
 func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, stop chan struct{}) {
-	dataNodes, nIndex, err := etcdReg.getDataNodes(false)
+	defer close(dataNodesChan)
+	dataNodes, _, err := etcdReg.getDataNodes(false)
 	if err == nil {
 		select {
 		case dataNodesChan <- dataNodes:
 		case <-stop:
-			close(dataNodesChan)
 			return
 		}
 	}
 
 	key := etcdReg.getDataNodeRootPath()
-	watcher := etcdReg.client.Watch(key, nIndex, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -838,45 +869,20 @@ func (etcdReg *PDEtcdRegister) WatchDataNodes(dataNodesChan chan []NodeInfo, sto
 			cancel()
 		}
 	}()
-	for {
-		rsp, err := watcher.Next(ctx)
-		if err != nil {
-			if err == context.Canceled {
-				coordLog.Infof("watch key[%s] canceled.", key)
-				close(dataNodesChan)
-				return
-			}
-			coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
-			//rewatch
-			if IsEtcdWatchExpired(err) {
-				rsp, err = etcdReg.client.Get(key, false, true)
-				if err != nil {
-					coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
-					time.Sleep(time.Second)
-					continue
-				}
-				coordLog.Errorf("watch expired key[%s] : %v", key, rsp)
-				watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
-				// should get the nodes to notify watcher since last watch is expired
-			} else {
-				time.Sleep(5 * time.Second)
-				continue
-			}
-		}
+	watchWaitAndDo(ctx, etcdReg.client, key, true, func(rsp *client.Response) {
 		// must get the newest data
 		// otherwise, the get may get the old data from another follower
 		dataNodes, _, err := etcdReg.getDataNodes(true)
 		if err != nil {
 			coordLog.Errorf("key[%s] getNodes error: %s", key, err.Error())
-			continue
+			return
 		}
 		select {
 		case dataNodesChan <- dataNodes:
 		case <-stop:
-			close(dataNodesChan)
 			return
 		}
-	}
+	}, nil)
 }
 
 func (etcdReg *PDEtcdRegister) getDataNodes(upToDate bool) ([]NodeInfo, uint64, error) {
@@ -1102,7 +1108,7 @@ func (etcdReg *DNEtcdRegister) Register(nodeData *NodeInfo) error {
 	}
 
 	etcdReg.nodeValue = string(value)
-	_, err = etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
+	_, err = etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, uint64(EtcdTTL))
 	if err != nil {
 		return err
 	}
@@ -1119,11 +1125,11 @@ func (etcdReg *DNEtcdRegister) refresh(stopChan chan bool) {
 		select {
 		case <-stopChan:
 			return
-		case <-time.After(time.Second * time.Duration(ETCD_TTL/10)):
-			_, err := etcdReg.client.SetWithTTL(etcdReg.nodeKey, ETCD_TTL)
+		case <-time.After(time.Second * time.Duration(EtcdTTL/10)):
+			_, err := etcdReg.client.SetWithTTL(etcdReg.nodeKey, uint64(EtcdTTL))
 			if err != nil {
 				coordLog.Errorf("update error: %s", err.Error())
-				_, err := etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, ETCD_TTL)
+				_, err := etcdReg.client.Set(etcdReg.nodeKey, etcdReg.nodeValue, uint64(EtcdTTL))
 				if err != nil {
 					coordLog.Errorf("set key error: %s", err.Error())
 				} else {
@@ -1223,6 +1229,7 @@ func (etcdReg *DNEtcdRegister) NewRegisterNodeID() (uint64, error) {
 }
 
 func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan struct{}) error {
+	defer close(leader)
 	key := etcdReg.getPDLeaderPath()
 
 	rsp, err := etcdReg.client.Get(key, false, false)
@@ -1234,7 +1241,6 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 			select {
 			case leader <- &node:
 			case <-stop:
-				close(leader)
 				return nil
 			}
 		}
@@ -1242,7 +1248,6 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 		coordLog.Errorf("get error: %s", err.Error())
 	}
 
-	watcher := etcdReg.client.Watch(key, 0, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -1251,33 +1256,9 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 		}
 	}()
 	isMissing := true
-	for {
-		rsp, err = watcher.Next(ctx)
-		if err != nil {
-			if err == context.Canceled {
-				coordLog.Infof("watch key[%s] canceled.", key)
-				close(leader)
-				return nil
-			}
-			coordLog.Errorf("watcher key[%s] error: %s", key, err.Error())
-			//rewatch
-			if IsEtcdWatchExpired(err) {
-				isMissing = true
-				rsp, err = etcdReg.client.Get(key, false, true)
-				if err != nil {
-					coordLog.Errorf("rewatch and get key[%s] error: %s", key, err.Error())
-					time.Sleep(time.Second)
-					continue
-				}
-				coordLog.Errorf("watch expired key[%s] : %s", key, rsp.Node.String())
-				watcher = etcdReg.client.Watch(key, rsp.Index+1, true)
-			} else {
-				time.Sleep(5 * time.Second)
-				continue
-			}
-		}
+	watchWaitAndDo(ctx, etcdReg.client, key, true, func(rsp *client.Response) {
 		if rsp == nil {
-			continue
+			return
 		}
 		var node NodeInfo
 		if rsp.Action == "expire" || rsp.Action == "delete" {
@@ -1286,7 +1267,7 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 		} else if rsp.Action == "create" || rsp.Action == "update" || rsp.Action == "set" {
 			err := json.Unmarshal([]byte(rsp.Node.Value), &node)
 			if err != nil {
-				continue
+				return
 			}
 			if node.ID != "" {
 				isMissing = false
@@ -1294,24 +1275,25 @@ func (etcdReg *DNEtcdRegister) WatchPDLeader(leader chan *NodeInfo, stop chan st
 		} else {
 			if isMissing {
 				coordLog.Infof("key[%s] new data : %s", key, rsp.Node.String())
-				err := json.Unmarshal([]byte(rsp.Node.Value), &node)
-				if err != nil {
-					continue
-				}
-				if node.ID != "" {
-					isMissing = false
-				}
-			} else {
-				continue
 			}
+			err := json.Unmarshal([]byte(rsp.Node.Value), &node)
+			if err != nil {
+				return
+			}
+			if node.ID != "" {
+				isMissing = false
+			}
+		}
+		if node.ID == "" {
+			isMissing = true
 		}
 		select {
 		case leader <- &node:
 		case <-stop:
-			close(leader)
-			return nil
+			return
 		}
-	}
+	}, nil)
+	return nil
 }
 
 func (etcdReg *DNEtcdRegister) getDataNodePathFromID(nid string) string {

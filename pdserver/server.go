@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/pdnode_coord"
 	"github.com/youzan/ZanRedisDB/common"
@@ -104,6 +105,15 @@ func NewServer(conf *ServerConfig) (*Server, error) {
 	}
 	s.pdCoord.SetRegister(r)
 
+	metricAddr := conf.MetricAddress
+	if metricAddr == "" {
+		metricAddr = ":8800"
+	}
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		http.ListenAndServe(metricAddr, mux)
+	}()
 	return s, nil
 }
 

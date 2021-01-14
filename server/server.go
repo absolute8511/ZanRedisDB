@@ -21,6 +21,7 @@ import (
 
 	"github.com/absolute8511/redcon"
 	ps "github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/cluster/datanode_coord"
 	"github.com/youzan/ZanRedisDB/common"
@@ -219,6 +220,16 @@ func NewServer(conf ServerConfig) (*Server, error) {
 	} else {
 		s.raftTransport.ID = types.ID(myNode.RegID)
 	}
+
+	metricAddr := conf.MetricAddr
+	if metricAddr == "" {
+		metricAddr = ":8800"
+	}
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		http.ListenAndServe(metricAddr, mux)
+	}()
 
 	return s, nil
 }
@@ -491,7 +502,6 @@ func (s *Server) GetHandler(cmdName string,
 	}
 	if !kvn.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) && !isAllowStaleReadCmd(cmdName) {
 		// read only to leader to avoid stale read
-		// TODO: also read command can request the raft read index if not leader
 		return nil, cmd, node.ErrNamespaceNotLeader
 	}
 	return h, cmd, nil

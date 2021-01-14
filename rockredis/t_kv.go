@@ -451,6 +451,19 @@ func (db *RockDB) KVGet(key []byte) ([]byte, error) {
 	return v, nil
 }
 
+// KVGetExpired will get the value even it is expired
+func (db *RockDB) KVGetExpired(key []byte) ([]byte, error) {
+	tn := time.Now().UnixNano()
+	_, v, err := db.getDBKVRealValueAndHeader(tn, key, true)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	return v, nil
+}
+
 func (db *RockDB) Incr(ts int64, key []byte) (int64, error) {
 	return db.incr(ts, key, 1)
 }
