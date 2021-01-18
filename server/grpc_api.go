@@ -150,9 +150,11 @@ func (s *Server) ApplyRaftReqs(ctx context.Context, reqs *syncerpb.RaftReqs) (*s
 		if err != nil {
 			rpcErr.ErrCode = http.StatusInternalServerError
 			rpcErr.ErrMsg = err.Error()
-			return &rpcErr, nil
+			// we just set error and continue wait other future response
 		}
 	}
+	// should clean here to avoid wait response again in defer
+	futureList = futureList[:0]
 	return &rpcErr, nil
 }
 
