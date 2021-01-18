@@ -504,6 +504,7 @@ func (rc *raftNode) restartAsStandaloneNode(cfg *raft.Config, snapshot *raftpb.S
 // ID-related entry:
 // - ConfChangeAddNode, in which case the contained ID will be added into the set.
 // - ConfChangeRemoveNode, in which case the contained ID will be removed from the set.
+// - ConfChangeAddLearnerNode, in which the contained ID will be added into the set.
 func getIDsAndGroups(snap *raftpb.Snapshot, ents []raftpb.Entry) ([]uint64, map[uint64]raftpb.Group) {
 	ids := make(map[uint64]bool)
 	grps := make(map[uint64]raftpb.Group)
@@ -528,12 +529,16 @@ func getIDsAndGroups(snap *raftpb.Snapshot, ents []raftpb.Entry) ([]uint64, map[
 		var cc raftpb.ConfChange
 		cc.Unmarshal(e.Data)
 		switch cc.Type {
+		case raftpb.ConfChangeAddLearnerNode:
+			// https://github.com/etcd-io/etcd/pull/12288
+			ids[cc.ReplicaID] = true
+			grps[cc.NodeGroup.RaftReplicaId] = cc.NodeGroup
 		case raftpb.ConfChangeAddNode:
 			ids[cc.ReplicaID] = true
 			grps[cc.NodeGroup.RaftReplicaId] = cc.NodeGroup
 		case raftpb.ConfChangeRemoveNode:
 			delete(ids, cc.ReplicaID)
-			delete(grps, cc.ReplicaID)
+			delete(grps, cc.NodeGroup.RaftReplicaId)
 		case raftpb.ConfChangeUpdateNode:
 			// do nothing
 		default:

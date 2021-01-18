@@ -704,10 +704,11 @@ func (nd *KVNode) ProposeRawAsyncFromSyncer(buffer []byte, reqList *BatchInterna
 				err = ErrProposalCanceled
 			}
 			nd.w.Trigger(reqList.ReqId, err)
-			<-wr.WaitC()
+			rsp = err
 		case <-wr.WaitC():
+			// WaitC should be called only once
+			rsp = wr.GetResult()
 		}
-		rsp = wr.GetResult()
 		cancel()
 		if err, ok = rsp.(error); ok {
 			rsp = nil
@@ -765,6 +766,7 @@ type FutureRsp struct {
 	rspHandle func(interface{}) (interface{}, error)
 }
 
+// note: should not call twice on wait
 func (fr *FutureRsp) WaitRsp() (interface{}, error) {
 	rsp, err := fr.waitFunc()
 	if err != nil {
@@ -805,10 +807,10 @@ func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*Futur
 				err = ErrProposalCanceled
 			}
 			nd.w.Trigger(req.Header.ID, err)
-			<-wrh.wr.WaitC()
+			rsp = err
 		case <-wrh.wr.WaitC():
+			rsp = wrh.wr.GetResult()
 		}
-		rsp = wrh.wr.GetResult()
 		cancel()
 
 		defer wrh.release(err == nil)

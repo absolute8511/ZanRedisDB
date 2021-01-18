@@ -275,6 +275,10 @@ func (s *Server) getOrInitSyncerNormalInit() error {
 	if s.dataCoord == nil {
 		return nil
 	}
+	if s.conf.LearnerRole == "" {
+		// non-syncer node no need write state to etcd
+		return nil
+	}
 	// if etcd key is exist, then use the value in etcd. If not, we set it to the initValue and update to etcd
 	origV, err := s.dataCoord.GetSyncerNormalInit()
 	if err == nil {

@@ -259,7 +259,7 @@ func TestRegisterWatchKeepAliveTimeoutInDeadConn(t *testing.T) {
 			close(stopC)
 			wg.Wait()
 			t.Logf("changed: %v , %v", atomic.LoadInt32(&pdLeaderChanged), atomic.LoadInt32(&dataNodeChanged))
-			assert.True(t, atomic.LoadInt32(&dataNodeChanged) >= 2)
+			assert.True(t, atomic.LoadInt32(&dataNodeChanged) >= 1)
 			assert.True(t, atomic.LoadInt32(&dataNodeChanged) <= 4)
 			assert.True(t, atomic.LoadInt32(&pdLeaderChanged) <= 8)
 			assert.True(t, atomic.LoadInt32(&pdLeaderChanged) >= 2)
