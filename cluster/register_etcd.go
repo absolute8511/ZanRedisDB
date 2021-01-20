@@ -322,11 +322,19 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 		}
 	}()
 	watchWaitAndDo(ctx, etcdReg.client, key, true, func(rsp *client.Response) {
+		// it seems the rsp.index may not changed while watch trigged even if the keys has changed
+		// and also it seems the rsp.index sometimes may less than the max modifiedindex in the key node
 		if rsp.Index != atomic.LoadUint64(&etcdReg.watchedNsClusterIndex) {
-			atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+		} else {
+			coordLog.Infof("namespace changed but index not changed: %v", rsp)
 		}
 		atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
-		coordLog.Infof("namespace changed at cluster index %v", rsp.Index)
+		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
+		if rsp.Node != nil {
+			coordLog.Infof("namespace changed at cluster index %v, node modified index: %v", rsp.Index, rsp.Node.ModifiedIndex)
+		} else {
+			coordLog.Infof("namespace changed at cluster index %v", rsp.Index)
+		}
 		select {
 		case etcdReg.triggerScanCh <- struct{}{}:
 		default:
