@@ -355,7 +355,8 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 		// note the rsp.index in watch is the cluster-index when the watch begin, so the cluster-index may less than modifiedIndex
 		// since it will be increased after watch begin.
 		mi := getMaxIndexFromWatchRsp(rsp)
-		if mi == atomic.LoadUint64(&etcdReg.watchedNsClusterIndex) {
+		old := atomic.LoadUint64(&etcdReg.watchedNsClusterIndex)
+		if mi == old {
 			coordLog.Infof("namespace changed but index not changed: %v", rsp)
 		}
 		if mi > 0 {
@@ -363,9 +364,10 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 		}
 		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		if rsp.Node != nil {
-			coordLog.Infof("namespace changed at max cluster index %v (%v, modified index: %v)", mi, rsp.Index, rsp.Node.ModifiedIndex)
+			coordLog.Infof("namespace changed at max cluster index %v (%v, modified index: %v), old: %v",
+				mi, rsp.Index, rsp.Node.ModifiedIndex, old)
 		} else {
-			coordLog.Infof("namespace changed at cluster index %v, %v", mi, rsp.Index)
+			coordLog.Infof("namespace changed at cluster index %v, %v, old: %v", mi, rsp.Index, old)
 		}
 		select {
 		case etcdReg.triggerScanCh <- struct{}{}:
