@@ -107,6 +107,35 @@ func exchangeNodeValue(c *EtcdClient, nodePath string, initValue string,
 	return err
 }
 
+func getMaxIndexFromNode(n *client.Node) uint64 {
+	if n == nil {
+		return 0
+	}
+	maxI := n.ModifiedIndex
+	if n.Dir {
+		for _, child := range n.Nodes {
+			index := getMaxIndexFromNode(child)
+			if index > maxI {
+				maxI = index
+			}
+		}
+	}
+	return maxI
+}
+
+func getMaxIndexFromWatchRsp(resp *client.Response) uint64 {
+	if resp == nil {
+		return 0
+	}
+	index := resp.Index
+	if resp.Node != nil {
+		if nmi := getMaxIndexFromNode(resp.Node); nmi > index {
+			index = nmi
+		}
+	}
+	return index
+}
+
 func watchWaitAndDo(ctx context.Context, client *EtcdClient,
 	key string, recursive bool, callback func(rsp *client.Response),
 	watchExpiredCb func()) {
@@ -323,17 +352,20 @@ func (etcdReg *EtcdRegister) watchNamespaces(stopC <-chan struct{}) {
 	}()
 	watchWaitAndDo(ctx, etcdReg.client, key, true, func(rsp *client.Response) {
 		// it seems the rsp.index may not changed while watch trigged even if the keys has changed
-		// and also it seems the rsp.index sometimes may less than the max modifiedindex in the key node
-		if rsp.Index != atomic.LoadUint64(&etcdReg.watchedNsClusterIndex) {
-		} else {
+		// note the rsp.index in watch is the cluster-index when the watch begin, so the cluster-index may less than modifiedIndex
+		// since it will be increased after watch begin.
+		mi := getMaxIndexFromWatchRsp(rsp)
+		if mi == atomic.LoadUint64(&etcdReg.watchedNsClusterIndex) {
 			coordLog.Infof("namespace changed but index not changed: %v", rsp)
 		}
-		atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, rsp.Index)
+		if mi > 0 {
+			atomic.StoreUint64(&etcdReg.watchedNsClusterIndex, mi)
+		}
 		atomic.StoreInt32(&etcdReg.ifNamespaceChanged, 1)
 		if rsp.Node != nil {
-			coordLog.Infof("namespace changed at cluster index %v, node modified index: %v", rsp.Index, rsp.Node.ModifiedIndex)
+			coordLog.Infof("namespace changed at max cluster index %v (%v, modified index: %v)", mi, rsp.Index, rsp.Node.ModifiedIndex)
 		} else {
-			coordLog.Infof("namespace changed at cluster index %v", rsp.Index)
+			coordLog.Infof("namespace changed at cluster index %v, %v", mi, rsp.Index)
 		}
 		select {
 		case etcdReg.triggerScanCh <- struct{}{}:

@@ -2,6 +2,7 @@ package pdserver
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path"
@@ -211,6 +212,18 @@ func getNsInfo(t *testing.T, ns string, part int) cluster.PartitionMetaInfo {
 	return nsPartInfo
 }
 
+func getCurrentPartitionNodes(t *testing.T, ns string) [][]string {
+	allInfo, _, err := gpdServer.pdCoord.GetAllNamespaces()
+	assert.Nil(t, err)
+	nsInfo, ok := allInfo[ns]
+	assert.True(t, ok)
+	partNodes := make([][]string, len(nsInfo))
+	for pid, partInfo := range nsInfo {
+		partNodes[pid] = partInfo.GetISR()
+	}
+	return partNodes
+}
+
 func waitBalancedLeader(t *testing.T, ns string, part int) {
 	start := time.Now()
 	for {
@@ -305,6 +318,76 @@ func getTestRedisConn(t *testing.T, port int) *goredis.PoolConn {
 		t.Fatal(err)
 	}
 	return conn
+}
+
+func checkPartitionNodesBalance(t *testing.T, balanceVer string, partitionNodes [][]string) bool {
+	replicaNodesMap := make(map[string]int)
+	leaderNodesMap := make(map[string]int)
+	for _, nlist := range partitionNodes {
+		l := nlist[0]
+		cnt, ok := leaderNodesMap[l]
+		if !ok {
+			cnt = 0
+		}
+		cnt++
+		leaderNodesMap[l] = cnt
+		nameMap := make(map[string]bool)
+		for _, n := range nlist {
+			nameMap[n] = true
+			cnt, ok = replicaNodesMap[n]
+			if !ok {
+				cnt = 0
+			}
+			cnt++
+			replicaNodesMap[n] = cnt
+		}
+		assert.Equal(t, len(nlist), len(nameMap), nlist)
+	}
+
+	maxL := 0
+	minL := math.MaxInt32
+	for _, cnt := range leaderNodesMap {
+		if cnt > maxL {
+			maxL = cnt
+		}
+		if cnt < minL {
+			minL = cnt
+		}
+	}
+	t.Logf("leader max vs min: %v, %v", maxL, minL)
+	balanced := true
+	if maxL-minL <= 1 {
+		assert.True(t, maxL-minL <= 1, partitionNodes)
+	} else {
+		balanced = false
+	}
+
+	maxL = 0
+	minL = math.MaxInt32
+	for _, cnt := range replicaNodesMap {
+		if cnt > maxL {
+			maxL = cnt
+		}
+		if cnt < minL {
+			minL = cnt
+		}
+	}
+	t.Logf("replica max vs min: %v, %v", maxL, minL)
+	if balanceVer == "" {
+		// default balance may not have balanced replicas
+		if maxL-minL <= 3 {
+			assert.True(t, maxL-minL <= 3, partitionNodes)
+		} else {
+			balanced = false
+		}
+		return balanced
+	}
+	if maxL-minL <= 1 {
+		assert.True(t, maxL-minL <= 1, partitionNodes)
+	} else {
+		balanced = false
+	}
+	return balanced
 }
 
 func TestRWMultiPartOnDifferentNodes(t *testing.T) {
@@ -1052,11 +1135,12 @@ func TestClusterRemoveNodeForLast(t *testing.T) {
 
 func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 	// one failed node and trigger rebalance on left nodes
-	ensureClusterReady(t, 4)
+	ensureClusterReady(t, 3)
 
 	time.Sleep(time.Second)
 	ns := "test_cluster_failed_node_balance"
 	partNum := 8
+	replicator := 3
 	pduri := "http://127.0.0.1:" + pdHttpPort
 
 	ensureDataNodesReady(t, pduri, len(gkvList))
@@ -1066,7 +1150,7 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 	defer cleanDataNodes(newDataNodes, dataDir)
 	time.Sleep(time.Second)
 
-	ensureNamespace(t, pduri, ns, partNum, 3)
+	ensureNamespace(t, pduri, ns, partNum, replicator)
 	defer ensureDeleteNamespace(t, pduri, ns)
 	dnw, nsNode := waitForLeader(t, ns, 0)
 	leader := dnw.s
@@ -1099,7 +1183,7 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 	start := time.Now()
 	for i := 0; i < partNum; i++ {
 		for {
-			if time.Since(start) > time.Minute*time.Duration(partNum) {
+			if time.Since(start) > time.Minute*time.Duration(partNum/2) {
 				t.Errorf("timeout wait removing partition %v on removed node", i)
 				break
 			}
@@ -1108,7 +1192,7 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 			if len(nsInfo.Removings) > 0 {
 				continue
 			}
-			if len(nsInfo.GetISR()) != 3 {
+			if len(nsInfo.GetISR()) != replicator {
 				continue
 			}
 			waitRemove := false
@@ -1128,8 +1212,13 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 	}
 
 	time.Sleep(time.Second * 5)
+	start = time.Now()
 	for i := 0; i < partNum; i++ {
 		for {
+			if time.Since(start) > time.Minute*time.Duration(partNum/2) {
+				t.Errorf("timeout wait balance partition %v ", i)
+				break
+			}
 			time.Sleep(time.Second)
 			waitRemoveFromRemoving(t, ns, i)
 			waitEnoughReplica(t, ns, i)
@@ -1137,18 +1226,56 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 			waitBalancedLeader(t, ns, i)
 			newNs := getNsInfo(t, ns, i)
 			newISR := newNs.GetISR()
-			if len(newISR) != 3 || len(newNs.Removings) > 0 {
+			if len(newISR) != replicator || len(newNs.Removings) > 0 {
 				// wait remove unneed replica
 				continue
 			}
 			break
 		}
 		nsInfo := getNsInfo(t, ns, i)
+		t.Logf("after stopped, isr: %v", nsInfo.GetISR())
 		for _, nid := range nsInfo.GetISR() {
 			assert.NotEqual(t, nid, removedNodeID)
 		}
 		assert.Equal(t, 3, len(nsInfo.GetISR()))
 		assert.Equal(t, 0, len(nsInfo.Removings))
+	}
+	assert.True(t, checkPartitionNodesBalance(t, "v2", getCurrentPartitionNodes(t, ns)), "should balanced after stopped")
+	// start the failed node to make sure balance again
+	newDataNodes[0].s.Start()
+	time.Sleep(time.Second * 10)
+	start = time.Now()
+	for {
+		found := 0
+		for i := 0; i < partNum; i++ {
+			time.Sleep(time.Second)
+			waitEnoughReplica(t, ns, i)
+			waitForAllFullReady(t, ns, i)
+			waitBalancedLeader(t, ns, i)
+			newNs := getNsInfo(t, ns, i)
+			newISR := newNs.GetISR()
+			if len(newISR) != replicator || len(newNs.Removings) > 0 {
+				// wait remove unneed replica
+				continue
+			}
+			t.Logf("after restart stopped node, isr: %v", newNs.GetISR())
+			if cluster.FindSlice(newISR, removedNodeID) != -1 {
+				found++
+				t.Logf("found restarted node in part: %v", i)
+			}
+			assert.Equal(t, 3, len(newNs.GetISR()))
+			assert.Equal(t, 0, len(newNs.Removings))
+		}
+		t.Logf("found %v part for restarted node", found)
+		if found > partNum/2 {
+			if checkPartitionNodesBalance(t, "v2", getCurrentPartitionNodes(t, ns)) {
+				break
+			}
+		}
+		if time.Since(start) > time.Minute {
+			t.Errorf("timeout wait balance")
+			break
+		}
 	}
 }
 
