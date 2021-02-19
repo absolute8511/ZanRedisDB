@@ -784,6 +784,10 @@ func (nd *KVNode) queueRequest(start time.Time, req InternalRaftRequest) (*Futur
 		return nil, errRaftNotReadyForWrite
 	}
 	if !nd.rn.HasLead() {
+		metric.ErrorCnt.With(ps.Labels{
+			"namespace":  nd.GetFullName(),
+			"error_info": "raft_propose_failed_noleader",
+		}).Inc()
 		return nil, ErrNodeNoLeader
 	}
 	req.Header.Timestamp = start.UnixNano()

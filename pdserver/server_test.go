@@ -1267,14 +1267,20 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 			assert.Equal(t, 0, len(newNs.Removings))
 		}
 		t.Logf("found %v part for restarted node", found)
-		if found > partNum/2 {
-			if checkPartitionNodesBalance(t, "v2", getCurrentPartitionNodes(t, ns)) {
-				break
-			}
-		}
 		if time.Since(start) > time.Minute {
 			t.Errorf("timeout wait balance")
 			break
+		}
+		if found > partNum/2 {
+			localNsList, err := newDataNodes[0].s.GetNsMgr().GetNamespaceNodes(ns, false)
+			assert.Nil(t, err)
+			t.Logf("found %v part for restarted node, and local loaded: %v", found, localNsList)
+			if len(localNsList) < found {
+				continue
+			}
+			if checkPartitionNodesBalance(t, "v2", getCurrentPartitionNodes(t, ns)) {
+				break
+			}
 		}
 	}
 }
