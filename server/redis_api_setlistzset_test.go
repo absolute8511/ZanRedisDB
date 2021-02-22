@@ -934,9 +934,19 @@ func TestSetErrorParams(t *testing.T) {
 	defer c.Close()
 
 	key := "default:test:set_error_param"
+	invalidKey := string(append([]byte("default:test:set_error_param"), make([]byte, 10240)...))
+	invalidMember := string(append([]byte("long_param"), make([]byte, 10240)...))
 	if _, err := c.Do("sadd", key); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
+	_, err := c.Do("sadd", invalidKey, key)
+	assert.NotNil(t, err)
+	_, err = c.Do("sadd", key, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("sadd", key, key, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("sadd", invalidKey, invalidMember)
+	assert.NotNil(t, err)
 
 	if _, err := c.Do("scard"); err == nil {
 		t.Fatalf("invalid err of %v", err)
@@ -1644,6 +1654,16 @@ func TestZsetErrorParams(t *testing.T) {
 	if _, err := c.Do("zadd", key, "0.1a", "a"); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
+	invalidKey := string(append([]byte("default:test:zset_error_param"), make([]byte, 10240)...))
+	invalidMember := string(append([]byte("long_param"), make([]byte, 10240)...))
+	_, err := c.Do("zadd", invalidKey, 0, key)
+	assert.NotNil(t, err)
+	_, err = c.Do("zadd", key, 0, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("zadd", key, 0, key, 1, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("zadd", invalidKey, 0, invalidMember)
+	assert.NotNil(t, err)
 
 	//zcard
 	if _, err := c.Do("zcard"); err == nil {

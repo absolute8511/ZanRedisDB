@@ -86,6 +86,9 @@ func (nd *KVNode) saddCommand(cmd redcon.Command) (interface{}, error) {
 
 	needChange := false
 	for _, m := range cmd.Args[2:] {
+		if err := common.CheckKeySubKey(key, m); err != nil {
+			return nil, err
+		}
 		n, _ := nd.store.SIsMember(key, m)
 		if n == 0 {
 			// found a new member not exist, we need do raft proposal

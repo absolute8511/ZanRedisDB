@@ -1425,7 +1425,11 @@ func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 
 	waitBalancedLeader(t, ns, 0)
 	newNsInfo := getNsInfo(t, ns, 0)
-	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
+	oldISR := oldNsInfo.GetISR()
+	sort.Strings(oldISR)
+	newISR := newNsInfo.GetISR()
+	sort.Strings(newISR)
+	assert.Equal(t, oldISR, newISR)
 	nodeWrapper, _ = waitForLeaderFromNodes(t, ns, 0, allNodes)
 	newLeader := nodeWrapper.s
 	assert.NotNil(t, newLeader)

@@ -427,7 +427,7 @@ func (db *RockDB) HDel(ts int64, key []byte, args ...[]byte) (int64, error) {
 	var num int64 = 0
 	var newNum int64 = -1
 	for i := 0; i < len(args); i++ {
-		if err := checkKeySubKey(rk, args[i]); err != nil {
+		if err := common.CheckKeySubKey(rk, args[i]); err != nil {
 			return 0, err
 		}
 
