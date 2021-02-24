@@ -31,13 +31,29 @@ func TestPebbleEngCheckpointData(t *testing.T) {
 }
 
 func TestMemEngBtreeCheckpointData(t *testing.T) {
-	useSkiplist = false
+	old := useMemType
+	useMemType = memTypeBtree
 	defer func() {
-		useSkiplist = true
+		useMemType = old
 	}()
 	testCheckpointData(t, "mem")
 }
+
+func TestMemEngRadixCheckpointData(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeRadix
+	defer func() {
+		useMemType = old
+	}()
+	testCheckpointData(t, "mem")
+}
+
 func TestMemEngSkiplistCheckpointData(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeSkiplist
+	defer func() {
+		useMemType = old
+	}()
 	testCheckpointData(t, "mem")
 }
 
@@ -66,7 +82,8 @@ func testCheckpointData(t *testing.T, engType string) {
 	assert.Nil(t, err)
 
 	wb := eng.DefaultWriteBatch()
-	for j := 0; j < 2; j++ {
+	knum := 3
+	for j := 0; j < knum; j++ {
 		wb.Put([]byte("test"+strconv.Itoa(j)), []byte("test"+strconv.Itoa(j)))
 	}
 	eng.Write(wb)
@@ -96,7 +113,7 @@ func testCheckpointData(t *testing.T, engType string) {
 	assert.Nil(t, err)
 	defer engCK2.CloseAll()
 
-	for j := 0; j < 2; j++ {
+	for j := 0; j < knum; j++ {
 		key := []byte("test" + strconv.Itoa(j))
 		origV, err := eng.GetBytes(key)
 		assert.Equal(t, key, origV)
@@ -112,14 +129,29 @@ func testCheckpointData(t *testing.T, engType string) {
 }
 
 func TestMemEngBtreeIterator(t *testing.T) {
-	useSkiplist = false
+	old := useMemType
+	useMemType = memTypeBtree
 	defer func() {
-		useSkiplist = true
+		useMemType = old
+	}()
+	testKVIterator(t, "mem")
+}
+
+func TestMemEngRadixIterator(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeRadix
+	defer func() {
+		useMemType = old
 	}()
 	testKVIterator(t, "mem")
 }
 
 func TestMemEngSkiplistIterator(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeSkiplist
+	defer func() {
+		useMemType = old
+	}()
 	testKVIterator(t, "mem")
 }
 
@@ -151,23 +183,56 @@ func testKVIterator(t *testing.T, engType string) {
 	wb.Put(key, key)
 	eng.Write(wb)
 	wb.Clear()
+	v, err := eng.GetBytes(key)
+	assert.Nil(t, err)
+	assert.Equal(t, key, v)
 	key2 := []byte("test2")
 	wb.Put(key2, key2)
 	eng.Write(wb)
 	wb.Clear()
+	v, err = eng.GetBytes(key2)
+	assert.Nil(t, err)
+	assert.Equal(t, key2, v)
 	key3 := []byte("test3")
 	wb.Put(key3, key3)
 	eng.Write(wb)
 	wb.Clear()
+	v, err = eng.GetBytes(key3)
+	assert.Nil(t, err)
+	assert.Equal(t, key3, v)
 	key4 := []byte("test4")
 	wb.Put(key4, key4)
 	eng.Write(wb)
 	wb.Clear()
+	v, err = eng.GetBytes(key4)
+	assert.Nil(t, err)
+	assert.Equal(t, key4, v)
 	it, _ := eng.GetIterator(IteratorOpts{})
 	defer it.Close()
+
+	// test seek part of prefix
+	it.Seek([]byte("tes"))
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, key, it.Value())
+	it.Seek(key)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, key, it.Value())
+	it.Seek(key2)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key2, it.Key())
+	assert.Equal(t, key2, it.Value())
+	it.Seek(key4)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key4, it.Key())
+	assert.Equal(t, key4, it.Value())
+	it.Seek([]byte("test44"))
+	assert.True(t, !it.Valid())
+
 	it.SeekToFirst()
 	// change value after iterator should not change the snapshot iterator?
-	if engType != "mem" {
+	if engType != "mem" || useMemType == memTypeRadix {
 		// for btree, the write will be blocked while the iterator is open
 		// for skiplist, we do not support snapshot
 		wb.Put(key4, []byte(string(key4)+"update"))
@@ -197,10 +262,13 @@ func testKVIterator(t *testing.T, engType string) {
 	assert.True(t, it.Valid())
 	assert.Equal(t, key3, it.Key())
 	assert.Equal(t, key3, it.Value())
-	//it.SeekForPrev(key3)
-	//assert.True(t, it.Valid())
-	//assert.Equal(t, key2, it.Key())
-	//assert.Equal(t, key2, it.Value())
+
+	if useMemType != memTypeBtree && engType != "pebble" {
+		it.SeekForPrev(key3)
+		assert.True(t, it.Valid())
+		assert.Equal(t, key3, it.Key())
+		assert.Equal(t, key3, it.Value())
+	}
 
 	it.SeekForPrev([]byte("test5"))
 	assert.True(t, it.Valid())
