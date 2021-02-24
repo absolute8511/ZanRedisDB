@@ -199,7 +199,7 @@ func wrapReadCommandKK(f common.CommandFunc) common.CommandFunc {
 	}
 }
 
-func wrapWriteCommandK(kvn *KVNode, f common.CommandRspFunc) common.WriteCommandFunc {
+func wrapWriteCommandK(kvn *KVNode, preCheck func(key []byte) (bool, interface{}, error), f common.CommandRspFunc) common.WriteCommandFunc {
 	return func(cmd redcon.Command) (interface{}, error) {
 		if len(cmd.Args) != 2 {
 			err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
@@ -207,6 +207,19 @@ func wrapWriteCommandK(kvn *KVNode, f common.CommandRspFunc) common.WriteCommand
 		}
 		if err := common.CheckKey(cmd.Args[1]); err != nil {
 			return nil, err
+		}
+		if preCheck != nil {
+			key, err := common.CutNamesapce(cmd.Args[1])
+			if err != nil {
+				return nil, err
+			}
+			needContinue, rsp, err := preCheck(key)
+			if err != nil {
+				return nil, err
+			}
+			if !needContinue {
+				return f(cmd, rsp)
+			}
 		}
 		rsp, err := rebuildFirstKeyAndPropose(kvn, cmd, f)
 		return rsp, err

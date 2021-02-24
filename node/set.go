@@ -145,6 +145,22 @@ func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 			return nil, errors.New("Invalid count")
 		}
 	}
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	n, err := nd.store.SCard(key)
+	if err != nil {
+		return nil, err
+	}
+	// check if empty set
+	if n == 0 {
+		if !hasCount {
+			return nil, nil
+		} else {
+			return [][]byte{}, nil
+		}
+	}
 	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
 		// without the count argument, it is bulk string
 		if !hasCount {
