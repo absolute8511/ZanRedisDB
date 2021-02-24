@@ -240,7 +240,7 @@ func TestListMPush(t *testing.T) {
 	}
 }
 
-func TestPop(t *testing.T) {
+func TestListPop(t *testing.T) {
 	c := getTestConn(t)
 	defer c.Close()
 
@@ -301,6 +301,16 @@ func TestPop(t *testing.T) {
 		t.Fatal(n)
 	}
 
+	// test lpop, rpop empty list
+	v, err := goredis.Bytes(c.Do("lpop", key))
+	assert.Equal(t, goredis.ErrNil, err)
+	assert.Nil(t, v)
+	v, err = goredis.Bytes(c.Do("rpop", key))
+	assert.Equal(t, goredis.ErrNil, err)
+	assert.Nil(t, v)
+	sv, err := goredis.String(c.Do("ltrim", key, 0, 1))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", sv)
 }
 
 func disableTestTrim(t *testing.T) {
@@ -720,6 +730,15 @@ func TestSetSPopCompatile(t *testing.T) {
 	assert.Equal(t, binaryStr2, vals[0])
 	_, ok = vals[0].([]byte)
 	assert.Equal(t, true, ok)
+
+	// spop empty
+	val, err = c.Do("spop", key1)
+	assert.Nil(t, err)
+	assert.Equal(t, nil, val)
+	vals, err = goredis.MultiBulk(c.Do("spop", key1, 1))
+	assert.Nil(t, err)
+	assert.NotNil(t, vals)
+	assert.Equal(t, 0, len(vals))
 }
 
 func TestSetSPopSAddConcurrent(t *testing.T) {
@@ -934,9 +953,19 @@ func TestSetErrorParams(t *testing.T) {
 	defer c.Close()
 
 	key := "default:test:set_error_param"
+	invalidKey := string(append([]byte("default:test:set_error_param"), make([]byte, 10240)...))
+	invalidMember := string(append([]byte("long_param"), make([]byte, 10240)...))
 	if _, err := c.Do("sadd", key); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
+	_, err := c.Do("sadd", invalidKey, key)
+	assert.NotNil(t, err)
+	_, err = c.Do("sadd", key, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("sadd", key, key, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("sadd", invalidKey, invalidMember)
+	assert.NotNil(t, err)
 
 	if _, err := c.Do("scard"); err == nil {
 		t.Fatalf("invalid err of %v", err)
@@ -1644,6 +1673,16 @@ func TestZsetErrorParams(t *testing.T) {
 	if _, err := c.Do("zadd", key, "0.1a", "a"); err == nil {
 		t.Fatalf("invalid err of %v", err)
 	}
+	invalidKey := string(append([]byte("default:test:zset_error_param"), make([]byte, 10240)...))
+	invalidMember := string(append([]byte("long_param"), make([]byte, 10240)...))
+	_, err := c.Do("zadd", invalidKey, 0, key)
+	assert.NotNil(t, err)
+	_, err = c.Do("zadd", key, 0, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("zadd", key, 0, key, 1, invalidMember)
+	assert.NotNil(t, err)
+	_, err = c.Do("zadd", invalidKey, 0, invalidMember)
+	assert.NotNil(t, err)
 
 	//zcard
 	if _, err := c.Do("zcard"); err == nil {

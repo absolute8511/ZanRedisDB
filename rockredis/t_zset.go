@@ -313,7 +313,7 @@ func (db *RockDB) ZAdd(ts int64, key []byte, args ...common.ScorePair) (int64, e
 		score := args[i].Score
 		member := args[i].Member
 
-		if err := checkKeySubKey(key, member); err != nil {
+		if err := common.CheckKeySubKey(key, member); err != nil {
 			return 0, err
 		}
 		if n, err := db.zSetItem(table, keyInfo.VerKey, score, member, wb); err != nil {
@@ -468,7 +468,7 @@ func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 
 	var num int64 = 0
 	for i := 0; i < len(members); i++ {
-		if err := checkKeySubKey(key, members[i]); err != nil {
+		if err := common.CheckKeySubKey(key, members[i]); err != nil {
 			return 0, err
 		}
 		if n, err := db.zDelItem(table, keyInfo.VerKey, members[i], wb); err != nil {
@@ -495,7 +495,7 @@ func (db *RockDB) ZRem(ts int64, key []byte, members ...[]byte) (int64, error) {
 
 func (db *RockDB) ZIncrBy(ts int64, key []byte, delta float64, member []byte) (float64, error) {
 	var score float64
-	if err := checkKeySubKey(key, member); err != nil {
+	if err := common.CheckKeySubKey(key, member); err != nil {
 		return score, err
 	}
 
@@ -574,7 +574,7 @@ func (db *RockDB) ZCount(key []byte, min float64, max float64) (int64, error) {
 }
 
 func (db *RockDB) zrank(key []byte, member []byte, reverse bool) (int64, error) {
-	if err := checkKeySubKey(key, member); err != nil {
+	if err := common.CheckKeySubKey(key, member); err != nil {
 		return 0, err
 	}
 
@@ -690,8 +690,9 @@ func (db *RockDB) zRemAll(ts int64, key []byte, wb engine.WriteBatch) (int64, er
 
 func (db *RockDB) zRemRangeBytes(ts int64, key []byte, keyInfo collVerKeyInfo, offset int,
 	count int, wb engine.WriteBatch) (int64, error) {
-	if len(key) > MaxKeySize {
-		return 0, errKeySize
+	err := common.CheckKey(key)
+	if err != nil {
+		return 0, err
 	}
 	total, err := parseZMetaSize(keyInfo.OldHeader.UserData)
 	if err != nil {
@@ -765,8 +766,9 @@ func (db *RockDB) zRemRange(ts int64, key []byte, min float64, max float64, offs
 }
 
 func (db *RockDB) zRangeBytes(ts int64, preCheckCnt bool, key []byte, minKey []byte, maxKey []byte, offset int, count int, reverse bool) ([]common.ScorePair, error) {
-	if len(key) > MaxKeySize {
-		return nil, errKeySize
+	err := common.CheckKey(key)
+	if err != nil {
+		return nil, err
 	}
 	if offset < 0 {
 		return []common.ScorePair{}, nil
@@ -799,7 +801,6 @@ func (db *RockDB) zRangeBytes(ts int64, preCheckCnt bool, key []byte, minKey []b
 	// TODO: use pool for large alloc
 	v := make([]common.ScorePair, 0, preAlloc)
 
-	var err error
 	var it *engine.RangeLimitedIterator
 	//if reverse and offset is 0, count < 0, we may use forward iterator then reverse
 	//because store iterator prev is slower than next

@@ -358,9 +358,16 @@ func (nd *KVNode) zaddCommand(cmd redcon.Command) (interface{}, error) {
 		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
 		return nil, err
 	}
-	_, err := getScorePairs(cmd.Args[2:])
+	key := cmd.Args[1]
+	args, err := getScorePairs(cmd.Args[2:])
 	if err != nil {
 		return nil, err
+	}
+	for i := 0; i < len(args); i++ {
+		err := common.CheckKeySubKey(key, args[i].Member)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// TODO: optimize check exist before propose to raft if we later support nx/xx options
 

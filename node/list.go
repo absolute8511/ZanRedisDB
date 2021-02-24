@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -73,6 +74,20 @@ func (nd *KVNode) lsetCommand(cmd redcon.Command) (interface{}, error) {
 	return rsp, nil
 }
 
+// only check if ok to pop, lpop/rpop
+func (nd *KVNode) preCheckListLength(key []byte) (bool, interface{}, error) {
+	// check if empty list to avoid raft
+	n, err := nd.store.LLen(key)
+	if err != nil {
+		return false, nil, err
+	}
+	// check if empty set
+	if n == 0 {
+		return false, nil, nil
+	}
+	return true, nil, nil
+}
+
 func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
 		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
@@ -86,7 +101,17 @@ func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	needContinue, _, err := nd.preCheckListLength(key)
+	if err != nil {
+		return nil, err
+	}
+	if !needContinue {
+		return checkOKRsp(cmd, nil)
+	}
 	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
 	if err != nil {
 		return nil, err

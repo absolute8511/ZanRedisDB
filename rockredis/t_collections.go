@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"time"
+
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 const (
@@ -126,12 +128,7 @@ func (info collVerKeyInfo) IsNotExistOrExpired() bool {
 }
 
 func checkCollKFSize(key []byte, field []byte) error {
-	if len(key) > MaxKeySize || len(key) == 0 {
-		return errKeySize
-	} else if len(field) > MaxSubKeyLen {
-		return errSubKeySize
-	}
-	return nil
+	return common.CheckKeySubKey(key, field)
 }
 
 func encodeMetaKey(dt byte, key []byte) ([]byte, error) {

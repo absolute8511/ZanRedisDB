@@ -254,7 +254,7 @@ func (db *RockDB) SIsMember(key []byte, member []byte) (int64, error) {
 	if keyInfo.IsNotExistOrExpired() {
 		return 0, nil
 	}
-	if err := checkSubKey(member); err != nil {
+	if err := common.CheckSubKey(member); err != nil {
 		return 0, err
 	}
 	table := keyInfo.Table

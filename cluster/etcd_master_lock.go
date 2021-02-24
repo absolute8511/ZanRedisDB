@@ -183,6 +183,8 @@ func (self *EtcdLock) acquire() (ret error) {
 
 		// normally it should use modifiedIndex, while for error index is outdated and cleared,
 		// we should use cluster index instead (anyway we should use the larger one)
+		// note the rsp.index in watch is the cluster-index when the watch begin, so the cluster-index may less than modifiedIndex
+		// since it will be increased after watch begin.
 		wi := rsp.Node.ModifiedIndex
 		if rsp.Index > wi {
 			wi = rsp.Index

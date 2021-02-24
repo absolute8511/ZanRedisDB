@@ -28,7 +28,7 @@ var (
 	// to avoid too much partitions do the leader transfer in short time.
 	TransferLeaderWait    = time.Second * 20
 	CheckUnsyncedInterval = time.Minute * 5
-	EnsureJoinCheckWait   = time.Second * 30
+	EnsureJoinCheckWait   = time.Second * 20
 	// the wait interval allowed while changing leader in the same raft group
 	// to avoid change the leader in the same raft too much
 	ChangeLeaderInRaftWait       = time.Minute
@@ -45,7 +45,8 @@ func ChangeIntervalForTest() {
 }
 
 const (
-	MaxRaftJoinRunning = 2
+	// allow more running since the rsync has a limit on the network traffic
+	MaxRaftJoinRunning = 20
 )
 
 func GetNamespacePartitionFileName(namespace string, partition int, suffix string) string {
