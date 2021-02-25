@@ -602,7 +602,7 @@ func (r *RockEng) DeleteFilesInRange(rg CRange) {
 	r.eng.DeleteFilesInRange(rrg)
 }
 
-func (r *RockEng) NewCheckpoint() (KVCheckpoint, error) {
+func (r *RockEng) NewCheckpoint(printToStdoutAlso bool) (KVCheckpoint, error) {
 	ck, err := gorocksdb.NewCheckpoint(r.eng)
 	if err != nil {
 		return nil, err

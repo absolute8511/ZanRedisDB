@@ -815,7 +815,7 @@ func (r *RockDB) backupLoop() {
 				defer close(rsp.done)
 				dbLog.Infof("begin backup to:%v \n", rsp.backupDir)
 				start := time.Now()
-				ck, err := r.rockEng.NewCheckpoint()
+				ck, err := r.rockEng.NewCheckpoint(false)
 				if err != nil {
 					dbLog.Infof("init checkpoint failed: %v", err)
 					rsp.err = err

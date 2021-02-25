@@ -206,7 +206,7 @@ type KVEngine interface {
 	GetValueWithOpNoLock(key []byte, op func([]byte) error) error
 	DeleteFilesInRange(rg CRange)
 	GetIterator(opts IteratorOpts) (Iterator, error)
-	NewCheckpoint() (KVCheckpoint, error)
+	NewCheckpoint(printToStdoutAlso bool) (KVCheckpoint, error)
 	SetOptsForLogStorage()
 	SetCompactionFilter(ICompactFilter)
 }

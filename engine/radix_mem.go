@@ -87,5 +87,9 @@ func (mi *radixMemIndex) Put(txn *memdb.Txn, key []byte, value []byte) error {
 }
 
 func (mi *radixMemIndex) Delete(txn *memdb.Txn, key []byte) error {
-	return txn.Delete(defaultTableName, &ritem{Key: string(key), Value: nil})
+	err := txn.Delete(defaultTableName, &ritem{Key: string(key), Value: nil})
+	if err == memdb.ErrNotFound {
+		return nil
+	}
+	return err
 }

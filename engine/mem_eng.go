@@ -394,7 +394,7 @@ func (me *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &memRefSlice{b: v, needCopy: false}, nil
+		return &memRefSlice{b: v, needCopy: true}, nil
 	default:
 		v, err := me.slEng.Get(key)
 		if err != nil {
@@ -449,14 +449,16 @@ func (me *memEng) GetIterator(opts IteratorOpts) (Iterator, error) {
 	return mit, nil
 }
 
-func (me *memEng) NewCheckpoint() (KVCheckpoint, error) {
+func (me *memEng) NewCheckpoint(printToStdout bool) (KVCheckpoint, error) {
 	return &memEngCheckpoint{
-		me: me,
+		me:            me,
+		printToStdout: true,
 	}, nil
 }
 
 type memEngCheckpoint struct {
-	me *memEng
+	me            *memEng
+	printToStdout bool
 }
 
 func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
@@ -484,7 +486,7 @@ func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
 		close(notify)
 	}
 
-	n, fs, err := saveMemDBToFile(it, tmpFile, dataNum)
+	n, fs, err := saveMemDBToFile(it, tmpFile, dataNum, pck.printToStdout)
 	// release the lock early to avoid blocking while sync file
 	it.Close()
 
@@ -564,7 +566,7 @@ func loadMemDBFromFile(fileName string, loader func([]byte, []byte) error) error
 	return nil
 }
 
-func saveMemDBToFile(it Iterator, fileName string, dataNum int64) (int64, *os.File, error) {
+func saveMemDBToFile(it Iterator, fileName string, dataNum int64, printToStdoutAlso bool) (int64, *os.File, error) {
 	fs, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY, common.FILE_PERM)
 	if err != nil {
 		return 0, nil, err
@@ -585,6 +587,9 @@ func saveMemDBToFile(it Iterator, fileName string, dataNum int64) (int64, *os.Fi
 	if err != nil {
 		return total, nil, err
 	}
+	if printToStdoutAlso {
+		fmt.Printf("data num: %v\n", dataNum)
+	}
 	total += int64(n)
 	buf := make([]byte, 8)
 	for it.SeekToFirst(); it.Valid(); it.Next() {
@@ -603,6 +608,10 @@ func saveMemDBToFile(it Iterator, fileName string, dataNum int64) (int64, *os.Fi
 		}
 		total += int64(n)
 		v := it.RefValue()
+		if printToStdoutAlso {
+			fmt.Printf("key: (%v)##\n", k)
+			fmt.Printf("value: (%v)##\n", v)
+		}
 		vlen = uint64(len(v))
 		binary.BigEndian.PutUint64(buf, vlen)
 		n, err = fs.Write(buf[:8])
