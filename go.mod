@@ -12,7 +12,7 @@ require (
 	github.com/absolute8511/hyperloglog v0.0.0-20171127080255-5259284545fc
 	github.com/absolute8511/hyperloglog2 v0.1.1
 	github.com/absolute8511/redcon v0.9.1
-	github.com/absolute8511/redigo v1.4.3
+	github.com/absolute8511/redigo v1.4.6
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible // indirect
 	github.com/cockroachdb/pebble v0.0.0-20200616214509-8de6baeca713
@@ -33,7 +33,9 @@ require (
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b // indirect
 	github.com/golang/snappy v0.0.2-0.20190904063534-ff6b7dc882cf
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
-	github.com/hashicorp/golang-lru v0.0.0-20180201235237-0fb14efe8c47
+	github.com/hashicorp/go-immutable-radix v1.3.0
+	github.com/hashicorp/go-memdb v1.3.1
+	github.com/hashicorp/golang-lru v0.5.4
 	github.com/judwhite/go-svc v1.0.0
 	github.com/julienschmidt/httprouter v1.2.0
 	github.com/mailru/easyjson v0.7.0 // indirect
@@ -50,10 +52,12 @@ require (
 	github.com/tidwall/sjson v1.0.0
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
-	github.com/youzan/go-zanredisdb v0.5.9
+	github.com/youzan/go-zanredisdb v0.6.1
 	github.com/youzan/gorocksdb v0.0.0-20201201080653-1a9b5c65c962
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
 	google.golang.org/genproto v0.0.0-20180518175338-11a468237815 // indirect
 	google.golang.org/grpc v1.9.2
 )
+
+replace github.com/hashicorp/go-immutable-radix v1.3.0 => github.com/absolute8511/go-immutable-radix v1.3.1-0.20210225131658-3dcbbb786587
