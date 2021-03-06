@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bytes"
 	"sync/atomic"
 
 	memdb "github.com/youzan/ZanRedisDB/engine/radixdb"
@@ -32,7 +31,7 @@ func (mi *radixMemIndex) IsClosed() bool {
 }
 
 func (mi *radixMemIndex) Len() int64 {
-	cs := 0
+	cs := mi.memkv.Size()
 	return int64(cs)
 }
 
@@ -48,21 +47,19 @@ func (mi *radixMemIndex) Get(key []byte) ([]byte, error) {
 	txn := sn.Txn(false)
 	defer txn.Abort()
 
-	v, err := txn.First(key)
+	// will make sure the key is exactly match if not nil
+	_, v, err := txn.First(key)
 	if err != nil {
 		return nil, err
 	}
 	if v == nil {
 		return nil, nil
 	}
-	dbk, dbv, err := memdb.KVFromObject(v)
+	_, dbv, err := memdb.KVFromObject(v)
 	if err != nil {
 		return nil, err
 	}
-	if bytes.Equal(key, dbk) {
-		return dbv, nil
-	}
-	return nil, nil
+	return dbv, nil
 }
 
 func (mi *radixMemIndex) Put(txn *memdb.Txn, key []byte, value []byte) error {

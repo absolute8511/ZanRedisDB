@@ -41,6 +41,17 @@ func (db *MemDB) getRoot() *iradix.Tree {
 	return root
 }
 
+func (db *MemDB) Size() int {
+	root := db.getRoot()
+	path := indexPath(defTable, id)
+	raw, _ := root.Get(path)
+	indexTree, ok := raw.(*iradix.Tree)
+	if ok {
+		return indexTree.Len()
+	}
+	return 0
+}
+
 // Txn is used to start a new transaction, in either read or write mode.
 // There can only be a single concurrent writer, but any number of readers.
 func (db *MemDB) Txn(write bool) *Txn {
@@ -71,7 +82,7 @@ func (db *MemDB) Snapshot() *MemDB {
 func (db *MemDB) initialize() error {
 	root := db.getRoot()
 	index := iradix.New()
-	path := indexPath(table, id)
+	path := indexPath(defTable, id)
 	root, _, _ = root.Insert(path, index)
 	db.root = unsafe.Pointer(root)
 	return nil

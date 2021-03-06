@@ -125,6 +125,10 @@ func testCheckpointData(t *testing.T, engType string) {
 		assert.Equal(t, key, v2)
 		assert.Equal(t, origV, v2)
 	}
+	if engType == "mem" && useMemType == memTypeRadix {
+		kn := engCK2.GetApproximateTotalKeyNum()
+		assert.Equal(t, knum, kn)
+	}
 	time.Sleep(time.Second)
 }
 
@@ -238,6 +242,10 @@ func testKVIterator(t *testing.T, engType string) {
 		wb.Put(key4, []byte(string(key4)+"update"))
 		eng.Write(wb)
 		wb.Clear()
+	}
+	if engType == "mem" && useMemType == memTypeRadix {
+		kn := eng.GetApproximateTotalKeyNum()
+		assert.Equal(t, 4, kn)
 	}
 	assert.True(t, it.Valid())
 	assert.Equal(t, key, it.Key())

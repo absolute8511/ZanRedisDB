@@ -7,6 +7,7 @@ import (
 type radixIterator struct {
 	miTxn      *memdb.Txn
 	cursor     interface{}
+	cursorKey  []byte
 	resIter    memdb.ResultIterator
 	isReverser bool
 	err        error
@@ -23,6 +24,9 @@ func (iter *radixIterator) Valid() bool {
 
 // Key returns the key the iterator currently holds.
 func (iter *radixIterator) Key() []byte {
+	if iter.cursorKey != nil {
+		return iter.cursorKey
+	}
 	dbk, _, _ := memdb.KVFromObject(iter.cursor)
 	return dbk
 }
@@ -45,7 +49,7 @@ func (iter *radixIterator) Next() {
 			return
 		}
 	}
-	iter.cursor = iter.resIter.Next()
+	iter.cursorKey, iter.cursor = iter.resIter.Next()
 }
 
 // Prev moves the iterator to the previous sequential key in the database.
@@ -60,7 +64,7 @@ func (iter *radixIterator) Prev() {
 		}
 	}
 	// for reverse iterator, prev is just next
-	iter.cursor = iter.resIter.Next()
+	iter.cursorKey, iter.cursor = iter.resIter.Next()
 }
 
 // SeekToFirst moves the iterator to the first key in the database.

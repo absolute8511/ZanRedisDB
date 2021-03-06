@@ -732,6 +732,10 @@ func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int
 	return int64(total)
 }
 
+func (r *RockDB) GetApproximateTotalNum() int64 {
+	return int64(r.rockEng.GetApproximateTotalKeyNum())
+}
+
 // [start, end)
 func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end []byte) int64 {
 	num := r.rockEng.GetApproximateTotalKeyNum()
