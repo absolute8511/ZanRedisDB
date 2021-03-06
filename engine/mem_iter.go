@@ -99,7 +99,7 @@ func (it *memIterator) RefKey() []byte {
 
 func (it *memIterator) Key() []byte {
 	d := it.RefKey()
-	if useMemType == memTypeSkiplist || useMemType == memTypeRadix {
+	if useMemType == memTypeSkiplist {
 		return d
 	}
 	c := make([]byte, len(d))

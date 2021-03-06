@@ -1,19 +1,15 @@
 package engine
 
 import (
+	"bytes"
 	"sync/atomic"
 
-	"github.com/hashicorp/go-memdb"
+	memdb "github.com/youzan/ZanRedisDB/engine/radixdb"
 )
 
 const (
 	defaultTableName = "default"
 )
-
-type ritem struct {
-	Key   string
-	Value []byte
-}
 
 type radixMemIndex struct {
 	memkv  *memdb.MemDB
@@ -21,21 +17,7 @@ type radixMemIndex struct {
 }
 
 func NewRadix() (*radixMemIndex, error) {
-	schema := &memdb.DBSchema{
-		Tables: map[string]*memdb.TableSchema{
-			defaultTableName: &memdb.TableSchema{
-				Name: defaultTableName,
-				Indexes: map[string]*memdb.IndexSchema{
-					"id": &memdb.IndexSchema{
-						Name:    "id",
-						Unique:  true,
-						Indexer: &memdb.StringFieldIndex{Field: "Key"},
-					},
-				},
-			},
-		},
-	}
-	memkv, err := memdb.NewMemDB(schema)
+	memkv, err := memdb.NewMemDB()
 	return &radixMemIndex{
 		memkv: memkv,
 	}, err
@@ -66,28 +48,33 @@ func (mi *radixMemIndex) Get(key []byte) ([]byte, error) {
 	txn := sn.Txn(false)
 	defer txn.Abort()
 
-	v, err := txn.First(defaultTableName, "id", string(key))
+	v, err := txn.First(key)
 	if err != nil {
 		return nil, err
 	}
 	if v == nil {
 		return nil, nil
 	}
-	item := v.(*ritem)
-	if string(key) == item.Key {
-		return item.Value, nil
+	dbk, dbv, err := memdb.KVFromObject(v)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Equal(key, dbk) {
+		return dbv, nil
 	}
 	return nil, nil
 }
 
 func (mi *radixMemIndex) Put(txn *memdb.Txn, key []byte, value []byte) error {
+	nk := make([]byte, len(key))
 	nv := make([]byte, len(value))
+	copy(nk, key)
 	copy(nv, value)
-	return txn.Insert(defaultTableName, &ritem{Key: string(key), Value: nv})
+	return txn.Insert(nk, nv)
 }
 
 func (mi *radixMemIndex) Delete(txn *memdb.Txn, key []byte) error {
-	err := txn.Delete(defaultTableName, &ritem{Key: string(key), Value: nil})
+	err := txn.Delete(key)
 	if err == memdb.ErrNotFound {
 		return nil
 	}

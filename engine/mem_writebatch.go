@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/hashicorp/go-memdb"
+	memdb "github.com/youzan/ZanRedisDB/engine/radixdb"
 )
 
 type wop int

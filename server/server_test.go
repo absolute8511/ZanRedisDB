@@ -31,7 +31,8 @@ import (
 var clusterName = "cluster-unittest-server"
 
 const (
-	testEngineType = "rocksdb"
+	//testEngineType = "rocksdb"
+	testEngineType = "mem"
 )
 
 type fakeClusterInfo struct {

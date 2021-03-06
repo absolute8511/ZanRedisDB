@@ -1,13 +1,7 @@
 package engine
 
 import (
-	"errors"
-
-	"github.com/hashicorp/go-memdb"
-)
-
-var (
-	errReverseInvalid = errors.New("invalid reservse iterator in radix")
+	memdb "github.com/youzan/ZanRedisDB/engine/radixdb"
 )
 
 type radixIterator struct {
@@ -29,12 +23,14 @@ func (iter *radixIterator) Valid() bool {
 
 // Key returns the key the iterator currently holds.
 func (iter *radixIterator) Key() []byte {
-	return []byte(iter.cursor.(*ritem).Key)
+	dbk, _, _ := memdb.KVFromObject(iter.cursor)
+	return dbk
 }
 
 // Value returns the value in the database the iterator currently holds.
 func (iter *radixIterator) Value() []byte {
-	return iter.cursor.(*ritem).Value
+	_, dbv, _ := memdb.KVFromObject(iter.cursor)
+	return dbv
 }
 
 // Next moves the iterator to the next sequential key in the database.
@@ -43,8 +39,6 @@ func (iter *radixIterator) Next() {
 		return
 	}
 	if iter.isReverser {
-		//iter.err = errReverseInvalid
-		//return
 		// we convert iterator to non reverse
 		iter.Seek(iter.Key())
 		if iter.err != nil {
@@ -60,8 +54,6 @@ func (iter *radixIterator) Prev() {
 		return
 	}
 	if !iter.isReverser {
-		//iter.err = errReverseInvalid
-		//return
 		iter.SeekForPrev(iter.Key())
 		if iter.err != nil {
 			return
@@ -73,7 +65,7 @@ func (iter *radixIterator) Prev() {
 
 // SeekToFirst moves the iterator to the first key in the database.
 func (iter *radixIterator) First() {
-	resIter, err := iter.miTxn.Get(defaultTableName, "id")
+	resIter, err := iter.miTxn.Get(nil)
 	if err != nil {
 		iter.err = err
 		return
@@ -85,7 +77,7 @@ func (iter *radixIterator) First() {
 
 // SeekToLast moves the iterator to the last key in the database.
 func (iter *radixIterator) Last() {
-	resIter, err := iter.miTxn.GetReverse(defaultTableName, "id")
+	resIter, err := iter.miTxn.GetReverse(nil)
 	if err != nil {
 		iter.err = err
 		return
@@ -97,7 +89,7 @@ func (iter *radixIterator) Last() {
 
 // Seek moves the iterator to the position greater than or equal to the key.
 func (iter *radixIterator) Seek(key []byte) {
-	resIter, err := iter.miTxn.LowerBound(defaultTableName, "id", string(key))
+	resIter, err := iter.miTxn.LowerBound(key)
 	if err != nil {
 		iter.err = err
 		return
@@ -111,7 +103,7 @@ func (iter *radixIterator) Seek(key []byte) {
 // while enable prefix_extractor, use seek() and prev() doesn't work if seek to the end
 // of the prefix range. use this seekforprev instead
 func (iter *radixIterator) SeekForPrev(key []byte) {
-	resIter, err := iter.miTxn.ReverseLowerBound(defaultTableName, "id", string(key))
+	resIter, err := iter.miTxn.ReverseLowerBound(key)
 	if err != nil {
 		iter.err = err
 		return
