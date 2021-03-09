@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -381,4 +382,34 @@ func TestDBKVWithNoTable(t *testing.T) {
 	} else if v != nil {
 		t.Error("should get no value")
 	}
+}
+
+func BenchmarkKVSetSingleKey(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	b.StopTimer()
+	key := []byte("test:testdb_kv_bench")
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		db.KVSet(0, key, key)
+	}
+	b.StopTimer()
+}
+
+func BenchmarkKVSetManyKeys(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	b.StopTimer()
+	key := "test:testdb_kv_bench"
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		db.KVSet(0, []byte(key+(strconv.Itoa(i))), []byte("1"))
+	}
+	b.StopTimer()
 }
