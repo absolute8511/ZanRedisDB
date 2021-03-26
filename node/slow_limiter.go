@@ -42,7 +42,7 @@ const (
 	slowQueueThreshold = 5
 )
 
-var SlowRefuseCostMs = int64(600)
+var SlowRefuseCostMs = int64(800)
 var SlowHalfOpenSec = int64(15)
 var maybeSlowCmd map[string]bool
 var slowQueueCostMs = int64(250)
@@ -64,6 +64,10 @@ func init() {
 func IsMaybeSlowWriteCmd(cmd string) bool {
 	_, ok := maybeSlowCmd[cmd]
 	return ok
+}
+
+func ChangeSlowRefuseCost(v int64) {
+	atomic.StoreInt64(&SlowRefuseCostMs, v)
 }
 
 func RegisterSlowConfChanged() {
