@@ -43,7 +43,7 @@ func TestPebbleCheckpointDuringWrite(t *testing.T) {
 			default:
 			}
 			begin := time.Now()
-			ck, err := eng.NewCheckpoint()
+			ck, err := eng.NewCheckpoint(false)
 			assert.Nil(t, err)
 			// test save should not block, so lastTs should be updated soon
 			ckpath := path.Join(tmpDir, "newCk")
@@ -115,7 +115,7 @@ func TestPebbleReopenAndCheck(t *testing.T) {
 	wb.Put([]byte("test"), []byte("test"))
 	err = pe.Write(wb)
 	assert.Nil(t, err)
-	ck, _ := pe.NewCheckpoint()
+	ck, _ := pe.NewCheckpoint(false)
 	err = ck.Save(path.Join(tmpDir, "cktmp"), make(chan struct{}))
 	assert.Nil(t, err)
 

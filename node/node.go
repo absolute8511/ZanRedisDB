@@ -214,11 +214,12 @@ type KVNode struct {
 	remoteSyncedStates *remoteSyncedStateMgr
 	applyWait          wait.WaitTime
 	// used for read index
-	readMu       sync.RWMutex
-	readWaitC    chan struct{}
-	readNotifier *notifier
-	wrPools      waitReqPoolArray
-	slowLimiter  *SlowLimiter
+	readMu              sync.RWMutex
+	readWaitC           chan struct{}
+	readNotifier        *notifier
+	wrPools             waitReqPoolArray
+	slowLimiter         *SlowLimiter
+	lastFailedSnapIndex uint64
 }
 
 type KVSnapInfo struct {
@@ -1477,11 +1478,15 @@ func (nd *KVNode) maybeTriggerSnapshot(np *nodeProgress, confChanged bool, force
 		}
 	}
 
+	if np.appliedi < atomic.LoadUint64(&nd.lastFailedSnapIndex)+uint64(nd.rn.config.SnapCount) {
+		return
+	}
 	// TODO: need wait the concurrent apply buffer empty
 	nd.rn.Infof("start snapshot [applied index: %d | last snapshot index: %d]", np.appliedi, np.snapi)
 	err := nd.rn.beginSnapshot(np.appliedt, np.appliedi, np.confState)
 	if err != nil {
 		nd.rn.Infof("begin snapshot failed: %v", err)
+		atomic.StoreUint64(&nd.lastFailedSnapIndex, np.appliedi)
 		return
 	}
 

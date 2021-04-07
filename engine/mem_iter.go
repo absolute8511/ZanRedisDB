@@ -48,11 +48,17 @@ func newMemIterator(db *memEng, opts IteratorOpts) (*memIterator, error) {
 		upperBound: upperBound,
 		opts:       opts,
 	}
-	if useSkiplist {
-		dbit.memit = db.slEng.NewIterator()
-	} else {
+	if useMemType == memTypeBtree {
 		bit := db.eng.MakeIter()
 		dbit.memit = &bit
+	} else if useMemType == memTypeRadix {
+		var err error
+		dbit.memit, err = db.radixMemI.NewIterator()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		dbit.memit = db.slEng.NewIterator()
 	}
 
 	return dbit, nil
@@ -93,7 +99,7 @@ func (it *memIterator) RefKey() []byte {
 
 func (it *memIterator) Key() []byte {
 	d := it.RefKey()
-	if useSkiplist {
+	if useMemType == memTypeSkiplist {
 		return d
 	}
 	c := make([]byte, len(d))
@@ -112,7 +118,7 @@ func (it *memIterator) RefValue() []byte {
 
 func (it *memIterator) Value() []byte {
 	d := it.RefValue()
-	if useSkiplist {
+	if useMemType == memTypeSkiplist {
 		return d
 	}
 	c := make([]byte, len(d))

@@ -18,7 +18,15 @@ const (
 	defBucket = "default"
 )
 
-var useSkiplist = true
+type memType int
+
+const (
+	memTypeSkiplist memType = iota
+	memTypeRadix
+	memTypeBtree
+)
+
+var useMemType memType = memTypeRadix
 
 type memRefSlice struct {
 	b        []byte
@@ -62,6 +70,7 @@ type memEng struct {
 	cfg         *RockEngConfig
 	eng         *btree
 	slEng       *skipList
+	radixMemI   *radixMemIndex
 	engOpened   int32
 	lastCompact int64
 	deletedCnt  int64
@@ -141,16 +150,23 @@ func (me *memEng) OpenEng() error {
 	if !me.cfg.ReadOnly {
 		os.MkdirAll(me.GetDataDir(), common.DIR_PERM)
 	}
-	if useSkiplist {
-		sleng := NewSkipList()
-		err := loadMemDBFromFile(me.getDataFileName(), func(key []byte, value []byte) error {
-			return sleng.Set(key, value)
+	switch useMemType {
+	case memTypeRadix:
+		eng, err := NewRadix()
+		if err != nil {
+			return err
+		}
+		err = loadMemDBFromFile(me.getDataFileName(), func(key []byte, value []byte) error {
+			w := eng.memkv.Txn(true)
+			eng.Put(w, key, value)
+			w.Commit()
+			return nil
 		})
 		if err != nil {
 			return err
 		}
-		me.slEng = sleng
-	} else {
+		me.radixMemI = eng
+	case memTypeBtree:
 		eng := &btree{
 			cmp: cmpItem,
 		}
@@ -168,8 +184,16 @@ func (me *memEng) OpenEng() error {
 			return err
 		}
 		me.eng = eng
+	default:
+		sleng := NewSkipList()
+		err := loadMemDBFromFile(me.getDataFileName(), func(key []byte, value []byte) error {
+			return sleng.Set(key, value)
+		})
+		if err != nil {
+			return err
+		}
+		me.slEng = sleng
 	}
-
 	atomic.StoreInt32(&me.engOpened, 1)
 	dbLog.Infof("engine opened: %v", me.GetDataDir())
 	return nil
@@ -204,10 +228,14 @@ func (me *memEng) DisableManualCompact(disable bool) {
 func (me *memEng) GetApproximateTotalKeyNum() int {
 	me.rwmutex.RLock()
 	defer me.rwmutex.RUnlock()
-	if useSkiplist {
+	switch useMemType {
+	case memTypeBtree:
+		return me.eng.Len()
+	case memTypeRadix:
+		return int(me.radixMemI.Len())
+	default:
 		return int(me.slEng.Len())
 	}
-	return me.eng.Len()
 }
 
 func (me *memEng) GetApproximateKeyNum(ranges []CRange) uint64 {
@@ -240,10 +268,19 @@ func (me *memEng) CloseEng() bool {
 	me.rwmutex.Lock()
 	defer me.rwmutex.Unlock()
 	if atomic.CompareAndSwapInt32(&me.engOpened, 1, 0) {
-		if useSkiplist && me.slEng != nil {
-			me.slEng.Destroy()
-		} else if me.eng != nil {
-			me.eng.Destroy()
+		switch useMemType {
+		case memTypeBtree:
+			if me.eng != nil {
+				me.eng.Destroy()
+			}
+		case memTypeRadix:
+			if me.radixMemI != nil {
+				me.radixMemI.Destroy()
+			}
+		default:
+			if me.slEng != nil {
+				me.slEng.Destroy()
+			}
 		}
 		dbLog.Infof("engine closed: %v", me.GetDataDir())
 		return true
@@ -338,26 +375,33 @@ func (me *memEng) ExistNoLock(key []byte) (bool, error) {
 }
 
 func (me *memEng) GetRefNoLock(key []byte) (RefSlice, error) {
-	if useSkiplist {
+	switch useMemType {
+	case memTypeBtree:
+		bt := me.eng
+		bi := bt.MakeIter()
+
+		bi.SeekGE(&kvitem{key: key})
+		if !bi.Valid() {
+			return nil, nil
+		}
+		item := bi.Cur()
+		if bytes.Equal(item.key, key) {
+			return &memRefSlice{b: item.value, needCopy: true}, nil
+		}
+		return nil, nil
+	case memTypeRadix:
+		v, err := me.radixMemI.Get(key)
+		if err != nil {
+			return nil, err
+		}
+		return &memRefSlice{b: v, needCopy: true}, nil
+	default:
 		v, err := me.slEng.Get(key)
 		if err != nil {
 			return nil, err
 		}
 		return &memRefSlice{b: v, needCopy: false}, nil
 	}
-
-	bt := me.eng
-	bi := bt.MakeIter()
-
-	bi.SeekGE(&kvitem{key: key})
-	if !bi.Valid() {
-		return nil, nil
-	}
-	item := bi.Cur()
-	if bytes.Equal(item.key, key) {
-		return &memRefSlice{b: item.value, needCopy: true}, nil
-	}
-	return nil, nil
 }
 
 func (me *memEng) GetRef(key []byte) (RefSlice, error) {
@@ -405,14 +449,16 @@ func (me *memEng) GetIterator(opts IteratorOpts) (Iterator, error) {
 	return mit, nil
 }
 
-func (me *memEng) NewCheckpoint() (KVCheckpoint, error) {
+func (me *memEng) NewCheckpoint(printToStdout bool) (KVCheckpoint, error) {
 	return &memEngCheckpoint{
-		me: me,
+		me:            me,
+		printToStdout: true,
 	}, nil
 }
 
 type memEngCheckpoint struct {
-	me *memEng
+	me            *memEng
+	printToStdout bool
 }
 
 func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
@@ -426,10 +472,13 @@ func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
 		return err
 	}
 	var dataNum int64
-	if useSkiplist {
-		dataNum = pck.me.slEng.Len()
-	} else {
+	switch useMemType {
+	case memTypeBtree:
 		dataNum = int64(pck.me.eng.Len())
+	case memTypeRadix:
+		dataNum = pck.me.radixMemI.Len()
+	default:
+		dataNum = pck.me.slEng.Len()
 	}
 
 	it.SeekToFirst()
@@ -437,7 +486,7 @@ func (pck *memEngCheckpoint) Save(cpath string, notify chan struct{}) error {
 		close(notify)
 	}
 
-	n, fs, err := saveMemDBToFile(it, tmpFile, dataNum)
+	n, fs, err := saveMemDBToFile(it, tmpFile, dataNum, pck.printToStdout)
 	// release the lock early to avoid blocking while sync file
 	it.Close()
 
@@ -517,7 +566,7 @@ func loadMemDBFromFile(fileName string, loader func([]byte, []byte) error) error
 	return nil
 }
 
-func saveMemDBToFile(it Iterator, fileName string, dataNum int64) (int64, *os.File, error) {
+func saveMemDBToFile(it Iterator, fileName string, dataNum int64, printToStdoutAlso bool) (int64, *os.File, error) {
 	fs, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY, common.FILE_PERM)
 	if err != nil {
 		return 0, nil, err
@@ -538,6 +587,9 @@ func saveMemDBToFile(it Iterator, fileName string, dataNum int64) (int64, *os.Fi
 	if err != nil {
 		return total, nil, err
 	}
+	if printToStdoutAlso {
+		fmt.Printf("data num: %v\n", dataNum)
+	}
 	total += int64(n)
 	buf := make([]byte, 8)
 	for it.SeekToFirst(); it.Valid(); it.Next() {
@@ -556,6 +608,10 @@ func saveMemDBToFile(it Iterator, fileName string, dataNum int64) (int64, *os.Fi
 		}
 		total += int64(n)
 		v := it.RefValue()
+		if printToStdoutAlso {
+			fmt.Printf("key: (%v)##\n", k)
+			fmt.Printf("value: (%v)##\n", v)
+		}
 		vlen = uint64(len(v))
 		binary.BigEndian.PutUint64(buf, vlen)
 		n, err = fs.Write(buf[:8])

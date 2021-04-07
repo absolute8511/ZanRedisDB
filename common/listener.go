@@ -53,7 +53,7 @@ func (ln StoppableListener) Accept() (c net.Conn, err error) {
 		return nil, err
 	case tc := <-connc:
 		tc.SetKeepAlive(true)
-		tc.SetKeepAlivePeriod(3 * time.Minute)
+		tc.SetKeepAlivePeriod(10 * time.Second)
 		return tc, nil
 	}
 }

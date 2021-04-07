@@ -2,6 +2,8 @@ package engine
 
 import (
 	"bytes"
+	"fmt"
+	"runtime"
 
 	"github.com/youzan/ZanRedisDB/common"
 )
@@ -90,32 +92,54 @@ type IteratorOpts struct {
 
 // note: all the iterator use the prefix iterator flag. Which means it may skip the keys for different table
 // prefix.
-func NewDBRangeLimitIteratorWithOpts(ig IteratorGetter, opts IteratorOpts) (*RangeLimitedIterator, error) {
-	dbit, err := ig.GetIterator(opts)
+func NewDBRangeLimitIteratorWithOpts(ig IteratorGetter, opts IteratorOpts) (rit *RangeLimitedIterator, err error) {
+	var dbit Iterator
+	dbit, err = ig.GetIterator(opts)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if e := recover(); e != nil {
+			dbit.Close()
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			err = fmt.Errorf("init iterator panic: %s:%v", buf, e)
+		}
+	}()
 	if !opts.Reverse {
-		return NewRangeLimitIterator(dbit, &opts.Range,
-			&opts.Limit), nil
+		rit = NewRangeLimitIterator(dbit, &opts.Range,
+			&opts.Limit)
 	} else {
-		return NewRevRangeLimitIterator(dbit, &opts.Range,
-			&opts.Limit), nil
+		rit = NewRevRangeLimitIterator(dbit, &opts.Range,
+			&opts.Limit)
 	}
+	return
 }
 
 // note: all the iterator use the prefix iterator flag. Which means it may skip the keys for different table
 // prefix.
-func NewDBRangeIteratorWithOpts(ig IteratorGetter, opts IteratorOpts) (*RangeLimitedIterator, error) {
-	dbit, err := ig.GetIterator(opts)
+func NewDBRangeIteratorWithOpts(ig IteratorGetter, opts IteratorOpts) (rit *RangeLimitedIterator, err error) {
+	var dbit Iterator
+	dbit, err = ig.GetIterator(opts)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if e := recover(); e != nil {
+			dbit.Close()
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			buf = buf[0:n]
+			err = fmt.Errorf("init iterator panic: %s:%v", buf, e)
+		}
+	}()
 	if !opts.Reverse {
-		return NewRangeIterator(dbit, &opts.Range), nil
+		rit = NewRangeIterator(dbit, &opts.Range)
 	} else {
-		return NewRevRangeIterator(dbit, &opts.Range), nil
+		rit = NewRevRangeIterator(dbit, &opts.Range)
 	}
+	return
 }
 
 type RangeLimitedIterator struct {

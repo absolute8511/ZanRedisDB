@@ -371,7 +371,7 @@ func (dc *DataCoordinator) isLocalRaftInRaftGroup(nsInfo *cluster.PartitionMetaI
 		var rsp []*common.MemberInfo
 		code, err := common.APIRequest("GET",
 			"http://"+destAddress+common.APIGetMembers+"/"+nsInfo.GetDesp(),
-			nil, time.Second*3, &rsp)
+			nil, cluster.APIShortTo, &rsp)
 		if err != nil {
 			cluster.CoordLog().Infof("failed to get members from %v for namespace: %v, %v", destAddress, nsInfo.GetDesp(), err)
 			if code == http.StatusNotFound {
@@ -579,7 +579,7 @@ func (dc *DataCoordinator) isReplicaReadyForRaft(nsNode *node.NamespaceNode, toR
 			nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(nodeID)
 			code, err := common.APIRequest("GET",
 				"http://"+net.JoinHostPort(nip, httpPort)+common.APINodeAllReady,
-				nil, time.Second*10, nil)
+				nil, cluster.APILongTo, nil)
 			if err != nil {
 				cluster.CoordLog().Infof("not ready from %v for transfer leader: %v, %v", nip, code, err.Error())
 				return false
@@ -1030,7 +1030,7 @@ func (dc *DataCoordinator) requestJoinNamespaceGroup(raftID uint64, nsInfo *clus
 	}
 	_, err := common.APIRequest("POST",
 		uri,
-		bytes.NewReader(d), time.Second*3, nil)
+		bytes.NewReader(d), cluster.APIShortTo, nil)
 	if err != nil {
 		cluster.CoordLog().Infof("failed to request join namespace: %v", err)
 		return err

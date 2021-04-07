@@ -167,10 +167,6 @@ func TestEtcdRegisterGetSetTimeout(t *testing.T) {
 }
 
 func TestRegisterWatchKeepAliveTimeoutInDeadConn(t *testing.T) {
-	WatchEtcdTimeout = time.Second
-	defer func() {
-		WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*2)
-	}()
 	clusterID := "unittest-zankv-cluster-test-register"
 	reg, err := NewPDEtcdRegister(testEtcdServers)
 	assert.Nil(t, err)

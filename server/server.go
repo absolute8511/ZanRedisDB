@@ -110,6 +110,9 @@ func NewServer(conf ServerConfig) (*Server, error) {
 	if conf.UseRedisV2 {
 		node.UseRedisV2 = true
 	}
+	if conf.SlowLimiterRefuseCostMs > 0 {
+		node.ChangeSlowRefuseCost(conf.SlowLimiterRefuseCostMs)
+	}
 
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,

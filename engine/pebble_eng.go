@@ -529,7 +529,7 @@ func (pe *PebbleEng) GetIterator(opts IteratorOpts) (Iterator, error) {
 	return dbit, nil
 }
 
-func (pe *PebbleEng) NewCheckpoint() (KVCheckpoint, error) {
+func (pe *PebbleEng) NewCheckpoint(printToStdoutAlso bool) (KVCheckpoint, error) {
 	return &pebbleEngCheckpoint{
 		pe: pe,
 	}, nil
