@@ -96,7 +96,7 @@ func IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, erro
 		var rsp []*common.MemberInfo
 		_, err := common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
-			nil, time.Second*3, &rsp)
+			nil, cluster.APIShortTo, &rsp)
 		if err != nil {
 			cluster.CoordLog().Infof("failed (%v) to get members for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			lastErr = err
@@ -134,7 +134,7 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 		var rsp []*common.MemberInfo
 		_, err := common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
-			nil, time.Second*3, &rsp)
+			nil, cluster.APIShortTo, &rsp)
 		if err != nil {
 			cluster.CoordLog().Infof("failed (%v) to get members for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			return false, err
@@ -153,7 +153,7 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 		}
 		_, err = common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIIsRaftSynced+"/"+nsInfo.GetDesp(),
-			nil, time.Second*5, nil)
+			nil, cluster.APILongTo, nil)
 		if err != nil {
 			cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			return false, err
@@ -167,7 +167,7 @@ func IsRaftNodeSynced(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, erro
 	nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(nid)
 	_, err := common.APIRequest("GET",
 		"http://"+net.JoinHostPort(nip, httpPort)+common.APIIsRaftSynced+"/"+nsInfo.GetDesp(),
-		nil, time.Second*10, nil)
+		nil, cluster.APILongTo, nil)
 	if err != nil {
 		cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 		return false, err

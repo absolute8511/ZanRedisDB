@@ -20,6 +20,8 @@ github.com/absolute8511/hyperloglog2 v0.1.1 h1:ZFAXGBcLsbXTtfMVqOJkaJe0Z1GNaeNFE
 github.com/absolute8511/hyperloglog2 v0.1.1/go.mod h1:4ZpNQu/xhWhgXqUKLPaqJlbcyBvKsqbVNsxYcv/cqVo=
 github.com/absolute8511/redcon v0.9.1 h1:xb2T1znUKyr/oR3DaWmGhyU8t7spNLz1LD4EWrK8PuM=
 github.com/absolute8511/redcon v0.9.1/go.mod h1:pcezn7cyNCl6Bbics6NRddlZw1GwLqpNFapwKI14N4A=
+github.com/absolute8511/redcon v0.9.2 h1:engVvU2x7lGgK78y2lh2OqAPu7Vml8jPjtol7NiSFUQ=
+github.com/absolute8511/redcon v0.9.2/go.mod h1:pcezn7cyNCl6Bbics6NRddlZw1GwLqpNFapwKI14N4A=
 github.com/absolute8511/redigo v1.3.3 h1:YZO9+Yh7WnjzmZkJPZWPAXWnrKsRj89vmNCJAFqjMC4=
 github.com/absolute8511/redigo v1.3.3/go.mod h1:ncnpDtZTl7oMnWRkyfo8hfwC8+u3HlzK3XEzJ7W/M08=
 github.com/absolute8511/redigo v1.4.3 h1:6pGvkwupasEaJSYwOXfSEKM3mYL+CqtH2FIFGSz9Hds=

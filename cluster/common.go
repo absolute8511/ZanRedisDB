@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	ErrFailedOnNotLeader = "E_FAILED_ON_NOT_LEADER"
+	APIShortTo           = time.Second * 3
+	APILongTo            = time.Second * 10
 )
 
 const (
