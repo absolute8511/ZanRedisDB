@@ -43,7 +43,7 @@ const (
 )
 
 var SlowRefuseCostMs = int64(800)
-var SlowHalfOpenSec = int64(15)
+var SlowHalfOpenSec = int64(10)
 var maybeSlowCmd map[string]bool
 var slowQueueCostMs = int64(250)
 
