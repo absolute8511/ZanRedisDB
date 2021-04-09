@@ -510,7 +510,7 @@ func TestKVTTL_CompactKeepTTL(t *testing.T) {
 	if v, err := db.Expire(tn, key1, ttl1); err != nil {
 		t.Fatal(err)
 	} else if v != 1 {
-		t.Fatal("return value from expire != 1")
+		t.Fatalf("return value from expire %v != 1", v)
 	}
 	db.BitSetOld(0, key1, 2, 1)
 	db.BitSetOld(0, key1, 1, 0)
