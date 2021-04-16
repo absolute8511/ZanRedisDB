@@ -26,7 +26,6 @@ require (
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/emirpasic/gods v1.12.0
-	github.com/felixge/fgprof v0.9.1 // indirect
 	github.com/go-ole/go-ole v1.2.1 // indirect
 	github.com/gobwas/glob v0.2.3
 	github.com/gogo/protobuf v1.3.1
@@ -34,7 +33,6 @@ require (
 	github.com/golang/snappy v0.0.2-0.20190904063534-ff6b7dc882cf
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.0
-	github.com/hashicorp/go-memdb v1.3.1
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/judwhite/go-svc v1.0.0
 	github.com/julienschmidt/httprouter v1.2.0
@@ -45,14 +43,14 @@ require (
 	github.com/prometheus/client_model v0.1.0
 	github.com/shirou/gopsutil v0.0.0-20180427012116-c95755e4bcd7
 	github.com/siddontang/goredis v0.0.0-20180423163523-0b4019cbd7b7
-	github.com/spaolacci/murmur3 v0.0.0-20170819071325-9f5d223c6079
 	github.com/stretchr/testify v1.3.0
 	github.com/tidwall/gjson v1.1.0
 	github.com/tidwall/match v1.0.1 // indirect
 	github.com/tidwall/sjson v1.0.0
+	github.com/twmb/murmur3 v1.1.5
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18
-	github.com/youzan/go-zanredisdb v0.6.1
+	github.com/youzan/go-zanredisdb v0.6.3
 	github.com/youzan/gorocksdb v0.0.0-20201201080653-1a9b5c65c962
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553

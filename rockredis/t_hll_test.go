@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
-	"github.com/spaolacci/murmur3"
+	"github.com/twmb/murmur3"
 
 	hll2 "github.com/absolute8511/go-hll"
 	hll "github.com/absolute8511/hyperloglog"
