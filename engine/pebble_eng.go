@@ -185,7 +185,8 @@ func NewPebbleEng(cfg *RockEngConfig) (*PebbleEng, error) {
 		opts.DisableWAL = true
 	}
 	// prefix search
-	opts.Comparer = pebble.DefaultComparer
+	comp := *pebble.DefaultComparer
+	opts.Comparer = &comp
 	opts.Comparer.Split = func(a []byte) int {
 		if len(a) <= 3 {
 			return len(a)
