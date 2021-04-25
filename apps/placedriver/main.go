@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"syscall"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/youzan/ZanRedisDB/pdserver"
 
 	"github.com/BurntSushi/toml"
-	"github.com/absolute8511/glog"
 	"github.com/judwhite/go-svc/svc"
 	"github.com/mreiferson/go-options"
 )
@@ -21,6 +21,7 @@ var (
 	flagSet = flag.NewFlagSet("placedriver", flag.ExitOnError)
 
 	config      = flagSet.String("config", "", "path to config file")
+	logAge      = flagSet.Int("logage", 0, "the max age (day) log will keep")
 	showVersion = flagSet.Bool("version", false, "print version string")
 
 	httpAddress        = flagSet.String("http-address", "0.0.0.0:18001", "<addr>:<port> to listen on for HTTP clients")
@@ -52,7 +53,7 @@ type program struct {
 }
 
 func main() {
-	defer glog.Flush()
+	defer common.FlushZapDefault()
 	prg := &program{}
 	if err := svc.Run(prg, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGINT); err != nil {
 		log.Fatal(err)
@@ -68,8 +69,6 @@ func (p *program) Init(env svc.Environment) error {
 }
 
 func (p *program) Start() error {
-	glog.InitWithFlag(flagSet)
-
 	flagSet.Parse(os.Args[1:])
 	fmt.Println(common.VerString("placedriver"))
 	if *showVersion {
@@ -86,7 +85,7 @@ func (p *program) Start() error {
 
 	opts := pdserver.NewServerConfig()
 	options.Resolve(opts, flagSet, cfg)
-	common.InitDefaultForGLogger(opts.LogDir)
+	common.SetZapRotateOptions(false, true, path.Join(opts.LogDir, "placedriver.log"), 0, 0, *logAge)
 	daemon, err := pdserver.NewServer(opts)
 	if err != nil {
 		return err

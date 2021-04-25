@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	github.com/AndreasBriese/bbloom v0.0.0-20190306092124-e2d15f34fcf9 // indirect
-	github.com/BurntSushi/toml v0.3.0
+	github.com/BurntSushi/toml v0.3.1
 	github.com/Jeffail/gabs v1.4.0 // indirect
 	github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6 // indirect
 	github.com/absolute8511/glog v0.3.1
@@ -43,7 +43,7 @@ require (
 	github.com/prometheus/client_model v0.1.0
 	github.com/shirou/gopsutil v0.0.0-20180427012116-c95755e4bcd7
 	github.com/siddontang/goredis v0.0.0-20180423163523-0b4019cbd7b7
-	github.com/stretchr/testify v1.3.0
+	github.com/stretchr/testify v1.4.0
 	github.com/tidwall/gjson v1.1.0
 	github.com/tidwall/match v1.0.1 // indirect
 	github.com/tidwall/sjson v1.0.0
@@ -53,9 +53,11 @@ require (
 	github.com/youzan/go-zanredisdb v0.6.3
 	github.com/youzan/gorocksdb v0.0.0-20201201080653-1a9b5c65c962
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
+	go.uber.org/zap v1.16.0
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
 	google.golang.org/genproto v0.0.0-20180518175338-11a468237815 // indirect
 	google.golang.org/grpc v1.9.2
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
 replace github.com/hashicorp/go-immutable-radix v1.3.0 => github.com/absolute8511/go-immutable-radix v1.3.1-0.20210225131658-3dcbbb786587

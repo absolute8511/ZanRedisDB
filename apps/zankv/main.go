@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/absolute8511/glog"
 	"github.com/judwhite/go-svc/svc"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
@@ -23,6 +22,7 @@ import (
 var (
 	flagSet        = flag.NewFlagSet("zanredisdb", flag.ExitOnError)
 	configFilePath = flagSet.String("config", "", "the config file path to read")
+	logAge         = flagSet.Int("logage", 0, "the max age (day) log will keep")
 	showVersion    = flagSet.Bool("version", false, "print version string and exit")
 )
 
@@ -32,7 +32,7 @@ type program struct {
 
 func main() {
 	defer log.Printf("main exit")
-	defer glog.Flush()
+	defer common.FlushZapDefault()
 	prg := &program{}
 	if err := svc.Run(prg, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGINT); err != nil {
 		log.Panic(err)
@@ -48,7 +48,6 @@ func (p *program) Init(env svc.Environment) error {
 }
 
 func (p *program) Start() error {
-	glog.InitWithFlag(flagSet)
 	flagSet.Parse(os.Args[1:])
 
 	fmt.Println(common.VerString("ZanRedisDB"))
@@ -76,7 +75,7 @@ func (p *program) Start() error {
 	}
 
 	serverConf := configFile.ServerConf
-	common.InitDefaultForGLogger(serverConf.LogDir)
+	common.SetZapRotateOptions(false, true, path.Join(serverConf.LogDir, "zankv.log"), 0, 0, *logAge)
 
 	loadConf, _ := json.MarshalIndent(configFile, "", " ")
 	fmt.Printf("loading with conf:%v\n", string(loadConf))
