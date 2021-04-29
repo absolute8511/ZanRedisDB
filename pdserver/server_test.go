@@ -1,6 +1,7 @@
 package pdserver
 
 import (
+	"flag"
 	"fmt"
 	"math"
 	"net/http"
@@ -28,7 +29,10 @@ import (
 func TestMain(m *testing.M) {
 	pdnode_coord.ChangeIntervalForTest()
 	datanode_coord.ChangeIntervalForTest()
-	cluster.SetLogLevel(int(common.LOG_DEBUG))
+	flag.Parse()
+	if testing.Verbose() {
+		cluster.SetLogLevel(int(common.LOG_DEBUG))
+	}
 
 	ret := m.Run()
 

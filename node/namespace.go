@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/spaolacci/murmur3"
+	"github.com/twmb/murmur3"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/metric"
@@ -644,8 +644,11 @@ func (nsm *NamespaceMgr) InitNamespaceNode(conf *NamespaceConfig, raftID uint64,
 	return n, nil
 }
 
+func HashedKey(pk []byte) int {
+	return int(murmur3.Sum32(pk))
+}
 func GetHashedPartitionID(pk []byte, pnum int) int {
-	return int(murmur3.Sum32(pk)) % pnum
+	return HashedKey(pk) % pnum
 }
 
 func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKeySum(nsBaseName string, pk []byte, pkSum int) (*NamespaceNode, error) {
@@ -670,7 +673,7 @@ func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKeySum(nsBaseName string, pk
 }
 
 func (nsm *NamespaceMgr) GetNamespaceNodeWithPrimaryKey(nsBaseName string, pk []byte) (*NamespaceNode, error) {
-	pkSum := int(murmur3.Sum32(pk))
+	pkSum := HashedKey(pk)
 	return nsm.GetNamespaceNodeWithPrimaryKeySum(nsBaseName, pk, pkSum)
 }
 

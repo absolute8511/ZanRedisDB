@@ -12,7 +12,7 @@ import (
 
 	"github.com/emirpasic/gods/maps/treemap"
 	"github.com/emirpasic/gods/utils"
-	"github.com/spaolacci/murmur3"
+	"github.com/twmb/murmur3"
 	"github.com/youzan/ZanRedisDB/cluster"
 	"github.com/youzan/ZanRedisDB/common"
 )

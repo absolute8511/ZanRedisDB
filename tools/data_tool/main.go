@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/absolute8511/glog"
 	"github.com/absolute8511/redigo/redis"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/rockredis"
@@ -47,8 +46,7 @@ func getRangeStr(dr DeleteTableRange) string {
 
 func main() {
 	flag.Parse()
-	common.InitDefaultForGLogger("./")
-	defer glog.Flush()
+	defer common.FlushZapDefault()
 
 	switch *toolType {
 	case "gen_delrange":

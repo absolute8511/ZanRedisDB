@@ -15,7 +15,6 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/slow"
 
@@ -472,7 +471,7 @@ func GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []byte, int, e
 	if err != nil {
 		return namespace, nil, 0, err
 	}
-	pkSum := int(murmur3.Sum32(pk))
+	pkSum := node.HashedKey(pk)
 	return namespace, pk, pkSum, nil
 }
 
