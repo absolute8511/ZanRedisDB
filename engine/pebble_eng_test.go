@@ -115,6 +115,7 @@ func TestPebbleReopenAndCheck(t *testing.T) {
 	wb.Put([]byte("test"), []byte("test"))
 	err = pe.Write(wb)
 	assert.Nil(t, err)
+	wb.Clear()
 	ck, _ := pe.NewCheckpoint(false)
 	err = ck.Save(path.Join(tmpDir, "cktmp"), make(chan struct{}))
 	assert.Nil(t, err)
@@ -153,6 +154,7 @@ func TestPebbleSharedCacheForMulti(t *testing.T) {
 	wb.Put([]byte("test"), []byte("test"))
 	err = pe.Write(wb)
 	assert.Nil(t, err)
+	wb.Clear()
 
 	pe.eng.Flush()
 
@@ -169,6 +171,7 @@ func TestPebbleSharedCacheForMulti(t *testing.T) {
 	wb2.Put([]byte("test"), []byte("test2"))
 	err = pe2.Write(wb2)
 	assert.Nil(t, err)
+	wb2.Clear()
 	pe2.eng.Flush()
 
 	v1, err := pe.GetBytes([]byte("test"))
@@ -182,6 +185,7 @@ func TestPebbleSharedCacheForMulti(t *testing.T) {
 	wb.Put([]byte("test"), []byte("test"))
 	err = pe.Write(wb)
 	assert.Nil(t, err)
+	wb.Clear()
 	pe.eng.Flush()
 
 	v1, err = pe.GetBytes([]byte("test"))

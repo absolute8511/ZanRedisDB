@@ -1,11 +1,16 @@
 package main
 
 import (
+	"os"
+	"path"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/mreiferson/go-options"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/pdserver"
 )
 
@@ -20,6 +25,16 @@ func TestAppConfigParse(t *testing.T) {
 	}
 	opts := pdserver.NewServerConfig()
 	options.Resolve(opts, flagSet, cfg)
-	pdserver.NewServer(opts)
+	opts.LogDir = path.Join(os.TempDir(), strconv.Itoa(int(time.Now().UnixNano())))
+	os.MkdirAll(opts.LogDir, 0755)
+	common.SetZapRotateOptions(false, true, path.Join(opts.LogDir, "test.log"), 0, 0, 0)
+	s, err := pdserver.NewServer(opts)
+	t.Log(err)
 	assert.Equal(t, "v2", opts.BalanceVer)
+
+	s.Start()
+	t.Log(opts.LogDir)
+
+	time.Sleep(time.Second)
+	s.Stop()
 }

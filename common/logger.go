@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,10 +16,6 @@ import (
 var inTestLog bool
 
 func init() {
-	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "-test") {
-		inTestLog = true
-		log.Printf("using log for test, %s\n", os.Args[1])
-	}
 	conf := zap.NewProductionConfig()
 	conf.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	conf.DisableStacktrace = true
@@ -390,6 +385,7 @@ func SetZapRotateOptions(alsoLogToStdout bool, alsoLogErrToStdErr bool, logfile 
 	encConf := zap.NewProductionEncoderConfig()
 	encConf.EncodeTime = zapcore.ISO8601TimeEncoder
 	enc := zapcore.NewJSONEncoder(encConf)
+	fmt.Printf("zap logger option: %v, %v, %v, %v\n", alsoLogToStdout, alsoLogErrToStdErr, logfile, maxAgeDay)
 	if logfile == "" {
 		wrap := zap.WrapCore(func(c zapcore.Core) zapcore.Core {
 			return zapcore.NewTee(
@@ -440,49 +436,68 @@ func SetZapRotateOptions(alsoLogToStdout bool, alsoLogErrToStdErr bool, logfile 
 }
 
 type zapLogger struct {
-	logger *zap.SugaredLogger
+	module string
 }
 
 // note: currently, the zap logger do not support buffer writer by default, so we need merge new code after the zap new
 // release published.
 func newZapLogger(module string) *zapLogger {
-	if module == "" {
-		return &zapLogger{
-			logger: zapLog.Sugar(),
-		}
-	}
 	return &zapLogger{
-		logger: zapLog.Named(module).Sugar(),
+		module: module,
 	}
 }
 
 func (zl *zapLogger) Output(maxdepth int, s string) error {
+	if zapLog == nil {
+		return nil
+	}
 	if maxdepth <= 2 {
-		zl.logger.Info(s)
+		if zl.module == "" {
+			zapLog.Sugar().Info(s)
+		} else {
+			zapLog.Named(zl.module).Sugar().Info(s)
+		}
 	} else {
-		zl.logger.Desugar().WithOptions(zap.AddCallerSkip(maxdepth - 2)).Info(s)
+		zapLog.WithOptions(zap.AddCallerSkip(maxdepth - 2)).Info(s)
 	}
 	return nil
 }
 
 func (zl *zapLogger) OutputWarning(maxdepth int, s string) error {
+	if zapLog == nil {
+		return nil
+	}
 	if maxdepth == 2 {
-		zl.logger.Warn(s)
+		if zl.module == "" {
+			zapLog.Sugar().Warn(s)
+		} else {
+			zapLog.Named(zl.module).Sugar().Warn(s)
+		}
 	} else {
-		zl.logger.Desugar().WithOptions(zap.AddCallerSkip(maxdepth - 2)).Warn(s)
+		zapLog.WithOptions(zap.AddCallerSkip(maxdepth - 2)).Warn(s)
 	}
 	return nil
 }
 
 func (zl *zapLogger) OutputErr(maxdepth int, s string) error {
+	if zapLog == nil {
+		return nil
+	}
 	if maxdepth == 2 {
-		zl.logger.Error(s)
+		if zl.module == "" {
+			zapLog.Sugar().Error(s)
+		} else {
+			zapLog.Named(zl.module).Sugar().Error(s)
+		}
 	} else {
-		zl.logger.Desugar().WithOptions(zap.AddCallerSkip(maxdepth - 2)).Error(s)
+		zapLog.WithOptions(zap.AddCallerSkip(maxdepth - 2)).Error(s)
 	}
 	return nil
 }
 
 func (zl *zapLogger) Flush() {
-	zl.logger.Sync()
+	if zapLog == nil {
+		return
+	}
+	zapLog.Sync()
 }
