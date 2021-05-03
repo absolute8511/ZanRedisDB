@@ -452,13 +452,9 @@ func (zl *zapLogger) Output(maxdepth int, s string) error {
 		return nil
 	}
 	if maxdepth <= 2 {
-		if zl.module == "" {
-			zapLog.Sugar().Info(s)
-		} else {
-			zapLog.Named(zl.module).Sugar().Info(s)
-		}
+		zapLog.Named(zl.module).Info(s)
 	} else {
-		zapLog.WithOptions(zap.AddCallerSkip(maxdepth - 2)).Info(s)
+		zapLog.Named(zl.module).WithOptions(zap.AddCallerSkip(maxdepth - 2)).Info(s)
 	}
 	return nil
 }
@@ -468,13 +464,9 @@ func (zl *zapLogger) OutputWarning(maxdepth int, s string) error {
 		return nil
 	}
 	if maxdepth == 2 {
-		if zl.module == "" {
-			zapLog.Sugar().Warn(s)
-		} else {
-			zapLog.Named(zl.module).Sugar().Warn(s)
-		}
+		zapLog.Named(zl.module).Warn(s)
 	} else {
-		zapLog.WithOptions(zap.AddCallerSkip(maxdepth - 2)).Warn(s)
+		zapLog.Named(zl.module).WithOptions(zap.AddCallerSkip(maxdepth - 2)).Warn(s)
 	}
 	return nil
 }
@@ -484,13 +476,9 @@ func (zl *zapLogger) OutputErr(maxdepth int, s string) error {
 		return nil
 	}
 	if maxdepth == 2 {
-		if zl.module == "" {
-			zapLog.Sugar().Error(s)
-		} else {
-			zapLog.Named(zl.module).Sugar().Error(s)
-		}
+		zapLog.Named(zl.module).Error(s)
 	} else {
-		zapLog.WithOptions(zap.AddCallerSkip(maxdepth - 2)).Error(s)
+		zapLog.Named(zl.module).WithOptions(zap.AddCallerSkip(maxdepth - 2)).Error(s)
 	}
 	return nil
 }
