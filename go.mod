@@ -11,7 +11,7 @@ require (
 	github.com/absolute8511/go-hll v0.0.0-20190228064837-043118556d83
 	github.com/absolute8511/hyperloglog v0.0.0-20171127080255-5259284545fc
 	github.com/absolute8511/hyperloglog2 v0.1.1
-	github.com/absolute8511/redcon v0.9.2
+	github.com/absolute8511/redcon v0.9.3
 	github.com/absolute8511/redigo v1.4.6
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible // indirect
