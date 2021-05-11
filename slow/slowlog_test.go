@@ -63,7 +63,7 @@ func TestSlowLogLevel(t *testing.T) {
 	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
 	t.Log(str)
 	assert.Equal(t, false, logged)
-	time.Sleep(time.Second)
+	time.Sleep(3 * time.Second)
 	str, logged = LogLargeCollection(collectionLargeLen, NewSlowLogInfo("scope_test", "test", ""))
 	t.Log(str)
 	assert.Equal(t, true, logged)
