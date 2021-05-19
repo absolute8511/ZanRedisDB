@@ -3,7 +3,11 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
+	"os"
+	"path"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/server"
@@ -19,5 +23,6 @@ func TestAppConfigParse(t *testing.T) {
 	assert.Nil(t, err)
 
 	serverConf := configFile.ServerConf
+	serverConf.LogDir = path.Join(os.TempDir(), strconv.Itoa(int(time.Now().UnixNano())))
 	server.NewServer(serverConf)
 }

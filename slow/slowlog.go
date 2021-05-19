@@ -71,7 +71,7 @@ func getIndex(si SlowLogInfo) int {
 func checkLastLogCollTime(si SlowLogInfo) bool {
 	index := getIndex(si)
 	t := logCollTimes[index%len(logCollTimes)]
-	return atomic.LoadInt64(t)+time.Second.Nanoseconds() <= time.Now().UnixNano()
+	return atomic.LoadInt64(t)+3*time.Second.Nanoseconds() <= time.Now().UnixNano()
 }
 
 func updateLastLogCollTime(si SlowLogInfo) {
