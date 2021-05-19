@@ -27,7 +27,7 @@ jobs:
 
     - name: Get dependencies
       run: |
-        sudo apt-get install libsnappy1v5 libsnappy-dev libjemalloc1 libjemalloc-dev
+        sudo apt-get install libsnappy1v5 libsnappy-dev libjemalloc2 libjemalloc-dev
         git clone https://github.com/absolute8511/rocksdb.git /tmp/rocksdb
         pushd /tmp/rocksdb && git checkout v6.4.6-patched && PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib && popd
 
