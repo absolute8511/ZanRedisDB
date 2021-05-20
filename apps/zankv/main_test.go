@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -24,5 +25,11 @@ func TestAppConfigParse(t *testing.T) {
 
 	serverConf := configFile.ServerConf
 	serverConf.LogDir = path.Join(os.TempDir(), strconv.Itoa(int(time.Now().UnixNano())))
-	server.NewServer(serverConf)
+	if runtime.GOOS == "darwin" {
+		serverConf.BroadcastInterface = "lo0"
+	} else {
+		serverConf.BroadcastInterface = "lo"
+	}
+	_, err = server.NewServer(serverConf)
+	assert.Nil(t, err)
 }

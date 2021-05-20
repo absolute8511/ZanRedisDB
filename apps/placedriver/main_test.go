@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -28,6 +29,11 @@ func TestAppConfigParse(t *testing.T) {
 	opts.LogDir = path.Join(os.TempDir(), strconv.Itoa(int(time.Now().UnixNano())))
 	os.MkdirAll(opts.LogDir, 0755)
 	common.SetZapRotateOptions(false, true, path.Join(opts.LogDir, "test.log"), 0, 0, 0)
+	if runtime.GOOS == "darwin" {
+		opts.BroadcastInterface = "lo0"
+	} else {
+		opts.BroadcastInterface = "lo"
+	}
 	s, err := pdserver.NewServer(opts)
 	t.Log(err)
 	assert.Equal(t, "v2", opts.BalanceVer)
