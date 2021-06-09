@@ -1074,8 +1074,12 @@ func (r *RockDB) restoreFromPath(backupDir string, term uint64, index uint64) er
 			continue
 		}
 		dst := path.Join(r.GetDataDir(), path.Base(fn))
-		err := common.CopyFileForHardLink(fn, dst)
-		//err := copyFile(fn, dst, false)
+		var err error
+		if strings.HasSuffix(fn, ".sst") {
+			err = common.CopyFileForHardLink(fn, dst)
+		} else {
+			err = common.CopyFile(fn, dst, true)
+		}
 		if err != nil {
 			dbLog.Infof("copy %v to %v failed: %v", fn, dst, err)
 			return err
