@@ -498,8 +498,100 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 	}
 }
 
-func TestSnapshotApplyingShouldNotBlock(t *testing.T) {
-	// TODO: apply slow snapshot should not block raft loop for ticker and other messaages
+type fakeDataStorage struct {
+}
+
+func (*fakeDataStorage) CleanData() error                                        { return nil }
+func (*fakeDataStorage) RestoreFromSnapshot(raftpb.Snapshot) error               { return nil }
+func (*fakeDataStorage) PrepareSnapshot(raftpb.Snapshot) error                   { return nil }
+func (*fakeDataStorage) GetSnapshot(term uint64, index uint64) (Snapshot, error) { return nil, nil }
+func (*fakeDataStorage) UpdateSnapshotState(term uint64, index uint64)           {}
+func (*fakeDataStorage) Stop()                                                   {}
+func TestSnapshotApplyingShouldBlock(t *testing.T) {
+	// TODO: apply slow snapshot should not become leader for compaign
+	n := newNopReadyNode()
+	config := &RaftConfig{
+		GroupID:   1,
+		GroupName: "testgroup",
+		ID:        1,
+		RaftAddr:  "127.0.0.1:1239",
+	}
+	commitC := make(chan applyInfo, 10)
+	r := &raftNode{
+		ds:             &fakeDataStorage{},
+		config:         config,
+		commitC:        commitC,
+		node:           n,
+		persistStorage: NewStorageRecorder(""),
+		raftStorage:    raft.NewMemoryStorage(),
+		transport:      rafthttp.NewNopTransporter(),
+		stopc:          make(chan struct{}),
+	}
+
+	go func() {
+		r.serveChannels()
+	}()
+	defer close(r.stopc)
+
+	n.pushReady(raft.Ready{
+		SoftState: &raft.SoftState{RaftState: raft.StateFollower},
+		Snapshot: raftpb.Snapshot{
+			Metadata: raftpb.SnapshotMetadata{
+				Term:  1,
+				Index: 2,
+			},
+		},
+	})
+	blockingEnt := <-commitC
+	if blockingEnt.applyWaitDone == nil {
+		t.Fatalf("unexpected nil chan, should init wait channel for waiting apply snapshot event")
+	}
+	if blockingEnt.applySnapshotResult == nil {
+		t.Fatalf("unexpected nil chan, should init wait channel for waiting apply snapshot event")
+	}
+	continueC := make(chan struct{})
+	go func() {
+		n.pushReady(raft.Ready{
+			Snapshot: raftpb.Snapshot{
+				Metadata: raftpb.SnapshotMetadata{
+					Term:  1,
+					Index: 3,
+				},
+			},
+		})
+		select {
+		case blockingEnt2 := <-commitC:
+			if blockingEnt2.applyWaitDone == nil {
+				t.Fatalf("unexpected nil chan, should init wait channel for waiting apply conf change event")
+			}
+			// finish apply, unblock raft routine
+			blockingEnt2.applySnapshotResult <- nil
+			<-blockingEnt2.raftDone
+			close(blockingEnt2.applyWaitDone)
+		case <-time.After(time.Second * 3):
+			t.Fatalf("unexpected blocking on execution")
+		}
+
+		close(continueC)
+	}()
+
+	select {
+	case <-continueC:
+		t.Fatalf("unexpected execution: raft routine should block waiting for apply")
+	case <-time.After(time.Second):
+	}
+
+	// finish apply, unblock raft routine
+	blockingEnt.applySnapshotResult <- nil
+	<-blockingEnt.raftDone
+	<-blockingEnt.raftDone
+	close(blockingEnt.applyWaitDone)
+
+	select {
+	case <-continueC:
+	case <-time.After(time.Second * 4):
+		t.Fatalf("unexpected blocking on execution")
+	}
 }
 
 func TestSnapshotPreTransferRetryOnFail(t *testing.T) {

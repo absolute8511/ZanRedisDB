@@ -189,7 +189,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot, readOld bool) (*wal.WAL, 
 	var hardState raftpb.HardState
 	if !wal.Exist(rc.config.WALDir) {
 		if err := os.MkdirAll(rc.config.WALDir, common.DIR_PERM); err != nil {
-			nodeLog.Errorf("cannot create dir for wal (%v)", err)
+			rc.Errorf("cannot create dir for wal (%v)", err)
 			return nil, nil, hardState, nil, err
 		}
 
@@ -200,7 +200,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot, readOld bool) (*wal.WAL, 
 		d, _ := json.Marshal(m)
 		w, err := wal.Create(rc.config.WALDir, d, rc.config.OptimizedFsync)
 		if err != nil {
-			nodeLog.Errorf("create wal error (%v)", err)
+			rc.Errorf("create wal error (%v)", err)
 		}
 		return w, d, hardState, nil, err
 	}
@@ -215,21 +215,21 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot, readOld bool) (*wal.WAL, 
 	for {
 		w, err = wal.Open(rc.config.WALDir, walsnap, rc.config.OptimizedFsync)
 		if err != nil {
-			nodeLog.Errorf("error loading wal (%v)", err)
+			rc.Errorf("error loading wal (%v)", err)
 			return w, nil, hardState, nil, err
 		}
 		if readOld {
 			meta, st, ents, err := w.ReadAll()
 			if err != nil {
 				w.Close()
-				nodeLog.Errorf("failed to read WAL (%s)", err)
+				rc.Errorf("failed to read WAL (%s)", err)
 				if repaired {
-					nodeLog.Errorf("read wal error and cannot be repaire")
+					rc.Errorf("read wal error and cannot be repaire")
 				} else {
 					if !wal.Repair(rc.config.WALDir) {
-						nodeLog.Errorf("read wal error and cannot be repaire")
+						rc.Errorf("read wal error and cannot be repaire")
 					} else {
-						nodeLog.Infof("wal repaired")
+						rc.Infof("wal repaired")
 						repaired = true
 						continue
 					}
@@ -263,13 +263,13 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 	err = json.Unmarshal(meta, &m)
 	if err != nil {
 		w.Close()
-		nodeLog.Errorf("meta is wrong: %v", err)
+		rc.Errorf("meta is wrong: %v", err)
 		return err
 	}
 	if m.ID != uint64(rc.config.ID) ||
 		m.GroupID != rc.config.GroupID {
 		w.Close()
-		nodeLog.Errorf("meta starting mismatch config: %v, %v", m, rc.config)
+		rc.Errorf("meta starting mismatch config: %v, %v", m, rc.config)
 		return errWALMetaMismatch
 	}
 	if rs, ok := rc.persistStorage.(*raftPersistStorage); ok {
@@ -280,7 +280,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 		// discard the previously uncommitted entries
 		for i, ent := range ents {
 			if ent.Index > st.Commit {
-				nodeLog.Infof("discarding %d uncommitted WAL entries ", len(ents)-i)
+				rc.Infof("discarding %d uncommitted WAL entries ", len(ents)-i)
 				ents = ents[:i]
 				break
 			}
@@ -312,7 +312,7 @@ func (rc *raftNode) replayWAL(snapshot *raftpb.Snapshot, forceStandalone bool) e
 		// force commit newly appended entries
 		err := w.Save(raftpb.HardState{}, toAppEnts)
 		if err != nil {
-			nodeLog.Errorf("force commit error: %v", err)
+			rc.Errorf("force commit error: %v", err)
 			return err
 		}
 		if len(ents) != 0 {
@@ -394,12 +394,12 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			err := rc.ds.PrepareSnapshot(*snapshot)
 			if err == nil {
 				if err := rc.ds.RestoreFromSnapshot(*snapshot); err != nil {
-					nodeLog.Error(err)
+					rc.Errorf("failed to restore from snapshot: %s", err)
 					return err
 				}
 			} else if err == errNobackupAvailable {
 				if common.IsConfSetted(common.ConfIgnoreStartupNoBackup) {
-					nodeLog.Infof("ignore failed at startup for no any backup from anyware")
+					rc.Infof("ignore failed at startup for no any backup from anyware")
 				} else {
 					return err
 				}
@@ -773,13 +773,13 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 			var m common.MemberInfo
 			err := json.Unmarshal(cc.Context, &m)
 			if err != nil {
-				nodeLog.Errorf("error conf context: %v", err)
+				rc.Errorf("error conf context: %v", err)
 				go rc.ds.Stop()
 				return false, false, err
 			} else {
 				m.ID = cc.ReplicaID
 				if m.NodeID == 0 {
-					nodeLog.Errorf("invalid member info: %v", m)
+					rc.Errorf("invalid member info: %v", m)
 					go rc.ds.Stop()
 					return false, confChanged, errors.New("add member should include node id ")
 				}
@@ -837,12 +837,12 @@ func (rc *raftNode) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Conf
 		var m common.MemberInfo
 		err := json.Unmarshal(cc.Context, &m)
 		if err != nil {
-			nodeLog.Errorf("error conf context: %v", err)
+			rc.Errorf("error conf context: %v", err)
 			return false, false, err
 		}
 		m.ID = cc.ReplicaID
 		if m.NodeID == 0 {
-			nodeLog.Errorf("invalid member info: %v", m)
+			rc.Errorf("invalid member info: %v", m)
 			return false, confChanged, errors.New("add member should include node id ")
 		}
 		rc.memMutex.Lock()
@@ -986,7 +986,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 		for _, ent := range rd.CommittedEntries {
 			if ent.Type == raftpb.EntryConfChange {
 				waitApply = true
-				nodeLog.Infof("need wait apply for config changed: %v", ent.String())
+				rc.Infof("need wait apply for config changed: %v", ent.String())
 				break
 			}
 		}
@@ -998,6 +998,10 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	var applySnapshotTransferResult chan error
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		applySnapshotTransferResult = make(chan error, 1)
+		if !waitApply {
+			waitApply = true
+			applyWaitDone = make(chan struct{})
+		}
 	}
 	processedMsgs, hasRequestSnapMsg := rc.processMessages(rd.Messages)
 	if len(rd.CommittedEntries) > 0 || !raft.IsEmptySnap(rd.Snapshot) || hasRequestSnapMsg {
@@ -1046,7 +1050,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	start := time.Now()
 	// TODO: save entries, hardstate and snapshot should be atomic, or it may corrupt the raft
 	if err := rc.persistRaftState(&rd); err != nil {
-		nodeLog.Errorf("raft save states to disk error: %v", err)
+		rc.Errorf("raft save states to disk error: %v", err)
 		go rc.ds.Stop()
 		<-rc.stopc
 		return
@@ -1103,6 +1107,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	if !isMeNewLeader {
 		raftDone <- struct{}{}
 		if waitApply {
+			rc.Infof("wait apply for pending configure or snapshot")
 			s := time.Now()
 			// wait and handle pending config change
 			confDone := false
@@ -1118,7 +1123,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 			}
 			cost := time.Since(s)
 			if cost > time.Second {
-				nodeLog.Infof("wait apply %v msgs done cost: %v", len(processedMsgs), cost.String())
+				rc.Infof("wait apply %v msgs done cost: %v", len(processedMsgs), cost.String())
 			}
 		}
 		rc.transport.Send(processedMsgs)
@@ -1159,7 +1164,7 @@ func (rc *raftNode) processReadStates(rd *raft.Ready) {
 			select {
 			case rc.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
 			case <-t.C:
-				nodeLog.Infof("timeout sending read state")
+				rc.Infof("timeout sending read state")
 			case <-rc.stopc:
 				return
 			}
