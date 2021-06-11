@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ import (
 )
 
 const (
-	testEngineType = "mem"
+	testEngineType = "rocksdb"
 )
 
 type testLogger struct {
@@ -77,6 +78,8 @@ func getTestDBForBench() *RockDB {
 func getTestDBWithDirType(t *testing.T, dataDir string, tp string) *RockDB {
 	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
+	cfg.WriteBufferSize = 1000
+	cfg.MaxWriteBufferNumber = 1
 	cfg.EnablePartitionedIndexFilter = true
 	cfg.EngineType = tp
 	cfg.DataDir = dataDir
@@ -810,5 +813,133 @@ func Test_purgeOldCheckpoint(t *testing.T) {
 				assert.True(t, os.IsNotExist(err), "should not keep")
 			}
 		})
+	}
+}
+
+func TestRockDBRecovery(t *testing.T) {
+	// test restore should overwrite new local data and have the restored data
+	dataDir, err := ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	db := getTestDBWithDirType(t, dataDir, "rocksdb")
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	t.Log(db.cfg.DataDir)
+	key := []byte("test:test_kv_recovery")
+	value := []byte("value")
+	err = db.KVSet(0, key, value)
+	assert.Nil(t, err)
+	wcnt := 50000
+	for i := 0; i < wcnt; i++ {
+		expectedV := []byte(string(key) + strconv.Itoa(i))
+		err := db.KVSet(0, expectedV, expectedV)
+		assert.Nil(t, err)
+	}
+	db.CompactAllRange()
+
+	v, err := db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	bi := db.Backup(1, 1)
+	_, err = bi.GetResult()
+	assert.Nil(t, err)
+	checkpointDir := GetCheckpointDir(1, 1)
+	fullBackupPath := path.Join(db.GetBackupDir(), checkpointDir)
+	// copy file to make the backup unlink from local to test recover
+	backupfiles, _ := filepath.Glob(path.Join(fullBackupPath, "*"))
+	var backupSSTfiles []string
+	for _, f := range backupfiles {
+		fi, _ := os.Stat(f)
+		ofi, _ := os.Stat(path.Join(db.GetDataDir(), path.Base(f)))
+		if strings.HasSuffix(f, ".sst") {
+			assert.True(t, os.SameFile(fi, ofi))
+			dst := f + ".tmp"
+			common.CopyFile(f, dst, true)
+			os.Remove(f)
+			os.Rename(dst, f)
+			fi, _ = os.Stat(f)
+			assert.False(t, os.SameFile(fi, ofi))
+			backupSSTfiles = append(backupSSTfiles, f)
+		} else {
+			assert.False(t, os.SameFile(fi, ofi))
+			assert.Nil(t, isSameSSTFile(f, path.Join(db.GetDataDir(), path.Base(f))))
+		}
+	}
+
+	ok, err := db.IsLocalBackupOK(1, 1)
+	assert.Nil(t, err)
+	assert.True(t, ok)
+
+	// write new data to local to test overwrite for restore
+	err = db.KVSet(0, key, []byte("changed"))
+	assert.Nil(t, err)
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, "changed", string(v))
+
+	err = db.restoreFromPath(db.GetBackupDir(), 1, 1)
+	assert.Nil(t, err)
+	localfiles, _ := filepath.Glob(path.Join(db.GetDataDir(), "*.sst"))
+	assert.Equal(t, len(localfiles), len(backupSSTfiles))
+	assert.True(t, len(localfiles) >= 1, localfiles)
+	for _, f := range backupfiles {
+		if strings.HasPrefix(f, "LOG") {
+			continue
+		}
+		fi, err := os.Stat(f)
+		assert.Nil(t, err)
+		lfi, err := os.Stat(path.Join(db.GetDataDir(), path.Base(f)))
+		assert.Nil(t, err)
+		if strings.HasSuffix(f, "sst") {
+			assert.True(t, os.SameFile(fi, lfi))
+		} else {
+			assert.False(t, os.SameFile(fi, lfi))
+			assert.Nil(t, isSameSSTFile(f, path.Join(db.GetDataDir(), path.Base(f))))
+		}
+	}
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	for i := 0; i < wcnt; i++ {
+		expectedV := []byte(string(key) + strconv.Itoa(i))
+		v, err := db.KVGet(expectedV)
+		assert.Nil(t, err)
+		assert.Equal(t, string(expectedV), string(v))
+	}
+
+	err = db.KVSet(0, key, []byte("changed"))
+	assert.Nil(t, err)
+
+	err = db.restoreFromPath(db.GetBackupDir(), 1, 1)
+	assert.Nil(t, err)
+
+	assert.Equal(t, len(localfiles), len(backupSSTfiles))
+	assert.True(t, len(localfiles) >= 1, localfiles)
+	for _, f := range backupfiles {
+		if strings.HasPrefix(f, "LOG") {
+			continue
+		}
+		fi, err := os.Stat(f)
+		assert.Nil(t, err)
+		lfi, err := os.Stat(path.Join(db.GetDataDir(), path.Base(f)))
+		assert.Nil(t, err)
+		if strings.HasSuffix(f, "sst") {
+			assert.True(t, os.SameFile(fi, lfi))
+		} else {
+			assert.False(t, os.SameFile(fi, lfi))
+			assert.Nil(t, isSameSSTFile(f, path.Join(db.GetDataDir(), path.Base(f))))
+		}
+	}
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	for i := 0; i < wcnt; i++ {
+		expectedV := []byte(string(key) + strconv.Itoa(i))
+		v, err := db.KVGet(expectedV)
+		assert.Nil(t, err)
+		assert.Equal(t, string(expectedV), string(v))
 	}
 }
