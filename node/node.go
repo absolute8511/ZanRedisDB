@@ -51,15 +51,16 @@ var (
 )
 
 const (
-	RedisReq        int8 = 0
-	CustomReq       int8 = 1
-	SchemaChangeReq int8 = 2
-	RedisV2Req      int8 = 3
-	proposeTimeout       = time.Second * 4
-	raftSlow             = time.Millisecond * 200
-	maxPoolIDLen         = 256
-	waitPoolSize         = 6
-	minPoolIDLen         = 4
+	RedisReq             int8 = 0
+	CustomReq            int8 = 1
+	SchemaChangeReq      int8 = 2
+	RedisV2Req           int8 = 3
+	proposeTimeout            = time.Second * 4
+	raftSlow                  = time.Millisecond * 200
+	maxPoolIDLen              = 256
+	waitPoolSize              = 6
+	minPoolIDLen              = 4
+	checkApplyFallbehind      = 1000
 )
 
 const (
@@ -1021,6 +1022,9 @@ func (nd *KVNode) SetAppliedIndex(ci uint64) {
 }
 
 func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
+	if nd.rn == nil {
+		return false
+	}
 	if nd.rn.Lead() == raft.None {
 		select {
 		case <-time.After(time.Duration(nd.machineConfig.ElectionTick/10) * time.Millisecond * time.Duration(nd.machineConfig.TickMs)):
@@ -1028,7 +1032,7 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 			return false
 		}
 		if nd.rn.Lead() == raft.None {
-			nodeLog.Infof("not synced, since no leader ")
+			nd.rn.Infof("not synced, since no leader ")
 			nd.rn.maybeTryElection()
 			return false
 		}
@@ -1037,8 +1041,14 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 		// leader always raft synced.
 		return true
 	}
+	ai := nd.GetAppliedIndex()
+	ci := nd.GetRaftStatus().Commit
+	nd.rn.Infof("check raft synced, apply: %v, commit: %v", ai, ci)
 	if !checkCommitIndex {
 		return true
+	}
+	if ai+checkApplyFallbehind < ci {
+		return false
 	}
 	to := time.Second * 5
 	ctx, cancel := context.WithTimeout(context.Background(), to)
@@ -1046,7 +1056,7 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	cancel()
 
 	if err != nil {
-		nodeLog.Infof("wait raft not synced,  %v", err.Error())
+		nd.rn.Infof("wait raft not synced,  %v", err.Error())
 		return false
 	}
 	return true
@@ -1119,10 +1129,10 @@ func (nd *KVNode) readIndexLoop() {
 					if len(rs.RequestCtx) == 8 {
 						id2 = binary.BigEndian.Uint64(rs.RequestCtx)
 					}
-					nodeLog.Infof("ignored out of date read index: %v, %v", id2, id1)
+					nd.rn.Infof("ignored out of date read index: %v, %v", id2, id1)
 				}
 			case <-time.After(to):
-				nodeLog.Infof("timeout waiting for read index response: %v", id1)
+				nd.rn.Infof("timeout waiting for read index response: %v", id1)
 				timeout = true
 				nr.notify(ErrReadIndexTimeout)
 			case <-nd.stopChan:
