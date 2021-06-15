@@ -844,7 +844,14 @@ func (r *raft) hup(t CampaignType) {
 	r.campaign(t)
 }
 
+// campaign transitions the raft instance to candidate state. This must only be
+// called after verifying that this is a legitimate transition.
 func (r *raft) campaign(t CampaignType) {
+	if !r.promotable() {
+		// This path should not be hit (callers are supposed to check), but
+		// better safe than sorry.
+		r.logger.Warningf("%x is unpromotable; campaign() should have been called", r.id)
+	}
 	var term uint64
 	var voteMsg pb.MessageType
 	if t == campaignPreElection {
