@@ -632,6 +632,23 @@ func (r *raft) bcastHeartbeatWithCtx(ctx []byte) {
 	})
 }
 
+func (r *raft) advance(rd Ready) {
+	// If entries were applied (or a snapshot), update our cursor for
+	// the next Ready. Note that if the current HardState contains a
+	// new Commit index, this does not mean that we're also applying
+	// all of the new entries due to commit pagination by size.
+	if index := rd.appliedCursor(); index > 0 {
+		r.raftLog.appliedTo(index)
+	}
+	if len(rd.Entries) > 0 {
+		e := rd.Entries[len(rd.Entries)-1]
+		r.raftLog.stableTo(e.Index, e.Term)
+	}
+	if !IsEmptySnap(rd.Snapshot) {
+		r.raftLog.stableSnapTo(rd.Snapshot.Metadata.Index)
+	}
+}
+
 // maybeCommit attempts to advance the commit index. Returns true if
 // the commit index changed (in which case the caller should call
 // r.bcastAppend).
@@ -1446,8 +1463,8 @@ func (r *raft) restoreNode(nodes []uint64, grpsConf []*pb.Group, isLearner bool)
 // promotable indicates whether state machine can be promoted to leader,
 // which is true when its own id is in progress list.
 func (r *raft) promotable() bool {
-	_, ok := r.prs[r.id]
-	return ok
+	pr, ok := r.prs[r.id]
+	return ok && pr != nil && !pr.IsLearner && !r.raftLog.hasPendingSnapshot()
 }
 
 func (r *raft) updateNode(id uint64, g pb.Group) {
