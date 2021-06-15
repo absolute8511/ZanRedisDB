@@ -817,6 +817,33 @@ func (r *raft) becomeLeader() {
 	r.logger.Infof("%x(%v) became leader at term %d", r.id, r.group.Name, r.Term)
 }
 
+func (r *raft) hup(t CampaignType) {
+	if r.state == StateLeader {
+		r.logger.Debugf("%x ignoring MsgHup because already leader", r.id)
+		return
+	}
+
+	if !r.promotable() {
+		r.logger.Warningf("%x is unpromotable and can not campaign; ignoring MsgHup", r.id)
+		return
+	}
+	ents, err := r.raftLog.slice(r.raftLog.applied+1, r.raftLog.committed+1, noLimit)
+	if err != nil {
+		if err == ErrCompacted {
+			r.logger.Errorf("%x cannot campaign at term %d since log is compacted: %d", r.id, r.Term, r.raftLog.applied)
+			return
+		}
+		r.logger.Panicf("unexpected error getting unapplied entries (%v)", err)
+	}
+	if n := numOfPendingConf(ents); n != 0 && r.raftLog.committed > r.raftLog.applied {
+		r.logger.Warningf("%x cannot campaign at term %d since there are still %d pending configuration changes to apply", r.id, r.Term, n)
+		return
+	}
+
+	r.logger.Infof("%x(%v) is starting a new election at term %d", r.id, r.group.Name, r.Term)
+	r.campaign(t)
+}
+
 func (r *raft) campaign(t CampaignType) {
 	var term uint64
 	var voteMsg pb.MessageType
@@ -945,30 +972,11 @@ func (r *raft) Step(m pb.Message) error {
 
 	switch m.Type {
 	case pb.MsgHup:
-		if r.state != StateLeader {
-			ents, err := r.raftLog.slice(r.raftLog.applied+1, r.raftLog.committed+1, noLimit)
-			if err != nil {
-				if err == ErrCompacted {
-					r.logger.Errorf("%x cannot campaign at term %d since log is compacted: %d", r.id, r.Term, r.raftLog.applied)
-					return nil
-				}
-				r.logger.Panicf("unexpected error getting unapplied entries (%v)", err)
-			}
-			if n := numOfPendingConf(ents); n != 0 && r.raftLog.committed > r.raftLog.applied {
-				r.logger.Warningf("%x cannot campaign at term %d since there are still %d pending configuration changes to apply", r.id, r.Term, n)
-				return nil
-			}
-
-			r.logger.Infof("%x(%v) is starting a new election at term %d", r.id, r.group.Name, r.Term)
-			if r.preVote {
-				r.campaign(campaignPreElection)
-			} else {
-				r.campaign(campaignElection)
-			}
+		if r.preVote {
+			r.hup(campaignPreElection)
 		} else {
-			r.logger.Debugf("%x ignoring MsgHup because already leader", r.id)
+			r.hup(campaignElection)
 		}
-
 	case pb.MsgVote, pb.MsgPreVote:
 		if r.isLearner {
 			// TODO: learner may need to vote, in case of node down when confchange.
@@ -1340,7 +1348,7 @@ func stepFollower(r *raft, m pb.Message) bool {
 			// Leadership transfers never use pre-vote even if r.preVote is true; we
 			// know we are not recovering from a partition so there is no need for the
 			// extra round trip.
-			r.campaign(campaignTransfer)
+			r.hup(campaignTransfer)
 		} else {
 			r.logger.Infof("%x received MsgTimeoutNow from %x but is not promotable", r.id, m.From)
 		}
