@@ -21,8 +21,7 @@ const (
 )
 
 var (
-	EtcdTTL          = 60
-	WatchEtcdTimeout = time.Second * time.Duration(EtcdTTL*3)
+	EtcdTTL = 30
 )
 
 const (

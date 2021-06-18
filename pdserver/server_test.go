@@ -1,6 +1,7 @@
 package pdserver
 
 import (
+	"flag"
 	"fmt"
 	"math"
 	"net/http"
@@ -28,7 +29,10 @@ import (
 func TestMain(m *testing.M) {
 	pdnode_coord.ChangeIntervalForTest()
 	datanode_coord.ChangeIntervalForTest()
-	cluster.SetLogLevel(int(common.LOG_DEBUG))
+	flag.Parse()
+	if testing.Verbose() {
+		cluster.SetLogLevel(int(common.LOG_DEBUG))
+	}
 
 	ret := m.Run()
 
@@ -1267,14 +1271,20 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 			assert.Equal(t, 0, len(newNs.Removings))
 		}
 		t.Logf("found %v part for restarted node", found)
-		if found > partNum/2 {
-			if checkPartitionNodesBalance(t, "v2", getCurrentPartitionNodes(t, ns)) {
-				break
-			}
-		}
 		if time.Since(start) > time.Minute {
 			t.Errorf("timeout wait balance")
 			break
+		}
+		if found > partNum/2 {
+			localNsList, err := newDataNodes[0].s.GetNsMgr().GetNamespaceNodes(ns, false)
+			assert.Nil(t, err)
+			t.Logf("found %v part for restarted node, and local loaded: %v", found, localNsList)
+			if len(localNsList) < found {
+				continue
+			}
+			if checkPartitionNodesBalance(t, "v2", getCurrentPartitionNodes(t, ns)) {
+				break
+			}
 		}
 	}
 }
@@ -1503,7 +1513,11 @@ func TestMarkAsRemovingWhileNotEnoughAlives(t *testing.T) {
 
 	waitBalancedLeader(t, ns, 0)
 	newNsInfo := getNsInfo(t, ns, 0)
-	assert.Equal(t, oldNsInfo.GetISR(), newNsInfo.GetISR())
+	oldISR := oldNsInfo.GetISR()
+	sort.Strings(oldISR)
+	newISR := newNsInfo.GetISR()
+	sort.Strings(newISR)
+	assert.Equal(t, oldISR, newISR)
 	nodeWrapper, _ = waitForLeaderFromNodes(t, ns, 0, allNodes)
 	newLeader := nodeWrapper.s
 	assert.NotNil(t, newLeader)

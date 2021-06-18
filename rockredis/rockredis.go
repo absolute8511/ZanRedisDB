@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/spaolacci/murmur3"
+	"github.com/twmb/murmur3"
 
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/engine"
@@ -732,6 +732,10 @@ func (r *RockDB) GetTableSizeInRange(table string, start []byte, end []byte) int
 	return int64(total)
 }
 
+func (r *RockDB) GetApproximateTotalNum() int64 {
+	return int64(r.rockEng.GetApproximateTotalKeyNum())
+}
+
 // [start, end)
 func (r *RockDB) GetTableApproximateNumInRange(table string, start []byte, end []byte) int64 {
 	num := r.rockEng.GetApproximateTotalKeyNum()
@@ -815,7 +819,7 @@ func (r *RockDB) backupLoop() {
 				defer close(rsp.done)
 				dbLog.Infof("begin backup to:%v \n", rsp.backupDir)
 				start := time.Now()
-				ck, err := r.rockEng.NewCheckpoint()
+				ck, err := r.rockEng.NewCheckpoint(false)
 				if err != nil {
 					dbLog.Infof("init checkpoint failed: %v", err)
 					rsp.err = err

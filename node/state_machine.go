@@ -739,7 +739,7 @@ func (kvsm *kvStoreSM) ApplyRaftRequest(isReplaying bool, batch IBatchOperator, 
 						}).Inc()
 						continue
 					}
-					if reqTs > GetSyncedOnlyChangedTs() && !MaybeConflictLogDisabled() {
+					if (reqTs > GetSyncedOnlyChangedTs() || conflict == MaybeConflict) && !MaybeConflictLogDisabled() {
 						// maybe unconsistence if write on slave after cluster switched,
 						// so we need log write here to know what writes are synced after we
 						// became the master cluster.

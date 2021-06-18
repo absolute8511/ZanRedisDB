@@ -31,13 +31,29 @@ func TestPebbleEngCheckpointData(t *testing.T) {
 }
 
 func TestMemEngBtreeCheckpointData(t *testing.T) {
-	useSkiplist = false
+	old := useMemType
+	useMemType = memTypeBtree
 	defer func() {
-		useSkiplist = true
+		useMemType = old
 	}()
 	testCheckpointData(t, "mem")
 }
+
+func TestMemEngRadixCheckpointData(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeRadix
+	defer func() {
+		useMemType = old
+	}()
+	testCheckpointData(t, "mem")
+}
+
 func TestMemEngSkiplistCheckpointData(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeSkiplist
+	defer func() {
+		useMemType = old
+	}()
 	testCheckpointData(t, "mem")
 }
 
@@ -56,7 +72,7 @@ func testCheckpointData(t *testing.T, engType string) {
 	assert.Nil(t, err)
 	defer eng.CloseAll()
 
-	ck, err := eng.NewCheckpoint()
+	ck, err := eng.NewCheckpoint(false)
 	assert.Nil(t, err)
 	// test save should not block, so lastTs should be updated soon
 	ckpath := path.Join(tmpDir, "newCk")
@@ -66,13 +82,14 @@ func testCheckpointData(t *testing.T, engType string) {
 	assert.Nil(t, err)
 
 	wb := eng.DefaultWriteBatch()
-	for j := 0; j < 2; j++ {
+	knum := 3
+	for j := 0; j < knum; j++ {
 		wb.Put([]byte("test"+strconv.Itoa(j)), []byte("test"+strconv.Itoa(j)))
 	}
 	eng.Write(wb)
 	wb.Clear()
 
-	ck2, err := eng.NewCheckpoint()
+	ck2, err := eng.NewCheckpoint(false)
 	assert.Nil(t, err)
 	// test save should not block, so lastTs should be updated soon
 	ckpath2 := path.Join(tmpDir, "newCk2")
@@ -96,7 +113,7 @@ func testCheckpointData(t *testing.T, engType string) {
 	assert.Nil(t, err)
 	defer engCK2.CloseAll()
 
-	for j := 0; j < 2; j++ {
+	for j := 0; j < knum; j++ {
 		key := []byte("test" + strconv.Itoa(j))
 		origV, err := eng.GetBytes(key)
 		assert.Equal(t, key, origV)
@@ -108,18 +125,37 @@ func testCheckpointData(t *testing.T, engType string) {
 		assert.Equal(t, key, v2)
 		assert.Equal(t, origV, v2)
 	}
+	if engType == "mem" && useMemType == memTypeRadix {
+		kn := engCK2.GetApproximateTotalKeyNum()
+		assert.Equal(t, knum, kn)
+	}
 	time.Sleep(time.Second)
 }
 
 func TestMemEngBtreeIterator(t *testing.T) {
-	useSkiplist = false
+	old := useMemType
+	useMemType = memTypeBtree
 	defer func() {
-		useSkiplist = true
+		useMemType = old
+	}()
+	testKVIterator(t, "mem")
+}
+
+func TestMemEngRadixIterator(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeRadix
+	defer func() {
+		useMemType = old
 	}()
 	testKVIterator(t, "mem")
 }
 
 func TestMemEngSkiplistIterator(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeSkiplist
+	defer func() {
+		useMemType = old
+	}()
 	testKVIterator(t, "mem")
 }
 
@@ -151,28 +187,65 @@ func testKVIterator(t *testing.T, engType string) {
 	wb.Put(key, key)
 	eng.Write(wb)
 	wb.Clear()
+	v, err := eng.GetBytes(key)
+	assert.Nil(t, err)
+	assert.Equal(t, key, v)
 	key2 := []byte("test2")
 	wb.Put(key2, key2)
 	eng.Write(wb)
 	wb.Clear()
+	v, err = eng.GetBytes(key2)
+	assert.Nil(t, err)
+	assert.Equal(t, key2, v)
 	key3 := []byte("test3")
 	wb.Put(key3, key3)
 	eng.Write(wb)
 	wb.Clear()
+	v, err = eng.GetBytes(key3)
+	assert.Nil(t, err)
+	assert.Equal(t, key3, v)
 	key4 := []byte("test4")
 	wb.Put(key4, key4)
 	eng.Write(wb)
 	wb.Clear()
+	v, err = eng.GetBytes(key4)
+	assert.Nil(t, err)
+	assert.Equal(t, key4, v)
 	it, _ := eng.GetIterator(IteratorOpts{})
 	defer it.Close()
+
+	// test seek part of prefix
+	it.Seek([]byte("tes"))
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, key, it.Value())
+	it.Seek(key)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, key, it.Value())
+	it.Seek(key2)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key2, it.Key())
+	assert.Equal(t, key2, it.Value())
+	it.Seek(key4)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key4, it.Key())
+	assert.Equal(t, key4, it.Value())
+	it.Seek([]byte("test44"))
+	assert.True(t, !it.Valid())
+
 	it.SeekToFirst()
 	// change value after iterator should not change the snapshot iterator?
-	if engType != "mem" {
+	if engType != "mem" || useMemType == memTypeRadix {
 		// for btree, the write will be blocked while the iterator is open
 		// for skiplist, we do not support snapshot
 		wb.Put(key4, []byte(string(key4)+"update"))
 		eng.Write(wb)
 		wb.Clear()
+	}
+	if engType == "mem" && useMemType == memTypeRadix {
+		kn := eng.GetApproximateTotalKeyNum()
+		assert.Equal(t, 4, kn)
 	}
 	assert.True(t, it.Valid())
 	assert.Equal(t, key, it.Key())
@@ -197,10 +270,13 @@ func testKVIterator(t *testing.T, engType string) {
 	assert.True(t, it.Valid())
 	assert.Equal(t, key3, it.Key())
 	assert.Equal(t, key3, it.Value())
-	//it.SeekForPrev(key3)
-	//assert.True(t, it.Valid())
-	//assert.Equal(t, key2, it.Key())
-	//assert.Equal(t, key2, it.Value())
+
+	if useMemType != memTypeBtree && engType != "pebble" {
+		it.SeekForPrev(key3)
+		assert.True(t, it.Valid())
+		assert.Equal(t, key3, it.Key())
+		assert.Equal(t, key3, it.Value())
+	}
 
 	it.SeekForPrev([]byte("test5"))
 	assert.True(t, it.Valid())
@@ -213,4 +289,156 @@ func testKVIterator(t *testing.T, engType string) {
 	assert.Equal(t, key, it.Value())
 	it.Prev()
 	assert.True(t, !it.Valid())
+}
+
+func TestPebbleEngSnapshotIterator(t *testing.T) {
+	testKVSnapshotIterator(t, "pebble")
+}
+func TestRocksdbEngSnapshotIterator(t *testing.T) {
+	testKVSnapshotIterator(t, "rocksdb")
+}
+func TestMemEngSnapshotIteratorRadix(t *testing.T) {
+	// snapshot iterator for btree or skiplist currently not supported
+	old := useMemType
+	useMemType = memTypeRadix
+	defer func() {
+		useMemType = old
+	}()
+	testKVSnapshotIterator(t, "mem")
+}
+
+func testKVSnapshotIterator(t *testing.T, engType string) {
+	SetLogger(0, nil)
+	cfg := NewRockConfig()
+	tmpDir, err := ioutil.TempDir("", "iterator_data")
+	assert.Nil(t, err)
+	t.Log(tmpDir)
+	defer os.RemoveAll(tmpDir)
+	cfg.DataDir = tmpDir
+	cfg.EngineType = engType
+	eng, err := NewKVEng(cfg)
+	assert.Nil(t, err)
+	err = eng.OpenEng()
+	assert.Nil(t, err)
+	defer eng.CloseAll()
+
+	wb := eng.NewWriteBatch()
+	key := []byte("test")
+	wb.Put(key, key)
+	key2 := []byte("test2")
+	wb.Put(key2, key2)
+	key3 := []byte("test3")
+	wb.Put(key3, key3)
+	eng.Write(wb)
+	wb.Clear()
+
+	it, _ := eng.GetIterator(IteratorOpts{})
+	defer it.Close()
+	// modify after iterator snapshot
+	wb = eng.NewWriteBatch()
+	wb.Put(key2, []byte("changed"))
+	wb.Put(key3, []byte("changed"))
+	eng.Write(wb)
+	wb.Clear()
+
+	it.Seek(key)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, key, it.Value())
+	it.Seek(key2)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key2, it.Key())
+	assert.Equal(t, key2, it.Value())
+	it.Seek(key3)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key3, it.Key())
+	assert.Equal(t, key3, it.Value())
+
+	it2, _ := eng.GetIterator(IteratorOpts{})
+	defer it2.Close()
+
+	it2.Seek(key)
+	assert.True(t, it2.Valid())
+	assert.Equal(t, key, it2.Key())
+	assert.Equal(t, key, it2.Value())
+	it2.Seek(key2)
+	assert.True(t, it2.Valid())
+	assert.Equal(t, key2, it2.Key())
+	assert.Equal(t, []byte("changed"), it2.Value())
+	it2.Seek(key3)
+	assert.True(t, it2.Valid())
+	assert.Equal(t, key3, it2.Key())
+	assert.Equal(t, []byte("changed"), it2.Value())
+}
+
+func TestSpecialDataSeekForRocksdb(t *testing.T) {
+	testSpecialDataSeekForAnyType(t, "rocksdb")
+}
+func TestSpecialDataSeekForPebble(t *testing.T) {
+	testSpecialDataSeekForAnyType(t, "pebble")
+}
+func TestSpecialDataSeekForBtree(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeBtree
+	defer func() {
+		useMemType = old
+	}()
+	testSpecialDataSeekForAnyType(t, "mem")
+}
+
+func TestSpecialDataSeekForSkiplist(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeSkiplist
+	defer func() {
+		useMemType = old
+	}()
+	testSpecialDataSeekForAnyType(t, "mem")
+}
+
+func TestSpecialDataSeekForRadix(t *testing.T) {
+	old := useMemType
+	useMemType = memTypeRadix
+	defer func() {
+		useMemType = old
+	}()
+	testSpecialDataSeekForAnyType(t, "mem")
+}
+
+func testSpecialDataSeekForAnyType(t *testing.T, engType string) {
+	base := []byte{1, 0, 1, 0}
+	key := append([]byte{}, base...)
+	key2 := append([]byte{}, base...)
+	minKey := []byte{1, 0, 1}
+
+	SetLogger(0, nil)
+	cfg := NewRockConfig()
+	tmpDir, err := ioutil.TempDir("", "iterator_data")
+	assert.Nil(t, err)
+	t.Log(tmpDir)
+	defer os.RemoveAll(tmpDir)
+	cfg.DataDir = tmpDir
+	cfg.EngineType = engType
+	eng, err := NewKVEng(cfg)
+	assert.Nil(t, err)
+	err = eng.OpenEng()
+	assert.Nil(t, err)
+	defer eng.CloseAll()
+
+	wb := eng.NewWriteBatch()
+	value := []byte{1}
+
+	wb.Put(key, value)
+	eng.Write(wb)
+	wb.Clear()
+	key2 = append(key2, []byte{1}...)
+	wb.Put(key2, value)
+	eng.Write(wb)
+	wb.Clear()
+
+	it, _ := eng.GetIterator(IteratorOpts{})
+	defer it.Close()
+	it.Seek(minKey)
+	assert.True(t, it.Valid())
+	assert.Equal(t, key, it.Key())
+	assert.Equal(t, value, it.Value())
 }

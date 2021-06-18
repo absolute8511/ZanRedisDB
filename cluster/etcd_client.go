@@ -13,8 +13,8 @@ import (
 var etcdTransport client.CancelableTransport = &http.Transport{
 	Proxy: http.ProxyFromEnvironment,
 	Dial: (&net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
+		Timeout:   10 * time.Second,
+		KeepAlive: 10 * time.Second,
 	}).Dial,
 	TLSHandshakeTimeout: 10 * time.Second,
 	WriteBufferSize:     1024,

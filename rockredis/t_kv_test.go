@@ -2,6 +2,7 @@ package rockredis
 
 import (
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -220,38 +221,38 @@ func TestDBKVBit(t *testing.T) {
 	defer db.Close()
 
 	key := []byte("test:testdb_kv_bit")
-	n, err := db.BitSetOld(0, key, 5, 1)
+	n, err := db.BitSetV2(0, key, 5, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
-	n, err = db.bitGetOld(key, 0)
+	n, err = db.BitGetV2(key, 0)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
-	n, err = db.bitGetOld(key, 5)
+	n, err = db.BitGetV2(key, 5)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	n, err = db.bitGetOld(key, 100)
+	n, err = db.BitGetV2(key, 100)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), n)
 
-	n, err = db.bitCountOld(key, 0, -1)
+	n, err = db.BitCountV2(key, 0, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	n, err = db.BitSetOld(0, key, 5, 0)
+	n, err = db.BitSetV2(0, key, 5, 0)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(1), n)
 
-	_, err = db.BitSetOld(0, key, -5, 0)
+	_, err = db.BitSetV2(0, key, -5, 0)
 	assert.NotNil(t, err)
 
 	for i := 0; i < bitmapSegBits*3; i++ {
-		n, err = db.bitGetOld(key, int64(i))
+		n, err = db.BitGetV2(key, int64(i))
 		assert.Nil(t, err)
 		assert.Equal(t, int64(0), n)
 
-		n, err = db.bitCountOld(key, 0, -1)
+		n, err = db.BitCountV2(key, 0, -1)
 		assert.Nil(t, err)
 		assert.Equal(t, int64(0), n)
 	}
@@ -282,12 +283,9 @@ func TestDBKVBit(t *testing.T) {
 	bitsForOne[bitmapSegBits*2+bitmapSegBytes+1] = true
 
 	for bpos := range bitsForOne {
-		n, err = db.BitSetOld(0, key, int64(bpos), 1)
+		n, err = db.BitSetV2(0, key, int64(bpos), 1)
 		assert.Nil(t, err)
 		assert.Equal(t, int64(0), n)
-		n, err = db.bitGetOld(key, int64(bpos))
-		assert.Nil(t, err)
-		assert.Equal(t, int64(1), n)
 		// new v2 should read old
 		n, err = db.BitGetV2(key, int64(bpos))
 		assert.Nil(t, err)
@@ -295,7 +293,7 @@ func TestDBKVBit(t *testing.T) {
 	}
 
 	for i := 0; i < bitmapSegBits*3; i++ {
-		n, err = db.bitGetOld(key, int64(i))
+		n, err = db.BitGetV2(key, int64(i))
 		assert.Nil(t, err)
 		if _, ok := bitsForOne[i]; ok {
 			assert.Equal(t, int64(1), n)
@@ -303,9 +301,6 @@ func TestDBKVBit(t *testing.T) {
 			assert.Equal(t, int64(0), n)
 		}
 	}
-	n, err = db.bitCountOld(key, 0, -1)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(len(bitsForOne)), n)
 	// new v2 should read old
 	n, err = db.BitCountV2(key, 0, -1)
 	assert.Nil(t, err)
@@ -381,4 +376,34 @@ func TestDBKVWithNoTable(t *testing.T) {
 	} else if v != nil {
 		t.Error("should get no value")
 	}
+}
+
+func BenchmarkKVSetSingleKey(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	b.StopTimer()
+	key := []byte("test:testdb_kv_bench")
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		db.KVSet(0, key, key)
+	}
+	b.StopTimer()
+}
+
+func BenchmarkKVSetManyKeys(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	b.StopTimer()
+	key := "test:testdb_kv_bench"
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		db.KVSet(0, []byte(key+(strconv.Itoa(i))), []byte("1"))
+	}
+	b.StopTimer()
 }

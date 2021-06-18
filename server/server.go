@@ -15,7 +15,6 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/spaolacci/murmur3"
 	"github.com/youzan/ZanRedisDB/engine"
 	"github.com/youzan/ZanRedisDB/slow"
 
@@ -110,6 +109,9 @@ func NewServer(conf ServerConfig) (*Server, error) {
 	if conf.UseRedisV2 {
 		node.UseRedisV2 = true
 	}
+	if conf.SlowLimiterRefuseCostMs > 0 {
+		node.ChangeSlowRefuseCost(conf.SlowLimiterRefuseCostMs)
+	}
 
 	myNode := &cluster.NodeInfo{
 		NodeIP:      conf.BroadcastAddr,
@@ -142,7 +144,9 @@ func NewServer(conf ServerConfig) (*Server, error) {
 		conf.BroadcastAddr = myNode.NodeIP
 	}
 	if myNode.NodeIP == "0.0.0.0" || myNode.NodeIP == "" {
-		return nil, fmt.Errorf("can not decide the broadcast ip: %v", myNode.NodeIP)
+		err := fmt.Errorf("can not decide the broadcast ip: %v , %v", myNode.NodeIP, conf.BroadcastInterface)
+		sLog.Errorf(err.Error())
+		return nil, err
 	}
 	conf.LocalRaftAddr = strings.Replace(conf.LocalRaftAddr, "0.0.0.0", myNode.NodeIP, 1)
 	myNode.RaftTransportAddr = conf.LocalRaftAddr
@@ -469,7 +473,7 @@ func GetPKAndHashSum(cmdName string, cmd redcon.Command) (string, []byte, int, e
 	if err != nil {
 		return namespace, nil, 0, err
 	}
-	pkSum := int(murmur3.Sum32(pk))
+	pkSum := node.HashedKey(pk)
 	return namespace, pk, pkSum, nil
 }
 

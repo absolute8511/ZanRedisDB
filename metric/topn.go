@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/spaolacci/murmur3"
+	"github.com/twmb/murmur3"
 )
 
 type HKeyInfo struct {

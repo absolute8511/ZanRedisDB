@@ -412,8 +412,8 @@ func BenchmarkSAddAndSPop(b *testing.B) {
 		for i := 0; ; i++ {
 			db.SIsMember(key, []byte("hello"+strconv.Itoa(i%b.N)))
 			db.SMembers(key)
-			ck, _ := db.rockEng.NewCheckpoint()
-			ck.Save(tmp, nil)
+			//ck, _ := db.rockEng.NewCheckpoint(false)
+			//ck.Save(tmp, nil)
 			select {
 			case <-stopC:
 				return

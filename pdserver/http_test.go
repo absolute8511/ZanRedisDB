@@ -195,6 +195,8 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 			GrpcAPIPort:          rpcPort,
 			TickMs:               100,
 			ElectionTick:         5,
+			DefaultSnapCount:     100,
+			DefaultSnapCatchup:   50,
 			SyncerWriteOnly:      syncOnly,
 			UseRocksWAL:          true,
 		}

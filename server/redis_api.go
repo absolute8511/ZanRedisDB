@@ -112,6 +112,7 @@ func (s *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
 			}
 		},
 	)
+	redisS.SetIdleClose(time.Minute * 5)
 	go func() {
 		err := redisS.ListenAndServe()
 		if err != nil {

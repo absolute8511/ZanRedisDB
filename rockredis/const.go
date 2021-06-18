@@ -2,6 +2,8 @@ package rockredis
 
 import (
 	"errors"
+
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 const (
@@ -85,8 +87,6 @@ const (
 )
 
 var (
-	errKeySize          = errors.New("invalid key size")
-	errSubKeySize       = errors.New("invalid sub key size")
 	errValueSize        = errors.New("invalid value size")
 	errZSetMemberSize   = errors.New("invalid zset member size")
 	errTooMuchBatchSize = errors.New("the batch size exceed the limit")
@@ -101,30 +101,14 @@ const (
 	MaxTableNameLen int = 255
 	MaxColumnLen    int = 255
 	//max key size
-	MaxKeySize int = 10240
+	MaxKeySize int = common.MaxKeySize
 
 	// subkey length for hash/set/zset
-	MaxSubKeyLen int = 10240
+	MaxSubKeyLen int = common.MaxSubKeyLen
 
 	//max value size
-	MaxValueSize int = 1024 * 1024 * 8
+	MaxValueSize int = common.MaxValueSize
 )
-
-func checkSubKey(subkey []byte) error {
-	if len(subkey) > MaxSubKeyLen {
-		return errSubKeySize
-	}
-	return nil
-}
-
-func checkKeySubKey(key []byte, field []byte) error {
-	if len(key) > MaxKeySize || len(key) == 0 {
-		return errKeySize
-	} else if len(field) > MaxSubKeyLen {
-		return errSubKeySize
-	}
-	return nil
-}
 
 var (
 	ErrZScoreMiss   = errors.New("zset score miss")

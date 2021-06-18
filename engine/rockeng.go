@@ -204,8 +204,9 @@ func NewRockEng(cfg *RockEngConfig) (*RockEng, error) {
 	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(3))
 	opts.SetMemtablePrefixBloomSizeRatio(0.1)
 	opts.EnableStatistics()
-	opts.SetMaxLogFileSize(1024 * 1024 * 32)
-	opts.SetLogFileTimeToRoll(3600 * 24 * 3)
+	opts.SetMaxLogFileSize(1024 * 1024 * 64)
+	opts.SetLogFileTimeToRoll(3600 * 24 * 15)
+	opts.SetKeepLogFileNum(200)
 	opts.SetMaxManifestFileSize(cfg.MaxMainifestFileSize)
 	opts.SetMaxSuccessiveMerges(1000)
 	// https://github.com/facebook/mysql-5.6/wiki/my.cnf-tuning
@@ -602,7 +603,7 @@ func (r *RockEng) DeleteFilesInRange(rg CRange) {
 	r.eng.DeleteFilesInRange(rrg)
 }
 
-func (r *RockEng) NewCheckpoint() (KVCheckpoint, error) {
+func (r *RockEng) NewCheckpoint(printToStdoutAlso bool) (KVCheckpoint, error) {
 	ck, err := gorocksdb.NewCheckpoint(r.eng)
 	if err != nil {
 		return nil, err

@@ -478,15 +478,7 @@ func (kvsm *kvStoreSM) localPFAddCommand(cmd redcon.Command, ts int64) (interfac
 }
 
 func (kvsm *kvStoreSM) localBitSetCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	offset, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	on, err := strconv.ParseInt(string(cmd.Args[3]), 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	return kvsm.store.BitSetOld(ts, cmd.Args[1], offset, int(on))
+	return kvsm.localBitSetV2Command(cmd, ts)
 }
 
 func (kvsm *kvStoreSM) localBitSetV2Command(cmd redcon.Command, ts int64) (interface{}, error) {

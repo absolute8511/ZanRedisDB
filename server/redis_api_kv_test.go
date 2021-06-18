@@ -1245,7 +1245,7 @@ func TestSlowLimiterCommand(t *testing.T) {
 		loop, refused, passedAfterRefused, time.Now())
 	assert.True(t, refused > 1)
 	assert.True(t, passedAfterRefused < 5)
-	assert.True(t, passedAfterRefused > 3)
+	assert.True(t, passedAfterRefused > 1)
 	c2.SetReadDeadline(time.Now().Add(time.Second * 10))
 	time.Sleep(time.Second * 5)
 	//  we become no slow, we try 3 times to avoid just half open pass

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+
+	memdb "github.com/youzan/ZanRedisDB/engine/radixdb"
 )
 
 type wop int
@@ -23,8 +25,11 @@ type writeOp struct {
 }
 
 type memWriteBatch struct {
-	db  *memEng
-	ops []writeOp
+	db             *memEng
+	ops            []writeOp
+	writer         *memdb.Txn
+	hasErr         error
+	cachedForMerge map[string][]byte
 }
 
 func newMemWriteBatch(db *memEng) (*memWriteBatch, error) {
@@ -32,11 +37,19 @@ func newMemWriteBatch(db *memEng) (*memWriteBatch, error) {
 		db:  db,
 		ops: make([]writeOp, 0, 10),
 	}
+
 	return b, nil
 }
 
 func (wb *memWriteBatch) Destroy() {
 	wb.ops = wb.ops[:0]
+	wb.hasErr = nil
+	wb.cachedForMerge = nil
+	if useMemType == memTypeRadix {
+		if wb.writer != nil {
+			wb.writer.Abort()
+		}
+	}
 }
 
 func (wb *memWriteBatch) commitSkiplist() error {
@@ -87,10 +100,14 @@ func (wb *memWriteBatch) commitSkiplist() error {
 }
 
 func (wb *memWriteBatch) Commit() error {
-	if useSkiplist {
+	switch useMemType {
+	case memTypeBtree:
+		return wb.commitBtree()
+	case memTypeRadix:
+		return wb.commitRadixMem()
+	default:
 		return wb.commitSkiplist()
 	}
-	return wb.commitBtree()
 }
 
 func (wb *memWriteBatch) commitBtree() error {
@@ -141,11 +158,58 @@ func (wb *memWriteBatch) commitBtree() error {
 	return nil
 }
 
+func (wb *memWriteBatch) commitRadixMem() error {
+	defer wb.Clear()
+	if wb.hasErr != nil {
+		wb.writer.Abort()
+		return wb.hasErr
+	}
+	if wb.writer != nil {
+		wb.writer.Commit()
+	}
+	return nil
+}
+
 func (wb *memWriteBatch) Clear() {
 	wb.ops = wb.ops[:0]
+	wb.hasErr = nil
+	wb.cachedForMerge = nil
+	if useMemType == memTypeRadix {
+		if wb.writer != nil {
+			wb.writer.Abort()
+			// TODO: maybe reset for reuse if possible
+			wb.writer = nil
+		}
+	}
 }
 
 func (wb *memWriteBatch) DeleteRange(start, end []byte) {
+	if useMemType == memTypeRadix {
+		if wb.writer == nil {
+			wb.writer = wb.db.radixMemI.memkv.Txn(true)
+		}
+		it, err := wb.db.radixMemI.NewIterator()
+		if err != nil {
+			wb.hasErr = err
+			return
+		}
+		it.Seek(start)
+		for ; it.Valid(); it.Next() {
+			k := it.Key()
+			if end != nil && bytes.Compare(k, end) >= 0 {
+				break
+			}
+			err = wb.db.radixMemI.Delete(wb.writer, k)
+			if err != nil {
+				wb.hasErr = err
+				break
+			}
+			if wb.cachedForMerge != nil {
+				delete(wb.cachedForMerge, string(k))
+			}
+		}
+		it.Close()
+	}
 	wb.ops = append(wb.ops, writeOp{
 		op:    DeleteRangeOp,
 		key:   start,
@@ -154,6 +218,19 @@ func (wb *memWriteBatch) DeleteRange(start, end []byte) {
 }
 
 func (wb *memWriteBatch) Delete(key []byte) {
+	if useMemType == memTypeRadix {
+		if wb.writer == nil {
+			wb.writer = wb.db.radixMemI.memkv.Txn(true)
+		}
+		err := wb.db.radixMemI.Delete(wb.writer, key)
+		if err != nil {
+			wb.hasErr = err
+		}
+		if wb.cachedForMerge != nil {
+			delete(wb.cachedForMerge, string(key))
+		}
+		return
+	}
 	wb.ops = append(wb.ops, writeOp{
 		op:    DeleteOp,
 		key:   key,
@@ -162,6 +239,21 @@ func (wb *memWriteBatch) Delete(key []byte) {
 }
 
 func (wb *memWriteBatch) Put(key []byte, value []byte) {
+	if useMemType == memTypeRadix {
+		if wb.writer == nil {
+			wb.writer = wb.db.radixMemI.memkv.Txn(true)
+		}
+		err := wb.db.radixMemI.Put(wb.writer, key, value)
+		if err != nil {
+			wb.hasErr = err
+		} else {
+			if wb.cachedForMerge == nil {
+				wb.cachedForMerge = make(map[string][]byte, 4)
+			}
+			wb.cachedForMerge[string(key)] = value
+		}
+		return
+	}
 	item := &kvitem{}
 	item.key = make([]byte, len(key))
 	item.value = make([]byte, len(value))
@@ -175,6 +267,42 @@ func (wb *memWriteBatch) Put(key []byte, value []byte) {
 }
 
 func (wb *memWriteBatch) Merge(key []byte, value []byte) {
+	if useMemType == memTypeRadix {
+		if wb.writer == nil {
+			wb.writer = wb.db.radixMemI.memkv.Txn(true)
+		}
+		var oldV []byte
+		if wb.cachedForMerge != nil {
+			oldV = wb.cachedForMerge[string(key)]
+		}
+		var err error
+		if oldV == nil {
+			oldV, err = wb.db.GetBytesNoLock(key)
+		}
+		cur, err := GetRocksdbUint64(oldV, err)
+		if err != nil {
+			wb.hasErr = err
+			return
+		}
+		vint, err := GetRocksdbUint64(value, nil)
+		if err != nil {
+			wb.hasErr = err
+			return
+		}
+		nv := cur + vint
+		buf := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buf, nv)
+		err = wb.db.radixMemI.Put(wb.writer, key, buf)
+		if err != nil {
+			wb.hasErr = err
+		} else {
+			if wb.cachedForMerge == nil {
+				wb.cachedForMerge = make(map[string][]byte, 4)
+			}
+			wb.cachedForMerge[string(key)] = buf
+		}
+		return
+	}
 	item := &kvitem{}
 	item.key = make([]byte, len(key))
 	item.value = make([]byte, len(value))

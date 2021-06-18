@@ -86,6 +86,9 @@ func (nd *KVNode) saddCommand(cmd redcon.Command) (interface{}, error) {
 
 	needChange := false
 	for _, m := range cmd.Args[2:] {
+		if err := common.CheckKeySubKey(key, m); err != nil {
+			return nil, err
+		}
 		n, _ := nd.store.SIsMember(key, m)
 		if n == 0 {
 			// found a new member not exist, we need do raft proposal
@@ -140,6 +143,22 @@ func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
 		}
 		if cnt < 1 {
 			return nil, errors.New("Invalid count")
+		}
+	}
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	n, err := nd.store.SCard(key)
+	if err != nil {
+		return nil, err
+	}
+	// check if empty set
+	if n == 0 {
+		if !hasCount {
+			return nil, nil
+		} else {
+			return [][]byte{}, nil
 		}
 	}
 	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {

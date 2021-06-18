@@ -398,9 +398,13 @@ func testRockDBScanTableForList(t *testing.T, reverse bool) {
 
 	minKey := encodeDataTableStart(ListType, []byte("test"))
 	maxKey := encodeDataTableEnd(ListType, []byte("test"))
+	t.Logf("min: %v, max %v\n", minKey, maxKey)
 	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
+		if err != nil {
+			return
+		}
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
@@ -421,6 +425,9 @@ func testRockDBScanTableForList(t *testing.T, reverse bool) {
 	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
+		if err != nil {
+			return
+		}
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
@@ -472,6 +479,9 @@ func testRockDBScanTableForList(t *testing.T, reverse bool) {
 	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
+		if err != nil {
+			return
+		}
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {

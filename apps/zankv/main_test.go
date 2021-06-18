@@ -3,7 +3,12 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
+	"os"
+	"path"
+	"runtime"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/server"
@@ -19,5 +24,12 @@ func TestAppConfigParse(t *testing.T) {
 	assert.Nil(t, err)
 
 	serverConf := configFile.ServerConf
-	server.NewServer(serverConf)
+	serverConf.LogDir = path.Join(os.TempDir(), strconv.Itoa(int(time.Now().UnixNano())))
+	if runtime.GOOS == "darwin" {
+		serverConf.BroadcastInterface = "lo0"
+	} else {
+		serverConf.BroadcastInterface = "lo"
+	}
+	_, err = server.NewServer(serverConf)
+	assert.Nil(t, err)
 }

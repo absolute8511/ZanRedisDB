@@ -42,10 +42,7 @@ func convertRedisKeyToDBKVKey(key []byte) ([]byte, []byte, error) {
 }
 
 func checkKeySize(key []byte) error {
-	if len(key) > MaxKeySize || len(key) == 0 {
-		return errKeySize
-	}
-	return nil
+	return common.CheckKey(key)
 }
 
 func checkValueSize(value []byte) error {

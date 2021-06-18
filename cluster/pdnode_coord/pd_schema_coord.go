@@ -19,7 +19,7 @@ func getIndexSchemasFromDataNode(remoteNode string, ns string) (map[string]*comm
 	rsp := make(map[string]*common.IndexSchema)
 	_, err := common.APIRequest("GET",
 		"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetIndexes+"/"+ns,
-		nil, time.Second*3, &rsp)
+		nil, cluster.APIShortTo, &rsp)
 	if err != nil {
 		cluster.CoordLog().Infof("failed (%v) to get indexes for namespace %v : %v",
 			nip, ns, err)

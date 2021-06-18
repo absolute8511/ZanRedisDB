@@ -63,7 +63,7 @@ func NewServer(conf *ServerConfig) (*Server, error) {
 		conf.BroadcastAddr = myNode.NodeIP
 	}
 	if myNode.NodeIP == "0.0.0.0" || myNode.NodeIP == "" {
-		err := fmt.Errorf("can not decide the broadcast ip: %v", myNode.NodeIP)
+		err := fmt.Errorf("can not decide the broadcast ip: %v , %v", myNode.NodeIP, conf.BroadcastInterface)
 		sLog.Errorf(err.Error())
 		return nil, err
 	}
