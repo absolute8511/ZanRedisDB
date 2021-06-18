@@ -734,9 +734,13 @@ func (n *node) ApplyConfChange(cc pb.ConfChange) *pb.ConfState {
 
 func (n *node) Status() Status {
 	c := make(chan Status, 1)
+	to := time.NewTimer(time.Second)
+	defer to.Stop()
 	select {
 	case n.status <- c:
 	case <-n.done:
+		return Status{}
+	case <-to.C:
 		return Status{}
 	}
 	n.NotifyEventCh()
@@ -744,6 +748,8 @@ func (n *node) Status() Status {
 	case s := <-c:
 		return s
 	case <-n.done:
+		return Status{}
+	case <-to.C:
 		return Status{}
 	}
 }

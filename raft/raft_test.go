@@ -2785,6 +2785,13 @@ func TestRestore(t *testing.T) {
 	if ok := sm.restore(s); ok {
 		t.Fatal("restore succeed, want fail")
 	}
+	// It should not campaign before actually applying data.
+	for i := 0; i < sm.randomizedElectionTimeout; i++ {
+		sm.tick()
+	}
+	if sm.state != StateFollower {
+		t.Errorf("state = %d, want %d", sm.state, StateFollower)
+	}
 }
 
 // TestRestoreWithLearner restores a snapshot which contains learners.
@@ -2901,12 +2908,16 @@ func TestLearnerReceiveSnapshot(t *testing.T) {
 		},
 	}
 
-	n1 := newTestLearnerRaft(1, []uint64{1}, []uint64{2}, 10, 1, NewMemoryStorage())
+	store := NewMemoryStorage()
+	n1 := newTestLearnerRaft(1, []uint64{1}, []uint64{2}, 10, 1, store)
 	n2 := newTestLearnerRaft(2, []uint64{1}, []uint64{2}, 10, 1, NewMemoryStorage())
 	defer closeAndFreeRaft(n1)
 	defer closeAndFreeRaft(n2)
 
 	n1.restore(s)
+	ready := newReady(n1, &SoftState{}, pb.HardState{}, true)
+	store.ApplySnapshot(ready.Snapshot)
+	n1.advance(ready)
 
 	// Force set n1 appplied index.
 	n1.raftLog.appliedTo(n1.raftLog.committed)
@@ -3567,10 +3578,32 @@ func TestLeaderTransferAfterSnapshot(t *testing.T) {
 		t.Fatalf("node 1 has match %x for node 3, want %x", lead.prs[3].Match, 1)
 	}
 
+	filtered := pb.Message{}
+	// Snapshot needs to be applied before sending MsgAppResp
+	nt.msgHook = func(m pb.Message) bool {
+		if m.Type != pb.MsgAppResp || m.From != 3 || m.Reject {
+			return true
+		}
+		filtered = m
+		return false
+	}
+
 	// Transfer leadership to 3 when node 3 is lack of snapshot.
 	nt.send(pb.Message{From: 3, To: 1, Type: pb.MsgTransferLeader})
-	// Send pb.MsgHeartbeatResp to leader to trigger a snapshot for node 3.
-	nt.send(pb.Message{From: 3, To: 1, Type: pb.MsgHeartbeatResp})
+	if lead.state != StateLeader {
+		t.Fatalf("node 1 should still be leader as snapshot is not applied, got %x", lead.state)
+	}
+	if reflect.DeepEqual(filtered, pb.Message{}) {
+		t.Fatalf("Follower should report snapshot progress automatically.")
+	}
+
+	// Apply snapshot and resume progress
+	follower := nt.peers[3].(*raft)
+	ready := newReady(follower, &SoftState{}, pb.HardState{}, true)
+	nt.storage[3].ApplySnapshot(ready.Snapshot)
+	follower.advance(ready)
+	nt.msgHook = nil
+	nt.send(filtered)
 
 	checkLeaderTransferState(t, lead, StateFollower, 3)
 }
@@ -4021,6 +4054,45 @@ func TestNodeWithSmallerTermCanCompleteElection(t *testing.T) {
 	}
 }
 
+// TestLearnerCampaign verifies that a learner won't campaign even if it receives
+// a MsgHup or MsgTimeoutNow.
+func TestLearnerCampaign(t *testing.T) {
+	n1 := newTestRaft(1, []uint64{1}, 10, 1, NewMemoryStorage())
+	grp2 := pb.Group{
+		NodeId:        2,
+		GroupId:       1,
+		RaftReplicaId: 2,
+	}
+	n1.addLearner(2, grp2)
+	n2 := newTestRaft(2, []uint64{1}, 10, 1, NewMemoryStorage())
+	n2.addLearner(2, grp2)
+	nt := newNetwork(n1, n2)
+	nt.send(pb.Message{From: 2, To: 2, Type: pb.MsgHup})
+
+	if !n2.isLearner {
+		t.Fatalf("failed to make n2 a learner")
+	}
+
+	if n2.state != StateFollower {
+		t.Fatalf("n2 campaigned despite being learner")
+	}
+
+	nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgHup})
+	if n1.state != StateLeader || n1.lead != 1 {
+		t.Fatalf("n1 did not become leader")
+	}
+
+	// NB: TransferLeader already checks that the recipient is not a learner, but
+	// the check could have happened by the time the recipient becomes a learner,
+	// in which case it will receive MsgTimeoutNow as in this test case and we
+	// verify that it's ignored.
+	nt.send(pb.Message{From: 1, To: 2, Type: pb.MsgTimeoutNow})
+
+	if n2.state != StateFollower {
+		t.Fatalf("n2 accepted leadership transfer despite being learner")
+	}
+}
+
 // simulate rolling update a cluster for Pre-Vote. cluster has 3 nodes [n1, n2, n3].
 // n1 is leader with term 2
 // n2 is follower with term 2
@@ -4163,6 +4235,101 @@ func TestPreVoteMigrationWithFreeStuckPreCandidate(t *testing.T) {
 	if n3.Term != n1.Term {
 		t.Errorf("term = %d, want %d", n3.Term, n1.Term)
 	}
+}
+
+func testConfChangeCheckBeforeCampaign(t *testing.T, v2 bool) {
+	nt := newNetwork(nil, nil, nil)
+	n1 := nt.peers[1].(*raft)
+	n2 := nt.peers[2].(*raft)
+	nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgHup})
+	if n1.state != StateLeader {
+		t.Errorf("node 1 state: %s, want %s", n1.state, StateLeader)
+	}
+
+	// Begin to remove the third node.
+	cc := pb.ConfChange{
+		Type:      pb.ConfChangeRemoveNode,
+		ReplicaID: 2,
+	}
+	var ccData []byte
+	var err error
+	var ty pb.EntryType
+	if v2 {
+		// TODO: v2 config
+		//ccv2 := cc.AsV2()
+		//ccData, err = ccv2.Marshal()
+		//ty = pb.EntryConfChangeV2
+		ccData, err = cc.Marshal()
+		ty = pb.EntryConfChange
+	} else {
+		ccData, err = cc.Marshal()
+		ty = pb.EntryConfChange
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	nt.send(pb.Message{
+		From: 1,
+		To:   1,
+		Type: pb.MsgProp,
+		Entries: []pb.Entry{
+			{Type: ty, Data: ccData},
+		},
+	})
+
+	// Trigger campaign in node 2
+	for i := 0; i < n2.randomizedElectionTimeout; i++ {
+		n2.tick()
+	}
+	// It's still follower because committed conf change is not applied.
+	if n2.state != StateFollower {
+		t.Errorf("node 2 state: %s, want %s", n2.state, StateFollower)
+	}
+
+	// Transfer leadership to peer 2.
+	nt.send(pb.Message{From: 2, To: 1, Type: pb.MsgTransferLeader})
+	if n1.state != StateLeader {
+		t.Errorf("node 1 state: %s, want %s", n1.state, StateLeader)
+	}
+	// It's still follower because committed conf change is not applied.
+	if n2.state != StateFollower {
+		t.Errorf("node 2 state: %s, want %s", n2.state, StateFollower)
+	}
+	// Abort transfer leader
+	for i := 0; i < n1.electionTimeout; i++ {
+		n1.tick()
+	}
+
+	// Advance apply
+	nextEnts(n2, nt.storage[2])
+
+	// Transfer leadership to peer 2 again.
+	nt.send(pb.Message{From: 2, To: 1, Type: pb.MsgTransferLeader})
+	if n1.state != StateFollower {
+		t.Errorf("node 1 state: %s, want %s", n1.state, StateFollower)
+	}
+	if n2.state != StateLeader {
+		t.Errorf("node 2 state: %s, want %s", n2.state, StateLeader)
+	}
+
+	nextEnts(n1, nt.storage[1])
+	// Trigger campaign in node 2
+	for i := 0; i < n1.randomizedElectionTimeout; i++ {
+		n1.tick()
+	}
+	if n1.state != StateCandidate {
+		t.Errorf("node 1 state: %s, want %s", n1.state, StateCandidate)
+	}
+}
+
+// Tests if unapplied ConfChange is checked before campaign.
+func TestConfChangeCheckBeforeCampaign(t *testing.T) {
+	testConfChangeCheckBeforeCampaign(t, false)
+}
+
+// Tests if unapplied ConfChangeV2 is checked before campaign.
+func TestConfChangeV2CheckBeforeCampaign(t *testing.T) {
+	testConfChangeCheckBeforeCampaign(t, true)
 }
 
 func entsWithConfig(configFunc func(*Config), terms ...uint64) *raft {

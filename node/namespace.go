@@ -215,19 +215,11 @@ func (nn *NamespaceNode) Start(forceStandaloneCluster bool) error {
 }
 
 func (nn *NamespaceNode) TransferMyLeader(to uint64, toRaftID uint64) error {
-	waitTimeout := time.Duration(nn.Node.machineConfig.ElectionTick) * time.Duration(nn.Node.machineConfig.TickMs) * time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
-	defer cancel()
-	oldLeader := nn.Node.rn.Lead()
-	nn.Node.rn.node.TransferLeadership(ctx, oldLeader, toRaftID)
-	for nn.Node.rn.Lead() != toRaftID {
-		select {
-		case <-ctx.Done():
-			return errTimeoutLeaderTransfer
-		case <-time.After(200 * time.Millisecond):
-		}
+	err := nn.Node.TransferLeadership(toRaftID)
+	if err != nil {
+		return err
 	}
-	nodeLog.Infof("finished transfer from %v to %v:%v", oldLeader, to, toRaftID)
+	nodeLog.Infof("finished transfer to %v:%v", to, toRaftID)
 	return nil
 }
 

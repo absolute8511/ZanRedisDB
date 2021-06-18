@@ -24,12 +24,15 @@ import (
 	"github.com/youzan/ZanRedisDB/raft"
 	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/settings"
 	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 )
 
 var enableSnapTransferTest = false
 var enableSnapSaveTest = false
 var enableSnapApplyTest = false
+var enableSnapApplyBlockingTest = false
+var snapApplyBlockingC = make(chan time.Duration, 1)
 var enableSnapApplyRestoreStorageTest = false
 var UseRedisV2 = false
 
@@ -40,26 +43,37 @@ func EnableSnapForTest(transfer bool, save bool, apply bool, restore bool) {
 	enableSnapApplyRestoreStorageTest = restore
 }
 
+func EnableSnapBlockingForTest(b bool) {
+	enableSnapApplyBlockingTest = b
+}
+
+func PutSnapBlockingTime(d time.Duration) {
+	snapApplyBlockingC <- d
+}
+
 var (
-	errInvalidResponse      = errors.New("Invalid response type")
-	errSyntaxError          = errors.New("syntax error")
-	errUnknownData          = errors.New("unknown request data type")
-	errTooMuchBatchSize     = errors.New("the batch size exceed the limit")
-	errRaftNotReadyForWrite = errors.New("ERR_CLUSTER_CHANGED: the raft is not ready for write")
-	errWrongNumberArgs      = errors.New("ERR wrong number of arguments for redis command")
-	ErrReadIndexTimeout     = errors.New("wait read index timeout")
+	errInvalidResponse       = errors.New("Invalid response type")
+	errSyntaxError           = errors.New("syntax error")
+	errUnknownData           = errors.New("unknown request data type")
+	errTooMuchBatchSize      = errors.New("the batch size exceed the limit")
+	errRaftNotReadyForWrite  = errors.New("ERR_CLUSTER_CHANGED: the raft is not ready for write")
+	errWrongNumberArgs       = errors.New("ERR wrong number of arguments for redis command")
+	ErrReadIndexTimeout      = errors.New("wait read index timeout")
+	ErrNotLeader             = errors.New("not raft leader")
+	ErrTransferLeaderSelfErr = errors.New("transfer leader to self not allowed")
 )
 
 const (
-	RedisReq        int8 = 0
-	CustomReq       int8 = 1
-	SchemaChangeReq int8 = 2
-	RedisV2Req      int8 = 3
-	proposeTimeout       = time.Second * 4
-	raftSlow             = time.Millisecond * 200
-	maxPoolIDLen         = 256
-	waitPoolSize         = 6
-	minPoolIDLen         = 4
+	RedisReq             int8 = 0
+	CustomReq            int8 = 1
+	SchemaChangeReq      int8 = 2
+	RedisV2Req           int8 = 3
+	proposeTimeout            = time.Second * 4
+	raftSlow                  = time.Millisecond * 200
+	maxPoolIDLen              = 256
+	waitPoolSize              = 6
+	minPoolIDLen              = 4
+	checkApplyFallbehind      = 1000
 )
 
 const (
@@ -220,6 +234,7 @@ type KVNode struct {
 	wrPools             waitReqPoolArray
 	slowLimiter         *SlowLimiter
 	lastFailedSnapIndex uint64
+	applyingSnapshot int32
 }
 
 type KVSnapInfo struct {
@@ -477,13 +492,20 @@ func (nd *KVNode) GetRaftStatus() raft.Status {
 
 // this is used for leader to determine whether a follower is up to date.
 func (nd *KVNode) IsReplicaRaftReady(raftID uint64) bool {
-	s := nd.rn.node.Status()
+	allowLagCnt := settings.Soft.LeaderTransferLag
+	s := nd.GetRaftStatus()
+	if s.Progress == nil {
+		return false
+	}
 	pg, ok := s.Progress[raftID]
 	if !ok {
 		return false
 	}
+	if pg.IsPaused() {
+		return false
+	}
 	if pg.State.String() == "ProgressStateReplicate" {
-		if pg.Match+maxInflightMsgs >= s.Commit {
+		if pg.Match+allowLagCnt >= s.Commit {
 			return true
 		}
 	} else if pg.State.String() == "ProgressStateProbe" {
@@ -1026,6 +1048,9 @@ func (nd *KVNode) SetAppliedIndex(ci uint64) {
 }
 
 func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
+	if nd.rn == nil {
+		return false
+	}
 	if nd.rn.Lead() == raft.None {
 		select {
 		case <-time.After(time.Duration(nd.machineConfig.ElectionTick/10) * time.Millisecond * time.Duration(nd.machineConfig.TickMs)):
@@ -1033,7 +1058,7 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 			return false
 		}
 		if nd.rn.Lead() == raft.None {
-			nodeLog.Infof("not synced, since no leader ")
+			nd.rn.Infof("not synced, since no leader ")
 			nd.rn.maybeTryElection()
 			return false
 		}
@@ -1042,8 +1067,18 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 		// leader always raft synced.
 		return true
 	}
+	// here, the raft may still not started, so do not try wait raft event
+	ai := nd.GetAppliedIndex()
+	ci := nd.GetRaftStatus().Commit
+	nd.rn.Infof("check raft synced, apply: %v, commit: %v", ai, ci)
+	if nd.IsApplyingSnapshot() {
+		return false
+	}
 	if !checkCommitIndex {
 		return true
+	}
+	if ai+checkApplyFallbehind < ci {
+		return false
 	}
 	to := time.Second * 5
 	ctx, cancel := context.WithTimeout(context.Background(), to)
@@ -1051,7 +1086,7 @@ func (nd *KVNode) IsRaftSynced(checkCommitIndex bool) bool {
 	cancel()
 
 	if err != nil {
-		nodeLog.Infof("wait raft not synced,  %v", err.Error())
+		nd.rn.Infof("wait raft not synced,  %v", err.Error())
 		return false
 	}
 	return true
@@ -1124,10 +1159,10 @@ func (nd *KVNode) readIndexLoop() {
 					if len(rs.RequestCtx) == 8 {
 						id2 = binary.BigEndian.Uint64(rs.RequestCtx)
 					}
-					nodeLog.Infof("ignored out of date read index: %v, %v", id2, id1)
+					nd.rn.Infof("ignored out of date read index: %v, %v", id2, id1)
 				}
 			case <-time.After(to):
-				nodeLog.Infof("timeout waiting for read index response: %v", id1)
+				nd.rn.Infof("timeout waiting for read index response: %v", id1)
 				timeout = true
 				nr.notify(ErrReadIndexTimeout)
 			case <-nd.stopChan:
@@ -1161,6 +1196,8 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 		nodeLog.Panicf("snapshot index [%d] should > progress.appliedIndex [%d] + 1",
 			applyEvent.snapshot.Metadata.Index, np.appliedi)
 	}
+	atomic.StoreInt32(&nd.applyingSnapshot, 1)
+	defer atomic.StoreInt32(&nd.applyingSnapshot, 0)
 	err := nd.PrepareSnapshot(applyEvent.snapshot)
 	if enableSnapTransferTest {
 		err = errors.New("auto test failed in snapshot transfer")
@@ -1210,6 +1247,10 @@ func (nd *KVNode) applySnapshot(np *nodeProgress, applyEvent *applyInfo) {
 		}()
 		<-nd.stopChan
 		return
+	}
+	if enableSnapApplyBlockingTest {
+		wt := <-snapApplyBlockingC
+		time.Sleep(wt)
 	}
 
 	np.confState = applyEvent.snapshot.Metadata.ConfState
@@ -1550,16 +1591,35 @@ func (nd *KVNode) GetLastLeaderChangedTime() int64 {
 	return nd.rn.getLastLeaderChangedTime()
 }
 
+func (nd *KVNode) IsApplyingSnapshot() bool {
+	return atomic.LoadInt32(&nd.applyingSnapshot) == 1
+}
+
 func (nd *KVNode) ReportMeLeaderToCluster() {
 	if nd.clusterInfo == nil {
 		return
 	}
 	if nd.rn.IsLead() {
+		if nd.IsApplyingSnapshot() {
+			nd.rn.Errorf("should not update raft leader to me while applying snapshot")
+			// should give up the leader in raft
+			stats := nd.GetRaftStatus()
+			for rid, pr := range stats.Progress {
+				if pr.IsLearner || !nd.IsReplicaRaftReady(rid) {
+					continue
+				}
+				err := nd.TransferLeadership(rid)
+				if err == nil {
+					break
+				}
+			}
+			return
+		}
 		changed, err := nd.clusterInfo.UpdateMeForNamespaceLeader(nd.ns)
 		if err != nil {
 			nd.rn.Infof("update raft leader to me failed: %v", err)
 		} else if changed {
-			nd.rn.Infof("update %v raft leader to me : %v", nd.ns, nd.rn.config.ID)
+			nd.rn.Infof("update %v raft leader to me : %v, at %v-%v", nd.ns, nd.rn.config.ID, nd.GetAppliedIndex(), nd.GetRaftStatus().Commit)
 		}
 	}
 }
@@ -1569,6 +1629,30 @@ func (nd *KVNode) OnRaftLeaderChanged() {
 	if nd.rn.IsLead() {
 		go nd.ReportMeLeaderToCluster()
 	}
+}
+
+func (nd *KVNode) TransferLeadership(toRaftID uint64) error {
+	nd.rn.Infof("begin transfer leader to %v", toRaftID)
+	if !nd.rn.IsLead() {
+		return ErrNotLeader
+	}
+	oldLeader := nd.rn.Lead()
+	if oldLeader == toRaftID {
+		return ErrTransferLeaderSelfErr
+	}
+	waitTimeout := time.Duration(nd.machineConfig.ElectionTick) * time.Duration(nd.machineConfig.TickMs) * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	nd.rn.node.TransferLeadership(ctx, oldLeader, toRaftID)
+	for nd.rn.Lead() != toRaftID {
+		select {
+		case <-ctx.Done():
+			return errTimeoutLeaderTransfer
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	nd.rn.Infof("finished transfer from %v to %v", oldLeader, toRaftID)
+	return nil
 }
 
 func (nd *KVNode) Process(ctx context.Context, m raftpb.Message) error {

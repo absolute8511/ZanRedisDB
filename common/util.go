@@ -259,6 +259,7 @@ func BuildCommand(args [][]byte) redcon.Command {
 }
 
 // This will copy file as hard link, if failed it will failover to do the file content copy
+// Used this method when both the src and dst file content will never be changed to save disk space
 func CopyFileForHardLink(src, dst string) error {
 	// open source file
 	sfi, err := os.Stat(src)
@@ -287,6 +288,8 @@ func CopyFileForHardLink(src, dst string) error {
 		if os.SameFile(sfi, dfi) {
 			return nil
 		}
+		// link will failed if dst exist, so remove it first
+		os.Remove(dst)
 	}
 	if err = os.Link(src, dst); err == nil {
 		return nil
@@ -330,4 +333,25 @@ func copyFileContents(src, dst string) error {
 	}
 	err = dstFile.Sync()
 	return err
+}
+
+func CopyFile(src, dst string, override bool) error {
+	sfi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !sfi.Mode().IsRegular() {
+		return fmt.Errorf("copyfile: non-regular source file %v (%v)", sfi.Name(), sfi.Mode().String())
+	}
+	_, err = os.Stat(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else {
+		if !override {
+			return nil
+		}
+	}
+	return copyFileContents(src, dst)
 }

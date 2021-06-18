@@ -17,6 +17,7 @@ type soft struct {
 	MaxInflightMsgs          uint64 `json:"max_inflight_msgs"`
 	DefaultSnapCount         uint64 `json:"default_snap_count"`
 	MaxInFlightMsgSnap       uint64 `json:"max_in_flight_msg_snap"`
+	LeaderTransferLag        uint64 `json:"leader_transfer_lag"`
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
 	HealthIntervalSec uint64 `json:"health_interval_sec"`
@@ -49,6 +50,7 @@ func defaultSoftSettings() soft {
 		MaxInFlightMsgSnap: 16,
 		MaxSizePerMsg:      512 * 1024,
 		MaxInflightMsgs:    256,
+		LeaderTransferLag:  64,
 		CommitBufferLen:    1024 * 8,
 		ProposalQueueLen:   1024 * 4,
 		ProposalQueueNum:   uint64(runtime.NumCPU()),

@@ -632,6 +632,23 @@ func (r *raft) bcastHeartbeatWithCtx(ctx []byte) {
 	})
 }
 
+func (r *raft) advance(rd Ready) {
+	// If entries were applied (or a snapshot), update our cursor for
+	// the next Ready. Note that if the current HardState contains a
+	// new Commit index, this does not mean that we're also applying
+	// all of the new entries due to commit pagination by size.
+	if index := rd.appliedCursor(); index > 0 {
+		r.raftLog.appliedTo(index)
+	}
+	if len(rd.Entries) > 0 {
+		e := rd.Entries[len(rd.Entries)-1]
+		r.raftLog.stableTo(e.Index, e.Term)
+	}
+	if !IsEmptySnap(rd.Snapshot) {
+		r.raftLog.stableSnapTo(rd.Snapshot.Metadata.Index)
+	}
+}
+
 // maybeCommit attempts to advance the commit index. Returns true if
 // the commit index changed (in which case the caller should call
 // r.bcastAppend).
@@ -800,7 +817,41 @@ func (r *raft) becomeLeader() {
 	r.logger.Infof("%x(%v) became leader at term %d", r.id, r.group.Name, r.Term)
 }
 
+func (r *raft) hup(t CampaignType) {
+	if r.state == StateLeader {
+		r.logger.Debugf("%x ignoring MsgHup because already leader", r.id)
+		return
+	}
+
+	if !r.promotable() {
+		r.logger.Warningf("%x is unpromotable and can not campaign; ignoring MsgHup", r.id)
+		return
+	}
+	ents, err := r.raftLog.slice(r.raftLog.applied+1, r.raftLog.committed+1, noLimit)
+	if err != nil {
+		if err == ErrCompacted {
+			r.logger.Errorf("%x cannot campaign at term %d since log is compacted: %d", r.id, r.Term, r.raftLog.applied)
+			return
+		}
+		r.logger.Panicf("unexpected error getting unapplied entries (%v)", err)
+	}
+	if n := numOfPendingConf(ents); n != 0 && r.raftLog.committed > r.raftLog.applied {
+		r.logger.Warningf("%x cannot campaign at term %d since there are still %d pending configuration changes to apply", r.id, r.Term, n)
+		return
+	}
+
+	r.logger.Infof("%x(%v) is starting a new election at term %d", r.id, r.group.Name, r.Term)
+	r.campaign(t)
+}
+
+// campaign transitions the raft instance to candidate state. This must only be
+// called after verifying that this is a legitimate transition.
 func (r *raft) campaign(t CampaignType) {
+	if !r.promotable() {
+		// This path should not be hit (callers are supposed to check), but
+		// better safe than sorry.
+		r.logger.Warningf("%x is unpromotable; campaign() should have been called", r.id)
+	}
 	var term uint64
 	var voteMsg pb.MessageType
 	if t == campaignPreElection {
@@ -928,30 +979,11 @@ func (r *raft) Step(m pb.Message) error {
 
 	switch m.Type {
 	case pb.MsgHup:
-		if r.state != StateLeader {
-			ents, err := r.raftLog.slice(r.raftLog.applied+1, r.raftLog.committed+1, noLimit)
-			if err != nil {
-				if err == ErrCompacted {
-					r.logger.Errorf("%x cannot campaign at term %d since log is compacted: %d", r.id, r.Term, r.raftLog.applied)
-					return nil
-				}
-				r.logger.Panicf("unexpected error getting unapplied entries (%v)", err)
-			}
-			if n := numOfPendingConf(ents); n != 0 && r.raftLog.committed > r.raftLog.applied {
-				r.logger.Warningf("%x cannot campaign at term %d since there are still %d pending configuration changes to apply", r.id, r.Term, n)
-				return nil
-			}
-
-			r.logger.Infof("%x(%v) is starting a new election at term %d", r.id, r.group.Name, r.Term)
-			if r.preVote {
-				r.campaign(campaignPreElection)
-			} else {
-				r.campaign(campaignElection)
-			}
+		if r.preVote {
+			r.hup(campaignPreElection)
 		} else {
-			r.logger.Debugf("%x ignoring MsgHup because already leader", r.id)
+			r.hup(campaignElection)
 		}
-
 	case pb.MsgVote, pb.MsgPreVote:
 		if r.isLearner {
 			// TODO: learner may need to vote, in case of node down when confchange.
@@ -1323,7 +1355,7 @@ func stepFollower(r *raft, m pb.Message) bool {
 			// Leadership transfers never use pre-vote even if r.preVote is true; we
 			// know we are not recovering from a partition so there is no need for the
 			// extra round trip.
-			r.campaign(campaignTransfer)
+			r.hup(campaignTransfer)
 		} else {
 			r.logger.Infof("%x received MsgTimeoutNow from %x but is not promotable", r.id, m.From)
 		}
@@ -1446,8 +1478,8 @@ func (r *raft) restoreNode(nodes []uint64, grpsConf []*pb.Group, isLearner bool)
 // promotable indicates whether state machine can be promoted to leader,
 // which is true when its own id is in progress list.
 func (r *raft) promotable() bool {
-	_, ok := r.prs[r.id]
-	return ok
+	pr, ok := r.prs[r.id]
+	return ok && pr != nil && !pr.IsLearner && !r.raftLog.hasPendingSnapshot()
 }
 
 func (r *raft) updateNode(id uint64, g pb.Group) {
