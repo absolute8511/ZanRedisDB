@@ -1295,6 +1295,90 @@ func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {
 	// should only transfer leader when replica has almost the newest raft logs
 }
 
+func TestTransferLeaderWhileReplicaApplyingSnapshot(t *testing.T) {
+	// apply snapshot and transfer leader should fail
+	defer node.EnableSnapBlockingForTest(false)
+
+	ensureClusterReady(t, 3)
+	time.Sleep(time.Second)
+	ns := "test_cluster_transfer_leader_snap_applying"
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 5; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNs := getNsInfo(t, ns, 0)
+	t.Logf("old isr is: %v", oldNs)
+	assert.Equal(t, 3, len(oldNs.GetISR()))
+
+	foWrap, _ := getFollowerNode(t, ns, 0)
+	foWrap.s.Stop()
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	c := getTestRedisConn(t, dnw.redisPort)
+	defer c.Close()
+	key := fmt.Sprintf("%s:%s", ns, "snap_apply:k1")
+	rsp, err := goredis.String(c.Do("set", key, "1234"))
+	assert.Nil(t, err)
+	assert.Equal(t, "OK", rsp)
+
+	for i := 0; i < 50; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	leaderV, err := goredis.String(c.Do("get", key))
+	assert.True(t, err == nil || err == goredis.ErrNil)
+	assert.Equal(t, "1234", leaderV)
+	time.Sleep(time.Second * 5)
+
+	// make sure the snapshot applying is blocked
+	// and then transfer leader to this follower
+	node.EnableSnapBlockingForTest(true)
+	foWrap.s.Start()
+	time.Sleep(time.Second)
+	node.PutSnapBlockingTime(time.Second * 20)
+	fn := foWrap.s.GetNamespaceFromFullName(ns + "-0")
+	assert.True(t, fn.Node.IsApplyingSnapshot())
+	foRaftID := fn.GetRaftID()
+	err = nsNode.Node.TransferLeadership(foRaftID)
+	assert.NotNil(t, err)
+	nsInfo := getNsInfo(t, ns, 0)
+	transferOK := leader.GetCoord().TransferMyNamespaceLeader(&nsInfo, foWrap.s.GetCoord().GetMyID(), false, true)
+	assert.False(t, transferOK, "should not transfer while snapshot applying")
+	transferOK = leader.GetCoord().TransferMyNamespaceLeader(&nsInfo, foWrap.s.GetCoord().GetMyID(), false, false)
+	assert.False(t, transferOK, "should not transfer while snapshot applying")
+	transferOK = leader.GetCoord().TransferMyNamespaceLeader(&nsInfo, foWrap.s.GetCoord().GetMyID(), true, false)
+	assert.False(t, transferOK, "should not transfer while snapshot applying")
+
+	time.Sleep(time.Second * 20)
+	assert.False(t, fn.Node.IsApplyingSnapshot())
+	transferOK = leader.GetCoord().TransferMyNamespaceLeader(&nsInfo, foWrap.s.GetCoord().GetMyID(), false, true)
+	assert.True(t, transferOK, "should transfer ok")
+	_, newLeaderNode := waitForLeader(t, ns, 0)
+	assert.Equal(t, foRaftID, newLeaderNode.GetRaftID())
+
+	waitForAllFullReady(t, ns, 0)
+	followerConn := getTestRedisConn(t, foWrap.redisPort)
+	defer followerConn.Close()
+
+	getV, err := goredis.String(followerConn.Do("get", key))
+	assert.True(t, err == nil || err == goredis.ErrNil)
+	assert.Equal(t, "1234", getV)
+}
+
+func TestTransferLeaderWhileReplicaLagToomuch(t *testing.T) {
+}
 func TestClusterRestartNodeCatchup(t *testing.T) {
 	// test restarted node catchup while writing
 	ensureClusterReady(t, 3)

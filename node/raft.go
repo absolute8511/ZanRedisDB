@@ -999,6 +999,7 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 	if !raft.IsEmptySnap(rd.Snapshot) {
 		applySnapshotTransferResult = make(chan error, 1)
 		if !waitApply {
+			// this is only needed if the recover from snapshot is not atomic
 			waitApply = true
 			applyWaitDone = make(chan struct{})
 		}
@@ -1110,13 +1111,13 @@ func (rc *raftNode) processReady(rd raft.Ready) {
 			rc.Infof("wait apply for pending configure or snapshot")
 			s := time.Now()
 			// wait and handle pending config change
-			confDone := false
-			for !confDone {
+			done := false
+			for !done {
 				select {
 				case cc := <-rc.node.ConfChangedCh():
 					rc.node.HandleConfChanged(cc)
 				case <-applyWaitDone:
-					confDone = true
+					done = true
 				case <-rc.stopc:
 					return
 				}

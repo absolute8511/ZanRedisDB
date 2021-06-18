@@ -541,7 +541,7 @@ func (dc *DataCoordinator) getNamespaceRaftLeader(nsInfo *cluster.PartitionMetaI
 	return m.NodeID
 }
 
-func (dc *DataCoordinator) transferMyNamespaceLeader(nsInfo *cluster.PartitionMetaInfo, nid string, force bool, checkAll bool) bool {
+func (dc *DataCoordinator) TransferMyNamespaceLeader(nsInfo *cluster.PartitionMetaInfo, nid string, force bool, checkAll bool) bool {
 	nsNode := dc.localNSMgr.GetNamespaceNode(nsInfo.GetDesp())
 	if nsNode == nil {
 		return false
@@ -779,7 +779,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 					// removing node should transfer leader immediately since others partitions may wait for ready ,
 					// so it may never all ready for transfer. we transfer only check local partition.
 					_, removed := namespaceMeta.Removings[dc.GetMyID()]
-					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], false, !removed)
+					done = dc.TransferMyNamespaceLeader(namespaceMeta, isrList[0], false, !removed)
 					lastTransferCheckedTime = time.Now()
 				}
 				if !done {
@@ -797,7 +797,7 @@ func (dc *DataCoordinator) checkForUnsyncedNamespaces() {
 				// also we should avoid transfer leader while some node is catchuping while recover from restart
 				done := false
 				if time.Since(lastTransferCheckedTime) >= TransferLeaderWait {
-					done = dc.transferMyNamespaceLeader(namespaceMeta, isrList[0], false, true)
+					done = dc.TransferMyNamespaceLeader(namespaceMeta, isrList[0], false, true)
 					lastTransferCheckedTime = time.Now()
 				}
 				if !done {
@@ -1369,13 +1369,27 @@ func (dc *DataCoordinator) prepareLeavingCluster() {
 			if leader != dc.GetMyRegID() {
 				continue
 			}
+			// try not force for the first time, if failed try force again
+			transferSuccess := false
 			for _, newLeader := range nsInfo.GetISR() {
 				if newLeader == dc.GetMyID() {
 					continue
 				}
-				done := dc.transferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, true, false)
+				done := dc.TransferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, false, true)
 				if done {
+					transferSuccess = true
 					break
+				}
+			}
+			if !transferSuccess {
+				for _, newLeader := range nsInfo.GetISR() {
+					if newLeader == dc.GetMyID() {
+						continue
+					}
+					done := dc.TransferMyNamespaceLeader(nsInfo.GetCopy(), newLeader, true, false)
+					if done {
+						break
+					}
 				}
 			}
 		}
