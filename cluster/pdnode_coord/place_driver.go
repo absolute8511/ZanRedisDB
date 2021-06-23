@@ -452,6 +452,11 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			return moved, false
 		default:
 		}
+		// only balance at given interval, check again here since last move may cost a long time
+		if time.Now().Hour() > int(atomic.LoadInt32(&dp.balanceInterval[1])) ||
+			time.Now().Hour() < int(atomic.LoadInt32(&dp.balanceInterval[0])) {
+			return moved, false
+		}
 		if !dp.pdCoord.IsClusterStable() {
 			return moved, false
 		}
