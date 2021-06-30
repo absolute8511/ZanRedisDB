@@ -216,8 +216,32 @@ POST /stable/nodenum?number=xx
 zankv API
 
 ```
-/kv/optimize
-为了避免太多删除数据影响性能, 可以定期执行此API清理优化性能, 建议每几个月执行一次 (每台zankv机子错峰执行). rocksdb v6及以上新版本已经有部分优化, 因此可以不用执行.
+POST /kv/optimize/:namespace/:table
+为了避免太多删除数据影响性能, 可以定期执行此API清理优化性能, rocksdb v6及以上新版本已经有部分优化, 因此可以不用执行. 建议指定namespace和table缩小范围, 避免优化时影响读写访问请求
+
+POST /kv/optimize_expire/:namespace
+优化过期时间元数据, 大量过期清理后, 可能会影响扫描过期数据的效率, 可以指定compact这一部分数据
+
+POST /kv/backup/:namespace
+触发指定namespace的快照备份
+
+POST --header "Content-Type: application/json" --data '{"start_from":"","end_to":"","delete_all":true, "dryrun":false}' /kv/delrange/:namespace/:table
+删除指定表的区间数据, 区间由start_from和end_to指定(注意这里需要将内容做base64编码传入), 如果要删除整个表, 需要指定delete_all=true
+
+POST /slowlog/set?loglevel=xx
+调整慢查日志的级别, 越大打印越多的慢查日志.
+
+POST /staleread?allow=true
+开启stale读, 开启后, 非leader状态也能提供读请求, 可能读到老数据
+
+POST /topn/enable/:namespace
+开启topn写入统计, 会统计最近一段时间的写入量最大的几个表统计
+
+POST /topn/disable/:namespace
+关闭topn写入统计
+
+POST /topn/clear/:namespace
+清理当前统计的topn写入数据
 
 /stats
 获取统计数据,其中db_write_stats, cluster_write_stats中两个长度为16的数据对应的数据, 标识对应区间统计的计数器. 其中db_write_stats代表存储层的统计数据, cluster_write_stats表示服务端协议层的统计数据(从收到网络请求开始, 到回复网络请求结束), 具体的统计区间含义可以参考代码WriteStats结构的定义.
@@ -226,6 +250,7 @@ zankv API
 
 /raft/stats
 获取raft集群状态, 用于判断异常信息
+
 ```
 
 动态配置支持int和string两种类型, 对应的更改和获取接口如下:
