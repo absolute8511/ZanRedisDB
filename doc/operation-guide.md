@@ -163,6 +163,54 @@ placedriver API
 POST /cluster/node/remove?remove_node=xxx
 下线不用的节点, xxx信息使用获取节点数信息返回的node_id串替换, 下线节点会触发数据迁移, 等待迁移完成后, 观察log输出再停掉下线的节点.
 
+GET /namespaces
+获取集群的namespace列表
+
+GET /listpd
+获取集群pd节点列表
+
+GET /query/:namespace?epoch=xxx&disable_cache=false
+查询namespace的数据分布情况
+
+GET /querytable/stats/:table?leader_only=true
+查询集群表数据详情
+
+POST /learner/stop
+停止learner节点, 写入状态值false, 仅用于learner角色的pd, learner一般作数据异步同步用
+
+POST /learner/start
+启动learner节点, 开启同步状态, 写入状态值true
+
+GET /learner/state
+查询当前的learner状态, 注意如果状态值是false才会返回false, 其他都是true(包括非法状态)
+
+GET /cluster/stats
+查询集群稳定状态, 需要发给当前的leader节点, 当集群raft都正常是返回true, 否则返回false. 值为false时一定有不稳定的情况, 但是值为true时也可能有其他问题.
+
+POST /cluster/balance?enable=false
+切换开启或禁用平衡功能, 需要发给当前leader节点
+
+POST /cluster/node/remove?remove_node=xxx
+下线指定的数据节点, 指定的nid可以通过查询datanodes. 用于永久下线某个数据节点
+
+DELETE /cluster/partition/remove_node?node=xxx&namespace=xxx&partition=xx
+将namespace的某个分区从指定节点删除, 用于修复部分分区的数据, 一般用于异常情况处理, 比如这个数据节点上的这个分区数据已经损坏.
+
+POST /cluster/upgrade/begin
+开启集群升级状态, 此操作屏蔽集群数据漂移, 用于长时间操作集群单节点升级
+
+POST /cluster/upgrade/done
+结束集群升级状态, 重启开始数据平衡能力.
+
+DELETE /cluster/namespace/delete?namespace=xxx&partition=**
+删除指定的namespace, partition指定时删除指定分区, 建议一般情况下使用**来删除所有分区
+
+POST /cluster/namespace/meta/update?namespace=xxx&replicator=xx&optimizefsync=true&snapcount=xxx
+更新namespace的元数据, 比如副本数, 是否开启fsync优化, 快照间隔等
+
+POST /stable/nodenum?number=xx
+为了保护集群大规模故障时, 触发数据平衡, 会自动维护当前集群的最大节点数(自动增加, 不会减少), 如果需要缩容时, 需要手动减少稳定节点数
+
 ```
 
 zankv API
@@ -298,6 +346,7 @@ restore -lookup lookuplist -data restore  [-ns namespace -table table_name -qps 
 ### 初始化
 
 zankv 0.9.0版本之前
+
 - B机房集群用于同步, 使用相同配置, 更改其中的cluster_id和A机房不同, 以及etcd地址使用B机房, B机房zankv配置增加一项: "syncer_write_only": true, 逐一启动
 - B机房调用API创建初始化namespace, 保持和A机房一样
 - B机房选择2台机子做同步程序部署. 用于A到B机房同步
@@ -308,6 +357,7 @@ zankv 0.9.0版本之前
 - 反向同步, 配置对应修改好, 不启动
 
 zankv 0.9.0版本以及更新版本之后
+
 - B机房集群用于同步, 使用相同配置, 更改其中的cluster_id和A机房不同, 以及etcd地址使用B机房, B机房zankv配置增加一项: "syncer_write_only": true, 逐一启动
 - B机房调用API创建初始化namespace, 保持和A机房一样
 - B机房选择2台机子做同步程序部署. 用于A到B机房同步
@@ -324,6 +374,7 @@ zankv 0.9.0版本以及更新版本之后
 ### 机房正常切换
 
 zankv 0.9.0版本之前
+
 - A机房集群禁止客户端写入, 所有节点调用API设置只允许同步程序写入 POST /synceronly?enable=true
 - 观察数据同步完成,  停止用于同步A集群到B机房的数据同步程序和同步管理程序. (停同步程序, 向管理程序发送删除raft learner请求, 清理磁盘数据)
 - 启动事先准备好的反向同步, 用于同步B集群到A机房, 注意配置修改, 增加 syncer_normal_init=true用于正常初始化
@@ -331,6 +382,7 @@ zankv 0.9.0版本之前
 - B集群API设置允许非同步程序写入. B机房集群开始接收新的客户端写入 POST /synceronly?enable=false, 并去掉配置文件中的 "syncer_write_only": true
 
 zankv 0.9.0版本以及更新版本之后
+
 - A机房集群禁止客户端写入, 所有节点调用API设置只允许同步程序写入 POST /synceronly?enable=true
 - 观察数据同步完成, 发送API给部署在B机房的同步管理程序placedriver, 停止用于同步A集群到B机房的数据同步并清理同步程序的磁盘数据. `curl -XPOST "127.0.0.1:18001/learner/stop"`
 - 观察等待数据同步停止, 使用 `curl "127.0.0.1:3801/syncer/runnings"` 查看同步程序的运行列表是否为空.
