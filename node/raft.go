@@ -444,7 +444,11 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 		if rc.join {
 			startPeers = nil
 		}
-		rc.node = raft.StartNode(c, startPeers, isLearner)
+		if len(startPeers) == 0 {
+			rc.node = raft.RestartNode(c)
+		} else {
+			rc.node = raft.StartNode(c, startPeers, isLearner)
+		}
 	}
 	rc.initForTransport()
 	rc.wgServe.Add(1)

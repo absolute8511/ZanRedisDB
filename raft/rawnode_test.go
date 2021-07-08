@@ -17,6 +17,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 
@@ -26,20 +27,44 @@ import (
 // TestRawNodeStep ensures that RawNode.Step ignore local message.
 func TestRawNodeStep(t *testing.T) {
 	for i, msgn := range raftpb.MessageType_name {
-		s := NewMemoryStorage()
-		defer s.Close()
-		rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		msgt := raftpb.MessageType(i)
-		err = rawNode.Step(raftpb.Message{Type: msgt})
-		// LocalMsg should be ignored.
-		if IsLocalMsg(msgt) {
-			if err != ErrStepLocalMsg {
-				t.Errorf("%d: step should ignore %s", msgt, msgn)
+		t.Run(msgn, func(t *testing.T) {
+			s := NewMemoryStorage()
+			defer s.Close()
+			s.SetHardState(raftpb.HardState{Term: 1, Commit: 1})
+			s.Append([]raftpb.Entry{{Term: 1, Index: 1}})
+			peerGrps := make([]*raftpb.Group, 0)
+			for _, pid := range []uint64{1} {
+				grp := raftpb.Group{
+					NodeId:        pid,
+					RaftReplicaId: pid,
+					GroupId:       1,
+				}
+				peerGrps = append(peerGrps, &grp)
 			}
-		}
+			if err := s.ApplySnapshot(raftpb.Snapshot{Metadata: raftpb.SnapshotMetadata{
+				ConfState: raftpb.ConfState{
+					Nodes:  []uint64{1},
+					Groups: peerGrps,
+				},
+				Index: 1,
+				Term:  1,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s))
+			if err != nil {
+				t.Fatal(err)
+			}
+			msgt := raftpb.MessageType(i)
+			err = rawNode.Step(raftpb.Message{Type: msgt})
+			// LocalMsg should be ignored.
+			if IsLocalMsg(msgt) {
+				if err != ErrStepLocalMsg {
+					t.Errorf("%d: step should ignore %s", msgt, msgn)
+				}
+			}
+		})
 	}
 }
 
@@ -52,16 +77,9 @@ func TestRawNodeProposeAndConfChange(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
 	var err error
-	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
+	rawNode, err := NewRawNode(newTestConfig(1, []uint64{1}, 10, 1, s))
 	if err != nil {
 		t.Fatal(err)
-	}
-	rd := rawNode.Ready()
-	s.Append(rd.Entries)
-	rawNode.Advance(rd)
-
-	if d := rawNode.Ready(); d.MustSync || !IsEmptyHardState(d.HardState) || len(d.Entries) > 0 {
-		t.Fatalf("expected empty hard state with must-sync=false: %#v", d)
 	}
 
 	rawNode.Campaign()
@@ -71,11 +89,14 @@ func TestRawNodeProposeAndConfChange(t *testing.T) {
 		ccdata    []byte
 	)
 	for {
-		rd = rawNode.Ready()
+		rd := rawNode.Ready(true)
 		s.Append(rd.Entries)
+		rawNode.Advance(rd)
 		// Once we are the leader, propose a command and a ConfChange.
 		if !proposed && rd.SoftState.Lead == rawNode.raft.id {
-			rawNode.Propose([]byte("somedata"))
+			if err = rawNode.Propose([]byte("somedata")); err != nil {
+				t.Fatal(err)
+			}
 
 			grp := raftpb.Group{
 				NodeId:        1,
@@ -90,16 +111,13 @@ func TestRawNodeProposeAndConfChange(t *testing.T) {
 			rawNode.ProposeConfChange(cc)
 
 			proposed = true
-		}
-		rawNode.Advance(rd)
-
-		// Exit when we have four entries: one ConfChange, one no-op for the election,
-		// our proposed command and proposed ConfChange.
-		lastIndex, err = s.LastIndex()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if lastIndex >= 4 {
+		} else if proposed {
+			// We proposed last cycle, which means we appended the conf change
+			// in this cycle.
+			lastIndex, err = s.LastIndex()
+			if err != nil {
+				t.Fatal(err)
+			}
 			break
 		}
 	}
@@ -127,17 +145,17 @@ func TestRawNodeProposeAndConfChange(t *testing.T) {
 func TestRawNodeProposeAddDuplicateNode(t *testing.T) {
 	s := NewMemoryStorage()
 	defer s.Close()
-	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), []Peer{{NodeID: 1, ReplicaID: 1}})
+	rawNode, err := NewRawNode(newTestConfig(1, []uint64{1}, 10, 1, s))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rd := rawNode.Ready()
+	rd := rawNode.Ready(true)
 	s.Append(rd.Entries)
 	rawNode.Advance(rd)
 
 	rawNode.Campaign()
 	for {
-		rd = rawNode.Ready()
+		rd = rawNode.Ready(true)
 		s.Append(rd.Entries)
 		if rd.SoftState.Lead == rawNode.raft.id {
 			rawNode.Advance(rd)
@@ -148,7 +166,7 @@ func TestRawNodeProposeAddDuplicateNode(t *testing.T) {
 
 	proposeConfChangeAndApply := func(cc raftpb.ConfChange) {
 		rawNode.ProposeConfChange(cc)
-		rd = rawNode.Ready()
+		rd = rawNode.Ready(true)
 		s.Append(rd.Entries)
 		for _, entry := range rd.CommittedEntries {
 			if entry.Type == raftpb.EntryConfChange {
@@ -211,8 +229,8 @@ func TestRawNodeReadIndex(t *testing.T) {
 
 	s := NewMemoryStorage()
 	defer s.Close()
-	c := newTestConfig(1, nil, 10, 1, s)
-	rawNode, err := NewRawNode(c, []Peer{{NodeID: 1, ReplicaID: 1}})
+	c := newTestConfig(1, []uint64{1}, 10, 1, s)
+	rawNode, err := NewRawNode(c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +240,7 @@ func TestRawNodeReadIndex(t *testing.T) {
 	if !hasReady {
 		t.Errorf("HasReady() returns %t, want %t", hasReady, true)
 	}
-	rd := rawNode.Ready()
+	rd := rawNode.Ready(true)
 	if !reflect.DeepEqual(rd.ReadStates, wrs) {
 		t.Errorf("ReadStates = %d, want %d", rd.ReadStates, wrs)
 	}
@@ -236,7 +254,7 @@ func TestRawNodeReadIndex(t *testing.T) {
 	wrequestCtx := []byte("somedata2")
 	rawNode.Campaign()
 	for {
-		rd = rawNode.Ready()
+		rd = rawNode.Ready(true)
 		s.Append(rd.Entries)
 
 		if rd.SoftState.Lead == rawNode.raft.id {
@@ -270,71 +288,119 @@ func TestRawNodeReadIndex(t *testing.T) {
 // TestNodeStop from node_test.go has no equivalent in rawNode because there is
 // no goroutine in RawNode.
 
-// TestRawNodeStart ensures that a node can be started correctly. The node should
-// start with correct configuration change entries, and can accept and commit
-// proposals.
+// TestRawNodeStart ensures that a node can be started correctly. Note that RawNode
+// requires the application to bootstrap the state, i.e. it does not accept peers
+// and will not create faux configuration change entries.
 func TestRawNodeStart(t *testing.T) {
+	want := Ready{
+		SoftState: &SoftState{Lead: 1, RaftState: StateLeader},
+		HardState: raftpb.HardState{Term: 1, Commit: 3, Vote: 1},
+		Entries: []raftpb.Entry{
+			{Term: 1, Index: 2, Data: nil},
+			{Term: 1, Index: 3, Data: []byte("foo")},
+		},
+		CommittedEntries: []raftpb.Entry{
+			{Term: 1, Index: 2, Data: nil},
+			{Term: 1, Index: 3, Data: []byte("foo")}},
+		MustSync: true,
+	}
+
+	storage := NewRealMemoryStorage()
+	defer storage.Close()
+	storage.ents[0].Index = 1
+
+	// TODO(tbg): this is a first prototype of what bootstrapping could look
+	// like (without the annoying faux ConfChanges). We want to persist a
+	// ConfState at some index and make sure that this index can't be reached
+	// from log position 1, so that followers are forced to pick up the
+	// ConfState in order to move away from log position 1 (unless they got
+	// bootstrapped in the same way already). Failing to do so would mean that
+	// followers diverge from the bootstrapped nodes and don't learn about the
+	// initial config.
+	//
+	// NB: this is exactly what CockroachDB does. The Raft log really begins at
+	// index 10, so empty followers (at index 1) always need a snapshot first.
+	type appenderStorage interface {
+		Storage
+		ApplySnapshot(raftpb.Snapshot) error
+	}
+	bootstrap := func(storage appenderStorage, cs raftpb.ConfState) error {
+		if len(cs.Nodes) == 0 {
+			return fmt.Errorf("no voters specified")
+		}
+		fi, err := storage.FirstIndex()
+		if err != nil {
+			return err
+		}
+		if fi < 2 {
+			return fmt.Errorf("FirstIndex >= 2 is prerequisite for bootstrap")
+		}
+		if _, err = storage.Entries(fi, fi, math.MaxUint64); err == nil {
+			// TODO(tbg): match exact error
+			return fmt.Errorf("should not have been able to load first index")
+		}
+		li, err := storage.LastIndex()
+		if err != nil {
+			return err
+		}
+		if _, err = storage.Entries(li, li, math.MaxUint64); err == nil {
+			return fmt.Errorf("should not have been able to load last index")
+		}
+		hs, ics, err := storage.InitialState()
+		if err != nil {
+			return err
+		}
+		if !IsEmptyHardState(hs) {
+			return fmt.Errorf("HardState not empty")
+		}
+		if len(ics.Nodes) != 0 {
+			return fmt.Errorf("ConfState not empty")
+		}
+
+		meta := raftpb.SnapshotMetadata{
+			Index:     1,
+			Term:      0,
+			ConfState: cs,
+		}
+		snap := raftpb.Snapshot{Metadata: meta}
+		return storage.ApplySnapshot(snap)
+	}
+
 	grp := raftpb.Group{
 		NodeId:        1,
 		GroupId:       1,
 		RaftReplicaId: 1,
 	}
-	cc := raftpb.ConfChange{Type: raftpb.ConfChangeAddNode, ReplicaID: 1, NodeGroup: grp}
-	ccdata, err := cc.Marshal()
-	if err != nil {
-		t.Fatalf("unexpected marshal error: %v", err)
-	}
-	wants := []Ready{
-		{
-			HardState: raftpb.HardState{Term: 1, Commit: 1, Vote: 0},
-			Entries: []raftpb.Entry{
-				{Type: raftpb.EntryConfChange, Term: 1, Index: 1, Data: ccdata},
-			},
-			CommittedEntries: []raftpb.Entry{
-				{Type: raftpb.EntryConfChange, Term: 1, Index: 1, Data: ccdata},
-			},
-			MustSync: true,
-		},
-		{
-			HardState:        raftpb.HardState{Term: 2, Commit: 3, Vote: 1},
-			Entries:          []raftpb.Entry{{Term: 2, Index: 3, Data: []byte("foo")}},
-			CommittedEntries: []raftpb.Entry{{Term: 2, Index: 3, Data: []byte("foo")}},
-			MustSync:         true,
-		},
+	if err := bootstrap(storage, raftpb.ConfState{Nodes: []uint64{1}, Groups: []*raftpb.Group{&grp}}); err != nil {
+		t.Fatal(err)
 	}
 
-	storage := NewMemoryStorage()
-	defer storage.Close()
-	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), []Peer{{NodeID: 1, ReplicaID: 1}})
+	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rd := rawNode.Ready()
-	t.Logf("rd %v", rd)
-	if !reflect.DeepEqual(rd, wants[0]) {
-		t.Fatalf("#%d: g = %+v,\n             w   %+v", 1, rd, wants[0])
-	} else {
-		storage.Append(rd.Entries)
-		rawNode.Advance(rd)
+
+	if rawNode.HasReady() {
+		t.Fatalf("unexpected ready: %+v", rawNode.Ready(true))
 	}
-	storage.Append(rd.Entries)
-	rawNode.Advance(rd)
 
 	rawNode.Campaign()
-	rd = rawNode.Ready()
+	rawNode.Propose([]byte("foo"))
+	if !rawNode.HasReady() {
+		t.Fatal("expected a Ready")
+	}
+	rd := rawNode.Ready(true)
 	storage.Append(rd.Entries)
 	rawNode.Advance(rd)
 
-	rawNode.Propose([]byte("foo"))
-	if rd = rawNode.Ready(); !reflect.DeepEqual(rd, wants[1]) {
-		t.Errorf("#%d: g = %+v,\n             w   %+v", 2, rd, wants[1])
-	} else {
-		storage.Append(rd.Entries)
-		rawNode.Advance(rd)
+	rd.SoftState, want.SoftState = nil, nil
+
+	if !reflect.DeepEqual(rd, want) {
+		t.Fatalf("unexpected Ready:\n%+v\nvs\n%+v", rd, want)
 	}
 
 	if rawNode.HasReady() {
-		t.Errorf("unexpected Ready: %+v", rawNode.Ready())
+		t.Errorf("unexpected Ready: %+v", rawNode.Ready(true))
 	}
 }
 
@@ -356,17 +422,17 @@ func TestRawNodeRestart(t *testing.T) {
 	defer storage.Close()
 	storage.SetHardState(st)
 	storage.Append(entries)
-	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), nil)
+	rawNode, err := NewRawNode(newTestConfig(1, []uint64{1}, 10, 1, storage))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rd := rawNode.Ready()
+	rd := rawNode.Ready(true)
 	if !reflect.DeepEqual(rd, want) {
 		t.Errorf("g = %+v,\n             w   %+v", rd, want)
 	}
 	rawNode.Advance(rd)
 	if rawNode.HasReady() {
-		t.Errorf("unexpected Ready: %+v", rawNode.Ready())
+		t.Errorf("unexpected Ready: %+v", rawNode.Ready(true))
 	}
 }
 
@@ -405,11 +471,11 @@ func TestRawNodeRestartFromSnapshot(t *testing.T) {
 	s.SetHardState(st)
 	s.ApplySnapshot(snap)
 	s.Append(entries)
-	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s), nil)
+	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, s))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rd := rawNode.Ready(); !reflect.DeepEqual(rd, want) {
+	if rd := rawNode.Ready(true); !reflect.DeepEqual(rd, want) {
 		t.Errorf("g = %+v,\n             w   %+v", rd, want)
 	} else {
 		rawNode.Advance(rd)
@@ -425,7 +491,7 @@ func TestRawNodeRestartFromSnapshot(t *testing.T) {
 func TestRawNodeStatus(t *testing.T) {
 	storage := NewMemoryStorage()
 	defer storage.Close()
-	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage), []Peer{{NodeID: 1, ReplicaID: 1}})
+	rawNode, err := NewRawNode(newTestConfig(1, nil, 10, 1, storage))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,13 +554,13 @@ func TestRawNodeCommitPaginationAfterRestart(t *testing.T) {
 		Data:  []byte("boom"),
 	})
 
-	rawNode, err := NewRawNode(cfg, []Peer{{NodeID: 1, ReplicaID: 1}})
+	rawNode, err := NewRawNode(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for highestApplied := uint64(0); highestApplied != 11; {
-		rd := rawNode.Ready()
+		rd := rawNode.Ready(true)
 		n := len(rd.CommittedEntries)
 		if n == 0 {
 			t.Fatalf("stopped applying entries at index %d", highestApplied)
@@ -581,5 +647,39 @@ func BenchmarkStatusProgress(b *testing.B) {
 				}
 			})
 		})
+	}
+}
+
+func TestRawNodeConsumeReady(t *testing.T) {
+	// Check that readyWithoutAccept() does not call acceptReady (which resets
+	// the messages) but Ready() does.
+	s := NewMemoryStorage()
+	rn := newTestRawNode(1, []uint64{1}, 3, 1, s)
+	m1 := raftpb.Message{Context: []byte("foo")}
+	m2 := raftpb.Message{Context: []byte("bar")}
+
+	// Inject first message, make sure it's visible via readyWithoutAccept.
+	rn.raft.msgs = append(rn.raft.msgs, m1)
+	rd := rn.readyWithoutAccept(true)
+	if len(rd.Messages) != 1 || !reflect.DeepEqual(rd.Messages[0], m1) {
+		t.Fatalf("expected only m1 sent, got %+v", rd.Messages)
+	}
+	if len(rn.raft.msgs) != 1 || !reflect.DeepEqual(rn.raft.msgs[0], m1) {
+		t.Fatalf("expected only m1 in raft.msgs, got %+v", rn.raft.msgs)
+	}
+	// Now call Ready() which should move the message into the Ready (as opposed
+	// to leaving it in both places).
+	rd = rn.Ready(true)
+	if len(rn.raft.msgs) > 0 {
+		t.Fatalf("messages not reset: %+v", rn.raft.msgs)
+	}
+	if len(rd.Messages) != 1 || !reflect.DeepEqual(rd.Messages[0], m1) {
+		t.Fatalf("expected only m1 sent, got %+v", rd.Messages)
+	}
+	// Add a message to raft to make sure that Advance() doesn't drop it.
+	rn.raft.msgs = append(rn.raft.msgs, m2)
+	rn.Advance(rd)
+	if len(rn.raft.msgs) != 1 || !reflect.DeepEqual(rn.raft.msgs[0], m2) {
+		t.Fatalf("expected only m2 in raft.msgs, got %+v", rn.raft.msgs)
 	}
 }

@@ -136,9 +136,10 @@ func TestNodePropose(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
 	defer s.Close()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	n.r = r
-	n.prevS = newPrevState(r)
+	rn := newTestRawNode(1, []uint64{1}, 10, 1, s)
+	n.r = rn
+	r := rn.raft
+	n.prevS = newPrevState(rn)
 	n.NotifyEventCh()
 	n.Campaign(context.TODO())
 	for {
@@ -189,10 +190,11 @@ func TestNodeReadIndex(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
 	defer s.Close()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
+	rn := newTestRawNode(1, []uint64{1}, 10, 1, s)
+	r := rn.raft
 	r.readStates = wrs
-	n.r = r
-	n.prevS = newPrevState(r)
+	n.r = rn
+	n.prevS = newPrevState(rn)
 
 	n.Campaign(context.TODO())
 	time.Sleep(time.Millisecond)
@@ -347,9 +349,10 @@ func TestNodeProposeConfig(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
 	defer s.Close()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	n.r = r
-	n.prevS = newPrevState(r)
+	rn := newTestRawNode(1, []uint64{1}, 10, 1, s)
+	r := rn.raft
+	n.r = rn
+	n.prevS = newPrevState(rn)
 	n.NotifyEventCh()
 	n.Campaign(context.TODO())
 	for {
@@ -398,9 +401,9 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
 	defer s.Close()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	n.r = r
-	n.prevS = newPrevState(r)
+	rn := newTestRawNode(1, []uint64{1}, 10, 1, s)
+	n.r = rn
+	n.prevS = newPrevState(rn)
 	n.Campaign(context.TODO())
 	rdyEntries := make([]raftpb.Entry, 0)
 	ticker := time.NewTicker(time.Millisecond * 100)
@@ -476,9 +479,10 @@ func TestNodeProposeAddDuplicateNode(t *testing.T) {
 // who is the current leader.
 func TestBlockProposal(t *testing.T) {
 	n := newNode()
-	r := newTestRaft(1, []uint64{1}, 10, 1, NewMemoryStorage())
-	n.r = r
-	n.prevS = newPrevState(r)
+	rn := newTestRawNode(1, []uint64{1}, 10, 1, NewMemoryStorage())
+	n.r = rn
+	r := rn.raft
+	n.prevS = newPrevState(rn)
 	defer closeAndFreeRaft(r)
 	defer n.Stop()
 
@@ -512,9 +516,10 @@ func TestNodeTick(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
 	defer s.Close()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	n.r = r
-	n.prevS = newPrevState(r)
+	rn := newTestRawNode(1, []uint64{1}, 10, 1, s)
+	n.r = rn
+	r := rn.raft
+	n.prevS = newPrevState(rn)
 	elapsed := r.electionElapsed
 	n.Tick()
 	for len(n.tickc) != 0 {
@@ -533,9 +538,9 @@ func TestNodeStop(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
 	defer s.Close()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	n.r = r
-	n.prevS = newPrevState(r)
+	rn := newTestRawNode(1, []uint64{1}, 10, 1, s)
+	n.r = rn
+	n.prevS = newPrevState(rn)
 	n.NotifyEventCh()
 	donec := make(chan struct{})
 
@@ -654,7 +659,9 @@ func TestNodeStart(t *testing.T) {
 		n.Advance(g)
 	}
 
-	n.Campaign(ctx)
+	if err := n.Campaign(ctx); err != nil {
+		t.Fatal(err)
+	}
 	rd, _ := n.StepNode(true, false)
 	storage.Append(rd.Entries)
 	n.Advance(rd)
@@ -685,10 +692,12 @@ func TestNodeRestart(t *testing.T) {
 	st := raftpb.HardState{Term: 1, Commit: 1}
 
 	want := Ready{
-		HardState: st,
+		// No HardState is emitted because there was no change.
+		HardState: raftpb.HardState{},
 		// commit up to index commit index in st
 		CommittedEntries: entries[:st.Commit],
-		MustSync:         true,
+		// MustSync is false because no HardState or new entries are provided.
+		MustSync: false,
 	}
 
 	storage := NewMemoryStorage()
@@ -753,10 +762,14 @@ func TestNodeRestartFromSnapshot(t *testing.T) {
 	st := raftpb.HardState{Term: 1, Commit: 3}
 
 	want := Ready{
-		HardState: st,
+		// No HardState is emitted because nothing changed relative to what is
+		// already persisted.
+		HardState: raftpb.HardState{},
 		// commit up to index commit index in st
 		CommittedEntries: entries,
-		MustSync:         true,
+		// MustSync is only true when there is a new HardState or new entries;
+		// neither is the case here.
+		MustSync: false,
 	}
 
 	s := NewMemoryStorage()
@@ -902,7 +915,7 @@ func TestNodeProposeAddLearnerNode(t *testing.T) {
 	n := newNode()
 	s := NewMemoryStorage()
 	defer s.Close()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
+	r := newTestRawNode(1, []uint64{1}, 10, 1, s)
 	n.r = r
 	n.prevS = newPrevState(r)
 	n.Campaign(context.TODO())
@@ -1003,7 +1016,10 @@ func TestCommitPagination(t *testing.T) {
 	s := NewMemoryStorage()
 	cfg := newTestConfig(1, []uint64{1}, 10, 1, s)
 	cfg.MaxSizePerMsg = 2048
-	r := newRaft(cfg)
+	r, err := NewRawNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	n := newNode()
 	n.r = r
 	n.prevS = newPrevState(r)
@@ -1090,7 +1106,10 @@ func TestNodeCommitPaginationAfterRestart(t *testing.T) {
 	// this and *will* return it (which is how the Commit index ended up being 10 initially).
 	cfg.MaxSizePerMsg = size - uint64(s.ents[len(s.ents)-1].Size()) - 1
 
-	r := newRaft(cfg)
+	r, err := NewRawNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	n := newNode()
 	defer s.Close()
 	n.r = r
@@ -1114,7 +1133,10 @@ func TestNodeCommitEntriesWhileNoMoreApply(t *testing.T) {
 	s := NewMemoryStorage()
 	cfg := newTestConfig(1, []uint64{1}, 10, 1, s)
 	cfg.MaxSizePerMsg = 2048
-	r := newRaft(cfg)
+	r, err := NewRawNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	n := newNode()
 	n.r = r
 	n.prevS = newPrevState(r)
