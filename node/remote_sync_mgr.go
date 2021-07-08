@@ -343,6 +343,12 @@ func (nd *KVNode) ApplyRemoteSnapshot(skip bool, name string, term uint64, index
 }
 
 func (nd *KVNode) BeginTransferRemoteSnap(name string, term uint64, index uint64, syncAddr string, syncPath string) error {
+	// we should disallow transfer remote snap while we are running as master cluster
+	if !IsSyncerOnly() {
+		nd.rn.Infof("cluster %v snapshot is not allowed: %v-%v", name, term, index)
+		return errors.New("remote snapshot is not allowed while not in syncer only mode")
+	}
+
 	ss := SyncedState{SyncedTerm: term, SyncedIndex: index}
 	// set the snap status to begin and the snap status will be updated if transfer begin
 	// if transfer failed to propose, after some timeout it will be removed while adding

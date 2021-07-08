@@ -899,6 +899,10 @@ func (kvsm *kvStoreSM) handleCustomRequest(fromClusterSyncer bool, req *Internal
 		kvsm.Infof("transfer remote snap request: %v to local: %v", p, localPath)
 		retErr = errRemoteSnapTransferFailed
 		err := os.MkdirAll(localPath, common.DIR_PERM)
+		if !IsSyncerOnly() {
+			err = retErr
+			kvsm.Errorf("invalid state for remote snap request: %v to local: %v", p, localPath)
+		}
 		// trigger early to allow client api return quickly
 		// the transfer status already be saved.
 		kvsm.w.Trigger(reqID, err)
