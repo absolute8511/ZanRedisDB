@@ -3,8 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"path"
 	"strconv"
 	"sync"
 	"testing"
@@ -14,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/youzan/ZanRedisDB/common"
 	"github.com/youzan/ZanRedisDB/node"
-	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 var testOnceMerge sync.Once
@@ -23,90 +20,11 @@ var redisportMerge int
 var testNamespaces = make(map[string]*node.NamespaceNode)
 var gtmpMergeDir string
 
-func startMergeTestServer(t *testing.T) (*Server, int, string) {
-	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("dir:%v\n", tmpDir)
-	ioutil.WriteFile(
-		path.Join(tmpDir, "myid"),
-		[]byte(strconv.FormatInt(int64(1), 10)),
-		common.FILE_PERM)
-	rport := mergeTestPortBase
-	raftAddr := fmt.Sprintf("http://127.0.0.1:%d", rport+2)
-	kvOpts := ServerConfig{
-		ClusterID:     "unit-test-merge",
-		DataDir:       tmpDir,
-		RedisAPIPort:  rport,
-		HttpAPIPort:   rport + 1,
-		LocalRaftAddr: raftAddr,
-		BroadcastAddr: "127.0.0.1",
-		TickMs:        100,
-		ElectionTick:  5,
-	}
-	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
-	kv, err := NewServer(kvOpts)
-	assert.Nil(t, err)
-	var replica node.ReplicaInfo
-	replica.NodeID = 1
-	replica.ReplicaID = 1
-	replica.RaftAddr = raftAddr
-	partNum := 3
-	for i := 0; i < partNum; i++ {
-		nsConf := node.NewNSConfig()
-		nsConf.Name = "default-" + strconv.Itoa(i)
-		nsConf.BaseName = "default"
-		nsConf.EngType = rockredis.EngType
-		nsConf.PartitionNum = partNum
-		nsConf.Replicator = 1
-		nsConf.RaftGroupConf.GroupID = 1000
-		nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-		n, err := kv.InitKVNamespace(1, nsConf, false)
-		if err != nil {
-			t.Fatalf("failed to init namespace: %v", err)
-		}
-		testNamespaces[nsConf.Name] = n
-	}
-
-	kv.Start()
-	time.Sleep(time.Second)
-	t.Logf("start test server done at: %v", time.Now())
-	return kv, rport, tmpDir
-}
-func waitMergeServerForLeader(t *testing.T, w time.Duration) {
-	start := time.Now()
-	for {
-		leaderNum := 0
-		replicaNode := kvsMerge.GetNamespaceFromFullName("default-0")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNum++
-		}
-		replicaNode = kvsMerge.GetNamespaceFromFullName("default-1")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNum++
-		}
-		replicaNode = kvsMerge.GetNamespaceFromFullName("default-2")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNum++
-		}
-		if leaderNum >= 3 {
-			return
-		}
-		if time.Since(start) > w {
-			t.Fatalf("\033[31m timed out %v for wait leader \033[39m\n", time.Since(start))
-			break
-		}
-		time.Sleep(time.Second)
-	}
-}
 func getMergeTestConn(t *testing.T) *goredis.PoolConn {
 	testOnceMerge.Do(func() {
-		kvsMerge, redisportMerge, gtmpMergeDir = startMergeTestServer(t)
-		waitMergeServerForLeader(t, time.Second*10)
+		kvsMerge, redisportMerge, gtmpMergeDir = startFullScanTestServer(t, "unit-test-merge", mergeTestPortBase, 3)
+		testNamespaces = kvsMerge.GetNsMgr().GetNamespaces()
+		waitServersForLeader(t, kvsMerge, time.Second*10, 3)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisportMerge), "")
