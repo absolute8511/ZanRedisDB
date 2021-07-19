@@ -370,6 +370,7 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 	}
 
 	if oldwal {
+		rc.Infof("loading from old wal: %s", walDir)
 		// Find a snapshot to start/restart a raft node
 		walSnaps, err := wal.ValidSnapshotEntries(walDir)
 		if err != nil {
@@ -445,8 +446,10 @@ func (rc *raftNode) startRaft(ds DataStorage, standalone bool) error {
 			startPeers = nil
 		}
 		if len(startPeers) == 0 {
+			rc.Infof("loading empty wal: %s without peers", walDir)
 			rc.node = raft.RestartNode(c)
 		} else {
+			rc.Infof("loading empty wal: %s with peers: %v", walDir, startPeers)
 			rc.node = raft.StartNode(c, startPeers, isLearner)
 		}
 	}

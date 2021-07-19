@@ -3,7 +3,6 @@ module github.com/youzan/ZanRedisDB
 go 1.13
 
 require (
-	github.com/AndreasBriese/bbloom v0.0.0-20190306092124-e2d15f34fcf9 // indirect
 	github.com/BurntSushi/toml v0.3.1
 	github.com/Jeffail/gabs v1.4.0 // indirect
 	github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6 // indirect
@@ -20,11 +19,8 @@ require (
 	github.com/coreos/go-semver v0.2.0
 	github.com/coreos/go-systemd v0.0.0-20180511133405-39ca1b05acc7 // indirect
 	github.com/coreos/pkg v0.0.0-20180108230652-97fdf19511ea
-	github.com/dgraph-io/badger v0.0.0-20190301165350-b669ca040b3d
 	github.com/dgryski/go-bits v0.0.0-20180113010104-bd8a69a71dc2 // indirect
-	github.com/dgryski/go-farm v0.0.0-20190104051053-3adb47b1fb0f // indirect
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
-	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/emirpasic/gods v1.12.0
 	github.com/go-ole/go-ole v1.2.1 // indirect
 	github.com/gobwas/glob v0.2.3

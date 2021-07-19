@@ -32,7 +32,9 @@ var clusterName = "cluster-unittest-server"
 
 const (
 	//testEngineType = "rocksdb"
-	testEngineType = "mem"
+	testEngineType     = "mem"
+	testUseRocksWAL    = true
+	testSharedRocksWAL = true
 )
 
 type fakeClusterInfo struct {
@@ -192,8 +194,8 @@ func startTestClusterWithBasePort(cid string, portBase int, replicaNum int,
 			BroadcastAddr:  "127.0.0.1",
 			TickMs:         20,
 			ElectionTick:   20,
-			UseRocksWAL:    false,
-			SharedRocksWAL: true,
+			UseRocksWAL:    testUseRocksWAL,
+			SharedRocksWAL: testSharedRocksWAL,
 		}
 		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
 		kvOpts.RocksDBOpts.EngineType = testEngineType
