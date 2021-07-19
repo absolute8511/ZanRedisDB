@@ -44,11 +44,6 @@ func newInitedMemoryStorage(ents []pb.Entry) IExtRaftStorage {
 		ms.ents = ents
 		return testStorage
 	}
-	bs, ok := testStorage.(*BadgerStorage)
-	if ok {
-		bs.reset(ents)
-		return testStorage
-	}
 	rs, ok := testStorage.(*RocksStorage)
 	if ok {
 		rs.reset(ents)

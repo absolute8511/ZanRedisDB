@@ -1289,15 +1289,113 @@ func TestClusterNodeFailedTooLongBalance(t *testing.T) {
 	}
 }
 
+func testMigrateNode(t *testing.T, migrateLeader bool) {
+	ensureClusterReady(t, 4)
+	time.Sleep(time.Second)
+	partNum := 1
+
+	pduri := "http://127.0.0.1:" + pdHttpPort
+	ns := "test_migrate_node"
+
+	ensureDataNodesReady(t, pduri, len(gkvList))
+	enableAutoBalance(t, pduri, true)
+
+	ensureNamespace(t, pduri, ns, partNum, 3)
+	defer ensureDeleteNamespace(t, pduri, ns)
+	dnw, nsNode := waitForLeader(t, ns, 0)
+	leader := dnw.s
+	assert.NotNil(t, leader)
+	// call this to propose some request to write raft logs
+	for i := 0; i < 10; i++ {
+		nsNode.Node.OptimizeDB("")
+	}
+	oldNsList := make([]cluster.PartitionMetaInfo, 0)
+	for i := 0; i < partNum; i++ {
+		oldNs := getNsInfo(t, ns, i)
+		t.Logf("part %v isr is %v", i, oldNs.GetISR())
+		oldNsList = append(oldNsList, oldNs)
+		waitBalancedLeader(t, ns, i)
+	}
+	// remove node from api
+	removedNodeID := leader.GetCoord().GetMyID()
+	migratedNode := leader
+	if !migrateLeader {
+		followerWrap, _ := getFollowerNode(t, ns, 0)
+		removedNodeID = followerWrap.s.GetCoord().GetMyID()
+		migratedNode = followerWrap.s
+	}
+	gpdServer.pdCoord.MarkNodeAsRemoving(removedNodeID)
+	// wait balance
+	start := time.Now()
+	for i := 0; i < partNum; i++ {
+		for {
+			if time.Since(start) > time.Minute*time.Duration(partNum) {
+				t.Errorf("timeout wait removing partition %v on removed node", i)
+				break
+			}
+			time.Sleep(time.Second * 5)
+			nsInfo := getNsInfo(t, ns, i)
+			if len(nsInfo.Removings) > 0 {
+				continue
+			}
+			if len(nsInfo.GetISR()) != 3 {
+				continue
+			}
+			waitRemove := false
+			for _, nid := range nsInfo.GetISR() {
+				if nid == removedNodeID {
+					waitRemove = true
+					t.Logf("still waiting remove node: %v, %v", nsInfo.GetDesp(), nsInfo.GetISR())
+					break
+				}
+			}
+			if waitRemove {
+				continue
+			}
+			break
+		}
+		waitBalancedLeader(t, ns, i)
+	}
+
+	time.Sleep(time.Second * 5)
+	for i := 0; i < partNum; i++ {
+		for {
+			time.Sleep(time.Second)
+			waitRemoveFromRemoving(t, ns, i)
+			waitEnoughReplica(t, ns, i)
+			waitForAllFullReady(t, ns, i)
+			waitBalancedLeader(t, ns, i)
+			newNs := getNsInfo(t, ns, i)
+			newISR := newNs.GetISR()
+			if len(newISR) != 3 || len(newNs.Removings) > 0 {
+				// wait remove unneed replica
+				continue
+			}
+			break
+		}
+		nsInfo := getNsInfo(t, ns, i)
+		for _, nid := range nsInfo.GetISR() {
+			assert.NotEqual(t, nid, removedNodeID)
+		}
+	}
+	for i := 0; i < partNum; i++ {
+		nsNode := migratedNode.GetNamespaceFromFullName(ns + "-" + strconv.Itoa(i))
+		assert.Nil(t, nsNode)
+	}
+}
+
 // It should wait raft synced before we can start to balance
 func TestMigrateLeader(t *testing.T) {
-	// add new node and mark leader as removing.
+	// mark leader as removing.
 	// leader should transfer leader first and then propose remove self
+	// remove a node from api and wait all data balanced to others
+	testMigrateNode(t, true)
 }
 
 func TestMigrateFollower(t *testing.T) {
-	// add new node and mark follower as removing.
+	// mark follower as removing.
 	// removing node should propose remove self
+	testMigrateNode(t, false)
 }
 
 func TestTransferLeaderWhileReplicaNotReady(t *testing.T) {

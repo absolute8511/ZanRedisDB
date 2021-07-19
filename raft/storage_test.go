@@ -23,11 +23,6 @@ import (
 )
 
 func allEntries(s IExtRaftStorage) []pb.Entry {
-	ds, ok := s.(*BadgerStorage)
-	if ok {
-		all, _ := ds.allEntries(0, math.MaxUint64, math.MaxUint64)
-		return all
-	}
 	ms, ok := s.(*MemoryStorage)
 	if ok {
 		return ms.ents
