@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -12,15 +13,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/server"
 	"github.com/judwhite/go-svc/svc"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/server"
 )
 
 var (
 	flagSet        = flag.NewFlagSet("zanredisdb", flag.ExitOnError)
 	configFilePath = flagSet.String("config", "", "the config file path to read")
+	logAge         = flagSet.Int("logage", 0, "the max age (day) log will keep")
 	showVersion    = flagSet.Bool("version", false, "print version string and exit")
 )
 
@@ -30,6 +32,7 @@ type program struct {
 
 func main() {
 	defer log.Printf("main exit")
+	defer common.FlushZapDefault()
 	prg := &program{}
 	if err := svc.Run(prg, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGINT); err != nil {
 		log.Panic(err)
@@ -56,49 +59,53 @@ func (p *program) Start() error {
 	if *configFilePath != "" {
 		d, err := ioutil.ReadFile(*configFilePath)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		err = json.Unmarshal(d, &configFile)
 		if err != nil {
-			panic(err)
+			return err
 		}
 	}
 	if configFile.ServerConf.DataDir == "" {
 		tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 		if err != nil {
-			panic(err)
+			return err
 		}
 		configFile.ServerConf.DataDir = tmpDir
 	}
 
 	serverConf := configFile.ServerConf
+	common.SetZapRotateOptions(false, true, path.Join(serverConf.LogDir, "zankv.log"), 0, 0, *logAge)
 
 	loadConf, _ := json.MarshalIndent(configFile, "", " ")
 	fmt.Printf("loading with conf:%v\n", string(loadConf))
 	bip := server.GetIPv4ForInterfaceName(serverConf.BroadcastInterface)
 	if bip == "" || bip == "0.0.0.0" {
-		panic("broadcast ip can not be found")
+		return errors.New("broadcast ip can not be found")
 	} else {
 		serverConf.BroadcastAddr = bip
 	}
 	fmt.Printf("broadcast ip is :%v\n", bip)
-	app := server.NewServer(serverConf)
+	app, err := server.NewServer(serverConf)
+	if err != nil {
+		return err
+	}
 	for _, nsNodeConf := range serverConf.Namespaces {
 		nsFile := path.Join(configDir, nsNodeConf.Name)
 		d, err := ioutil.ReadFile(nsFile)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		var nsConf node.NamespaceConfig
 		err = json.Unmarshal(d, &nsConf)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		if nsConf.Name != nsNodeConf.Name {
-			panic("namespace name not match the config file")
+			return errors.New("namespace name not match the config file")
 		}
 		if nsConf.Replicator <= 0 {
-			panic("namespace replicator should be set")
+			return errors.New("namespace replicator should be set")
 		}
 
 		id := nsNodeConf.LocalReplicaID

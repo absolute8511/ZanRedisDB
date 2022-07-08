@@ -18,8 +18,13 @@ func TestKVNode_scanCommand(t *testing.T) {
 		{"hscan", buildCommand([][]byte{[]byte("hscan"), testKey, []byte("")})},
 		{"sscan", buildCommand([][]byte{[]byte("sscan"), testKey, []byte("")})},
 		{"zscan", buildCommand([][]byte{[]byte("zscan"), testKey, []byte("")})},
+		{"hrevscan", buildCommand([][]byte{[]byte("hscan"), testKey, []byte("")})},
+		{"srevscan", buildCommand([][]byte{[]byte("sscan"), testKey, []byte("")})},
+		{"zrevscan", buildCommand([][]byte{[]byte("zscan"), testKey, []byte("")})},
 		{"scan", buildCommand([][]byte{[]byte("scan"), testKey})},
 		{"scan", buildCommand([][]byte{[]byte("scan"), testKey, []byte("match"), []byte("test"), []byte("count"), []byte("1")})},
+		{"revscan", buildCommand([][]byte{[]byte("scan"), testKey})},
+		{"revscan", buildCommand([][]byte{[]byte("scan"), testKey, []byte("match"), []byte("test"), []byte("count"), []byte("1")})},
 		{"advscan", buildCommand([][]byte{[]byte("advscan"), testKey, []byte("kv")})},
 		{"advscan", buildCommand([][]byte{[]byte("advscan"), testKey, []byte("hash")})},
 		{"advscan", buildCommand([][]byte{[]byte("advscan"), testKey, []byte("list")})},
@@ -37,14 +42,22 @@ func TestKVNode_scanCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	for _, cmd := range tests {
 		c.Reset()
-		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
+		handler, _ := nd.router.GetCmdHandler(cmd.name)
 		if handler != nil {
 			handler(c, cmd.args)
 			assert.Nil(t, c.GetError())
 		} else {
-			mhandler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
-			_, err := mhandler(cmd.args)
-			assert.Nil(t, err)
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			if whandler != nil {
+				rsp, err := whandler(cmd.args)
+				assert.Nil(t, err)
+				_, ok := rsp.(error)
+				assert.True(t, !ok)
+			} else {
+				mhandler, _, _ := nd.router.GetMergeCmdHandler(cmd.name)
+				_, err := mhandler(cmd.args)
+				assert.Nil(t, err)
+			}
 		}
 	}
 }

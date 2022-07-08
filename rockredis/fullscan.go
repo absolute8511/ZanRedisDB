@@ -5,8 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 type ItemContainer struct {
@@ -16,7 +17,7 @@ type ItemContainer struct {
 	cursor []byte
 }
 
-type itemFunc func(*RangeLimitedIterator, glob.Glob) (*ItemContainer, error)
+type itemFunc func(*engine.RangeLimitedIterator, glob.Glob) (*ItemContainer, error)
 
 func buildErrFullScanResult(err error, dataType common.DataType) *common.FullScanResult {
 	return &common.FullScanResult{
@@ -86,7 +87,7 @@ func (db *RockDB) kvFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
 
 	return db.fullScanCommon(KVType, key, count, match,
-		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
+		func(it *engine.RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
 			if t, k, _, err := decodeFullScanKey(KVType, it.Key()); err != nil {
 				return nil, err
 			} else if r != nil && !r.Match(string(k)) {
@@ -102,7 +103,7 @@ func (db *RockDB) hashFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
 
 	return db.fullScanCommon(HashType, key, count, match,
-		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
+		func(it *engine.RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
 			var t, k, f []byte
 			var err error
 			if t, k, f, err = decodeFullScanKey(HashType, it.Key()); err != nil {
@@ -123,7 +124,7 @@ func (db *RockDB) listFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
 
 	return db.fullScanCommon(ListType, key, count, match,
-		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
+		func(it *engine.RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
 			var t, k, seq []byte
 			var err error
 			if t, k, seq, err = decodeFullScanKey(ListType, it.Key()); err != nil {
@@ -141,7 +142,7 @@ func (db *RockDB) setFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
 
 	return db.fullScanCommon(SetType, key, count, match,
-		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
+		func(it *engine.RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
 			var t, k, m []byte
 			var err error
 			if t, k, m, err = decodeFullScanKey(SetType, it.Key()); err != nil {
@@ -158,7 +159,7 @@ func (db *RockDB) zsetFullScan(key []byte, count int,
 	match string, inputBuffer []interface{}) *common.FullScanResult {
 
 	return db.fullScanCommon(ZSetType, key, count, match,
-		func(it *RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
+		func(it *engine.RangeLimitedIterator, r glob.Glob) (*ItemContainer, error) {
 			var t, k, m []byte
 			var err error
 			var s float64
@@ -270,7 +271,7 @@ func (db *RockDB) fullScanCommon(tp byte, key []byte, count int, match string,
 }
 
 func (db *RockDB) buildFullScanIterator(storeDataType byte, table,
-	key []byte, count int) (*RangeLimitedIterator, error) {
+	key []byte, count int) (*engine.RangeLimitedIterator, error) {
 	k, c, err := decodeFullScanCursor(key)
 	if err != nil {
 		return nil, err
@@ -287,7 +288,7 @@ func (db *RockDB) buildFullScanIterator(storeDataType byte, table,
 
 	dbLog.Debugf("full scan range: %v, %v, %v, %v", minKey, maxKey, string(minKey), string(maxKey))
 	//	minKey = minKey[:0]
-	it, err := NewDBRangeLimitIterator(db.eng, minKey, maxKey, common.RangeOpen, 0, count+1, false)
+	it, err := db.NewDBRangeLimitIterator(minKey, maxKey, common.RangeOpen, 0, count+1, false)
 	if err != nil {
 		return nil, err
 	}
@@ -315,11 +316,7 @@ func encodeFullScanMinKey(storeDataType byte, table, key, cursor []byte) ([]byte
 func encodeFullScanKey(storeDataType byte, table, key, cursor []byte) ([]byte, error) {
 	switch storeDataType {
 	case KVType:
-		var newKey []byte
-		newKey = append(newKey, table...)
-		newKey = append(newKey, []byte(":")...)
-		newKey = append(newKey, key...)
-		return encodeKVKey(newKey), nil
+		return encodeKVKey(packRedisKey(table, key)), nil
 	case ListType:
 		var seq int64
 		var err error

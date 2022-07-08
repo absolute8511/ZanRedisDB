@@ -1,7 +1,6 @@
 language: go
 go:
-  - 1.8.x
-  - 1.9.x
+  - 1.13.x
 env:
   - GOARCH=amd64 TEST_RACE=false
   - GOARCH=amd64 TEST_RACE=true
@@ -17,20 +16,14 @@ addons:
     - g++-4.9
 install:
   - export CXX="g++-4.9" CC="gcc-4.9"
-  - sudo apt-get install libsnappy1 libsnappy-dev
+  - sudo apt-get install libsnappy1v5 libsnappy-dev libjemalloc2 libjemalloc-dev
   - git clone https://github.com/absolute8511/rocksdb.git /tmp/rocksdb
-  - pushd /tmp/rocksdb && git checkout v5.8.8-share-rate-limiter && USE_SSE=1 make static_lib && popd
+  - pushd /tmp/rocksdb && git checkout v6.4.6-patched && PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib && popd
 script:
-  - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/absolute8511/gorocksdb 
-  - CGO_CFLAGS="-I/tmp/rocksdb/include" CGO_LDFLAGS="-L/tmp/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go install -race github.com/absolute8511/gorocksdb 
-  - curl -s https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm > gpm
-  - chmod +x gpm
-  - ./gpm install || true
   - wget -c https://github.com/coreos/etcd/releases/download/v2.3.8/etcd-v2.3.8-linux-amd64.tar.gz
   - tar -xvzf etcd-v2.3.8-linux-amd64.tar.gz
   - ./etcd-v2.3.8-linux-amd64/etcd -name=test-etcd0 -initial-advertise-peer-urls=http://127.0.0.1:2380 -listen-client-urls=http://127.0.0.1:2379 -advertise-client-urls=http://127.0.0.1:2379 -listen-peer-urls=http://127.0.0.1:2380 -initial-cluster="test-etcd0=http://127.0.0.1:2380" -initial-cluster-state=new --data-dir ./test-etcd > etcd.log 2>&1 &
-  - go get -u golang.org/x/sys/...
-  - ./test.sh
+  - ROCKSDB=/tmp/rocksdb ./test.sh
 notifications:
   email: false
 

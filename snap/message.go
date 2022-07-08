@@ -17,8 +17,8 @@ package snap
 import (
 	"io"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/ioutil"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/pkg/ioutil"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // Message is a struct that contains a raft Message and a ReadCloser. The type

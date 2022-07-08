@@ -18,7 +18,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
+	"github.com/youzan/ZanRedisDB/pkg/testutil"
 )
 
 func TestNewURLs(t *testing.T) {

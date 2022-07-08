@@ -1,36 +1,49 @@
 package server
 
 import (
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 type ServerConfig struct {
 	// this cluster id is used for server transport to tell
 	// different global cluster
-	ClusterID            string            `json:"cluster_id"`
-	EtcdClusterAddresses string            `json:"etcd_cluster_addresses"`
-	BroadcastInterface   string            `json:"broadcast_interface"`
-	BroadcastAddr        string            `json:"broadcast_addr"`
-	RedisAPIPort         int               `json:"redis_api_port"`
-	HttpAPIPort          int               `json:"http_api_port"`
-	GrpcAPIPort          int               `json:"grpc_api_port"`
-	ProfilePort          int               `json:"profile_port"`
-	DataDir              string            `json:"data_dir"`
-	DataRsyncModule      string            `json:"data_rsync_module"`
-	LocalRaftAddr        string            `json:"local_raft_addr"`
-	Tags                 map[string]string `json:"tags"`
-	SyncerWriteOnly      bool              `json:"syncer_write_only"`
-	SyncerNormalInit     bool              `json:"syncer_normal_init"`
-	LearnerRole          string            `json:"learner_role"`
-	RemoteSyncCluster    string            `json:"remote_sync_cluster"`
-	StateMachineType     string            `json:"state_machine_type"`
+	ClusterID               string            `json:"cluster_id"`
+	EtcdClusterAddresses    string            `json:"etcd_cluster_addresses"`
+	BroadcastInterface      string            `json:"broadcast_interface"`
+	BroadcastAddr           string            `json:"broadcast_addr"`
+	MetricAddr              string            `json:"metric_addr"`
+	RedisAPIPort            int               `json:"redis_api_port"`
+	HttpAPIPort             int               `json:"http_api_port"`
+	GrpcAPIPort             int               `json:"grpc_api_port"`
+	ProfilePort             int               `json:"profile_port"`
+	DataDir                 string            `json:"data_dir"`
+	LogDir                  string            `json:"log_dir"`
+	RemoteLogAddr           string            `json:"remote_log_addr"`
+	DataRsyncModule         string            `json:"data_rsync_module"`
+	LocalRaftAddr           string            `json:"local_raft_addr"`
+	Tags                    map[string]string `json:"tags"`
+	SyncerWriteOnly         bool              `json:"syncer_write_only"`
+	SyncerNormalInit        bool              `json:"syncer_normal_init"`
+	LearnerRole             string            `json:"learner_role"`
+	RemoteSyncCluster       string            `json:"remote_sync_cluster"`
+	StateMachineType        string            `json:"state_machine_type"`
+	RsyncLimit              int64             `json:"rsync_limit"`
+	DefaultSnapCount        int               `json:"default_snap_count"`
+	DefaultSnapCatchup      int               `json:"default_snap_catchup"`
+	KeepBackup              int               `json:"keep_backup"`
+	KeepWAL                 int               `json:"keep_wal"`
+	UseRocksWAL             bool              `json:"use_rocks_wal"`
+	SharedRocksWAL          bool              `json:"shared_rocks_wal"`
+	UseRedisV2              bool              `json:"use_redis_v2"`
+	SlowLimiterRefuseCostMs int64             `json:"slow_limiter_refuse_cost_ms"`
 
 	ElectionTick int `json:"election_tick"`
 	TickMs       int `json:"tick_ms"`
 	// default rocksdb options, can be override by namespace config
-	RocksDBOpts rockredis.RockOptions `json:"rocksdb_opts"`
-	Namespaces  []NamespaceNodeConfig `json:"namespaces"`
-	MaxScanJob  int32                 `json:"max_scan_job"`
+	RocksDBOpts    engine.RockOptions    `json:"rocksdb_opts"`
+	WALRocksDBOpts engine.RockOptions    `json:"wal_rocksdb_opts"`
+	Namespaces     []NamespaceNodeConfig `json:"namespaces"`
+	MaxScanJob     int32                 `json:"max_scan_job"`
 }
 
 type NamespaceNodeConfig struct {

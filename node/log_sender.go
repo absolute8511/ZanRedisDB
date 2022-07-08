@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/syncerpb"
-	"github.com/absolute8511/go-zanredisdb"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/syncerpb"
+	"github.com/youzan/go-zanredisdb"
 	"google.golang.org/grpc"
 )
 
@@ -67,15 +67,13 @@ func (s *RemoteLogSender) getZanCluster() *zanredisdb.Cluster {
 	if s.remoteClusterAddr == "" || strings.HasPrefix(s.remoteClusterAddr, "test://") {
 		return nil
 	}
-	conf := &zanredisdb.Conf{
-		DialTimeout:  rpcTimeout,
-		ReadTimeout:  rpcTimeout,
-		WriteTimeout: rpcTimeout,
-		TendInterval: 5,
-		Namespace:    s.ns,
-	}
+	conf := zanredisdb.NewDefaultConf()
+	conf.DialTimeout = rpcTimeout
+	conf.ReadTimeout = rpcTimeout
+	conf.WriteTimeout = rpcTimeout
+	conf.Namespace = s.ns
 	conf.LookupList = append(conf.LookupList, s.remoteClusterAddr)
-	s.zanCluster = zanredisdb.NewCluster(conf)
+	s.zanCluster = zanredisdb.NewCluster(conf, nil)
 	return s.zanCluster
 }
 
@@ -157,9 +155,9 @@ func (s *RemoteLogSender) getAllAddressesForPart() ([]string, error) {
 	return addrs, nil
 }
 
-func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
+func (s *RemoteLogSender) doSendOnce(in syncerpb.RaftReqs) error {
 	if s.remoteClusterAddr == "" {
-		nodeLog.Infof("sending log with no remote: %v", r)
+		nodeLog.Infof("sending log with no remote: %v", in.String())
 		return nil
 	}
 	c, addr, err := s.getClient()
@@ -167,26 +165,12 @@ func (s *RemoteLogSender) doSendOnce(r []*BatchInternalRaftRequest) error {
 		nodeLog.Infof("sending(%v) log failed to get grpc client: %v", addr, err)
 		return errors.New("failed to get grpc client")
 	}
-	raftLogs := make([]*syncerpb.RaftLogData, len(r))
-	for i, e := range r {
-		var rld syncerpb.RaftLogData
-		raftLogs[i] = &rld
-		raftLogs[i].Type = syncerpb.EntryNormalRaw
-		raftLogs[i].Data, _ = e.Marshal()
-		raftLogs[i].Term = e.OrigTerm
-		raftLogs[i].Index = e.OrigIndex
-		raftLogs[i].RaftTimestamp = e.Timestamp
-		raftLogs[i].RaftGroupName = s.grpName
-		raftLogs[i].ClusterName = s.localCluster
-	}
-
-	in := &syncerpb.RaftReqs{RaftLog: raftLogs}
 	if nodeLog.Level() > common.LOG_DETAIL {
 		nodeLog.Debugf("sending(%v) log : %v", addr, in.String())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sendLogTimeout)
 	defer cancel()
-	rpcErr, err := c.ApplyRaftReqs(ctx, in, grpc.MaxCallSendMsgSize(256<<20))
+	rpcErr, err := c.ApplyRaftReqs(ctx, &in, grpc.MaxCallSendMsgSize(256<<20))
 	if err != nil {
 		nodeLog.Infof("sending(%v) log failed: %v", addr, err.Error())
 		return err
@@ -264,7 +248,7 @@ func (s *RemoteLogSender) notifyApplySnapWithOption(skip bool, raftSnapshot raft
 		return err
 	}
 	if rsp != nil && rsp.ErrCode != 0 && rsp.ErrCode != http.StatusOK {
-		nodeLog.Infof("notify apply snapshot failed: %v,  %v", addr, rsp)
+		nodeLog.Infof("notify apply snapshot failed: %v,  %v, %v", addr, rsp, raftSnapshot.Metadata.String())
 		return errors.New(rsp.String())
 	}
 	return nil
@@ -296,15 +280,59 @@ func (s *RemoteLogSender) getApplySnapStatus(raftSnapshot raftpb.Snapshot, addr 
 	if rsp == nil {
 		return &applyStatus, errors.New("nil snap status rsp")
 	}
-	nodeLog.Infof("apply snapshot status: %v,  %v", addr, rsp.String())
+	nodeLog.Infof("apply snapshot status: %v,  %v, %v", addr, rsp.String(), raftSnapshot.Metadata.String())
 	applyStatus = *rsp
 	return &applyStatus, nil
+}
+
+func (s *RemoteLogSender) waitTransferSnapStatus(raftSnapshot raftpb.Snapshot,
+	syncAddr string, syncPath string, stop chan struct{}) error {
+	for {
+		s.notifyTransferSnap(raftSnapshot, syncAddr, syncPath)
+		tm := time.NewTimer(time.Second * 5)
+		select {
+		case <-stop:
+			tm.Stop()
+			return common.ErrStopped
+		case <-tm.C:
+		}
+		tm.Stop()
+		addrs, err := s.getAllAddressesForPart()
+		if err != nil {
+			return err
+		}
+		allTransferring := true
+		allReady := true
+		for _, addr := range addrs {
+			applyStatus, err := s.getApplySnapStatus(raftSnapshot, addr)
+			if err != nil {
+				return err
+			}
+			if applyStatus.Status != syncerpb.ApplySuccess {
+				allReady = false
+			}
+			if applyStatus.Status == syncerpb.ApplyWaitingBegin ||
+				applyStatus.Status == syncerpb.ApplyMissing {
+				allTransferring = false
+				break
+			}
+			if applyStatus.Status == syncerpb.ApplyFailed {
+				nodeLog.Infof("node %v failed to transfer snapshot : %v", addr, applyStatus)
+				return errors.New("some node failed to transfer snapshot")
+			}
+		}
+		if allTransferring || allReady {
+			break
+		}
+	}
+	return nil
 }
 
 func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop chan struct{}) error {
 	// first, query and wait all replicas to finish snapshot transfer
 	// if all done, notify apply the transferred snapshot and wait all done
 	// then wait all apply done.
+	lastNotifyApply := time.Now()
 	for {
 		select {
 		case <-stop:
@@ -318,7 +346,8 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 		// wait all became ApplyTransferSuccess or ApplySuccess
 		allReady := true
 		allTransferReady := true
-		needWait := false
+		needWaitTransfer := false
+		needWaitApply := false
 		for _, addr := range addrs {
 			applyStatus, err := s.getApplySnapStatus(raftSnapshot, addr)
 			if err != nil {
@@ -327,23 +356,38 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 			if applyStatus.Status != syncerpb.ApplySuccess {
 				allReady = false
 			}
-			if applyStatus.Status != syncerpb.ApplySuccess && applyStatus.Status != syncerpb.ApplyTransferSuccess {
+			if applyStatus.Status != syncerpb.ApplySuccess &&
+				applyStatus.Status != syncerpb.ApplyTransferSuccess &&
+				applyStatus.Status != syncerpb.ApplyWaiting {
 				allTransferReady = false
 			}
-			if applyStatus.Status == syncerpb.ApplyWaiting || applyStatus.Status == syncerpb.ApplyWaitingTransfer ||
+			if applyStatus.Status == syncerpb.ApplyWaitingTransfer ||
 				applyStatus.Status == syncerpb.ApplyUnknown {
-				needWait = true
+				needWaitTransfer = true
+			}
+			if applyStatus.Status == syncerpb.ApplyWaiting ||
+				applyStatus.Status == syncerpb.ApplyUnknown {
+				needWaitApply = true
 			}
 			if applyStatus.Status == syncerpb.ApplyFailed {
 				nodeLog.Infof("node %v failed to apply snapshot : %v", addr, applyStatus)
 				return errors.New("some node failed to apply snapshot")
 			}
+			if applyStatus.Status == syncerpb.ApplyMissing {
+				nodeLog.Infof("node %v failed to apply snapshot : %v", addr, applyStatus)
+				return errors.New("some node failed to apply snapshot")
+			}
 		}
-		if needWait {
+		if needWaitTransfer || needWaitApply {
 			select {
 			case <-stop:
 				return common.ErrStopped
-			case <-time.After(time.Second):
+			case <-time.After(time.Second * 10):
+				if needWaitApply && allTransferReady && time.Since(lastNotifyApply) > time.Minute*5 {
+					// the proposal for apply snapshot may be lost, we need send it again to begin apply
+					s.notifyApplySnap(raftSnapshot)
+					lastNotifyApply = time.Now()
+				}
 				continue
 			}
 		}
@@ -352,6 +396,7 @@ func (s *RemoteLogSender) waitApplySnapStatus(raftSnapshot raftpb.Snapshot, stop
 		}
 		if allTransferReady {
 			s.notifyApplySnap(raftSnapshot)
+			lastNotifyApply = time.Now()
 			time.Sleep(time.Second)
 		} else {
 			return errors.New("some node failed to apply snapshot")
@@ -425,16 +470,16 @@ func (s *RemoteLogSender) getRemoteSyncedRaft(stop chan struct{}) (SyncedState, 
 	return state, err
 }
 
-func (s *RemoteLogSender) sendRaftLog(r []*BatchInternalRaftRequest, stop chan struct{}) error {
-	if len(r) == 0 {
+func (s *RemoteLogSender) sendRaftLog(r syncerpb.RaftReqs, stop chan struct{}) error {
+	if len(r.RaftLog) == 0 {
 		return nil
 	}
-	first := r[0]
+	first := r.RaftLog[0]
 	err := sendRpcAndRetry(func() error {
 		err := s.doSendOnce(r)
 		if err != nil {
 			nodeLog.Infof("failed to send raft log : %v, at %v-%v",
-				err.Error(), first.OrigTerm, first.OrigIndex)
+				err.Error(), first.Term, first.Index)
 		}
 		return err
 	}, "sendRaftLog", stop)

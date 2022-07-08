@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 // some API for outside
@@ -74,6 +74,26 @@ func (pdCoord *PDCoordinator) SetClusterUpgradeState(upgrading bool) error {
 		}
 		cluster.CoordLog().Infof("the cluster state has been changed to normal")
 		pdCoord.triggerCheckNamespaces("", 0, time.Second)
+	}
+	return nil
+}
+
+func (pdCoord *PDCoordinator) RemoveNamespaceFromNode(ns string, pidStr string, nid string) error {
+	if pdCoord.leaderNode.GetID() != pdCoord.myNode.GetID() {
+		cluster.CoordLog().Infof("not leader while delete namespace")
+		return ErrNotLeader
+	}
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return err
+	}
+	nsinfo, err := pdCoord.register.GetNamespacePartInfo(ns, pid)
+	if err != nil {
+		return err
+	}
+	coordErr := pdCoord.removeNamespaceFromNode(nsinfo, nid)
+	if coordErr != nil {
+		return coordErr.ToErrorType()
 	}
 	return nil
 }
@@ -167,7 +187,7 @@ func (pdCoord *PDCoordinator) ChangeNamespaceMetaParam(namespace string, newRepl
 
 	var meta cluster.NamespaceMetaInfo
 	if ok, _ := pdCoord.register.IsExistNamespace(namespace); !ok {
-		cluster.CoordLog().Infof("namespace not exist %v :%v", namespace)
+		cluster.CoordLog().Infof("namespace not exist %v ", namespace)
 		return cluster.ErrNamespaceNotCreated.ToErrorType()
 	} else {
 		oldMeta, err := pdCoord.register.GetNamespaceMetaInfo(namespace)
@@ -282,7 +302,7 @@ func (pdCoord *PDCoordinator) checkAndUpdateNamespacePartitions(currentNodes map
 
 		tmpReplicaInfo := partReplicaList[i]
 		if len(tmpReplicaInfo.GetISR()) <= meta.Replica/2 {
-			cluster.CoordLog().Infof("failed update info for namespace : %v-%v since not quorum", namespace, i, tmpReplicaInfo)
+			cluster.CoordLog().Infof("failed update info for namespace : %v-%v since not quorum: %v", namespace, i, tmpReplicaInfo)
 			continue
 		}
 		commonErr := pdCoord.register.UpdateNamespacePartReplicaInfo(namespace, i, &tmpReplicaInfo, tmpReplicaInfo.Epoch())
@@ -312,7 +332,7 @@ func (pdCoord *PDCoordinator) RemoveLearnerFromNs(ns string, pidStr string, nid 
 			return err
 		}
 		for i := 0; i < oldMeta.PartitionNum; i++ {
-			err = pdCoord.removeNsLearnerFromNode(ns, i, nid)
+			err = pdCoord.removeNsLearnerFromNode(ns, i, nid, true)
 			if err != nil {
 				cluster.CoordLog().Infof("namespace %v-%v remove learner %v failed :%v", ns, i, nid, err)
 				return err
@@ -327,5 +347,5 @@ func (pdCoord *PDCoordinator) RemoveLearnerFromNs(ns string, pidStr string, nid 
 	if err != nil {
 		return err
 	}
-	return pdCoord.removeNsLearnerFromNode(ns, pid, nid)
+	return pdCoord.removeNsLearnerFromNode(ns, pid, nid, false)
 }

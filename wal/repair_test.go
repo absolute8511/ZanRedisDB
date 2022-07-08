@@ -21,8 +21,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 type corruptFunc func(string, int64) error
@@ -57,11 +57,14 @@ func testRepair(t *testing.T, ents [][]raftpb.Entry, corrupt corruptFunc, expect
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	for _, es := range ents {
+	off, _ := w.tail().Seek(0, io.SeekCurrent)
+	t.Logf("offset:%v", off)
+	for i, es := range ents {
 		if err = w.Save(raftpb.HardState{}, es); err != nil {
 			t.Fatal(err)
 		}
+		off, _ := w.tail().Seek(0, io.SeekCurrent)
+		t.Logf("%v offset:%v", i, off)
 	}
 
 	offset, err := w.tail().Seek(0, io.SeekCurrent)
@@ -155,7 +158,9 @@ func TestRepairWriteTearLast(t *testing.T) {
 		}
 		return nil
 	}
-	testRepair(t, makeEnts(50), corruptf, 40)
+	ents := makeEnts(50)
+	t.Log(ents[0][0].Size())
+	testRepair(t, ents, corruptf, 30)
 }
 
 // TestRepairWriteTearMiddle repairs the WAL when there is write tearing
@@ -181,4 +186,58 @@ func TestRepairWriteTearMiddle(t *testing.T) {
 		ents[i][0].Data = dat
 	}
 	testRepair(t, ents, corruptf, 1)
+}
+
+func TestRepairFailDeleteDir(t *testing.T) {
+	p, err := ioutil.TempDir(os.TempDir(), "waltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(p)
+
+	w, err := Create(p, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldSegmentSizeBytes := SegmentSizeBytes
+	SegmentSizeBytes = 64
+	defer func() {
+		SegmentSizeBytes = oldSegmentSizeBytes
+	}()
+	for _, es := range makeEnts(50) {
+		if err = w.Save(raftpb.HardState{}, es); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, serr := w.tail().Seek(0, io.SeekCurrent)
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	w.Close()
+
+	f, err := openLast(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terr := f.Truncate(20); terr != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	w, err = Open(p, walpb.Snapshot{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = w.ReadAll()
+	if err != io.ErrUnexpectedEOF {
+		t.Fatalf("err = %v, want error %v", err, io.ErrUnexpectedEOF)
+	}
+	w.Close()
+
+	os.RemoveAll(p)
+	if Repair(p) {
+		t.Fatal("expect 'Repair' fail on unexpected directory deletion")
+	}
 }

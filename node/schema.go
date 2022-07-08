@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) GetIndexSchema(table string) (map[string]*common.IndexSchema, error) {

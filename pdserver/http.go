@@ -3,19 +3,23 @@ package pdserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/julienschmidt/httprouter"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/metric"
 )
 
 type nodeInfo struct {
+	NodeID           string `json:"node_id"`
 	BroadcastAddress string `json:"broadcast_address"`
 	Hostname         string `json:"hostname"`
 	RedisPort        string `json:"redis_port"`
@@ -73,13 +77,18 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", "/datanodes", common.Decorate(s.getDataNodes, common.V1))
 	router.Handle("GET", "/listpd", common.Decorate(s.listPDNodes, common.V1))
 	router.Handle("GET", "/query/:namespace", common.Decorate(s.doQueryNamespace, debugLog, common.V1))
+	router.Handle("GET", "/querytable/stats/:table", common.Decorate(s.doQueryTableStats, debugLog, common.V1))
 	router.Handle("DELETE", "/namespace/rmlearner", common.Decorate(s.doRemoveNamespaceLearner, log, common.V1))
 
+	router.Handle("POST", "/learner/stop", common.Decorate(s.doStopLearner, log, common.V1))
+	router.Handle("POST", "/learner/start", common.Decorate(s.doStartLearner, log, common.V1))
+	router.Handle("GET", "/learner/state", common.Decorate(s.getLearnerRunningState, log, common.V1))
 	// cluster prefix url means only handled by leader of pd
 	router.Handle("GET", "/cluster/stats", common.Decorate(s.doClusterStats, common.V1))
 	router.Handle("POST", "/cluster/balance", common.Decorate(s.doClusterSwitchBalance, log, common.V1))
 	router.Handle("POST", "/cluster/pd/tombstone", common.Decorate(s.doClusterTombstonePD, log, common.V1))
 	router.Handle("POST", "/cluster/node/remove", common.Decorate(s.doClusterRemoveDataNode, log, common.V1))
+	router.Handle("DELETE", "/cluster/partition/remove_node", common.Decorate(s.doClusterNamespacePartRemoveNode, log, common.V1))
 	router.Handle("POST", "/cluster/upgrade/begin", common.Decorate(s.doClusterBeginUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/upgrade/done", common.Decorate(s.doClusterFinishUpgrade, log, common.V1))
 	router.Handle("POST", "/cluster/namespace/create", common.Decorate(s.doCreateNamespace, log, common.V1))
@@ -130,6 +139,7 @@ func (s *Server) getDataNodes(w http.ResponseWriter, req *http.Request, ps httpr
 		dc, _ := n.Tags[cluster.DCInfoTag]
 		dcInfo, _ := dc.(string)
 		dn := &nodeInfo{
+			NodeID:           n.GetID(),
 			BroadcastAddress: n.NodeIP,
 			Hostname:         n.Hostname,
 			Version:          n.Version,
@@ -168,6 +178,57 @@ func (s *Server) listPDNodes(w http.ResponseWriter, req *http.Request, ps httpro
 	}, nil
 }
 
+func (s *Server) doQueryTableStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	table := ps.ByName("table")
+	if table == "" {
+		return nil, common.HttpErr{Code: 400, Text: "MISSING_ARG_TABLE"}
+	}
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	leaderOnly := reqParams.Get("leader_only")
+
+	dns, _ := s.pdCoord.GetAllDataNodes()
+	nodeTableStats := make(map[string]map[string]metric.TableStats)
+	totalTableStats := make(map[string]metric.TableStats)
+	type TableStatsType struct {
+		TableStats map[string]metric.TableStats `json:"table_stats"`
+	}
+	for _, n := range dns {
+		uri := fmt.Sprintf("http://%s:%v%v?leader_only=%v&table=%v", n.Hostname, n.HttpPort, common.APITableStats, leaderOnly, table)
+		var tableStats TableStatsType
+		rspCode, err := common.APIRequest("GET", uri, nil, time.Second*10, &tableStats)
+		if err != nil {
+			sLog.Infof("get table stats error %v, %v", err, uri)
+			continue
+		}
+		if rspCode != http.StatusOK {
+			sLog.Infof("get table stats not ok %v, %v", rspCode, uri)
+			continue
+		}
+		nodeTableStats[n.GetID()] = tableStats.TableStats
+		for ns, tbs := range tableStats.TableStats {
+			if tbs.Name != table {
+				continue
+			}
+			var tmp metric.TableStats
+			tmp.Name = table
+			if t, ok := totalTableStats[ns]; ok {
+				tmp = t
+			}
+			tmp.KeyNum += tbs.KeyNum
+			tmp.DiskBytesUsage += tbs.DiskBytesUsage
+			tmp.ApproximateKeyNum += tbs.ApproximateKeyNum
+			totalTableStats[ns] = tmp
+		}
+	}
+	return map[string]interface{}{
+		"total": totalTableStats,
+		"nodes": nodeTableStats,
+	}, nil
+}
+
 func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	if ns == "" {
@@ -198,9 +259,15 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 	partNodes := make(map[int]PartitionNodeInfo)
 
 	pnum := 0
+	replicator := 1
+	ex := ""
+	useFsync := false
 	engType := ""
 	for _, nsInfo := range nsPartsInfo {
 		pnum = nsInfo.PartitionNum
+		replicator = nsInfo.Replica
+		ex = nsInfo.ExpirationPolicy
+		useFsync = nsInfo.OptimizedFsync
 		engType = nsInfo.EngType
 		var pn PartitionNodeInfo
 		for _, nid := range nsInfo.RaftNodes {
@@ -220,6 +287,7 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 				}
 			}
 			dn := nodeInfo{
+				NodeID:           nid,
 				BroadcastAddress: ip,
 				Hostname:         hostname,
 				Version:          version,
@@ -236,10 +304,13 @@ func (s *Server) doQueryNamespace(w http.ResponseWriter, req *http.Request, ps h
 		partNodes[nsInfo.Partition] = pn
 	}
 	return map[string]interface{}{
-		"epoch":         curEpoch,
-		"partition_num": pnum,
-		"eng_type":      engType,
-		"partitions":    partNodes,
+		"epoch":           curEpoch,
+		"partition_num":   pnum,
+		"replicator":      replicator,
+		"expire_policy":   ex,
+		"fsync_optimized": useFsync,
+		"eng_type":        engType,
+		"partitions":      partNodes,
 	}, nil
 }
 
@@ -333,6 +404,22 @@ func (s *Server) doClusterRemoveDataNode(w http.ResponseWriter, req *http.Reques
 	return nil, nil
 }
 
+func (s *Server) doClusterNamespacePartRemoveNode(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_REQUEST"}
+	}
+	nid := reqParams.Get("node")
+	ns := reqParams.Get("namespace")
+	pid := reqParams.Get("partition")
+
+	err = s.pdCoord.RemoveNamespaceFromNode(ns, pid, nid)
+	if err != nil {
+		return nil, common.HttpErr{Code: 500, Text: err.Error()}
+	}
+	return nil, nil
+}
+
 func (s *Server) doClusterBeginUpgrade(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	err := s.pdCoord.SetClusterUpgradeState(true)
 	if err != nil {
@@ -385,11 +472,27 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_REPLICATOR"}
 	}
 
+	dataVersion := reqParams.Get("data_version")
+	if dataVersion == "" {
+		dataVersion = common.ValueHeaderV1Str
+	}
+	dv, err := common.StringToDataVersionType(dataVersion)
+	if err != nil {
+		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_DATA_VERSION"}
+	}
 	expPolicy := reqParams.Get("expiration_policy")
 	if expPolicy == "" {
 		expPolicy = common.DefaultExpirationPolicy
+		if dv == common.ValueHeaderV1 {
+			expPolicy = common.WaitCompactExpirationPolicy
+		}
 	} else if _, err := common.StringToExpirationPolicy(expPolicy); err != nil {
 		return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_EXPIRATION_POLICY"}
+	}
+	if expPolicy == common.WaitCompactExpirationPolicy {
+		if dataVersion != common.ValueHeaderV1Str {
+			return nil, common.HttpErr{Code: 400, Text: "INVALID_ARG_EXPIRATION_POLICY data version must be v1 in compact ttl"}
+		}
 	}
 
 	tagStr := reqParams.Get("tags")
@@ -411,6 +514,7 @@ func (s *Server) doCreateNamespace(w http.ResponseWriter, req *http.Request, ps 
 	meta.Replica = replicator
 	meta.EngType = engType
 	meta.ExpirationPolicy = expPolicy
+	meta.DataVersion = dataVersion
 	meta.Tags = make(map[string]interface{})
 	for _, tag := range tagList {
 		if strings.TrimSpace(tag) != "" {
@@ -603,6 +707,30 @@ func (s *Server) doUpdateNamespaceMeta(w http.ResponseWriter, req *http.Request,
 	}
 	return nil, nil
 
+}
+
+func (s *Server) doStopLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SwitchStartLearner(false)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
+}
+
+func (s *Server) getLearnerRunningState(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	v, err := s.pdCoord.GetLearnerRunningState()
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return v, nil
+}
+
+func (s *Server) doStartLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	err := s.pdCoord.SwitchStartLearner(true)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return nil, nil
 }
 
 func (s *Server) doRemoveNamespaceLearner(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {

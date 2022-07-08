@@ -16,9 +16,13 @@ package raft
 
 import (
 	"errors"
+	"fmt"
+	"io/ioutil"
 	"sync"
+	"time"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/engine"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // ErrCompacted is returned by Storage.Entries/Compact when a requested
@@ -69,6 +73,19 @@ type Storage interface {
 	Snapshot() (pb.Snapshot, error)
 }
 
+type IExtRaftStorage interface {
+	Storage
+	// Close closes the Storage and performs finalization.
+	Close()
+	ApplySnapshot(pb.Snapshot) error
+	SetHardState(pb.HardState) error
+	CreateSnapshot(uint64, *pb.ConfState, []byte) (pb.Snapshot, error)
+	Compact(uint64) error
+	Append([]pb.Entry) error
+}
+
+var errNotFound = errors.New("Unable to find raft entry")
+
 // MemoryStorage implements the Storage interface backed by an
 // in-memory array.
 type MemoryStorage struct {
@@ -83,12 +100,54 @@ type MemoryStorage struct {
 	ents []pb.Entry
 }
 
-// NewMemoryStorage creates an empty MemoryStorage.
-func NewMemoryStorage() *MemoryStorage {
-	return &MemoryStorage{
+// NewMemoryStorage creates an default MemoryStorage.
+// This should only be used in test
+func NewMemoryStorage() IExtRaftStorage {
+	return newDefaultRaftStorage(0, 0)
+}
+
+func NewRealMemoryStorage() *MemoryStorage {
+	ms := &MemoryStorage{
 		// When starting from scratch populate the list with a dummy entry at term zero.
 		ents: make([]pb.Entry, 1),
 	}
+	return ms
+}
+
+func newDefaultRaftStorage(id uint64, gid uint32) IExtRaftStorage {
+	tmpDir, _ := ioutil.TempDir("", fmt.Sprintf("raft-storage-%v-%v-%d", id, gid, time.Now().UnixNano()))
+	cfg := engine.NewRockConfig()
+	cfg.DataDir = tmpDir
+	cfg.DisableWAL = true
+	cfg.UseSharedCache = true
+	cfg.UseSharedRateLimiter = true
+	cfg.DisableMergeCounter = true
+	cfg.EnableTableCounter = false
+	cfg.OptimizeFiltersForHits = true
+	// basically, we no need compress wal since it will be cleaned after snapshot
+	cfg.MinLevelToCompress = 5
+	// use memtable_insert_with_hint_prefix_extractor to speed up insert
+	if cfg.InsertHintFixedLen == 0 {
+		cfg.InsertHintFixedLen = 10
+	}
+	scf, _ := engine.NewSharedEngConfig(cfg.RockOptions)
+	cfg.SharedConfig = scf
+	db, err := engine.NewRockEng(cfg)
+	if err == nil {
+		err = db.OpenEng()
+		if err == nil {
+			return NewRocksStorage(id, gid, false, db)
+		}
+	}
+	raftLogger.Warningf("failed to open rocks raft db: %v, fallback to memory entries", err.Error())
+	ms := &MemoryStorage{
+		// When starting from scratch populate the list with a dummy entry at term zero.
+		ents: make([]pb.Entry, 1),
+	}
+	return ms
+}
+
+func (ms *MemoryStorage) Close() {
 }
 
 // InitialState implements the Storage interface.

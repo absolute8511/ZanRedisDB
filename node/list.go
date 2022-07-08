@@ -1,9 +1,11 @@
 package node
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) lindexCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -56,100 +58,65 @@ func (nd *KVNode) lrangeCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) lfixkeyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) lpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.([]byte)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
-	}
-	// wait response
-	conn.WriteBulk(rsp)
-}
-
-func (nd *KVNode) lpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
-	}
-	// wait response
-	conn.WriteInt64(rsp)
-}
-
-func (nd *KVNode) lsetCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) lsetCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 	_, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid index: " + err.Error())
-		return
+		return nil, err
 	}
-	_, _, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
+	if err != nil {
+		return nil, err
 	}
-	// wait response
-	conn.WriteString("OK")
+	return rsp, nil
 }
 
-func (nd *KVNode) ltrimCommand(conn redcon.Conn, cmd redcon.Command) {
+// only check if ok to pop, lpop/rpop
+func (nd *KVNode) preCheckListLength(key []byte) (bool, interface{}, error) {
+	// check if empty list to avoid raft
+	n, err := nd.store.LLen(key)
+	if err != nil {
+		return false, nil, err
+	}
+	// check if empty set
+	if n == 0 {
+		return false, nil, nil
+	}
+	return true, nil, nil
+}
+
+func (nd *KVNode) ltrimCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 	_, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid start index: " + err.Error())
-		return
+		return nil, err
 	}
 	_, err = strconv.ParseInt(string(cmd.Args[3]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid end index: " + err.Error())
-		return
+		return nil, err
 	}
-
-	_, _, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
 	}
-	// wait response
-	conn.WriteString("OK")
-}
-
-func (nd *KVNode) rpopCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.([]byte)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
+	needContinue, _, err := nd.preCheckListLength(key)
+	if err != nil {
+		return nil, err
 	}
-	// wait response
-	conn.WriteBulk(rsp)
-}
-
-func (nd *KVNode) rpushCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
+	if !needContinue {
+		return checkOKRsp(cmd, nil)
 	}
-	// wait response
-	conn.WriteInt64(rsp)
-}
-
-func (nd *KVNode) lclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if !ok {
-		conn.WriteError("Invalid response type")
-		return
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkOKRsp)
+	if err != nil {
+		return nil, err
 	}
-	// wait response
-	conn.WriteInt64(rsp)
+	return rsp, nil
 }
 
 // local write command execute only on follower or on the local commit of leader
@@ -199,13 +166,13 @@ func (kvsm *kvStoreSM) localRpushCommand(cmd redcon.Command, ts int64) (interfac
 }
 
 func (kvsm *kvStoreSM) localLclearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.LClear(cmd.Args[1])
+	return kvsm.store.LClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localLMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, lkey := range cmd.Args[1:] {
-		if _, err := kvsm.store.LClear(lkey); err != nil {
+		if _, err := kvsm.store.LClear(ts, lkey); err != nil {
 			return count, err
 		} else {
 			count++

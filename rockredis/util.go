@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var errIntNumber = errors.New("invalid integer")
@@ -31,6 +31,10 @@ func Uint64(v []byte, err error) (uint64, error) {
 
 func FormatInt64ToSlice(v int64) []byte {
 	return strconv.AppendInt(nil, int64(v), 10)
+}
+
+func PutInt64ToBuf(v int64, b []byte) {
+	binary.BigEndian.PutUint64(b, uint64(v))
 }
 
 func PutInt64(v int64) []byte {

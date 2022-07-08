@@ -38,6 +38,7 @@ enum RaftApplySnapStatus {
     ApplyFailed = 5;
     ApplyMissing = 6;
     ApplyOutofdate = 7;
+    ApplyWaitingBegin = 8;
 }
 
 message RaftLogData {
@@ -56,7 +57,7 @@ message RaftLogData {
 }
 
 message RaftReqs {
-    repeated RaftLogData raft_log = 1;
+    repeated RaftLogData raft_log = 1 [(gogoproto.nullable) = false];
 }
 
 enum RaftApplySnapType {

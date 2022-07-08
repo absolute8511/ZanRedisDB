@@ -10,9 +10,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/spaolacci/murmur3"
+	"github.com/emirpasic/gods/maps/treemap"
+	"github.com/emirpasic/gods/utils"
+	"github.com/twmb/murmur3"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
+)
+
+const (
+	BalanceV2Str = "v2"
 )
 
 var (
@@ -90,7 +96,7 @@ func IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, erro
 		var rsp []*common.MemberInfo
 		_, err := common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
-			nil, time.Second*3, &rsp)
+			nil, cluster.APIShortTo, &rsp)
 		if err != nil {
 			cluster.CoordLog().Infof("failed (%v) to get members for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			lastErr = err
@@ -107,7 +113,7 @@ func IsRaftNodeJoined(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, erro
 	return false, lastErr
 }
 
-// query the raft peers if the nid already in the raft group for the namespace and all logs synced in all peers
+// query the raft peers if all the isr nodes already in the raft group for the namespace and all logs synced in all peers
 func IsAllISRFullReady(nsInfo *cluster.PartitionMetaInfo) (bool, error) {
 	for _, nid := range nsInfo.GetISR() {
 		ok, err := IsRaftNodeFullReady(nsInfo, nid)
@@ -128,7 +134,7 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 		var rsp []*common.MemberInfo
 		_, err := common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIGetMembers+"/"+nsInfo.GetDesp(),
-			nil, time.Second*3, &rsp)
+			nil, cluster.APIShortTo, &rsp)
 		if err != nil {
 			cluster.CoordLog().Infof("failed (%v) to get members for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			return false, err
@@ -147,7 +153,7 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 		}
 		_, err = common.APIRequest("GET",
 			"http://"+net.JoinHostPort(nip, httpPort)+common.APIIsRaftSynced+"/"+nsInfo.GetDesp(),
-			nil, time.Second*5, nil)
+			nil, cluster.APILongTo, nil)
 		if err != nil {
 			cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
 			return false, err
@@ -156,8 +162,22 @@ func IsRaftNodeFullReady(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, e
 	return true, nil
 }
 
+// check if all nodes in list is raft synced for the namespace-partition
+func IsRaftNodeSynced(nsInfo *cluster.PartitionMetaInfo, nid string) (bool, error) {
+	nip, _, _, httpPort := cluster.ExtractNodeInfoFromID(nid)
+	_, err := common.APIRequest("GET",
+		"http://"+net.JoinHostPort(nip, httpPort)+common.APIIsRaftSynced+"/"+nsInfo.GetDesp(),
+		nil, cluster.APILongTo, nil)
+	if err != nil {
+		cluster.CoordLog().Infof("failed (%v) to check sync state for namespace %v: %v", nip, nsInfo.GetDesp(), err)
+		return false, err
+	}
+	return true, nil
+}
+
 type DataPlacement struct {
 	balanceInterval [2]int32
+	balanceVer      string
 	pdCoord         *PDCoordinator
 }
 
@@ -221,16 +241,20 @@ func (dp *DataPlacement) addNodeToNamespaceAndWaitReady(monitorChan chan struct{
 	currentSelect := 0
 	namespaceName := namespaceInfo.Name
 	partitionID := namespaceInfo.Partition
-	// since we need add new catchup, we make the replica as replica+1
+	oldParts, coordErr := dp.getCurrentPartitionNodes(namespaceInfo.Name)
+	if coordErr != nil {
+		return namespaceInfo, coordErr.ToErrorType()
+	}
 	partitionNodes, coordErr := getRebalancedPartitionsFromNameList(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
-		namespaceInfo.Replica+1, nodeNameList)
+		namespaceInfo.Replica, oldParts, nodeNameList, dp.balanceVer)
 	if coordErr != nil {
 		return namespaceInfo, coordErr.ToErrorType()
 	}
 	fullName := namespaceInfo.GetDesp()
 	selectedCatchup := make([]string, 0)
+	// we need add new catchup, choose from the the diff between the new isr and old isr
 	for _, nid := range partitionNodes[namespaceInfo.Partition] {
 		if cluster.FindSlice(namespaceInfo.RaftNodes, nid) != -1 {
 			// already isr, ignore add catchup
@@ -306,10 +330,14 @@ func (dp *DataPlacement) allocNodeForNamespace(namespaceInfo *cluster.PartitionM
 		return nil, cluster.ErrRegisterServiceUnstable
 	}
 
+	oldParts, coordErr := dp.getCurrentPartitionNodes(namespaceInfo.Name)
+	if coordErr != nil {
+		return nil, coordErr
+	}
 	partitionNodes, err := getRebalancedNamespacePartitions(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
-		namespaceInfo.Replica, currentNodes)
+		namespaceInfo.Replica, oldParts, currentNodes, dp.balanceVer)
 	if err != nil {
 		return nil, err
 	}
@@ -344,10 +372,15 @@ func (dp *DataPlacement) checkNamespaceNodeConflict(namespaceInfo *cluster.Parti
 func (dp *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[string]cluster.NodeInfo,
 	replica int, partitionNum int, existPart map[int]*cluster.PartitionMetaInfo) ([]cluster.PartitionReplicaInfo, *cluster.CoordErr) {
 	replicaList := make([]cluster.PartitionReplicaInfo, partitionNum)
+
+	oldParts, coordErr := dp.getCurrentPartitionNodes(ns)
+	if coordErr != nil {
+		return nil, coordErr
+	}
 	partitionNodes, err := getRebalancedNamespacePartitions(
 		ns,
 		partitionNum,
-		replica, currentNodes)
+		replica, oldParts, currentNodes, dp.balanceVer)
 	if err != nil {
 		return nil, err
 	}
@@ -369,6 +402,26 @@ func (dp *DataPlacement) allocNamespaceRaftNodes(ns string, currentNodes map[str
 
 	cluster.CoordLog().Infof("selected namespace replica list : %v", replicaList)
 	return replicaList, nil
+}
+
+func (dp *DataPlacement) getCurrentPartitionNodes(ns string) ([][]string, *cluster.CoordErr) {
+	if dp.pdCoord == nil || dp.pdCoord.register == nil {
+		return nil, cluster.ErrNoCoordRegister
+	}
+	allNamespaces, _, err := dp.pdCoord.register.GetAllNamespaces()
+	if err != nil {
+		cluster.CoordLog().Infof("scan namespaces error: %v", err)
+		return nil, cluster.NewCoordErr(err.Error(), cluster.CoordTmpErr)
+	}
+	nsInfos, _ := allNamespaces[ns]
+	partNodes := make([][]string, 0)
+	for pid, part := range nsInfos {
+		if pid >= len(partNodes) {
+			partNodes = append(partNodes, make([][]string, pid-len(partNodes)+1)...)
+		}
+		partNodes[pid] = part.GetISR()
+	}
+	return partNodes, nil
 }
 
 func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bool) {
@@ -399,6 +452,11 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			return moved, false
 		default:
 		}
+		// only balance at given interval, check again here since last move may cost a long time
+		if time.Now().Hour() > int(atomic.LoadInt32(&dp.balanceInterval[1])) ||
+			time.Now().Hour() < int(atomic.LoadInt32(&dp.balanceInterval[0])) {
+			return moved, false
+		}
 		if !dp.pdCoord.IsClusterStable() {
 			return moved, false
 		}
@@ -419,6 +477,11 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			cluster.CoordLog().Infof("namespace %v isr is not full ready while balancing", namespaceInfo.GetDesp())
 			continue
 		}
+
+		oldParts, coordErr := dp.getCurrentPartitionNodes(namespaceInfo.Name)
+		if coordErr != nil {
+			continue
+		}
 		currentNodes := dp.pdCoord.getCurrentNodes(namespaceInfo.Tags)
 		nodeNameList := getNodeNameList(currentNodes)
 		cluster.CoordLog().Debugf("node name list: %v", nodeNameList)
@@ -426,7 +489,7 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 		partitionNodes, err := getRebalancedNamespacePartitions(
 			namespaceInfo.Name,
 			namespaceInfo.PartitionNum,
-			namespaceInfo.Replica, currentNodes)
+			namespaceInfo.Replica, oldParts, currentNodes, dp.balanceVer)
 		if err != nil {
 			isAllBalanced = false
 			continue
@@ -464,8 +527,17 @@ func (dp *DataPlacement) rebalanceNamespace(monitorChan chan struct{}) (bool, bo
 			coordErr := dp.pdCoord.removeNamespaceFromNode(&namespaceInfo, nid)
 			moved = true
 			if coordErr != nil {
+				cluster.CoordLog().Infof("namespace %v removing node: %v failed while balance",
+					namespaceInfo.GetDesp(), nid)
 				return moved, false
 			}
+			// Move only one node in a loop, we need wait the removing node be removed from raft group.
+			break
+		}
+		if len(namespaceInfo.Removings) > 0 {
+			// need wait moved node be removed from raft group
+			isAllBalanced = false
+			continue
 		}
 		expectLeader := partitionNodes[namespaceInfo.Partition][0]
 		if _, ok := namespaceInfo.Removings[expectLeader]; ok {
@@ -521,7 +593,8 @@ func (s SortableStrings) Swap(l, r int) {
 
 func getRebalancedNamespacePartitions(ns string,
 	partitionNum int, replica int,
-	currentNodes map[string]cluster.NodeInfo) ([][]string, *cluster.CoordErr) {
+	oldPartitionNodes [][]string,
+	currentNodes map[string]cluster.NodeInfo, balanceVer string) ([][]string, *cluster.CoordErr) {
 	if len(currentNodes) < replica {
 		return nil, ErrNodeUnavailable
 	}
@@ -535,6 +608,7 @@ func getRebalancedNamespacePartitions(ns string,
 	// start from the index of the current node array
 	// 4. for next partition, start from the next index of node array.
 	//  l -> leader, f-> follower
+	// 5. In this way, it may happend some nodes have the replicas more than average, we think it is ok if there are many partitions
 	//         nodeA   nodeB   nodeC   nodeD
 	// p1       l       f        f
 	// p2               l        f      f
@@ -560,16 +634,47 @@ func getRebalancedNamespacePartitions(ns string,
 	// p9       l       x        f     x-f
 	// p10     x-f      x       f-l     f
 
+	// if using the V2 balanced, we choose as below
+	// for each partition choose the leader and replicas one by one by, selecte the least leader/replica node for now
+	//         nodeA   nodeB   nodeC   nodeD
+	// p1       l       f        f
+	// p2       f       f               l
+	// p3       f                l      f
+	// p4               l        f      f
+	// p5       l       f        f
+	// p6       f       f               l
+	// p7       f                l      f
+	// p8               l        f      f
+	// p9       l       f        f
+	// p10      f       f               l
+
+	// after nodeB is down, the migration as bellow
+	// we keep old unchanged, and if the replica is on the failed node, we move leader or replica to the least leader/replica node
+	// and if this make the leader/replica unbalanced, we try move them by select the least node again.
+	//         nodeA   xxxx   nodeC   nodeD
+	// p1      l-f      x       f-l    x-f
+	// p2       f       x       x-f     l
+	// p3       f                l      f
+	// p4      x-l      x        f      f
+	// p5       l       x        f     x-f
+	// p6       f       x       x-f     l
+	// p7       f                l      f
+	// p8      x-l      x        f       f
+	// p9       l       x        f     x-f
+	// p10      f       x       x-f     l
+	// unbalanced, we continue balance leader
+
 	// if there are several data centers, we sort them one by one as below
 	// nodeA1@dc1 nodeA2@dc2 nodeA3@dc3 nodeB1@dc1 nodeB2@dc2 nodeB3@dc3
 
 	nodeNameList := getNodeNameList(currentNodes)
-	return getRebalancedPartitionsFromNameList(ns, partitionNum, replica, nodeNameList)
+	return getRebalancedPartitionsFromNameList(ns, partitionNum, replica, oldPartitionNodes, nodeNameList, balanceVer)
 }
 
 func getRebalancedPartitionsFromNameList(ns string,
 	partitionNum int, replica int,
-	nodeNameList []SortableStrings) ([][]string, *cluster.CoordErr) {
+	oldPartitionNodes [][]string,
+	nodeNameList []SortableStrings, balanceVer string) ([][]string, *cluster.CoordErr) {
 
 	var combined SortableStrings
 	sortedNodeNameList := make([]SortableStrings, 0, len(nodeNameList))
@@ -596,27 +701,320 @@ func getRebalancedPartitionsFromNameList(ns string,
 		sortedNodeNameList[idx%len(sortedNodeNameList)] = nList[1:]
 		idx++
 	}
+
+	if balanceVer == BalanceV2Str {
+		return fillPartitionMapV2(ns, partitionNum, replica, oldPartitionNodes, combined), nil
+	}
+	return fillPartitionMapV1(ns, partitionNum, replica, combined), nil
+}
+
+func fillPartitionMapV1(ns string,
+	partitionNum int, replica int,
+	sortedNodes SortableStrings) [][]string {
+
 	partitionNodes := make([][]string, partitionNum)
 	selectIndex := int(murmur3.Sum32([]byte(ns)))
 	for i := 0; i < partitionNum; i++ {
 		nlist := make([]string, replica)
 		partitionNodes[i] = nlist
 		for j := 0; j < replica; j++ {
-			nlist[j] = combined[(selectIndex+j)%len(combined)]
+			nlist[j] = sortedNodes[(selectIndex+j)%len(sortedNodes)]
 		}
 		selectIndex++
 	}
+	return partitionNodes
+	// maybe check if any node has too much replicas than average
+	// to avoid move data, we do not do balance here.(use v2 balance instead if need more balanced)
+	//
+}
 
-	return partitionNodes, nil
+type loadItem struct {
+	name        string
+	nameIndex   int
+	leaderPids  []int
+	replicaPids []int
+}
+
+func loadItemLeaderCmp(l interface{}, r interface{}) int {
+	li := l.(loadItem)
+	ri := r.(loadItem)
+	if len(li.leaderPids) == len(ri.leaderPids) && len(li.replicaPids) == len(ri.replicaPids) {
+		return utils.IntComparator(li.nameIndex, ri.nameIndex)
+	}
+	if len(li.leaderPids) == len(ri.leaderPids) {
+		return utils.IntComparator(len(li.replicaPids), len(ri.replicaPids))
+	}
+	return utils.IntComparator(len(li.leaderPids), len(ri.leaderPids))
+}
+
+func loadItemReplicaCmp(l interface{}, r interface{}) int {
+	li := l.(loadItem)
+	ri := r.(loadItem)
+	if len(li.replicaPids) == len(ri.replicaPids) {
+		return utils.IntComparator(li.nameIndex, ri.nameIndex)
+	}
+	return utils.IntComparator(len(li.replicaPids), len(ri.replicaPids))
+}
+
+func getMinMaxLoadForLeader(leaders map[string][]int, replicas map[string][]int, exclude []string, nameIndexMap map[string]int) (loadItem, loadItem) {
+	m := treemap.NewWith(loadItemLeaderCmp)
+	for name, lpids := range leaders {
+		ignore := false
+		for _, ex := range exclude {
+			if name == ex {
+				ignore = true
+				break
+			}
+		}
+		if ignore {
+			continue
+		}
+		rpids, _ := replicas[name]
+		m.Put(loadItem{
+			name:        name,
+			nameIndex:   nameIndexMap[name],
+			leaderPids:  lpids,
+			replicaPids: rpids,
+		}, name)
+	}
+	// Do we need copy the pid list for leader and replica?
+	mm, _ := m.Min()
+	min := mm.(loadItem)
+	mmax, _ := m.Max()
+	max := mmax.(loadItem)
+	return min, max
+}
+
+func getMinMaxLoadForReplica(replicas map[string][]int, exclude []string, nameIndexMap map[string]int) (loadItem, loadItem) {
+	m := treemap.NewWith(loadItemReplicaCmp)
+	for name, rpids := range replicas {
+		ignore := false
+		for _, ex := range exclude {
+			if name == ex {
+				ignore = true
+				break
+			}
+		}
+		if ignore {
+			continue
+		}
+		m.Put(loadItem{
+			name:        name,
+			nameIndex:   nameIndexMap[name],
+			replicaPids: rpids,
+		}, name)
+	}
+	min, _ := m.Min()
+	max, _ := m.Max()
+	return min.(loadItem), max.(loadItem)
+}
+
+func fillPartitionMapV2(ns string,
+	partitionNum int, replica int,
+	oldPartitionNodes [][]string,
+	sortedNodes SortableStrings) [][]string {
+
+	newNodesReplicaMap := make(map[string][]int)
+	newNodesLeaderMap := make(map[string][]int)
+	nameIndexMap := make(map[string]int, len(sortedNodes))
+	// hash namespace name to random the init chosen index, to avoid all namespace use the same init chosen index for sorted nodes
+	selectIndex := int(murmur3.Sum32([]byte(ns)))
+	for i, n := range sortedNodes {
+		nameIndexMap[n] = (i + selectIndex) % len(sortedNodes)
+		newNodesReplicaMap[n] = make([]int, 0)
+		newNodesLeaderMap[n] = make([]int, 0)
+	}
+	for pid, olist := range oldPartitionNodes {
+		for i, name := range olist {
+			if i == 0 {
+				pidlist, ok := newNodesLeaderMap[name]
+				if ok {
+					pidlist = append(pidlist, pid)
+					newNodesLeaderMap[name] = pidlist
+				}
+			}
+			pidlist, ok := newNodesReplicaMap[name]
+			if ok {
+				pidlist = append(pidlist, pid)
+				newNodesReplicaMap[name] = pidlist
+			}
+		}
+	}
+
+	partitionNodes := make([][]string, partitionNum)
+	// check and reuse the old first and if no old found, we choose the least load on current and update the load
+	for pid := 0; pid < partitionNum; pid++ {
+		var oldlist []string
+		if pid < len(oldPartitionNodes) {
+			oldlist = oldPartitionNodes[pid]
+		}
+		nlist := make([]string, replica)
+		partitionNodes[pid] = nlist
+		exclude := make([]string, 0)
+		exclude = append(exclude, oldlist...)
+		for j := 0; j < replica; j++ {
+			var old string
+			if len(oldlist) > j {
+				old = oldlist[j]
+			}
+			if j == 0 {
+				// check if old leader still alive for leader
+				_, ok := newNodesLeaderMap[old]
+				if ok {
+					nlist[j] = old
+					continue
+				}
+				nleader, _ := getMinMaxLoadForLeader(newNodesLeaderMap, newNodesReplicaMap, exclude, nameIndexMap)
+				newNodesLeaderMap[nleader.name] = append(nleader.leaderPids, pid)
+				newNodesReplicaMap[nleader.name] = append(nleader.replicaPids, pid)
+				nlist[j] = nleader.name
+				exclude = append(exclude, nlist[j])
+				continue
+			}
+			_, ok := newNodesReplicaMap[old]
+			if ok {
+				nlist[j] = old
+				continue
+			}
+			nreplica, _ := getMinMaxLoadForReplica(newNodesReplicaMap, exclude, nameIndexMap)
+			newNodesReplicaMap[nreplica.name] = append(nreplica.replicaPids, pid)
+			nlist[j] = nreplica.name
+			exclude = append(exclude, nlist[j])
+		}
+	}
+	// move if unbalanced
+	balanced := false
+	maxMoved := replica * partitionNum
+	for !balanced {
+		partitionNodes, balanced = moveIfUnbalanced(nameIndexMap, newNodesLeaderMap,
+			newNodesReplicaMap, partitionNodes)
+		maxMoved--
+		if maxMoved < 0 {
+			cluster.CoordLog().Warningf("balance moved too much times: %v", partitionNodes)
+			break
+		}
+	}
+	return partitionNodes
+}
+
+func findPidInList(pid int, l []int) bool {
+	for _, p := range l {
+		if p == pid {
+			return true
+		}
+	}
+	return false
+}
+
+func removePidFromList(pid int, l []int) []int {
+	nl := make([]int, 0, len(l)-1)
+	for _, p := range l {
+		if p == pid {
+			continue
+		}
+		nl = append(nl, p)
+	}
+	return nl
+}
+
+func replaceReplicaWith(replicas []string, oldR string, newR string) {
+	for i := 0; i < len(replicas); i++ {
+		if replicas[i] == oldR {
+			// move to min
+			replicas[i] = newR
+			break
+		}
+	}
+}
+
+// will only move once and return changed replica map and whether we already balanced.
+func moveIfUnbalanced(
+	nameIndexMap map[string]int,
+	newNodesLeaderMap map[string][]int,
+	newNodesReplicaMap map[string][]int,
+	partitionNodes [][]string) ([][]string, bool) {
+	min, max := getMinMaxLoadForLeader(newNodesLeaderMap, newNodesReplicaMap, nil, nameIndexMap)
+	balanced := true
+	if len(max.leaderPids)-len(min.leaderPids) <= 1 {
+		// leader is balanced
+	} else {
+		balanced = false
+		cluster.CoordLog().Infof("balance since too much leaders(max %v-min %v): %v, before move, replicas: %v", len(max.leaderPids),
+			len(min.leaderPids), newNodesLeaderMap, partitionNodes)
+		for _, pid := range max.leaderPids {
+			if findPidInList(pid, min.leaderPids) {
+				continue
+			}
+			if findPidInList(pid, min.replicaPids) {
+				// if have non-leader replica, we can just exchange the leader
+				cluster.CoordLog().Debugf("balance pid %v leaders, just exchange: %v %v", pid, max.name, min.name)
+				nlist := partitionNodes[pid]
+				for index, n := range nlist {
+					if n == min.name {
+						tmp := nlist[0]
+						nlist[0] = min.name
+						nlist[index] = tmp
+						break
+					}
+				}
+			} else {
+				replaceReplicaWith(partitionNodes[pid], max.name, min.name)
+				min.replicaPids = append(min.replicaPids, pid)
+				newNodesReplicaMap[min.name] = min.replicaPids
+				newNodesReplicaMap[max.name] = removePidFromList(pid, max.replicaPids)
+				cluster.CoordLog().Debugf("balance pid %v leaders, move: %v %v", pid, max.name, min.name)
+			}
+			min.leaderPids = append(min.leaderPids, pid)
+			newNodesLeaderMap[min.name] = min.leaderPids
+			newNodesLeaderMap[max.name] = removePidFromList(pid, max.leaderPids)
+			break
+		}
+		cluster.CoordLog().Infof("after moved(max %v-min %v), replicas: %v", len(max.leaderPids),
+			len(min.leaderPids), partitionNodes)
+		return partitionNodes, balanced
+	}
+
+	min, max = getMinMaxLoadForReplica(newNodesReplicaMap, nil, nameIndexMap)
+	// note, the leaderPids is empty since we do not care the load of leader while moving replicas
+	if len(max.replicaPids)-len(min.replicaPids) <= 1 {
+		// replica is balanced
+	} else {
+		balanced = false
+		cluster.CoordLog().Infof("balance since too much replicas(max %v-min %v): %v, before move, replicas: %v",
+			len(max.replicaPids), len(min.replicaPids), newNodesReplicaMap, partitionNodes)
+		for _, pid := range max.replicaPids {
+			if findPidInList(pid, min.replicaPids) {
+				continue
+			}
+			// do not move leader since we will check above
+			if findPidInList(pid, newNodesLeaderMap[max.name]) {
+				continue
+			}
+			cluster.CoordLog().Debugf("balance pid %v replicas, move: %v %v", pid, max.name, min.name)
+			replaceReplicaWith(partitionNodes[pid], max.name, min.name)
+			min.replicaPids = append(min.replicaPids, pid)
+			newNodesReplicaMap[min.name] = min.replicaPids
+			newNodesReplicaMap[max.name] = removePidFromList(pid, max.replicaPids)
+			break
+		}
+		cluster.CoordLog().Infof("after moved(max %v- min %v), replicas: %v", len(max.replicaPids),
+			len(min.replicaPids), partitionNodes)
+		return partitionNodes, balanced
+	}
+	return partitionNodes, balanced
 }
 
 func (dp *DataPlacement) decideUnwantedRaftNode(namespaceInfo *cluster.PartitionMetaInfo, currentNodes map[string]cluster.NodeInfo) string {
 	unwantedNode := ""
+	oldParts, coordErr := dp.getCurrentPartitionNodes(namespaceInfo.Name)
+	if coordErr != nil {
+		return unwantedNode
+	}
 	//remove the unwanted node in isr
 	partitionNodes, err := getRebalancedNamespacePartitions(
 		namespaceInfo.Name,
 		namespaceInfo.PartitionNum,
-		namespaceInfo.Replica, currentNodes)
+		namespaceInfo.Replica, oldParts, currentNodes, dp.balanceVer)
 	if err != nil {
 		return unwantedNode
 	}

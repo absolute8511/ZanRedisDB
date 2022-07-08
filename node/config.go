@@ -1,8 +1,8 @@
 package node
 
 import (
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 type NamespaceConfig struct {
@@ -18,17 +18,19 @@ type NamespaceConfig struct {
 	OptimizedFsync   bool            `json:"optimized_fsync"`
 	RaftGroupConf    RaftGroupConfig `json:"raft_group_conf"`
 	ExpirationPolicy string          `json:"expiration_policy"`
+	DataVersion      string          `json:"data_version"`
 }
 
 func NewNSConfig() *NamespaceConfig {
 	return &NamespaceConfig{
-		SnapCount:        400000,
-		SnapCatchup:      100000,
+		SnapCount:        common.DefaultSnapCount,
+		SnapCatchup:      common.DefaultSnapCatchup,
 		ExpirationPolicy: common.DefaultExpirationPolicy,
 	}
 }
 
 type NamespaceDynamicConf struct {
+	Replicator int
 }
 
 type RaftGroupConfig struct {
@@ -38,19 +40,24 @@ type RaftGroupConfig struct {
 
 type MachineConfig struct {
 	// server node id
-	NodeID              uint64                `json:"node_id"`
-	BroadcastAddr       string                `json:"broadcast_addr"`
-	HttpAPIPort         int                   `json:"http_api_port"`
-	LocalRaftAddr       string                `json:"local_raft_addr"`
-	DataRootDir         string                `json:"data_root_dir"`
-	ElectionTick        int                   `json:"election_tick"`
-	TickMs              int                   `json:"tick_ms"`
-	KeepWAL             int                   `json:"keep_wal"`
-	LearnerRole         string                `json:"learner_role"`
-	RemoteSyncCluster   string                `json:"remote_sync_cluster"`
-	StateMachineType    string                `json:"state_machine_type"`
-	RocksDBOpts         rockredis.RockOptions `json:"rocksdb_opts"`
-	RocksDBSharedConfig *rockredis.SharedRockConfig
+	NodeID                 uint64             `json:"node_id"`
+	BroadcastAddr          string             `json:"broadcast_addr"`
+	HttpAPIPort            int                `json:"http_api_port"`
+	LocalRaftAddr          string             `json:"local_raft_addr"`
+	DataRootDir            string             `json:"data_root_dir"`
+	ElectionTick           int                `json:"election_tick"`
+	TickMs                 int                `json:"tick_ms"`
+	KeepBackup             int                `json:"keep_backup"`
+	KeepWAL                int                `json:"keep_wal"`
+	UseRocksWAL            bool               `json:"use_rocks_wal"`
+	SharedRocksWAL         bool               `json:"shared_rocks_wal"`
+	LearnerRole            string             `json:"learner_role"`
+	RemoteSyncCluster      string             `json:"remote_sync_cluster"`
+	StateMachineType       string             `json:"state_machine_type"`
+	RocksDBOpts            engine.RockOptions `json:"rocksdb_opts"`
+	RocksDBSharedConfig    engine.SharedRockConfig
+	WALRocksDBOpts         engine.RockOptions `json:"wal_rocksdb_opts"`
+	WALRocksDBSharedConfig engine.SharedRockConfig
 }
 
 type ReplicaInfo struct {
@@ -70,12 +77,17 @@ type RaftConfig struct {
 	RaftAddr       string                 `json:"raft_addr"`
 	DataDir        string                 `json:"data_dir"`
 	WALDir         string                 `json:"wal_dir"`
-	KeepWAL        int                    `json:"keep_wal"`
 	SnapDir        string                 `json:"snap_dir"`
+	RaftStorageDir string                 `json:"raft_storage_dir"`
 	RaftPeers      map[uint64]ReplicaInfo `json:"raft_peers"`
 	SnapCount      int                    `json:"snap_count"`
 	SnapCatchup    int                    `json:"snap_catchup"`
-	Replicator     int                    `json:"replicator"`
+	Replicator     int32                  `json:"replicator"`
 	OptimizedFsync bool                   `json:"optimized_fsync"`
+	rockEng        engine.KVEngine
 	nodeConfig     *MachineConfig
+}
+
+func (rc *RaftConfig) SetEng(eng engine.KVEngine) {
+	rc.rockEng = eng
 }

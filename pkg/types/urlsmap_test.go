@@ -15,7 +15,7 @@
 package types
 
 import (
-	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
+	"github.com/youzan/ZanRedisDB/pkg/testutil"
 	"reflect"
 	"testing"
 )

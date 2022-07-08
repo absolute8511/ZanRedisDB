@@ -1,18 +1,21 @@
 package pdserver
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/cluster/pdnode_coord"
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/cluster/pdnode_coord"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
-var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("pdserver"))
+var sLog = common.NewLevelLogger(common.LOG_INFO, common.NewLogger())
 
 func SetLogger(level int32, logger common.Logger) {
 	sLog.SetLevel(level)
@@ -33,10 +36,11 @@ type Server struct {
 	tombstonePDNodes map[string]bool
 }
 
-func NewServer(conf *ServerConfig) *Server {
+func NewServer(conf *ServerConfig) (*Server, error) {
 	hname, err := os.Hostname()
 	if err != nil {
-		sLog.Fatal(err)
+		sLog.Error(err)
+		return nil, err
 	}
 
 	myNode := &cluster.NodeInfo{
@@ -47,7 +51,8 @@ func NewServer(conf *ServerConfig) *Server {
 	}
 
 	if conf.ClusterID == "" {
-		sLog.Fatalf("cluster id can not be empty")
+		sLog.Errorf("cluster id can not be empty")
+		return nil, errors.New("empty cluster id")
 	}
 	if conf.BroadcastInterface != "" {
 		myNode.NodeIP = common.GetIPv4ForInterfaceName(conf.BroadcastInterface)
@@ -58,8 +63,9 @@ func NewServer(conf *ServerConfig) *Server {
 		conf.BroadcastAddr = myNode.NodeIP
 	}
 	if myNode.NodeIP == "0.0.0.0" || myNode.NodeIP == "" {
-		sLog.Errorf("can not decide the broadcast ip: %v", myNode.NodeIP)
-		os.Exit(1)
+		err := fmt.Errorf("can not decide the broadcast ip: %v , %v", myNode.NodeIP, conf.BroadcastInterface)
+		sLog.Errorf(err.Error())
+		return nil, err
 	}
 	_, myNode.HttpPort, _ = net.SplitHostPort(conf.HTTPAddress)
 	if conf.ReverseProxyPort != "" {
@@ -71,16 +77,18 @@ func NewServer(conf *ServerConfig) *Server {
 	clusterOpts := &cluster.Options{}
 	clusterOpts.DataDir = conf.DataDir
 	clusterOpts.AutoBalanceAndMigrate = conf.AutoBalanceAndMigrate
+	clusterOpts.FilterNamespaces = conf.FilterNamespaces
+	clusterOpts.BalanceVer = conf.BalanceVer
 	if len(conf.BalanceInterval) == 2 {
 		clusterOpts.BalanceStart, err = strconv.Atoi(conf.BalanceInterval[0])
 		if err != nil {
 			sLog.Errorf("invalid balance interval: %v", err)
-			os.Exit(1)
+			return nil, err
 		}
 		clusterOpts.BalanceEnd, err = strconv.Atoi(conf.BalanceInterval[1])
 		if err != nil {
 			sLog.Errorf("invalid balance interval: %v", err)
-			os.Exit(1)
+			return nil, err
 		}
 	}
 	s := &Server{
@@ -90,10 +98,23 @@ func NewServer(conf *ServerConfig) *Server {
 		tombstonePDNodes: make(map[string]bool),
 	}
 
-	r := cluster.NewPDEtcdRegister(conf.ClusterLeadershipAddresses)
+	r, err := cluster.NewPDEtcdRegister(conf.ClusterLeadershipAddresses)
+	if err != nil {
+		sLog.Errorf("failed to init register: %v", err)
+		return nil, err
+	}
 	s.pdCoord.SetRegister(r)
 
-	return s
+	metricAddr := conf.MetricAddress
+	if metricAddr == "" {
+		metricAddr = ":8800"
+	}
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		http.ListenAndServe(metricAddr, mux)
+	}()
+	return s, nil
 }
 
 func (s *Server) Stop() {

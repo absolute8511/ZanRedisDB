@@ -5,7 +5,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/cluster"
+)
+
+const (
+	pdRegisterKVLearnerStartPrefix = "placedriver:learner:need_start_learner:"
 )
 
 func (pdCoord *PDCoordinator) checkNamespacesForLearner(monitorChan chan struct{}) {
@@ -28,11 +32,72 @@ func (pdCoord *PDCoordinator) checkNamespacesForLearner(monitorChan chan struct{
 	}
 }
 
+func (pdCoord *PDCoordinator) cleanAllLearners(ns string) error {
+	oldMeta, err := pdCoord.register.GetNamespaceMetaInfo(ns)
+	if err != nil {
+		cluster.CoordLog().Infof("get namespace key %v failed :%v", ns, err)
+		return err
+	}
+	for i := 0; i < oldMeta.PartitionNum; i++ {
+		origNSInfo, err := pdCoord.register.GetNamespacePartInfo(ns, i)
+		if err != nil {
+			cluster.CoordLog().Infof("get namespace %v info failed :%v", ns, err)
+			continue
+		}
+		err = pdCoord.removeNsAllLearners(origNSInfo)
+		if err != nil {
+			cluster.CoordLog().Infof("namespace %v-%v remove learner failed :%v", ns, i, err.Error())
+			return err
+		}
+	}
+	return nil
+}
+
+// use this to switch start or stop learner without restart the node
+func (pdCoord *PDCoordinator) SwitchStartLearner(enable bool) error {
+	if pdCoord.learnerRole == "" {
+		return nil
+	}
+	value := "false"
+	if enable {
+		value = "true"
+	}
+	return pdCoord.register.SaveKV(pdRegisterKVLearnerStartPrefix+pdCoord.learnerRole, value)
+}
+
+func (pdCoord *PDCoordinator) GetLearnerRunningState() (bool, error) {
+	v, err := pdCoord.register.GetKV(pdRegisterKVLearnerStartPrefix + pdCoord.learnerRole)
+	// we use not equal false to make sure the false running is always determined
+	return v != "false", err
+}
+
 func (pdCoord *PDCoordinator) doCheckNamespacesForLearner(monitorChan chan struct{}) {
+	needLearner, err := pdCoord.register.GetKV(pdRegisterKVLearnerStartPrefix + pdCoord.learnerRole)
+	if err != nil {
+		cluster.CoordLog().Infof("learner start state (should be one of true/false) read error: %v", err.Error())
+		return
+	}
 	namespaces := []cluster.PartitionMetaInfo{}
 	allNamespaces, _, commonErr := pdCoord.register.GetAllNamespaces()
 	if commonErr != nil {
 		cluster.CoordLog().Infof("scan namespaces failed. %v", commonErr)
+		return
+	}
+	if needLearner == "false" {
+		// remove learners from meta info
+		// to make sure the learner node is stopped, you should
+		// query the api on the learner node.
+		for ns, _ := range allNamespaces {
+			err = pdCoord.cleanAllLearners(ns)
+			if err != nil {
+				cluster.CoordLog().Infof("clean namespace %s learner failed. %v", ns, err.Error())
+				return
+			}
+		}
+		return
+	}
+	if needLearner != "true" {
+		cluster.CoordLog().Infof("unexpected learner start state (should be one of true/false) : %v", needLearner)
 		return
 	}
 	for _, parts := range allNamespaces {
@@ -66,6 +131,13 @@ func (pdCoord *PDCoordinator) doCheckNamespacesForLearner(monitorChan chan struc
 
 		if len(nsInfo.GetISR()) <= nsInfo.Replica/2 {
 			// wait enough isr for leader election before we add learner
+			continue
+		}
+		// filter some namespace
+		if _, ok := pdCoord.filterNamespaces[nsInfo.Name]; ok {
+			// need clean learner for old configure (new configure add new filter namespace after
+			// old learner already added)
+			pdCoord.removeNsAllLearners(&nsInfo)
 			continue
 		}
 		// check current learner node alive
@@ -161,22 +233,27 @@ func (pdCoord *PDCoordinator) addNsLearnerToNode(origNSInfo *cluster.PartitionMe
 }
 
 // remove learner should be manual since learner is not expected to change too often
-func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid string) error {
+func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid string, checkNode bool) error {
 	origNSInfo, err := pdCoord.register.GetNamespacePartInfo(ns, pid)
 	if err != nil {
 		return err
 	}
 
 	nsInfo := origNSInfo.GetCopy()
-	currentNodes, _ := pdCoord.getCurrentLearnerNodes()
-	if _, ok := currentNodes[nid]; ok {
-		cluster.CoordLog().Infof("namespace %v: mark learner node %v removing before stopped", nsInfo.GetDesp(), nid)
-		return errors.New("removing learner node should be stopped first")
+	if checkNode {
+		currentNodes, _ := pdCoord.getCurrentLearnerNodes()
+		if _, ok := currentNodes[nid]; ok {
+			cluster.CoordLog().Infof("namespace %v: mark learner node %v removing before stopped", nsInfo.GetDesp(), nid)
+			return errors.New("removing learner node should be stopped first")
+		}
 	}
 	role := pdCoord.learnerRole
 	cluster.CoordLog().Infof("namespace %v: mark learner role %v node %v removing , current : %v", nsInfo.GetDesp(), role, nid,
 		nsInfo.LearnerNodes)
 
+	if nsInfo.LearnerNodes == nil {
+		nsInfo.LearnerNodes = make(map[string][]string)
+	}
 	old := nsInfo.LearnerNodes[role]
 	newLrns := make([]string, 0, len(old))
 	for _, oid := range old {
@@ -187,9 +264,6 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 	}
 	if len(old) == len(newLrns) {
 		return errors.New("remove node id is not in learners")
-	}
-	if nsInfo.LearnerNodes == nil {
-		nsInfo.LearnerNodes = make(map[string][]string)
 	}
 	nsInfo.LearnerNodes[role] = newLrns
 	delete(nsInfo.RaftIDs, nid)
@@ -202,6 +276,36 @@ func (pdCoord *PDCoordinator) removeNsLearnerFromNode(ns string, pid int, nid st
 	} else {
 		cluster.CoordLog().Infof("namespace %v: mark learner role %v removing from node:%v done", nsInfo.GetDesp(),
 			role, nid)
+		*origNSInfo = *nsInfo
+	}
+	return nil
+}
+
+func (pdCoord *PDCoordinator) removeNsAllLearners(origNSInfo *cluster.PartitionMetaInfo) error {
+	nsInfo := origNSInfo.GetCopy()
+	role := pdCoord.learnerRole
+	if nsInfo.LearnerNodes == nil {
+		nsInfo.LearnerNodes = make(map[string][]string)
+	}
+	old := nsInfo.LearnerNodes[role]
+	if len(old) == 0 {
+		return nil
+	}
+	cluster.CoordLog().Infof("namespace %v: removing all learner role %v nodes %v",
+		nsInfo.GetDesp(), role, old)
+	for _, nid := range old {
+		delete(nsInfo.RaftIDs, nid)
+	}
+	nsInfo.LearnerNodes[role] = make([]string, 0)
+
+	err := pdCoord.register.UpdateNamespacePartReplicaInfo(nsInfo.Name, nsInfo.Partition,
+		&nsInfo.PartitionReplicaInfo, nsInfo.PartitionReplicaInfo.Epoch())
+	if err != nil {
+		cluster.CoordLog().Infof("update namespace %v replica info failed: %v", nsInfo.GetDesp(), err.Error())
+		return err
+	} else {
+		cluster.CoordLog().Infof("namespace %v: removed all learner role %v node:%v", nsInfo.GetDesp(),
+			role, old)
 		*origNSInfo = *nsInfo
 	}
 	return nil

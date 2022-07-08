@@ -16,6 +16,7 @@ package wait
 
 import (
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -25,20 +26,17 @@ func TestWait(t *testing.T) {
 	wt := New()
 	ch := wt.Register(eid)
 	wt.Trigger(eid, "foo")
-	v := <-ch
+	<-ch.WaitC()
+	v := ch.GetResult()
 	if g, w := fmt.Sprintf("%v (%T)", v, v), "foo (string)"; g != w {
 		t.Errorf("<-ch = %v, want %v", g, w)
-	}
-
-	if g := <-ch; g != nil {
-		t.Errorf("unexpected non-nil value: %v (%T)", g, g)
 	}
 }
 
 func TestRegisterDupPanic(t *testing.T) {
 	const eid = 1
 	wt := New()
-	ch1 := wt.Register(eid)
+	ch1 := wt.Register(eid).WaitC()
 
 	panicC := make(chan struct{}, 1)
 
@@ -64,18 +62,16 @@ func TestRegisterDupPanic(t *testing.T) {
 func TestTriggerDupSuppression(t *testing.T) {
 	const eid = 1
 	wt := New()
-	ch := wt.Register(eid)
+	wr := wt.Register(eid)
 	wt.Trigger(eid, "foo")
 	wt.Trigger(eid, "bar")
 
-	v := <-ch
+	<-wr.WaitC()
+	v := wr.GetResult()
 	if g, w := fmt.Sprintf("%v (%T)", v, v), "foo (string)"; g != w {
 		t.Errorf("<-ch = %v, want %v", g, w)
 	}
 
-	if g := <-ch; g != nil {
-		t.Errorf("unexpected non-nil value: %v (%T)", g, g)
-	}
 }
 
 func TestIsRegistered(t *testing.T) {
@@ -99,4 +95,41 @@ func TestIsRegistered(t *testing.T) {
 	if wt.IsRegistered(0) {
 		t.Errorf("event ID 0 is already triggered, shouldn't be registered")
 	}
+}
+
+func BenchmarkWaitRegister(b *testing.B) {
+	wt := New()
+
+	id := uint64(0)
+	b.SetParallelism(3)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			rid := atomic.AddUint64(&id, 1)
+			w := wt.Register(rid)
+			wt.IsRegistered(rid)
+			wt.Trigger(rid, rid)
+			<-w.WaitC()
+			w.GetResult()
+			wt.IsRegistered(rid)
+		}
+	})
+}
+
+func BenchmarkWaitRegisterWithChan(b *testing.B) {
+	wt := New()
+
+	id := uint64(0)
+	b.SetParallelism(3)
+	b.RunParallel(func(pb *testing.PB) {
+		done := make(chan struct{}, 1)
+		for pb.Next() {
+			rid := atomic.AddUint64(&id, 1)
+			w := wt.RegisterWithC(rid, done)
+			wt.IsRegistered(rid)
+			wt.Trigger(rid, rid)
+			<-w.WaitC()
+			w.GetResult()
+			wt.IsRegistered(rid)
+		}
+	})
 }

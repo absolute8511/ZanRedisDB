@@ -7,9 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var (
@@ -17,6 +16,7 @@ var (
 	costStatsLevel    int32
 )
 
+// TODO: maybe provide reusable memory buffer for req and response
 func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -46,13 +46,12 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 	case "ping":
 		conn.WriteString("PONG")
 	case "auth":
-		// TODO: add auth here
 		conn.WriteString("OK")
 	case "quit":
 		conn.WriteString("OK")
 		conn.Close()
 	case "info":
-		s := s.GetStats(false)
+		s := s.GetStats(false, false)
 		d, _ := json.MarshalIndent(s, "", " ")
 		conn.WriteBulkString(string(d))
 	default:
@@ -64,8 +63,12 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 			if level > 0 {
 				start = time.Now()
 			}
-			isWrite, h, cmd, err := s.GetHandler(cmdName, cmd)
 			cmdStr := string(cmd.Args[0])
+			ns, pk, pkSum, err := GetPKAndHashSum(cmdName, cmd)
+			if err != nil {
+				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
+				break
+			}
 			if len(cmd.Args) > 1 {
 				cmdStr += ", " + string(cmd.Args[1])
 				if level > 4 && len(cmd.Args) > 2 {
@@ -74,13 +77,11 @@ func (s *Server) serverRedis(conn redcon.Conn, cmd redcon.Command) {
 					}
 				}
 			}
+			kvn, err := s.GetHandleNode(ns, pk, pkSum, cmdName, cmd)
 			if err == nil {
-				if isWrite && node.IsSyncerOnly() {
-					conn.WriteError("The cluster is only allowing syncer write : ERR handle command " + cmdStr)
-				} else {
-					h(conn, cmd)
-				}
-			} else {
+				err = s.handleRedisSingleCmd(cmdName, pk, pkSum, kvn, conn, cmd)
+			}
+			if err != nil {
 				conn.WriteError(err.Error() + " : ERR handle command " + cmdStr)
 			}
 			if level > 0 && err == nil {
@@ -111,6 +112,7 @@ func (s *Server) serveRedisAPI(port int, stopC <-chan struct{}) {
 			}
 		},
 	)
+	redisS.SetIdleClose(time.Minute * 5)
 	go func() {
 		err := redisS.ListenAndServe()
 		if err != nil {

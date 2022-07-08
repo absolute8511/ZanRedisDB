@@ -2,33 +2,83 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/youzan/ZanRedisDB/metric"
+	"github.com/youzan/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/slow"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
 	"github.com/julienschmidt/httprouter"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/transport/rafthttp"
 )
 
 var allowStaleRead int32
 
+type RaftProgress struct {
+	Match uint64 `json:"match"`
+	Next  uint64 `json:"next"`
+	State string `json:"state"`
+}
+
+// raft status in raft can not marshal/unmarshal correctly, we redefine it
+type CustomRaftStatus struct {
+	ID             uint64                  `json:"id,omitempty"`
+	Term           uint64                  `json:"term,omitempty"`
+	Vote           uint64                  `json:"vote"`
+	Commit         uint64                  `json:"commit"`
+	Lead           uint64                  `json:"lead"`
+	RaftState      string                  `json:"raft_state"`
+	Applied        uint64                  `json:"applied"`
+	Progress       map[uint64]RaftProgress `json:"progress,omitempty"`
+	LeadTransferee uint64                  `json:"lead_transferee"`
+}
+
+func (crs *CustomRaftStatus) Init(s raft.Status) {
+	crs.ID = s.ID
+	crs.Term = s.Term
+	crs.Vote = s.Vote
+	crs.Commit = s.Commit
+	crs.Lead = s.Lead
+	crs.RaftState = s.RaftState.String()
+	crs.Applied = s.Applied
+	crs.Progress = make(map[uint64]RaftProgress, len(s.Progress))
+	for i, pr := range s.Progress {
+		var cpr RaftProgress
+		cpr.Match = pr.Match
+		cpr.Next = pr.Next
+		cpr.State = pr.State.String()
+		crs.Progress[i] = cpr
+	}
+	crs.LeadTransferee = s.LeadTransferee
+}
+
 type RaftStatus struct {
-	LeaderInfo *common.MemberInfo
-	Members    []*common.MemberInfo
-	Learners   []*common.MemberInfo
-	RaftStat   raft.Status
+	LeaderInfo *common.MemberInfo   `json:"leader_info,omitempty"`
+	Members    []*common.MemberInfo `json:"members,omitempty"`
+	Learners   []*common.MemberInfo `json:"learners,omitempty"`
+	RaftStat   CustomRaftStatus     `json:"raft_stat,omitempty"`
+}
+
+func toBoolParam(param string) bool {
+	if param == "true" {
+		return true
+	}
+	return false
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -55,15 +105,84 @@ func (s *Server) getKey(w http.ResponseWriter, req *http.Request, ps httprouter.
 	}
 }
 
-func (s *Server) doOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doOptimizeTable(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	ns := ps.ByName("namespace")
 	table := ps.ByName("table")
-	s.OptimizeDB(ns, table)
+	s.nsMgr.OptimizeDB(ns, table)
+	return nil, nil
+}
+
+func (s *Server) doOptimizeNS(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.OptimizeDB(ns, "")
+	return nil, nil
+}
+
+func (s *Server) doOptimizeExpire(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.OptimizeDBExpire(ns)
+	return nil, nil
+}
+
+func (s *Server) doOptimizeAnyRange(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	sLog.Infof("got compact range: %v from remote: %v", string(data), req.RemoteAddr)
+	var anyRange node.CompactAPIRange
+	err = json.Unmarshal(data, &anyRange)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
+	}
+	if len(anyRange.StartFrom) == 0 && len(anyRange.EndTo) == 0 {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "compact range can not be both empty"}
+	}
+	s.nsMgr.OptimizeDBAnyRange(ns, anyRange)
+	return nil, nil
+}
+
+func (s *Server) doBackup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.BackupDB(ns, false)
+	return nil, nil
+}
+
+func (s *Server) doBackupAll(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	s.nsMgr.BackupDB("", false)
 	return nil, nil
 }
 
 func (s *Server) doOptimizeAll(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	s.OptimizeDB("", "")
+	s.nsMgr.OptimizeDB("", "")
+	return nil, nil
+}
+
+func (s *Server) disableOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	s.nsMgr.DisableOptimizeDB(true)
+	return nil, nil
+}
+func (s *Server) enableOptimize(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	s.nsMgr.DisableOptimizeDB(false)
+	return nil, nil
+}
+
+func (s *Server) doEnableTopn(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.EnableTopn(ns, true)
+	return nil, nil
+}
+
+func (s *Server) doDisableTopn(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.EnableTopn(ns, false)
+	return nil, nil
+}
+
+func (s *Server) doClearTopn(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	ns := ps.ByName("namespace")
+	s.nsMgr.ClearTopn(ns)
 	return nil, nil
 }
 
@@ -283,6 +402,23 @@ func (s *Server) pingHandler(w http.ResponseWriter, req *http.Request, ps httpro
 	return "OK", nil
 }
 
+func (s *Server) doChangeSlowLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	levelStr := reqParams.Get("loglevel")
+	if levelStr == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG_LEVEL"}
+	}
+	level, err := strconv.Atoi(levelStr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_LEVEL_STRING"}
+	}
+	slow.ChangeSlowLogLevel(level)
+	return nil, nil
+}
+
 func (s *Server) doSetLogLevel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -337,6 +473,26 @@ func (s *Server) doSetCostLevel(w http.ResponseWriter, req *http.Request, ps htt
 	return nil, nil
 }
 
+func (s *Server) doSetRsyncLimit(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	limitStr := reqParams.Get("limit")
+	if limitStr == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_ARG_STRING"}
+	}
+	if limit <= 0 {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "BAD_ARG_STRING"}
+	}
+	common.SetRsyncLimit(int64(limit))
+	return nil, nil
+}
+
 func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -354,6 +510,49 @@ func (s *Server) doSetStaleRead(w http.ResponseWriter, req *http.Request, ps htt
 	return nil, nil
 }
 
+func (s *Server) getSyncerRunnings(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	if s.dataCoord == nil {
+		return nil, nil
+	}
+	runnings, err := s.dataCoord.GetCurrentNsWithLearners()
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	return struct {
+		Runnings []string `json:"runnings"`
+	}{
+		Runnings: runnings,
+	}, nil
+}
+
+func (s *Server) getSyncerNormalInit(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	return node.IsSyncerNormalInit(), nil
+}
+
+func (s *Server) doSetSyncerNormalInit(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	param := reqParams.Get("enable")
+	if param == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	}
+	boolParam := toBoolParam(param)
+	sLog.Infof("syncer normal init state changed to : %v", param)
+	err = s.updateSyncerNormalInitToRegister(boolParam)
+	if err != nil {
+		sLog.Warningf("failed to set state: %v", err.Error())
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	node.SetSyncerNormalInit(boolParam)
+	return nil, nil
+}
+
+func (s *Server) getSyncerOnlyState(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	return node.IsSyncerOnly(), nil
+}
+
 func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
@@ -363,10 +562,100 @@ func (s *Server) doSetSyncerOnly(w http.ResponseWriter, req *http.Request, ps ht
 	if param == "" {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
 	}
-	if param == "true" {
-		node.SetSyncerOnly(true)
+	boolParam := toBoolParam(param)
+	sLog.Infof("syncer only state changed to : %v", param)
+	err = s.updateSyncerWriteOnlyToRegister(boolParam)
+	if err != nil {
+		sLog.Warningf("failed to set syncer only state: %v", err.Error())
+		return nil, common.HttpErr{Code: http.StatusInternalServerError, Text: err.Error()}
+	}
+	node.SetSyncerOnly(boolParam)
+	return nil, nil
+}
+
+func (s *Server) doSwitchDisableConflictLog(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	param := reqParams.Get("disable")
+	if param == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "MISSING_ARG"}
+	}
+	boolParam := toBoolParam(param)
+	sLog.Infof("disable log conflict state changed to : %v", param)
+	node.SwitchDisableMaybeConflictLog(boolParam)
+	return nil, nil
+}
+
+func (s *Server) doSetDynamicConf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	paramT := reqParams.Get("type")
+	paramKey := reqParams.Get("key")
+	paramV := reqParams.Get("value")
+	if paramT == "int" {
+		n, err := strconv.Atoi(paramV)
+		if err != nil {
+			return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG"}
+		}
+		common.SetIntDynamicConf(paramKey, n)
+	} else if paramT == "str" {
+		common.SetStrDynamicConf(paramKey, paramV)
 	} else {
-		node.SetSyncerOnly(false)
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG: param type should be int/str"}
+	}
+	sLog.Infof("conf %v changed to : %v", paramKey, paramV)
+	return nil, nil
+}
+
+func (s *Server) doGetDynamicConf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	paramT := reqParams.Get("type")
+	paramKey := reqParams.Get("key")
+	if paramT == "int" {
+		v := common.GetIntDynamicConf(paramKey)
+		return struct {
+			Key   string `json:"key"`
+			Value int    `json:"value"`
+		}{
+			Key:   paramKey,
+			Value: v,
+		}, nil
+	} else if paramT == "str" {
+		v := common.GetStrDynamicConf(paramKey)
+		return struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}{
+			Key:   paramKey,
+			Value: v,
+		}, nil
+	} else {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG: param type should be int/str"}
+	}
+	return nil, nil
+}
+
+func (s *Server) doSetDBOptions(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	paramKey := reqParams.Get("key")
+	paramV := reqParams.Get("value")
+	if paramKey == "" || paramV == "" {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_ARG: option key empty"}
+	}
+	sLog.Infof("try set db option %v to : %v", paramKey, paramV)
+	err = s.nsMgr.SetDBOptions(paramKey, paramV)
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
 	return nil, nil
 }
@@ -380,7 +669,7 @@ func (s *Server) doSetSyncerIndex(w http.ResponseWriter, req *http.Request, ps h
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
 	}
-	var ss []common.LogSyncStats
+	var ss []metric.LogSyncStats
 	err = json.Unmarshal(data, &ss)
 	if err != nil {
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: err.Error()}
@@ -425,6 +714,8 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
 	ns := reqParams.Get("namespace")
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
 	nsList := s.nsMgr.GetNamespaces()
 	rstat := make([]*RaftStatus, 0)
 	for name, nsNode := range nsList {
@@ -434,11 +725,15 @@ func (s *Server) doRaftStats(w http.ResponseWriter, req *http.Request, ps httpro
 		if !nsNode.IsReady() {
 			continue
 		}
+		if leaderOnly && !nsNode.Node.IsLead() {
+			continue
+		}
 		var s RaftStatus
 		s.LeaderInfo = nsNode.Node.GetLeadMember()
 		s.Members = nsNode.Node.GetMembers()
 		s.Learners = nsNode.Node.GetLearners()
-		s.RaftStat = nsNode.Node.GetRaftStatus()
+		rs := nsNode.Node.GetRaftStatus()
+		s.RaftStat.Init(rs)
 		rstat = append(rstat, &s)
 	}
 	return rstat, nil
@@ -455,7 +750,12 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	if leaderOnlyStr == "" {
 		leaderOnly = true
 	}
-	ss := s.GetStats(leaderOnly)
+	detailStr := reqParams.Get("table_detail")
+	detail, _ := strconv.ParseBool(detailStr)
+	if detailStr == "" {
+		detail = false
+	}
+	ss := s.GetStats(leaderOnly, detail)
 
 	startTime := s.startTime
 	uptime := time.Since(startTime)
@@ -463,20 +763,78 @@ func (s *Server) doStats(w http.ResponseWriter, req *http.Request, ps httprouter
 	return struct {
 		Version string             `json:"version"`
 		UpTime  int64              `json:"up_time"`
-		Stats   common.ServerStats `json:"stats"`
+		Stats   metric.ServerStats `json:"stats"`
 	}{common.VerBinary, int64(uptime.Seconds()), ss}, nil
 }
 
+func (s *Server) doTableStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
+	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
+	table := reqParams.Get("table")
+	if len(table) == 0 {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST: table is needed"}
+	}
+	ss := s.GetTableStats(leaderOnly, table)
+
+	return struct {
+		TableStats map[string]metric.TableStats `json:"table_stats"`
+	}{ss}, nil
+}
+
 func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	if s.conf.LearnerRole == common.LearnerRoleLogSyncer {
+	if common.IsRoleLogSyncer(s.conf.LearnerRole) {
+		allUrls := make(map[string]bool)
 		recvLatency, syncLatency := node.GetLogLatencyStats()
 		recvStats, syncStats := s.GetLogSyncStatsInSyncLearner()
+		// note: it may happen one namespace is still waiting init, so
+		// this uninit namespace sync stats may be ignored in any stats.
+		for _, stat := range recvStats {
+			ninfos, err := s.dataCoord.GetSnapshotSyncInfo(stat.Name)
+			if err != nil {
+				sLog.Infof("failed to get %v nodes info - %s", stat.Name, err)
+				continue
+			}
+			for _, n := range ninfos {
+				uri := fmt.Sprintf("http://%s:%s/raft/stats?leader_only=true",
+					n.RemoteAddr, n.HttpAPIPort)
+				allUrls[uri] = true
+			}
+		}
+		allRaftStats := make(map[string]CustomRaftStatus)
+		for uri, _ := range allUrls {
+			rstat := make([]*RaftStatus, 0)
+			sc, err := common.APIRequest("GET", uri, nil, time.Second*3, &rstat)
+			if err != nil {
+				sLog.Infof("request %v error: %v", uri, err)
+				continue
+			}
+			if sc != http.StatusOK {
+				sLog.Infof("request %v error: %v", uri, sc)
+				continue
+			}
+
+			for _, rs := range rstat {
+				if rs.LeaderInfo != nil && rs.RaftStat.RaftState == raft.StateLeader.String() {
+					allRaftStats[rs.LeaderInfo.GroupName] = rs.RaftStat
+				}
+			}
+		}
+		// get leader raft log stats
 		return struct {
-			SyncRecvLatency *common.WriteStats    `json:"sync_net_latency"`
-			SyncAllLatency  *common.WriteStats    `json:"sync_all_latency"`
-			LogReceived     []common.LogSyncStats `json:"log_received,omitempty"`
-			LogSynced       []common.LogSyncStats `json:"log_synced,omitempty"`
-		}{recvLatency, syncLatency, recvStats, syncStats}, nil
+			SyncRecvLatency *metric.WriteStats          `json:"sync_net_latency"`
+			SyncAllLatency  *metric.WriteStats          `json:"sync_all_latency"`
+			LogReceived     []metric.LogSyncStats       `json:"log_received,omitempty"`
+			LogSynced       []metric.LogSyncStats       `json:"log_synced,omitempty"`
+			LeaderRaftStats map[string]CustomRaftStatus `json:"leader_raft_stats,omitempty"`
+		}{recvLatency, syncLatency, recvStats, syncStats, allRaftStats}, nil
 	}
 	netStat := syncClusterNetStats.Copy()
 	totalStat := syncClusterTotalStats.Copy()
@@ -493,9 +851,9 @@ func (s *Server) doLogSyncStats(w http.ResponseWriter, req *http.Request, ps htt
 	}
 	logSyncedStats := s.GetLogSyncStats(leaderOnly, reqParams.Get("cluster"))
 	return struct {
-		SyncNetLatency *common.WriteStats    `json:"sync_net_latency"`
-		SyncAllLatency *common.WriteStats    `json:"sync_all_latency"`
-		LogSynced      []common.LogSyncStats `json:"log_synced,omitempty"`
+		SyncNetLatency *metric.WriteStats    `json:"sync_net_latency"`
+		SyncAllLatency *metric.WriteStats    `json:"sync_all_latency"`
+		LogSynced      []metric.LogSyncStats `json:"log_synced,omitempty"`
 	}{netStat, totalStat, logSyncedStats}, nil
 }
 
@@ -515,19 +873,37 @@ func (s *Server) doDBStats(w http.ResponseWriter, req *http.Request, ps httprout
 	return ss, nil
 }
 
-func (s *Server) doDBPerf(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+func (s *Server) doWALDBStats(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := url.ParseQuery(req.URL.RawQuery)
 	if err != nil {
+		sLog.Infof("failed to parse request params - %s", err)
 		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
 	}
-	levelStr := reqParams.Get("level")
-	level, err := strconv.Atoi(levelStr)
-	if err != nil {
-		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: "INVALID_REQUEST"}
-	}
+	leaderOnlyStr := reqParams.Get("leader_only")
+	leaderOnly, _ := strconv.ParseBool(leaderOnlyStr)
 
-	node.SetPerfLevel(level)
-	sLog.Infof("perf level set to: %v", level)
+	if leaderOnlyStr == "" {
+		leaderOnly = true
+	}
+	ss := s.GetWALDBStats(leaderOnly)
+	return ss, nil
+}
+
+func setBlockRateHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	rate, err := strconv.Atoi(req.FormValue("rate"))
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: fmt.Sprintf("invalid block rate : %s", err.Error())}
+	}
+	runtime.SetBlockProfileRate(rate)
+	return nil, nil
+}
+
+func setMutexProfileHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	rate, err := strconv.Atoi(req.FormValue("rate"))
+	if err != nil {
+		return nil, common.HttpErr{Code: http.StatusBadRequest, Text: fmt.Sprintf("invalid block rate : %s", err.Error())}
+	}
+	runtime.SetMutexProfileFraction(rate)
 	return nil, nil
 }
 
@@ -542,8 +918,15 @@ func (s *Server) initHttpHandler() {
 	router.Handle("GET", common.APICheckBackup+"/:namespace", common.Decorate(s.checkNodeBackup, log, common.V1))
 	router.Handle("GET", common.APIIsRaftSynced+"/:namespace", common.Decorate(s.isNsNodeFullReady, common.V1))
 	router.Handle("GET", "/kv/get/:namespace", common.Decorate(s.getKey, common.PlainText))
-	router.Handle("POST", "/kv/optimize/:namespace/:table", common.Decorate(s.doOptimize, log, common.V1))
+	router.Handle("POST", "/kv/optimize/:namespace/:table", common.Decorate(s.doOptimizeTable, log, common.V1))
+	router.Handle("POST", "/kv/optimize/:namespace", common.Decorate(s.doOptimizeNS, log, common.V1))
+	router.Handle("POST", "/kv/optimize_expire/:namespace", common.Decorate(s.doOptimizeExpire, log, common.V1))
 	router.Handle("POST", "/kv/optimize", common.Decorate(s.doOptimizeAll, log, common.V1))
+	router.Handle("POST", "/kv/optimize_anyrange/:namespace", common.Decorate(s.doOptimizeAnyRange, log, common.V1))
+	router.Handle("POST", "/kv/disable_optimize", common.Decorate(s.disableOptimize, log, common.V1))
+	router.Handle("POST", "/kv/enable_optimize", common.Decorate(s.enableOptimize, log, common.V1))
+	router.Handle("POST", "/kv/backup/:namespace", common.Decorate(s.doBackup, log, common.V1))
+	router.Handle("POST", "/kv/backup/", common.Decorate(s.doBackupAll, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forcenew/:namespace", common.Decorate(s.doForceNewCluster, log, common.V1))
 	router.Handle("POST", "/cluster/raft/forceclean/:namespace", common.Decorate(s.doForceCleanRaftNode, log, common.V1))
 	router.Handle("POST", common.APIAddNode, common.Decorate(s.doAddNode, log, common.V1))
@@ -554,26 +937,41 @@ func (s *Server) initHttpHandler() {
 
 	router.Handle("GET", "/ping", common.Decorate(s.pingHandler, common.PlainText))
 	router.Handle("POST", "/loglevel/set", common.Decorate(s.doSetLogLevel, log, common.V1))
+	router.Handle("POST", "/slowlog/set", common.Decorate(s.doChangeSlowLogLevel, log, common.V1))
 	router.Handle("POST", "/costlevel/set", common.Decorate(s.doSetCostLevel, log, common.V1))
+	router.Handle("POST", "/rsynclimit", common.Decorate(s.doSetRsyncLimit, log, common.V1))
 	router.Handle("POST", "/staleread", common.Decorate(s.doSetStaleRead, log, common.V1))
 	router.Handle("POST", "/synceronly", common.Decorate(s.doSetSyncerOnly, log, common.V1))
+	router.Handle("POST", "/disableconflictlog", common.Decorate(s.doSwitchDisableConflictLog, log, common.V1))
+	router.Handle("GET", "/synceronly", common.Decorate(s.getSyncerOnlyState, log, common.V1))
+	router.Handle("POST", "/conf/set", common.Decorate(s.doSetDynamicConf, log, common.V1))
+	router.Handle("GET", "/conf/get", common.Decorate(s.doGetDynamicConf, log, common.V1))
 	router.Handle("GET", "/info", common.Decorate(s.doInfo, common.V1))
 	router.Handle("POST", "/syncer/setindex/:clustername", common.Decorate(s.doSetSyncerIndex, log, common.V1))
+	router.Handle("POST", "/syncer/normalinit", common.Decorate(s.doSetSyncerNormalInit, log, common.V1))
+	router.Handle("GET", "/syncer/normalinit", common.Decorate(s.getSyncerNormalInit, log, common.V1))
+	router.Handle("GET", "/syncer/runnings", common.Decorate(s.getSyncerRunnings, log, common.V1))
+
+	router.Handle("POST", "/topn/enable/:namespace", common.Decorate(s.doEnableTopn, log, common.V1))
+	router.Handle("POST", "/topn/disable/:namespace", common.Decorate(s.doDisableTopn, log, common.V1))
+	router.Handle("POST", "/topn/clear/:namespace", common.Decorate(s.doClearTopn, log, common.V1))
 
 	router.Handle("GET", "/stats", common.Decorate(s.doStats, common.V1))
+	router.Handle("GET", common.APITableStats, common.Decorate(s.doTableStats, common.V1))
 	router.Handle("GET", "/logsync/stats", common.Decorate(s.doLogSyncStats, common.V1))
 	router.Handle("GET", "/db/stats", common.Decorate(s.doDBStats, common.V1))
-	router.Handle("GET", "/db/perf", common.Decorate(s.doDBPerf, log, common.V1))
+	router.Handle("POST", "/db/options/set", common.Decorate(s.doSetDBOptions, log, common.V1))
+	router.Handle("GET", "/waldb/stats", common.Decorate(s.doWALDBStats, common.V1))
 	router.Handle("GET", "/raft/stats", common.Decorate(s.doRaftStats, debugLog, common.V1))
 
+	router.Handle("POST", "/debug/setblockrate", common.Decorate(setBlockRateHandler, log, common.V1))
+	router.Handle("POST", "/debug/setmutexrate", common.Decorate(setMutexProfileHandler, log, common.V1))
+	router.Handler("GET", "/metrics", promhttp.Handler())
 	s.router = router
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
 func (s *Server) serveHttpAPI(port int, stopC <-chan struct{}) {
-	if s.conf.ProfilePort >= 0 {
-		go http.ListenAndServe(":"+strconv.Itoa(s.conf.ProfilePort), nil)
-	}
 	s.initHttpHandler()
 	srv := http.Server{
 		Addr:    ":" + strconv.Itoa(port),

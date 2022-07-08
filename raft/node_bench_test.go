@@ -27,9 +27,10 @@ func BenchmarkOneNode(b *testing.B) {
 
 	n := newNode()
 	s := NewMemoryStorage()
-	r := newTestRaft(1, []uint64{1}, 10, 1, s)
-	go n.run(r)
-
+	defer s.Close()
+	r := newTestRawNode(1, []uint64{1}, 10, 1, s)
+	n.r = r
+	n.prevS = newPrevState(r)
 	defer n.Stop()
 
 	n.Campaign(ctx)
@@ -40,11 +41,15 @@ func BenchmarkOneNode(b *testing.B) {
 	}()
 
 	for {
-		rd := <-n.Ready()
+		<-n.EventNotifyCh()
+		rd, hasEvent := n.StepNode(true, false)
+		if !hasEvent {
+			continue
+		}
 		s.Append(rd.Entries)
 		// a reasonable disk sync latency
 		time.Sleep(1 * time.Millisecond)
-		n.Advance()
+		n.Advance(rd)
 		if rd.HardState.Commit == uint64(b.N+1) {
 			return
 		}

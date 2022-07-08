@@ -20,8 +20,8 @@ edit_uri: edit/master/doc/
 #theme:
 #  name: null
 #  custom_dir: 'mkdocs-material/material'
-repo_name: 'absolute8511/ZanRedisDB'
-repo_url: 'https://github.com/absolute8511/ZanRedisDB'
+repo_name: 'youzan/ZanRedisDB'
+repo_url: 'https://github.com/youzan/ZanRedisDB'
 google_analytics:
   - 'UA-3196917-8'
   - 'auto'
@@ -32,4 +32,5 @@ pages:
       - 'Overview' : 'design.md'
       - 'full scan' : 'design/fullscan.md'
       - 'source analyse' : 'design/source_analyse.md'
-  - 'Examples' : 'examples.md'
+  - 'User Guide' : 'user-guide.md'
+  - 'Operation Guide' : 'operation-guide.md'

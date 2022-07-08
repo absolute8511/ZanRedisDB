@@ -1,11 +1,18 @@
 PREFIX=/usr/local
 DESTDIR=
 BINDIR=${PREFIX}/bin
-PROJECT?=github.com/absolute8511/ZanRedisDB
-VERBINARY?= 0.3.2
+PROJECT?=github.com/youzan/ZanRedisDB
+VERBINARY?= 0.9.4
 COMMIT?=$(shell git rev-parse --short HEAD)
 BUILD_TIME?=$(shell date '+%Y-%m-%d_%H:%M:%S-%Z')
-GOFLAGS=-ldflags "-s -w -X ${PROJECT}/common.VerBinary=${VERBINARY} -X ${PROJECT}/common.Commit=${COMMIT} -X ${PROJECT}/common.BuildTime=${BUILD_TIME}"
+GOFLAGS=-ldflags "-X ${PROJECT}/common.VerBinary=${VERBINARY} -X ${PROJECT}/common.Commit=${COMMIT} -X ${PROJECT}/common.BuildTime=${BUILD_TIME}"
+
+CGO_CFLAGS="-I${ROCKSDB}/include"
+CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -ljemalloc"
+
+ifeq (${GOOS},linux)
+	CGO_LDFLAGS="-L${ROCKSDB} -lrocksdb -lstdc++ -lm -lsnappy -lrt -ljemalloc -ldl"
+endif
 
 BLDDIR = build
 EXT=
@@ -23,7 +30,10 @@ $(BLDDIR)/restore:  $(wildcard apps/restore/*.go)
 
 $(BLDDIR)/%:
 	@mkdir -p $(dir $@)
-	go build -i ${GOFLAGS} -o $@ ./apps/$*
+	@echo $(GOOS)
+	@echo $(CGO_LDFLAGS)
+	CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} GO111MODULE=on go get github.com/youzan/gorocksdb
+	CGO_CFLAGS=${CGO_CFLAGS} CGO_LDFLAGS=${CGO_LDFLAGS} GO111MODULE=on go build ${GOFLAGS} -o $@ ./apps/$*
 
 $(APPS): %: $(BLDDIR)/%
 

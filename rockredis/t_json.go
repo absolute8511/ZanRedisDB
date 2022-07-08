@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var (
@@ -72,7 +72,10 @@ func encodeJSONStopKey(table []byte, key []byte) []byte {
 
 func (db *RockDB) jSetPath(jdata []byte, path string, value []byte) ([]byte, error) {
 	if len(path) == 0 {
-		return value, nil
+		// for set path it will change the value, so we need return copy
+		v := make([]byte, len(value))
+		copy(v, value)
+		return v, nil
 	}
 	return sjson.SetRawBytes(jdata, path, value)
 }
@@ -85,7 +88,7 @@ func (db *RockDB) getOldJSON(table []byte, rk []byte) ([]byte, []byte, bool, err
 	if err != nil {
 		return nil, nil, false, err
 	}
-	oldV, err := db.eng.GetBytesNoLock(db.defaultReadOpts, ek)
+	oldV, err := db.GetBytesNoLock(ek)
 	if err != nil {
 		return ek, nil, false, err
 	}
@@ -122,7 +125,6 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 		return 0, err
 	}
 
-	db.wb.Clear()
 	oldV, err = db.jSetPath(oldV, convertJSONPath(path), value)
 	if err != nil {
 		return 0, err
@@ -143,7 +145,7 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)
 	db.wb.Put(ek, oldV)
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	if isExist {
 		return 0, err
 	}
@@ -151,7 +153,7 @@ func (db *RockDB) JSet(ts int64, key []byte, path []byte, value []byte) (int64, 
 }
 
 func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
-	if len(args) >= MAX_BATCH_NUM {
+	if len(args) > MAX_BATCH_NUM {
 		return errTooMuchBatchSize
 	}
 	if len(args) == 0 {
@@ -171,8 +173,6 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 	if err != nil {
 		return err
 	}
-
-	db.wb.Clear()
 
 	for i := 0; i < len(args); i++ {
 		path := args[i].Key
@@ -199,7 +199,7 @@ func (db *RockDB) JMset(ts int64, key []byte, args ...common.KVRecord) error {
 	if !isExist {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return err
 }
 
@@ -277,7 +277,6 @@ func (db *RockDB) JDel(ts int64, key []byte, path []byte) (int64, error) {
 	}
 
 	jpath := convertJSONPath(path)
-	db.wb.Clear()
 	if jpath == "" {
 		// delete whole json
 		db.wb.Delete(ek)
@@ -295,7 +294,7 @@ func (db *RockDB) JDel(ts int64, key []byte, path []byte) (int64, error) {
 		oldV = append(oldV, tsBuf...)
 		db.wb.Put(ek, oldV)
 	}
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return 1, err
 }
 
@@ -305,7 +304,7 @@ func (db *RockDB) JKeyExists(key []byte) (int64, error) {
 		return 0, err
 	}
 	sk, _ := encodeJSONKey(table, rk)
-	v, err := db.eng.GetBytes(db.defaultReadOpts, sk)
+	v, err := db.GetBytes(sk)
 	if v != nil && err == nil {
 		return 1, nil
 	}
@@ -348,7 +347,6 @@ func (db *RockDB) JArrayAppend(ts int64, key []byte, path []byte, jsons ...[]byt
 		}
 		arrySize++
 	}
-	db.wb.Clear()
 	if err := checkJSONValueSize(oldV); err != nil {
 		return 0, err
 	}
@@ -361,7 +359,7 @@ func (db *RockDB) JArrayAppend(ts int64, key []byte, path []byte, jsons ...[]byt
 	if !isExist {
 		db.IncrTableKeyCount(table, 1, db.wb)
 	}
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return int64(arrySize), err
 }
 
@@ -410,11 +408,10 @@ func (db *RockDB) JArrayPop(ts int64, key []byte, path []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	db.wb.Clear()
 	tsBuf := PutInt64(ts)
 	oldV = append(oldV, tsBuf...)
 	db.wb.Put(ek, oldV)
-	err = db.eng.Write(db.defaultWriteOpts, db.wb)
+	err = db.CommitBatchWrite()
 	return poped, err
 }
 

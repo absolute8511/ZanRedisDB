@@ -26,7 +26,7 @@ func TestListCodec(t *testing.T) {
 		t.Fatal(string(k))
 	}
 
-	ek, _ = convertRedisKeyToDBListKey(key, 1024)
+	ek = lEncodeListKey([]byte("test"), []byte("key"), 1024)
 	if tb, k, seq, err := lDecodeListKey(ek); err != nil {
 		t.Fatal(err)
 	} else if string(k) != "key" {
@@ -46,7 +46,7 @@ func TestListTrim(t *testing.T) {
 	key := []byte("test:test_list_trim")
 
 	init := func() {
-		db.LClear(key)
+		db.LClear(0, key)
 		for i := 0; i < 100; i++ {
 			n, err := db.RPush(0, key, []byte(strconv.Itoa(i)))
 			if err != nil {
@@ -126,7 +126,41 @@ func TestListTrim(t *testing.T) {
 	if string(v) != "97" {
 		t.Fatal("wrong value", string(v))
 	}
-	// TODO: LTrimFront, LTrimBack
+	err = db.LTrim(0, key, 10, 1)
+	assert.Nil(t, err)
+	n, err := db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err := db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), len(vlist))
+	init()
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(100), n)
+
+	err = db.LTrim(0, key, 1000, 10000)
+	assert.Nil(t, err)
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err = db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), len(vlist))
+
+	init()
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(100), n)
+
+	err = db.LTrim(0, key, 2, 1)
+	assert.Nil(t, err)
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	vlist, err = db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), len(vlist))
 }
 
 func TestDBList(t *testing.T) {
@@ -136,11 +170,13 @@ func TestDBList(t *testing.T) {
 
 	key := []byte("test:testdb_list_a")
 
-	if n, err := db.RPush(0, key, []byte("1"), []byte("2"), []byte("3")); err != nil {
-		t.Fatal(err)
-	} else if n != 3 {
-		t.Fatal(n)
-	}
+	n, err := db.RPush(0, key, []byte("1"), []byte("2"), []byte("3"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+
+	llen, err := db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), llen)
 
 	if ay, err := db.LRange(key, 0, -1); err != nil {
 		t.Fatal(err)
@@ -154,33 +190,37 @@ func TestDBList(t *testing.T) {
 		}
 	}
 
-	if k, err := db.RPop(0, key); err != nil {
-		t.Fatal(err)
-	} else if string(k) != "3" {
-		t.Fatal(string(k))
-	}
+	k, err := db.RPop(0, key)
+	assert.Nil(t, err)
+	assert.Equal(t, "3", string(k))
 
-	if k, err := db.LPop(0, key); err != nil {
-		t.Fatal(err)
-	} else if string(k) != "1" {
-		t.Fatal(string(k))
-	}
+	llen, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), llen)
 
-	if llen, err := db.LLen(key); err != nil {
-		t.Fatal(err)
-	} else if llen != 1 {
-		t.Fatal(llen)
-	}
+	k, err = db.LPop(0, key)
+	assert.Nil(t, err)
+	assert.Equal(t, "1", string(k))
 
-	if num, err := db.LClear(key); err != nil {
+	ay, err := db.LRange(key, 0, -1)
+	assert.Nil(t, err)
+	t.Log(ay)
+	assert.Equal(t, 1, len(ay))
+	assert.Equal(t, "2", string(ay[0]))
+
+	llen, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), llen)
+
+	if num, err := db.LClear(0, key); err != nil {
 		t.Fatal(err)
 	} else if num != 1 {
 		t.Error(num)
 	}
 
-	if llen, _ := db.LLen(key); llen != 0 {
-		t.Fatal(llen)
-	}
+	llen, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), llen)
 	// TODO: LSet
 }
 
@@ -356,7 +396,7 @@ func TestListLPushRPop(t *testing.T) {
 			assert.Nil(t, err)
 			atomic.AddInt32(&pushed, 1)
 			time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
-			if time.Since(start) > time.Second*10 {
+			if time.Since(start) > time.Second*3 {
 				break
 			}
 		}
@@ -374,7 +414,7 @@ func TestListLPushRPop(t *testing.T) {
 				atomic.AddInt32(&poped, 1)
 			}
 			time.Sleep(time.Microsecond * time.Duration(r.Int31n(1000)))
-			if time.Since(start) > time.Second*10 {
+			if time.Since(start) > time.Second*3 {
 				break
 			}
 		}
@@ -386,4 +426,92 @@ func TestListLPushRPop(t *testing.T) {
 	t.Logf("pushed %v poped %v", pushed, poped)
 	assert.True(t, pushed >= poped)
 	assert.Equal(t, int64(pushed-poped), length)
+}
+
+func TestDBListClearInCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_list_clear_compact_a")
+	member := []byte("member")
+	memberNew := []byte("memberNew")
+
+	ts := time.Now().UnixNano()
+	db.RPush(ts, key, member)
+	db.RPush(ts, key, member)
+
+	n, err := db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(2), n)
+
+	v, err := db.LIndex(key, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, member, v)
+
+	vlist, err := db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, member, vlist[0])
+	assert.Equal(t, member, vlist[1])
+	assert.Equal(t, int(n), len(vlist))
+
+	ts = time.Now().UnixNano()
+	n, err = db.LClear(ts, key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	n, err = db.LKeyExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	v, err = db.LIndex(key, 0)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+
+	vlist, err = db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, int(0), len(vlist))
+
+	ts = time.Now().UnixNano()
+	v, err = db.LPop(ts, key)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+
+	// renew
+	ts = time.Now().UnixNano()
+	db.RPush(ts, key, memberNew)
+
+	n, err = db.LLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	v, err = db.LIndex(key, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, memberNew, v)
+
+	vlist, err = db.LRange(key, 0, 100)
+	assert.Nil(t, err)
+	assert.Equal(t, memberNew, vlist[0])
+	assert.Equal(t, int(n), len(vlist))
+}
+
+func BenchmarkListAddAndLtrim(b *testing.B) {
+	db := getTestDBForBench()
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:list_addtrim_bench")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.RPush(0, key, []byte(strconv.Itoa(i)))
+	}
+	for i := 100; i >= 1; i-- {
+		db.LTrim(0, key, 0, int64(i))
+	}
+	b.StopTimer()
 }

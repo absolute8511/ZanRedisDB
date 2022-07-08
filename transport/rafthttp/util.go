@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/transport"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/pkg/transport"
+	"github.com/youzan/ZanRedisDB/pkg/types"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/go-semver/semver"
 )

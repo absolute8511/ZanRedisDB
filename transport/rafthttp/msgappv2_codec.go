@@ -20,10 +20,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/stats"
+	"github.com/youzan/ZanRedisDB/pkg/pbutil"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/stats"
 )
 
 const (
@@ -118,7 +118,7 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 			if _, err := enc.w.Write(enc.uint64buf); err != nil {
 				return err
 			}
-			if n := m.Entries[i].Size(); n < msgAppV2BufSize {
+			if n := m.Entries[i].Size(); n <= msgAppV2BufSize {
 				if _, err := m.Entries[i].MarshalTo(enc.buf[:n]); err != nil {
 					return err
 				}
@@ -143,12 +143,22 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 			return err
 		}
 		// write size of message
-		if err := binary.Write(enc.w, binary.BigEndian, uint64(m.Size())); err != nil {
+		ns := m.Size()
+		if err := binary.Write(enc.w, binary.BigEndian, uint64(ns)); err != nil {
 			return err
 		}
 		// write message
-		if _, err := enc.w.Write(pbutil.MustMarshal(m)); err != nil {
-			return err
+		if ns <= msgAppV2BufSize {
+			if _, err := m.MarshalTo(enc.buf[:ns]); err != nil {
+				return err
+			}
+			if _, err := enc.w.Write(enc.buf[:ns]); err != nil {
+				return err
+			}
+		} else {
+			if _, err := enc.w.Write(pbutil.MustMarshal(m)); err != nil {
+				return err
+			}
 		}
 
 		enc.term = m.Term
@@ -228,7 +238,7 @@ func (dec *msgAppV2Decoder) decode() (raftpb.Message, error) {
 			}
 			size := binary.BigEndian.Uint64(dec.uint64buf)
 			var buf []byte
-			if size < msgAppV2BufSize {
+			if size <= msgAppV2BufSize {
 				buf = dec.buf[:size]
 				if _, err := io.ReadFull(dec.r, buf); err != nil {
 					return m, err
@@ -241,7 +251,10 @@ func (dec *msgAppV2Decoder) decode() (raftpb.Message, error) {
 			}
 			dec.index++
 			// 1 alloc
-			pbutil.MustUnmarshal(&m.Entries[i], buf)
+			err := pbutil.MaybeUnmarshal(&m.Entries[i], buf)
+			if err != nil {
+				return m, err
+			}
 		}
 		// decode commit index
 		if _, err := io.ReadFull(dec.r, dec.uint64buf); err != nil {
@@ -253,11 +266,19 @@ func (dec *msgAppV2Decoder) decode() (raftpb.Message, error) {
 		if err := binary.Read(dec.r, binary.BigEndian, &size); err != nil {
 			return m, err
 		}
-		buf := make([]byte, int(size))
+		var buf []byte
+		if size <= msgAppV2BufSize {
+			buf = dec.buf[:size]
+		} else {
+			buf = make([]byte, int(size))
+		}
 		if _, err := io.ReadFull(dec.r, buf); err != nil {
 			return m, err
 		}
-		pbutil.MustUnmarshal(&m, buf)
+		err := pbutil.MaybeUnmarshal(&m, buf)
+		if err != nil {
+			return m, err
+		}
 
 		dec.term = m.Term
 		dec.index = m.Index

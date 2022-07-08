@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 type HindexSearchResults struct {
@@ -101,7 +101,7 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 4 {
 		return nil, common.ErrInvalidArgs
 	}
-	_, table, err := common.ExtractNamesapce(cmd.Args[1])
+	table, err := common.CutNamesapce(cmd.Args[1])
 	if err != nil {
 		return nil, err
 	}
@@ -173,12 +173,12 @@ func (nd *KVNode) hindexSearchCommand(cmd redcon.Command) (interface{}, error) {
 			}
 		case "hgetall":
 			for _, pk := range pkList {
-				_, valCh, err := nd.store.HGetAll(pk.PKey)
+				_, vals, err := nd.store.HGetAll(pk.PKey)
 				if err != nil {
 					continue
 				}
 				vv := [][]byte{}
-				for v := range valCh {
+				for _, v := range vals {
 					vv = append(vv, v.Rec.Key, v.Rec.Value)
 				}
 				rspV := common.HIndexRespWithValues{PKey: pk.PKey, IndexV: pk.IndexValue, HsetValues: vv}

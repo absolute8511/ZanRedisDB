@@ -1,7 +1,7 @@
 # ZanRedisDB
 
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/3288ed77f27c4f8a998e35ef936edc6f)](https://www.codacy.com/app/cool8511/ZanRedisDB?utm_source=github.com&utm_medium=referral&utm_content=absolute8511/ZanRedisDB&utm_campaign=badger)
-[![Build Status](https://travis-ci.org/absolute8511/ZanRedisDB.svg?branch=master)](https://travis-ci.org/absolute8511/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/absolute8511/ZanRedisDB.svg)](https://github.com/absolute8511/ZanRedisDB/releases/latest) [![codecov](https://codecov.io/gh/absolute8511/ZanRedisDB/branch/master/graph/badge.svg)](https://codecov.io/gh/absolute8511/ZanRedisDB) [![Go Report Card](https://goreportcard.com/badge/github.com/absolute8511/ZanRedisDB)](https://goreportcard.com/report/github.com/absolute8511/ZanRedisDB) [![Documentation Status](https://readthedocs.org/projects/zanredisdb/badge/?version=latest)](http://zanredisdb.readthedocs.io/en/latest/?badge=latest)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/5bb2847636f343e79edf048a0394de04)](https://www.codacy.com/app/cool8511/youzan_ZanRedisDB?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=youzan/ZanRedisDB&amp;utm_campaign=Badge_Grade)
+![Go](https://github.com/youzan/ZanRedisDB/workflows/Go/badge.svg)[![Build Status](https://travis-ci.com/youzan/ZanRedisDB.svg?branch=master)](https://travis-ci.com/youzan/ZanRedisDB) [![GitHub release](https://img.shields.io/github/release/youzan/ZanRedisDB.svg)](https://github.com/youzan/ZanRedisDB/releases/latest) [![codecov](https://codecov.io/gh/youzan/ZanRedisDB/branch/master/graph/badge.svg)](https://codecov.io/gh/youzan/ZanRedisDB) [![Go Report Card](https://goreportcard.com/badge/github.com/youzan/ZanRedisDB)](https://goreportcard.com/report/github.com/youzan/ZanRedisDB) [![Documentation Status](https://readthedocs.org/projects/youzan-zanredisdb/badge/?version=latest)](http://youzan-zanredisdb.readthedocs.io/en/latest/?badge=latest)
  
 
 ## What is ZanRedisDB
@@ -21,36 +21,32 @@ apt-get install libsnappy1 libsnappy-dev (for Debian/Ubuntu)
 brew install snappy (for Mac)
 </pre>
 
-Build the rocksdb 
+Build the rocksdb with jemalloc
 <pre>
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
-USE_SSE=1 make static_lib
+git checkout v6.4.6-patched
+PORTABLE=1 USE_SSE=1 USE_PCLMUL=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 </pre>
 
-Install the dependency:
+Install the dependency (for old go version only, if using go1.13+, it will be done in go modules):
 <pre>
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/absolute8511/gorocksdb
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -ljemalloc" go get github.com/youzan/gorocksdb
 
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy" go get github.com/absolute8511/gorocksdb (for MacOS)
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -ljemalloc" go get github.com/youzan/gorocksdb (for MacOS)
 </pre>
 
-use the `gpm` to install other dependencies
-<pre>
-wget https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm && sudo mv gpm /usr/local/bin
-gpm get
-</pre>
+use the `dep ensure` to install other dependencies or use go modules for go1.13+
 
-
-Build zankv and placedriver from the source (only support go version 1.8+, gcc 4.9+ or xcode-command-line-tools on Mac):
+Build zankv and placedriver from the source (only support go version 1.10+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
-make
+ROCKSDB=/path/to/rocksdb make
 </pre>
 
 If you want package the binary release run the scripts
 <pre>
 ./pre-dist.sh
-./dist.sh
+ROCKSDB=/path/to/rocksdb ./dist.sh
 </pre>
 
 ## Deploy
@@ -59,6 +55,16 @@ If you want package the binary release run the scripts
  * Deploy etcd cluster which is needed for the meta data for the namespaces
  * Deploy the placedriver which is used for data placement: `placedriver -config=/path/to/config`
  * Deploy the zankv for data storage server `zankv -config=/path/to/config`
+ * Init a namespace using the create the namespace API in placedriver
+
+## OS-Level Tuning
+
+ * Setting `vm.swappiness=0`
+ * Setting `vm.min_free_kbytes` to at least 1GB (8GB on larger memory system)
+ * Disable NUMA zone reclaim with `vm.zone_reclaim_mode=0`
+ * Disable THP(transparent huge pages)
+ * Avoid the tcp delay ack by `echo 4 > /proc/sys/net/ipv4/tcp_delack_min` (for old OS only)
+
 
 ## API
 placedriver has several HTTP APIs to manager the namespace
@@ -114,16 +120,21 @@ based on this golang sdk if you want use the redis client in other language.
   - [ ] Full text search support
 * Operation
   - [x] Backup and restore for cluster
-  - [ ] More stats for read/write performance and errors.
+  - [x] More stats for read/write performance and errors.
 * Client 
   - [x] High available for redis commands (Retry on fail)
   - [ ] Extand redis commands to support index and search
   - [x] Extand redis commands for advance scan
 * Others (maybe)
   - [ ] Support configure for Column storage friendly for OLAP
-  - [ ] BoltDB as storage engine (read/range optimize)
-  - [ ] Lua scripts support
+  - [x] Pebble as the storage engine
+  - [x] Support other memory storage engine
   - [ ] Support export data to other systems
 
 
-[client-sdk]: https://github.com/absolute8511/go-zanredisdb
+[client-sdk]: https://github.com/youzan/go-zanredisdb
+
+## Thanks
+
+Many thanks for these great projects which make this project possible: etcd, RocksDB, ledisdb, pika.
+

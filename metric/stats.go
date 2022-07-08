@@ -1,4 +1,4 @@
-package common
+package metric
 
 import (
 	"math"
@@ -73,14 +73,23 @@ type TableStats struct {
 	ApproximateKeyNum int64  `json:"approximate_key_num"`
 }
 
+type CompactFilterStats struct {
+	ExpiredCleanCnt int64 `json:"expired_clean_cnt,omitempty"`
+	VersionCleanCnt int64 `json:"version_clean_cnt,omitempty"`
+	DelCleanCnt     int64 `json:"del_clean_cnt,omitempty"`
+}
+
 type NamespaceStats struct {
 	Name              string                 `json:"name"`
 	TStats            []TableStats           `json:"table_stats"`
 	DBWriteStats      *WriteStats            `json:"db_write_stats"`
 	ClusterWriteStats *WriteStats            `json:"cluster_write_stats"`
 	InternalStats     map[string]interface{} `json:"internal_stats"`
+	DBCompactStats    CompactFilterStats     `json:"db_compact_stats,omitempty"`
 	EngType           string                 `json:"eng_type"`
 	IsLeader          bool                   `json:"is_leader"`
+	TopNWriteKeys     []TopNInfo             `json:"top_n_write_keys,omitempty"`
+	TopNLargeCollKeys []TopNInfo             `json:"top_n_large_coll_keys,omitempty"`
 }
 
 type LogSyncStats struct {

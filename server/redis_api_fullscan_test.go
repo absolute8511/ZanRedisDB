@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
 	"github.com/siddontang/goredis"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 var testOnceFullScan sync.Once
@@ -22,7 +22,7 @@ var kvsFullScan *Server
 var redisportFullScan int
 var gtmpScanDir string
 
-func startFullScanTestServer(t *testing.T) (*Server, int, string) {
+func startFullScanTestServer(t *testing.T, clusterID string, rport int, partNum int) (*Server, int, string) {
 	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatal(err)
@@ -32,85 +32,64 @@ func startFullScanTestServer(t *testing.T) (*Server, int, string) {
 		path.Join(tmpDir, "myid"),
 		[]byte(strconv.FormatInt(int64(1), 10)),
 		common.FILE_PERM)
-	raftAddr := "http://127.0.0.1:52346"
-	redisportFullScan := 52345
+	raftAddr := fmt.Sprintf("http://127.0.0.1:%d", rport+2)
+
+	kvOpts := ServerConfig{
+		ClusterID:      clusterID,
+		DataDir:        tmpDir,
+		RedisAPIPort:   rport,
+		HttpAPIPort:    rport + 1,
+		LocalRaftAddr:  raftAddr,
+		BroadcastAddr:  "127.0.0.1",
+		TickMs:         100,
+		ElectionTick:   5,
+		UseRocksWAL:    testUseRocksWAL,
+		SharedRocksWAL: testSharedRocksWAL,
+	}
+	kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+	kvOpts.WALRocksDBOpts.EngineType = testEngineType
+	kv, err := NewServer(kvOpts)
+	assert.Nil(t, err)
+
 	var replica node.ReplicaInfo
 	replica.NodeID = 1
 	replica.ReplicaID = 1
 	replica.RaftAddr = raftAddr
-	kvOpts := ServerConfig{
-		ClusterID:     "test",
-		DataDir:       tmpDir,
-		RedisAPIPort:  redisportFullScan,
-		LocalRaftAddr: raftAddr,
-		BroadcastAddr: "127.0.0.1",
-		TickMs:        100,
-		ElectionTick:  5,
-	}
-	nsConf := node.NewNSConfig()
-	nsConf.Name = "default-0"
-	nsConf.BaseName = "default"
-	nsConf.EngType = rockredis.EngType
-	nsConf.PartitionNum = 3
-	nsConf.Replicator = 1
-	nsConf.RaftGroupConf.GroupID = 1000
-	nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	kv := NewServer(kvOpts)
-	_, err = kv.InitKVNamespace(1, nsConf, false)
-	if err != nil {
-		t.Fatalf("failed to init namespace: %v", err)
-	}
-	nsConf1 := node.NewNSConfig()
-	nsConf1.Name = "default-1"
-	nsConf1.BaseName = "default"
-	nsConf1.EngType = rockredis.EngType
-	nsConf1.PartitionNum = 3
-	nsConf1.Replicator = 1
-	nsConf1.RaftGroupConf.GroupID = 1000
-	nsConf1.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	_, err = kv.InitKVNamespace(1, nsConf1, false)
-	if err != nil {
-		t.Fatalf("failed to init namespace: %v", err)
-	}
-
-	nsConf2 := node.NewNSConfig()
-	nsConf2.Name = "default-2"
-	nsConf2.BaseName = "default"
-	nsConf2.EngType = rockredis.EngType
-	nsConf2.PartitionNum = 3
-	nsConf2.Replicator = 1
-	nsConf2.RaftGroupConf.GroupID = 1000
-	nsConf2.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
-	_, err = kv.InitKVNamespace(1, nsConf2, false)
-	if err != nil {
-		t.Fatalf("failed to init namespace: %v", err)
+	for i := 0; i < partNum; i++ {
+		nsConf := node.NewNSConfig()
+		nsConf.Name = "default-" + strconv.Itoa(i)
+		nsConf.BaseName = "default"
+		nsConf.EngType = rockredis.EngType
+		nsConf.PartitionNum = partNum
+		nsConf.Replicator = 1
+		// different partition must use different group id
+		nsConf.RaftGroupConf.GroupID = uint64(1000 + i)
+		nsConf.RaftGroupConf.SeedNodes = append(nsConf.RaftGroupConf.SeedNodes, replica)
+		// since only one replica, we can use same raft id for different group
+		_, err = kv.InitKVNamespace(1, nsConf, false)
+		if err != nil {
+			t.Fatalf("failed to init namespace: %v", err)
+		}
 	}
 
 	kv.Start()
 	time.Sleep(time.Second)
-	return kv, redisportFullScan, tmpDir
+	t.Logf("start test server done at: %v", time.Now())
+	return kv, rport, tmpDir
 }
 
-func waitScanServerForLeader(t *testing.T, w time.Duration) {
+func waitServersForLeader(t *testing.T, kvServer *Server, w time.Duration, partNum int) {
 	start := time.Now()
 	for {
 		leaderNum := 0
-		replicaNode := kvsFullScan.GetNamespaceFromFullName("default-0")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNum++
+		for i := 0; i < partNum; i++ {
+			replicaNode := kvServer.GetNamespaceFromFullName("default-" + strconv.Itoa(i))
+			assert.NotNil(t, replicaNode)
+			if replicaNode.Node.IsLead() {
+				leaderNum++
+			}
 		}
-		replicaNode = kvsFullScan.GetNamespaceFromFullName("default-1")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNum++
-		}
-		replicaNode = kvsFullScan.GetNamespaceFromFullName("default-2")
-		assert.NotNil(t, replicaNode)
-		if replicaNode.Node.IsLead() {
-			leaderNum++
-		}
-		if leaderNum >= 3 {
+		if leaderNum >= partNum {
 			return
 		}
 		if time.Since(start) > w {
@@ -123,8 +102,8 @@ func waitScanServerForLeader(t *testing.T, w time.Duration) {
 
 func getFullScanConn(t *testing.T) *goredis.PoolConn {
 	testOnceFullScan.Do(func() {
-		kvsFullScan, redisportFullScan, gtmpScanDir = startFullScanTestServer(t)
-		waitScanServerForLeader(t, time.Second*10)
+		kvsFullScan, redisportFullScan, gtmpScanDir = startFullScanTestServer(t, "unit-test-scan", fullscanTestPortBase, 3)
+		waitServersForLeader(t, kvsFullScan, time.Second*10, 3)
 	},
 	)
 	c := goredis.NewClient("127.0.0.1:"+strconv.Itoa(redisportFullScan), "")
@@ -839,8 +818,7 @@ func checkListFullScan(t *testing.T, c *goredis.PoolConn) {
 		string(n) != "MDpUVlJGUFRwSUx5OHZMeTh2THk4dll6MD07MjpUa0U5UFRwSlFVRkJRVUZCUVVGQlFUMD07MTpUMUU5UFRwSUx5OHZMeTh2THk4dmF6MD07" &&
 		string(n) != "MTpUMUU5UFRwSUx5OHZMeTh2THk4dmF6MD07MDpUVlJGUFRwSUx5OHZMeTh2THk4dll6MD07MjpUa0U5UFRwSlFVRkJRVUZCUVVGQlFUMD07" &&
 		string(n) != "MTpUMUU5UFRwSUx5OHZMeTh2THk4dmF6MD07MjpUa0U5UFRwSlFVRkJRVUZCUVVGQlFUMD07MDpUVlJGUFRwSUx5OHZMeTh2THk4dll6MD07" &&
-		string(n) != "MjpUa0U5UFRwSlFVRkJRVUZCUVVGQlFUMD07MDpUVlJGUFRwSUx5OHZMeTh2THk4dll6MD07MTpUMUU5UFRwSUx5OHZMeTh2THk4dmF6MD07" &&
-		string(n) != "" {
+		string(n) != "MjpUa0U5UFRwSlFVRkJRVUZCUVVGQlFUMD07MDpUVlJGUFRwSUx5OHZMeTh2THk4dll6MD07MTpUMUU5UFRwSUx5OHZMeTh2THk4dmF6MD07" {
 		t.Fatal(string(n))
 	} else {
 		values := map[string][]string{

@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft"
 )
 
 // TransportStats encapsulates various statistics about an raft Server and its

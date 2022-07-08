@@ -11,7 +11,8 @@
 set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export GOPATH=$DIR/.godeps:$(go env GOPATH)
+# this is used by CI which can not use dep ensure
+export GOPATH=$(go env GOPATH):$DIR/.godeps
 echo $GOPATH
 
 arch=$(go env GOARCH)
@@ -19,13 +20,18 @@ os=$(go env GOOS)
 version=$(awk '/VERBINARY\?/ {print $NF}' < $DIR/Makefile | sed 's/"//g')
 goversion=$(go version | awk '{print $3}')
 
+echo $ROCKSDB
+
 echo "... building v$version for $os/$arch"
 BUILD=$(mktemp -d -t zankvXXXXXX)
 TARGET="zankv-$version.$os-$arch.$goversion"
 LATEST="zankv-latest.$os-$arch.$goversion"
-GOOS=$os GOARCH=$arch \
+GOOS=$os GOARCH=$arch ROCKSDB=$ROCKSDB \
     make DESTDIR=$BUILD PREFIX=/$TARGET install
 pushd $BUILD
+if [ "$os" == "linux" ]; then
+    cp -r $TARGET/bin $DIR/dist/docker/
+fi
 tar czvf $TARGET.tar.gz $TARGET
 mv $TARGET.tar.gz $DIR/dist/
 mv $TARGET $LATEST
@@ -35,3 +41,9 @@ rm -rf $LATEST
 popd
 make clean
 rm -r $BUILD
+
+IMAGE_URL="image.example.com"
+if [ "$os" == "linux" ]; then
+  docker build -t $IMAGE_URL/youzan/zankv:v$version .
+  docker push $IMAGE_URL/youzan/zankv:v$version
+fi

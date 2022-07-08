@@ -5,10 +5,50 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	node "github.com/absolute8511/ZanRedisDB/node"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
+	node "github.com/youzan/ZanRedisDB/node"
 )
+
+// GetCurrentNsWithLearners will return all currently namespaces which have running learners,
+// we can use this to check if any remaining learners still running in the namespace (even the register is removed).
+func (dc *DataCoordinator) GetCurrentNsWithLearners() ([]string, error) {
+	nsList := make([]string, 0)
+	tmpChecks := dc.localNSMgr.GetNamespaces()
+	for name, ns := range tmpChecks {
+		if ns.Node == nil {
+			continue
+		}
+		if ns.Node.GetLearnerRole() != "" {
+			nsList = append(nsList, name)
+		}
+	}
+	if dc.register == nil {
+		return nsList, nil
+	}
+	// check both local running and the meta for sure all learners will be included
+	namespaceMap, _, err := dc.register.GetAllNamespaces()
+	if err != nil {
+		if err == cluster.ErrKeyNotFound {
+			return nsList, nil
+		}
+		return nil, err
+	}
+	for ns, parts := range namespaceMap {
+		for pid, pinfo := range parts {
+			lrns := pinfo.LearnerNodes
+			if lrns == nil {
+				continue
+			}
+			nodes, ok := lrns[dc.learnerRole]
+			if !ok || len(nodes) == 0 {
+				continue
+			}
+			nsList = append(nsList, common.GetNsDesp(ns, pid))
+		}
+	}
+	return nsList, nil
+}
 
 func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 	if dc.localNSMgr == nil {
@@ -23,6 +63,7 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 		return err
 	}
 	sortedParts := make(PartitionList, 0)
+	// TODO: allow loading learner concurrent for different namespace and partitions
 	for namespaceName, namespaceParts := range namespaceMap {
 		sortedParts = sortedParts[:0]
 		for _, part := range namespaceParts {
@@ -50,11 +91,6 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 			if namespaceName == "" {
 				continue
 			}
-			checkErr := dc.checkLocalNamespaceMagicCode(&nsInfo, true)
-			if checkErr != nil {
-				cluster.CoordLog().Errorf("failed to check namespace :%v, err:%v", nsInfo.GetDesp(), checkErr)
-				continue
-			}
 
 			localNamespace, coordErr := dc.updateLocalNamespace(&nsInfo, false)
 			if coordErr != nil {
@@ -62,8 +98,6 @@ func (dc *DataCoordinator) loadLocalNamespaceForLearners() error {
 				continue
 			}
 
-			dyConf := &node.NamespaceDynamicConf{}
-			localNamespace.SetDynamicInfo(*dyConf)
 			localErr := dc.checkAndFixLocalNamespaceData(&nsInfo, localNamespace)
 			if localErr != nil {
 				cluster.CoordLog().Errorf("check local namespace %v data need to be fixed:%v", nsInfo.GetDesp(), localErr)
@@ -89,7 +123,9 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroupForLearner(nsInfo cluster.Par
 		localNamespace.SwitchForLearnerLeader(false)
 	}
 
-	dyConf := &node.NamespaceDynamicConf{}
+	dyConf := &node.NamespaceDynamicConf{
+		nsInfo.Replica,
+	}
 	localNamespace.SetDynamicInfo(*dyConf)
 	if localNamespace.IsDataNeedFix() {
 		// clean local data
@@ -219,7 +255,7 @@ func (dc *DataCoordinator) checkForUnsyncedLogSyncers() {
 			}
 
 			if !dc.isInLearnerGroup(*nsInfo, localNamespace) {
-				cluster.CoordLog().Infof("namespace %v removed since not in learner group", name, nsInfo.LearnerNodes)
+				cluster.CoordLog().Infof("namespace %v removed since not in learner group: %v", name, nsInfo.LearnerNodes)
 				dc.forceRemoveLocalNamespace(localNamespace)
 				continue
 			}

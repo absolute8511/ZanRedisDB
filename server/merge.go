@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/node"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/node"
 )
 
 func dispatchHandlersAndWait(cmdName string, handlers []common.MergeCommandFunc, cmds []redcon.Command, concurrent bool) []interface{} {
@@ -71,6 +71,7 @@ func (s *Server) doMergeCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
+// return merge func, command, haswrite, err
 func (s *Server) getHandlersForKeys(cmdName string,
 	origArgs [][]byte) ([]common.MergeCommandFunc, []redcon.Command, bool, error) {
 	cmdArgMap := make(map[string][][]byte)
@@ -122,9 +123,11 @@ func (s *Server) getHandlersForKeys(cmdName string,
 			// never happen
 			return nil, nil, false, errInvalidCommand
 		}
+		if nsNode.Node.IsStopping() {
+			return nil, nil, false, common.ErrStopped
+		}
 		if !isWrite && !nsNode.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 			// read only to leader to avoid stale read
-			// TODO: also read command can request the raft read index if not leader
 			return nil, nil, hasWrite, node.ErrNamespaceNotLeader
 		}
 		handlerMap[nsNode.FullName()] = f
@@ -199,28 +202,34 @@ func (s *Server) dispatchAndWaitMergeCmd(cmd redcon.Command) ([]redcon.Command, 
 	if len(cmd.Args) < 2 {
 		return nil, nil, fmt.Errorf("ERR wrong number of arguments for '%s' command", string(cmd.Args[0]))
 	}
-	handlers, cmds, concurrent, err := s.GetMergeHandlers(cmd)
+	hasWrite, handlers, cmds, concurrent, err := s.GetMergeHandlers(cmd)
 	if err != nil {
+		return nil, nil, err
+	}
+	if hasWrite && node.IsSyncerOnly() {
+		err = fmt.Errorf("The cluster is only allowing syncer write : ERR handle command " + string(cmd.Args[0]))
 		return nil, nil, err
 	}
 	return cmds, dispatchHandlersAndWait(string(cmd.Args[0]), handlers, cmds, concurrent), nil
 }
 
-func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc, []redcon.Command, bool, error) {
+// get merge handlers and return haswrite, handlers, commands, canconcurrency, error
+func (s *Server) GetMergeHandlers(cmd redcon.Command) (bool, []common.MergeCommandFunc, []redcon.Command, bool, error) {
+	hasWrite := false
 	if len(cmd.Args) < 2 {
-		return nil, nil, false, fmt.Errorf("ERR wrong number of arguments for '%s' command", string(cmd.Args[0]))
+		return hasWrite, nil, nil, false, fmt.Errorf("ERR wrong number of arguments for '%s' command", string(cmd.Args[0]))
 	}
 	rawKey := cmd.Args[1]
 
 	namespace, realKey, err := common.ExtractNamesapce(rawKey)
 	if err != nil {
 		sLog.Infof("failed to get the namespace of the redis command:%v", string(rawKey))
-		return nil, nil, false, err
+		return hasWrite, nil, nil, false, err
 	}
 
 	nodes, err := s.nsMgr.GetNamespaceNodes(namespace, true)
 	if err != nil {
-		return nil, nil, false, err
+		return hasWrite, nil, nil, false, err
 	}
 
 	cmdName := strings.ToLower(string(cmd.Args[0]))
@@ -229,10 +238,14 @@ func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc
 	if common.IsMergeScanCommand(cmdName) {
 		cmds, err = s.doScanNodesFilter(realKey, namespace, cmd, nodes)
 		if err != nil {
-			return nil, nil, false, err
+			return hasWrite, nil, nil, false, err
 		}
 	} else if common.IsMergeKeysCommand(cmdName) {
-		return s.getHandlersForKeys(cmdName, cmd.Args[1:])
+		h, cmds, w, err := s.getHandlersForKeys(cmdName, cmd.Args[1:])
+		if w {
+			hasWrite = true
+		}
+		return hasWrite, h, cmds, true, err
 	} else {
 		cmds = make(map[string]redcon.Command)
 		for k := range nodes {
@@ -248,10 +261,15 @@ func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc
 		newCmd := cmds[k]
 		h, isWrite, ok := v.Node.GetMergeHandler(cmdName)
 		if ok {
+			if isWrite {
+				hasWrite = true
+			}
 			if !isWrite && !v.Node.IsLead() && (atomic.LoadInt32(&allowStaleRead) == 0) {
 				// read only to leader to avoid stale read
-				// TODO: also read command can request the raft read index if not leader
-				return nil, nil, needConcurrent, node.ErrNamespaceNotLeader
+				return hasWrite, nil, nil, needConcurrent, node.ErrNamespaceNotLeader
+			}
+			if v.Node.IsStopping() {
+				return hasWrite, nil, nil, needConcurrent, common.ErrStopped
 			}
 			handlers = append(handlers, h)
 			commands = append(commands, newCmd)
@@ -259,8 +277,8 @@ func (s *Server) GetMergeHandlers(cmd redcon.Command) ([]common.MergeCommandFunc
 	}
 
 	if len(handlers) <= 0 {
-		return nil, nil, needConcurrent, common.ErrInvalidCommand
+		return hasWrite, nil, nil, needConcurrent, common.ErrInvalidCommand
 	}
 
-	return handlers, commands, needConcurrent, nil
+	return hasWrite, handlers, commands, needConcurrent, nil
 }

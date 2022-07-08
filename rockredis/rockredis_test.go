@@ -1,21 +1,55 @@
 package rockredis
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/slow"
 )
 
+const (
+	testEngineType = "rocksdb"
+)
+
+type testLogger struct {
+	t *testing.T
+}
+
+func newTestLogger(t *testing.T) *testLogger {
+	return &testLogger{t: t}
+}
+
+func (l *testLogger) Output(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputErr(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
+func (l *testLogger) OutputWarning(maxdepth int, s string) error {
+	l.t.Logf("%v:%v", time.Now().UnixNano(), s)
+	return nil
+}
+
 func getTestDBNoTableCounter(t *testing.T) *RockDB {
-	cfg := NewRockConfig()
+	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = false
+	cfg.EnablePartitionedIndexFilter = true
+	cfg.EngineType = testEngineType
 	var err error
 	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
 	assert.Nil(t, err)
@@ -24,24 +58,31 @@ func getTestDBNoTableCounter(t *testing.T) *RockDB {
 	return testDB
 }
 
-func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
-	cfg := NewRockConfig()
+func getTestDBForBench() *RockDB {
+	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
-	cfg.DataDir = dataDir
+	cfg.EnablePartitionedIndexFilter = true
+	cfg.EngineType = testEngineType
+	var err error
+	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	if err != nil {
+		panic(err)
+	}
 	testDB, err := OpenRockDB(cfg)
-	assert.Nil(t, err)
-	if testing.Verbose() {
-		SetLogLevel(int32(4))
+	if err != nil {
+		panic(err)
 	}
 	return testDB
 }
 
-func getTestDB(t *testing.T) *RockDB {
-	cfg := NewRockConfig()
+func getTestDBWithDirType(t *testing.T, dataDir string, tp string) *RockDB {
+	cfg := NewRockRedisDBConfig()
 	cfg.EnableTableCounter = true
-	var err error
-	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
-	assert.Nil(t, err)
+	cfg.WriteBufferSize = 1000
+	cfg.MaxWriteBufferNumber = 1
+	cfg.EnablePartitionedIndexFilter = true
+	cfg.EngineType = tp
+	cfg.DataDir = dataDir
 	testDB, err := OpenRockDB(cfg)
 	assert.Nil(t, err)
 	if testing.Verbose() {
@@ -50,10 +91,117 @@ func getTestDB(t *testing.T) *RockDB {
 	return testDB
 }
 
+func getTestDBWithDir(t *testing.T, dataDir string) *RockDB {
+	return getTestDBWithDirType(t, dataDir, testEngineType)
+}
+
+func getTestDB(t *testing.T) *RockDB {
+	dataDir, err := ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	return getTestDBWithDirType(t, dataDir, testEngineType)
+}
+
+func TestMain(m *testing.M) {
+	SetLogger(int32(common.LOG_INFO), nil)
+	engine.SetLogger(int32(common.LOG_INFO), nil)
+	slow.SetLogger(int32(common.LOG_INFO), nil)
+	flag.Parse()
+	if testing.Verbose() {
+		SetLogger(int32(common.LOG_DEBUG), common.NewLogger())
+		SetLogLevel(int32(common.LOG_DETAIL))
+		engine.SetLogLevel(int32(common.LOG_DETAIL))
+	}
+	lazyCleanExpired = time.Second * 3
+	timeUpdateFreq = 1
+	ret := m.Run()
+	os.Exit(ret)
+}
+
 func TestDB(t *testing.T) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
+}
+
+func TestDBCompact(t *testing.T) {
+	db := getTestDB(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:test_kv_key")
+	value := []byte("value")
+	err := db.KVSet(0, key, value)
+	assert.Nil(t, err)
+	for i := 0; i < 100; i++ {
+		err := db.KVSet(0, []byte(string(key)+strconv.Itoa(i)), value)
+		assert.Nil(t, err)
+	}
+
+	v, err := db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+
+	db.CompactAllRange()
+
+	for i := 0; i < 50; i++ {
+		db.DelKeys([]byte(string(key) + strconv.Itoa(i)))
+	}
+
+	db.CompactAllRange()
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	err = db.SetMaxBackgroundOptions(10, 0)
+	assert.Nil(t, err)
+	err = db.SetMaxBackgroundOptions(0, 10)
+	assert.Nil(t, err)
+	err = db.SetMaxBackgroundOptions(10, 10)
+	assert.Nil(t, err)
+}
+
+func TestIsSameSST(t *testing.T) {
+	d1, err := ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	defer os.RemoveAll(d1)
+	// small file, large file
+	f1small := path.Join(d1, "f1small")
+	f2small := path.Join(d1, "f2small")
+	f3small := path.Join(d1, "f3small")
+	err = ioutil.WriteFile(f1small, []byte("aaa"), 0655)
+	assert.Nil(t, err)
+	err = ioutil.WriteFile(f2small, []byte("aaa"), 0655)
+	err = ioutil.WriteFile(f3small, []byte("aab"), 0655)
+	assert.Nil(t, isSameSSTFile(f1small, f2small))
+	assert.NotNil(t, isSameSSTFile(f2small, f3small))
+	assert.NotNil(t, isSameSSTFile(f1small, f3small))
+	fileData := make([]byte, 1024*256*2)
+	for i := 0; i < len(fileData); i++ {
+		fileData[i] = 'a'
+	}
+
+	f1large := path.Join(d1, "f1large")
+	f2large := path.Join(d1, "f2large")
+	f3large := path.Join(d1, "f3large")
+	f4large := path.Join(d1, "f4large")
+	err = ioutil.WriteFile(f1large, fileData, 0655)
+	assert.Nil(t, err)
+	err = ioutil.WriteFile(f2large, fileData, 0655)
+	assert.Nil(t, err)
+	fileData[0] = 'b'
+	err = ioutil.WriteFile(f3large, fileData, 0655)
+	assert.Nil(t, err)
+	fileData[1024*256+1] = 'b'
+	err = ioutil.WriteFile(f4large, fileData, 0655)
+	assert.Nil(t, err)
+	assert.Nil(t, isSameSSTFile(f1large, f2large))
+	assert.Nil(t, isSameSSTFile(f1large, f3large))
+	assert.NotNil(t, isSameSSTFile(f1large, f4large))
+	assert.Nil(t, isSameSSTFile(f2large, f3large))
+	assert.NotNil(t, isSameSSTFile(f2large, f4large))
+	assert.NotNil(t, isSameSSTFile(f3large, f4large))
+	assert.NotNil(t, isSameSSTFile(f1small, f1large))
+	assert.NotNil(t, isSameSSTFile(f3small, f3large))
 }
 
 func TestRockDB(t *testing.T) {
@@ -106,38 +254,30 @@ func TestRockDB(t *testing.T) {
 	assert.Equal(t, 2, len(vlist))
 }
 
+func TestRockDBRevScanTableForHash(t *testing.T) {
+	testRockDBScanTableForHash(t, true)
+}
+
 func TestRockDBScanTableForHash(t *testing.T) {
+	testRockDBScanTableForHash(t, false)
+}
+
+func testRockDBScanTableForHash(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
 	total := 500
-	keyList1 := make([][]byte, 0, total*2)
-	keyList2 := make([][]byte, 0, total*2)
-	for i := 0; i < total; i++ {
-		keyList1 = append(keyList1, []byte("test:test_hash_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_hash_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < total; i++ {
-		keyList1 = append(keyList1, []byte("test:test_hash_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_hash_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
-		_, err := db.HSet(0, false, key, []byte("a"), key)
+	keyList1, keyList2 := fillScanKeysForType(t, "hash", total, func(key []byte, prefix string) {
+		_, err := db.HSet(0, false, key, []byte(prefix+":a"), key)
 		assert.Nil(t, err)
-		_, err = db.HSet(0, false, key, []byte("b"), key)
+		_, err = db.HSet(0, false, key, []byte(prefix+":b"), key)
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.HSet(0, false, key, []byte("a"), key)
-		assert.Nil(t, err)
-		_, err = db.HSet(0, false, key, []byte("b"), key)
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(HashType, []byte("test"))
 	maxKey := encodeDataTableEnd(HashType, []byte("test"))
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -147,7 +287,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test:a" && string(f) != "test:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -158,7 +298,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 
 	minKey = encodeDataTableStart(HashType, []byte("test2"))
 	maxKey = encodeDataTableEnd(HashType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -168,7 +308,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test2", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test2:a" && string(f) != "test2:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -189,7 +329,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 
 	minKey = encodeDataTableStart(HashType, []byte("test"))
 	maxKey = encodeDataTableEnd(HashType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -199,7 +339,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test:a" && string(f) != "test:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -210,7 +350,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 
 	minKey = encodeDataTableStart(HashType, []byte("test2"))
 	maxKey = encodeDataTableEnd(HashType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	it.NoTimestamp(HashType)
 	func() {
@@ -220,7 +360,7 @@ func TestRockDBScanTableForHash(t *testing.T) {
 			table, k, f, err := hDecodeHashKey(it.Key())
 			assert.Nil(t, err)
 			assert.Equal(t, "test2", string(table))
-			if string(f) != "a" && string(f) != "b" {
+			if string(f) != "test2:a" && string(f) != "test2:b" {
 				t.Fatal("scan field mismatch: " + string(f))
 			}
 			assert.Equal(t, string(table)+":"+string(k), string(it.Value()))
@@ -237,36 +377,34 @@ func TestRockDBScanTableForHash(t *testing.T) {
 	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
 }
 
+func TestRockDBRevScanTableForList(t *testing.T) {
+	testRockDBScanTableForList(t, true)
+}
+
 func TestRockDBScanTableForList(t *testing.T) {
+	testRockDBScanTableForList(t, false)
+}
+
+func testRockDBScanTableForList(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	keyList1 := make([][]byte, 0)
-	keyList2 := make([][]byte, 0)
 	totalCnt := 50
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_list_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_list_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_list_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_list_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
+	keyList1, keyList2 := fillScanKeysForType(t, "list", totalCnt, func(key []byte, prefix string) {
 		_, err := db.LPush(0, key, key, key)
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.LPush(0, key, key, key)
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(ListType, []byte("test"))
 	maxKey := encodeDataTableEnd(ListType, []byte("test"))
-	it, err := db.buildScanIterator(minKey, maxKey)
+	t.Logf("min: %v, max %v\n", minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
+		if err != nil {
+			return
+		}
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
@@ -284,9 +422,12 @@ func TestRockDBScanTableForList(t *testing.T) {
 
 	minKey = encodeDataTableStart(ListType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ListType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
+		if err != nil {
+			return
+		}
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
@@ -315,7 +456,7 @@ func TestRockDBScanTableForList(t *testing.T) {
 
 	minKey = encodeDataTableStart(ListType, []byte("test"))
 	maxKey = encodeDataTableEnd(ListType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -335,9 +476,12 @@ func TestRockDBScanTableForList(t *testing.T) {
 
 	minKey = encodeDataTableStart(ListType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ListType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
+		if err != nil {
+			return
+		}
 		defer it.Close()
 		cnt := 0
 		for ; it.Valid(); it.Next() {
@@ -355,34 +499,28 @@ func TestRockDBScanTableForList(t *testing.T) {
 	}()
 }
 
+func TestRockDBRevScanTableForSet(t *testing.T) {
+	testRockDBScanTableForSet(t, true)
+}
+
 func TestRockDBScanTableForSet(t *testing.T) {
+	testRockDBScanTableForSet(t, false)
+}
+
+func testRockDBScanTableForSet(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	keyList1 := make([][]byte, 0)
-	keyList2 := make([][]byte, 0)
 	totalCnt := 50
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_set_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_set_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_set_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_set_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
-		_, err := db.SAdd(0, key, []byte("test:a"), []byte("test:b"))
+	keyList1, keyList2 := fillScanKeysForType(t, "set", totalCnt, func(key []byte, prefix string) {
+		_, err := db.SAdd(0, key, []byte(prefix+":a"), []byte(prefix+":b"))
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.SAdd(0, key, []byte("test2:a"), []byte("test2:b"))
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(SetType, []byte("test"))
 	maxKey := encodeDataTableEnd(SetType, []byte("test"))
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -404,7 +542,7 @@ func TestRockDBScanTableForSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(SetType, []byte("test2"))
 	maxKey = encodeDataTableEnd(SetType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -436,7 +574,7 @@ func TestRockDBScanTableForSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(SetType, []byte("test"))
 	maxKey = encodeDataTableEnd(SetType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -458,7 +596,7 @@ func TestRockDBScanTableForSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(SetType, []byte("test2"))
 	maxKey = encodeDataTableEnd(SetType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -486,37 +624,31 @@ func TestRockDBScanTableForSet(t *testing.T) {
 	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
 }
 
+func TestRockDBRevScanTableForZSet(t *testing.T) {
+	testRockDBScanTableForZSet(t, true)
+}
+
 func TestRockDBScanTableForZSet(t *testing.T) {
+	testRockDBScanTableForZSet(t, false)
+}
+
+func testRockDBScanTableForZSet(t *testing.T, reverse bool) {
 	db := getTestDB(t)
 	defer os.RemoveAll(db.cfg.DataDir)
 	defer db.Close()
 
-	keyList1 := make([][]byte, 0)
-	keyList2 := make([][]byte, 0)
 	totalCnt := 50
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_zset_scan_key"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_zset_scan_key"+strconv.Itoa(i)))
-	}
-	for i := 0; i < totalCnt; i++ {
-		keyList1 = append(keyList1, []byte("test:test_zset_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-		keyList2 = append(keyList2, []byte("test2:test2_zset_scan_key_longlonglonglonglonglong"+strconv.Itoa(i)))
-	}
-	for _, key := range keyList1 {
-		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte("test:a")},
-			common.ScorePair{2, []byte("test:b")})
+
+	keyList1, keyList2 := fillScanKeysForType(t, "zset", totalCnt, func(key []byte, prefix string) {
+		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte(prefix + ":a")},
+			common.ScorePair{2, []byte(prefix + ":b")})
 		assert.Nil(t, err)
-	}
-	for _, key := range keyList2 {
-		_, err := db.ZAdd(0, key, common.ScorePair{1, []byte("test2:a")},
-			common.ScorePair{2, []byte("test2:b")})
-		assert.Nil(t, err)
-	}
+	})
 
 	minKey := encodeDataTableStart(ZScoreType, []byte("test"))
 	maxKey := encodeDataTableEnd(ZScoreType, []byte("test"))
 	t.Logf("scan test : %v, %v", minKey, maxKey)
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -542,7 +674,7 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(ZScoreType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ZScoreType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -578,7 +710,7 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(ZScoreType, []byte("test"))
 	maxKey = encodeDataTableEnd(ZScoreType, []byte("test"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -604,7 +736,7 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 
 	minKey = encodeDataTableStart(ZScoreType, []byte("test2"))
 	maxKey = encodeDataTableEnd(ZScoreType, []byte("test2"))
-	it, err = db.buildScanIterator(minKey, maxKey)
+	it, err = db.buildScanIterator(minKey, maxKey, reverse)
 	assert.Nil(t, err)
 	func() {
 		defer it.Close()
@@ -633,4 +765,191 @@ func TestRockDBScanTableForZSet(t *testing.T) {
 	keyNum = db.GetTableApproximateNumInRange("test2", nil, nil)
 	diskUsage = db.GetTableSizeInRange("test2", nil, nil)
 	t.Logf("test2 key number: %v, usage: %v", keyNum, diskUsage)
+}
+
+func Test_purgeOldCheckpoint(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("sm-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	defer os.RemoveAll(tmpDir)
+	t.Logf("dir:%v\n", tmpDir)
+	term := uint64(0x011a)
+	index := uint64(0x0c000)
+	cntIdx := 25
+
+	type args struct {
+		keepNum         int
+		checkpointDir   string
+		latestSnapIndex uint64
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{"keep0_1", args{0, "keep0_1dir", index + 1}},
+		{"keep0_2", args{0, "keep0_2dir", index + 2}},
+		{"keep0_10", args{0, "keep0_10dir", index + 10}},
+		{"keep0_max", args{0, "keep0_maxdir", index + uint64(cntIdx)}},
+		{"keep1_1", args{1, "keep1_1dir", index + 1}},
+		{"keep1_2", args{1, "keep1_2dir", index + 2}},
+		{"keep1_10", args{1, "keep1_10dir", index + 10}},
+		{"keep1_max", args{1, "keep1_maxdir", index + uint64(cntIdx)}},
+		{"keep10_1", args{10, "keep10_1dir", index + 1}},
+		{"keep10_2", args{10, "keep10_2dir", index + 2}},
+		{"keep10_10", args{10, "keep10_10dir", index + 10}},
+		{"keep10_max", args{10, "keep10_maxdir", index + uint64(cntIdx)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checkDir := path.Join(tmpDir, tt.args.checkpointDir)
+			fns := make([]string, 0, cntIdx)
+			fnIndexes := make([]uint64, 0, cntIdx)
+			for j := 0; j < cntIdx; j++ {
+				idx := index + uint64(j)
+				p := path.Join(checkDir, fmt.Sprintf("%04x-%05x", term, idx))
+				err := os.MkdirAll(p, 0755)
+				assert.Nil(t, err)
+				fns = append(fns, p)
+				fnIndexes = append(fnIndexes, idx)
+			}
+			purgeOldCheckpoint(tt.args.keepNum, checkDir, tt.args.latestSnapIndex)
+			for i, fn := range fns {
+				_, err := os.Stat(fn)
+				t.Logf("checking file: %v, %v", fn, err)
+				if int64(fnIndexes[i]) >= int64(tt.args.latestSnapIndex)-int64(tt.args.keepNum) {
+					assert.Nil(t, err)
+					continue
+				}
+				assert.True(t, os.IsNotExist(err), "should not keep")
+			}
+		})
+	}
+}
+
+func TestRockDBRecovery(t *testing.T) {
+	// test restore should overwrite new local data and have the restored data
+	dataDir, err := ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	db := getTestDBWithDirType(t, dataDir, "rocksdb")
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	t.Log(db.cfg.DataDir)
+	key := []byte("test:test_kv_recovery")
+	value := []byte("value")
+	err = db.KVSet(0, key, value)
+	assert.Nil(t, err)
+	wcnt := 50000
+	for i := 0; i < wcnt; i++ {
+		expectedV := []byte(string(key) + strconv.Itoa(i))
+		err := db.KVSet(0, expectedV, expectedV)
+		assert.Nil(t, err)
+	}
+	db.CompactAllRange()
+
+	v, err := db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	bi := db.Backup(1, 1)
+	_, err = bi.GetResult()
+	assert.Nil(t, err)
+	checkpointDir := GetCheckpointDir(1, 1)
+	fullBackupPath := path.Join(db.GetBackupDir(), checkpointDir)
+	// copy file to make the backup unlink from local to test recover
+	backupfiles, _ := filepath.Glob(path.Join(fullBackupPath, "*"))
+	var backupSSTfiles []string
+	for _, f := range backupfiles {
+		fi, _ := os.Stat(f)
+		ofi, _ := os.Stat(path.Join(db.GetDataDir(), path.Base(f)))
+		if strings.HasSuffix(f, ".sst") {
+			assert.True(t, os.SameFile(fi, ofi))
+			dst := f + ".tmp"
+			common.CopyFile(f, dst, true)
+			os.Remove(f)
+			os.Rename(dst, f)
+			fi, _ = os.Stat(f)
+			assert.False(t, os.SameFile(fi, ofi))
+			backupSSTfiles = append(backupSSTfiles, f)
+		} else {
+			assert.False(t, os.SameFile(fi, ofi))
+			assert.Nil(t, isSameSSTFile(f, path.Join(db.GetDataDir(), path.Base(f))))
+		}
+	}
+
+	ok, err := db.IsLocalBackupOK(1, 1)
+	assert.Nil(t, err)
+	assert.True(t, ok)
+
+	// write new data to local to test overwrite for restore
+	err = db.KVSet(0, key, []byte("changed"))
+	assert.Nil(t, err)
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, "changed", string(v))
+
+	err = db.restoreFromPath(db.GetBackupDir(), 1, 1)
+	assert.Nil(t, err)
+	localfiles, _ := filepath.Glob(path.Join(db.GetDataDir(), "*.sst"))
+	assert.Equal(t, len(localfiles), len(backupSSTfiles))
+	assert.True(t, len(localfiles) >= 1, localfiles)
+	for _, f := range backupfiles {
+		if strings.HasPrefix(f, "LOG") {
+			continue
+		}
+		fi, err := os.Stat(f)
+		assert.Nil(t, err)
+		lfi, err := os.Stat(path.Join(db.GetDataDir(), path.Base(f)))
+		assert.Nil(t, err)
+		if strings.HasSuffix(f, "sst") {
+			assert.True(t, os.SameFile(fi, lfi))
+		} else {
+			assert.False(t, os.SameFile(fi, lfi))
+			assert.Nil(t, isSameSSTFile(f, path.Join(db.GetDataDir(), path.Base(f))))
+		}
+	}
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	for i := 0; i < wcnt; i++ {
+		expectedV := []byte(string(key) + strconv.Itoa(i))
+		v, err := db.KVGet(expectedV)
+		assert.Nil(t, err)
+		assert.Equal(t, string(expectedV), string(v))
+	}
+
+	err = db.KVSet(0, key, []byte("changed"))
+	assert.Nil(t, err)
+
+	err = db.restoreFromPath(db.GetBackupDir(), 1, 1)
+	assert.Nil(t, err)
+
+	assert.Equal(t, len(localfiles), len(backupSSTfiles))
+	assert.True(t, len(localfiles) >= 1, localfiles)
+	for _, f := range backupfiles {
+		if strings.HasPrefix(f, "LOG") {
+			continue
+		}
+		fi, err := os.Stat(f)
+		assert.Nil(t, err)
+		lfi, err := os.Stat(path.Join(db.GetDataDir(), path.Base(f)))
+		assert.Nil(t, err)
+		if strings.HasSuffix(f, "sst") {
+			assert.True(t, os.SameFile(fi, lfi))
+		} else {
+			assert.False(t, os.SameFile(fi, lfi))
+			assert.Nil(t, isSameSSTFile(f, path.Join(db.GetDataDir(), path.Base(f))))
+		}
+	}
+
+	v, err = db.KVGet(key)
+	assert.Nil(t, err)
+	assert.Equal(t, string(value), string(v))
+	for i := 0; i < wcnt; i++ {
+		expectedV := []byte(string(key) + strconv.Itoa(i))
+		v, err := db.KVGet(expectedV)
+		assert.Nil(t, err)
+		assert.Equal(t, string(expectedV), string(v))
+	}
 }

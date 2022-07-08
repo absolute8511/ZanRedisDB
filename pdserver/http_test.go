@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/cluster"
-	"github.com/absolute8511/ZanRedisDB/common"
-	ds "github.com/absolute8511/ZanRedisDB/server"
-	"github.com/absolute8511/go-zanredisdb"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/cluster"
+	"github.com/youzan/ZanRedisDB/common"
+	ds "github.com/youzan/ZanRedisDB/server"
+	"github.com/youzan/go-zanredisdb"
 )
 
 const (
@@ -27,8 +27,11 @@ const (
 	pdHttpPort                = "18007"
 	pdRemoteHttpPort          = "18008"
 	pdLearnerHttpPort         = "18009"
+	baseRedisPort             = 62345
+	testEngineType            = "pebble"
 )
 
+var balanceVer = "v2"
 var testEtcdServers = "http://127.0.0.1:2379"
 var testOnce sync.Once
 var gpdServer *Server
@@ -54,16 +57,20 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 	opts.ClusterID = "unit-test"
 	opts.ClusterLeadershipAddresses = testEtcdServers
 	opts.BalanceInterval = []string{"0", "24"}
+	opts.BalanceVer = balanceVer
 	opts.LearnerRole = common.LearnerRoleLogSyncer
-	pd := NewServer(opts)
+	pd, err := NewServer(opts)
+	assert.Nil(t, err)
 	pd.Start()
+	// init start syncer
+	pd.pdCoord.SwitchStartLearner(true)
 
 	for i := 0; i < n; i++ {
 		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
 		os.MkdirAll(tmpDir, common.DIR_PERM)
-		raftAddr := "http://127.0.0.1:" + strconv.Itoa(15345+i*100)
-		redisPort := 25345 + i*100
-		httpPort := 35345 + i*100
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(baseRedisPort-100+i*10)
+		redisPort := baseRedisPort - 101 + i*10
+		httpPort := baseRedisPort - 102 + i*10
 		kvOpts := ds.ServerConfig{
 			ClusterID:            TestClusterName,
 			EtcdClusterAddresses: testEtcdServers,
@@ -76,8 +83,11 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 			ElectionTick:         5,
 			LearnerRole:          common.LearnerRoleLogSyncer,
 			RemoteSyncCluster:    "http://127.0.0.1:" + pdRemoteHttpPort,
+			UseRocksWAL:          true,
 		}
-		kv := ds.NewServer(kvOpts)
+		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+		kvOpts.RocksDBOpts.EngineType = testEngineType
+		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)
 		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})
@@ -86,11 +96,51 @@ func startTestClusterForLearner(t *testing.T, n int) (*Server, []dataNodeWrapper
 }
 
 func startRemoteSyncTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
-	return startTestCluster(t, true, TestRemoteSyncClusterName, pdRemoteHttpPort, n, 16345)
+	return startTestCluster(t, true, TestRemoteSyncClusterName, pdRemoteHttpPort, n, baseRedisPort+1000)
 }
 
 func startDefaultTestCluster(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
-	return startTestCluster(t, false, TestClusterName, pdHttpPort, n, 17345)
+	return startTestCluster(t, false, TestClusterName, pdHttpPort, n, baseRedisPort+2000)
+}
+
+func addMoreTestDataNodeToCluster(t *testing.T, n int) ([]dataNodeWrapper, string) {
+	basePort := baseRedisPort + 3000
+	clusterName := TestClusterName
+	syncOnly := false
+	kvList := make([]dataNodeWrapper, 0, n)
+	clusterTmpDir, err := ioutil.TempDir("", fmt.Sprintf("rocksdb-test-%d", time.Now().UnixNano()))
+	assert.Nil(t, err)
+	t.Logf("dir:%v\n", clusterTmpDir)
+
+	for i := 0; i < n; i++ {
+		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
+		os.MkdirAll(tmpDir, common.DIR_PERM)
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+100+i*10)
+		redisPort := basePort + 101 + i*10
+		httpPort := basePort + 102 + i*10
+		rpcPort := basePort + 103 + i*10
+		kvOpts := ds.ServerConfig{
+			ClusterID:            clusterName,
+			EtcdClusterAddresses: testEtcdServers,
+			DataDir:              tmpDir,
+			RedisAPIPort:         redisPort,
+			LocalRaftAddr:        raftAddr,
+			BroadcastAddr:        "127.0.0.1",
+			HttpAPIPort:          httpPort,
+			GrpcAPIPort:          rpcPort,
+			TickMs:               100,
+			ElectionTick:         5,
+			SyncerWriteOnly:      syncOnly,
+			UseRocksWAL:          true,
+		}
+		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+		kvOpts.RocksDBOpts.EngineType = testEngineType
+		kv, _ := ds.NewServer(kvOpts)
+		kv.Start()
+		time.Sleep(time.Second)
+		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})
+	}
+	return kvList, clusterTmpDir
 }
 
 func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort string, n int, basePort int) (*Server, []dataNodeWrapper, string) {
@@ -122,16 +172,18 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 	opts.ClusterID = clusterName
 	opts.ClusterLeadershipAddresses = testEtcdServers
 	opts.BalanceInterval = []string{"0", "24"}
-	pd := NewServer(opts)
+	opts.BalanceVer = balanceVer
+	pd, err := NewServer(opts)
+	assert.Nil(t, err)
 	pd.Start()
 
 	for i := 0; i < n; i++ {
 		tmpDir := path.Join(clusterTmpDir, strconv.Itoa(i))
 		os.MkdirAll(tmpDir, common.DIR_PERM)
-		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+i*100)
-		redisPort := basePort + 10000 + i*100
-		httpPort := basePort + 20000 + i*100
-		rpcPort := basePort + 22000 + i*100
+		raftAddr := "http://127.0.0.1:" + strconv.Itoa(basePort+100+i*10)
+		redisPort := basePort + 101 + i*10
+		httpPort := basePort + 102 + i*10
+		rpcPort := basePort + 103 + i*10
 		kvOpts := ds.ServerConfig{
 			ClusterID:            clusterName,
 			EtcdClusterAddresses: testEtcdServers,
@@ -143,9 +195,14 @@ func startTestCluster(t *testing.T, syncOnly bool, clusterName string, pdPort st
 			GrpcAPIPort:          rpcPort,
 			TickMs:               100,
 			ElectionTick:         5,
+			DefaultSnapCount:     100,
+			DefaultSnapCatchup:   50,
 			SyncerWriteOnly:      syncOnly,
+			UseRocksWAL:          true,
 		}
-		kv := ds.NewServer(kvOpts)
+		kvOpts.RocksDBOpts.EnablePartitionedIndexFilter = true
+		kvOpts.RocksDBOpts.EngineType = testEngineType
+		kv, _ := ds.NewServer(kvOpts)
 		kv.Start()
 		time.Sleep(time.Second)
 		kvList = append(kvList, dataNodeWrapper{kv, redisPort, httpPort, tmpDir})
@@ -169,6 +226,16 @@ func cleanAllCluster(ret int) {
 	}
 }
 
+func cleanDataNodes(dns []dataNodeWrapper, tmpDir string) {
+	for _, n := range dns {
+		n.s.Stop()
+	}
+	if strings.Contains(tmpDir, "rocksdb-test") {
+		fmt.Println("removing: ", tmpDir)
+		os.RemoveAll(tmpDir)
+	}
+}
+
 func getTestClient(t *testing.T, ns string) *zanredisdb.ZanRedisClient {
 	conf := &zanredisdb.Conf{
 		DialTimeout:  time.Second * 15,
@@ -178,13 +245,13 @@ func getTestClient(t *testing.T, ns string) *zanredisdb.ZanRedisClient {
 		Namespace:    ns,
 	}
 	conf.LookupList = append(conf.LookupList, "127.0.0.1:"+pdHttpPort)
-	c := zanredisdb.NewZanRedisClient(conf)
+	c, _ := zanredisdb.NewZanRedisClient(conf)
 	c.Start()
 	return c
 }
 
-func startTestClusterAndCheck(t *testing.T) (*Server, []dataNodeWrapper, string) {
-	pd, kvList, tmpDir := startDefaultTestCluster(t, 4)
+func startTestClusterAndCheck(t *testing.T, n int) (*Server, []dataNodeWrapper, string) {
+	pd, kvList, tmpDir := startDefaultTestCluster(t, n)
 	time.Sleep(time.Second)
 	pduri := "http://127.0.0.1:" + pdHttpPort
 	uri := fmt.Sprintf("%s/datanodes", pduri)
@@ -241,9 +308,9 @@ func startTestClusterAndCheck(t *testing.T) (*Server, []dataNodeWrapper, string)
 	return pd, kvList, tmpDir
 }
 
-func ensureClusterReady(t *testing.T) {
+func ensureClusterReady(t *testing.T, n int) {
 	testOnce.Do(func() {
-		gpdServer, gkvList, gtmpDir = startTestClusterAndCheck(t)
+		gpdServer, gkvList, gtmpDir = startTestClusterAndCheck(t, n)
 	},
 	)
 }
@@ -377,10 +444,10 @@ func ensureDeleteNamespace(t *testing.T, pduri string, ns string) {
 }
 
 func TestClusterInitStart(t *testing.T) {
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 }
 func TestClusterSchemaAddIndex(t *testing.T) {
-	ensureClusterReady(t)
+	ensureClusterReady(t, 4)
 
 	time.Sleep(time.Second)
 	ns := "test_schema_ns"

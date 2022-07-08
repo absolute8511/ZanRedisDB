@@ -19,8 +19,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/pkg/fileutil"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 // Repair tries to repair ErrUnexpectedEOF in the
@@ -53,8 +53,8 @@ func Repair(dirpath string) bool {
 			continue
 		case io.EOF:
 			return true
-		case io.ErrUnexpectedEOF:
-			plog.Infof("repairing %v", f.Name())
+		case io.ErrUnexpectedEOF, ErrMaxWALEntrySizeLimitExceeded:
+			plog.Infof("repairing %v for err: %s", f.Name(), err)
 			bf, bferr := os.Create(f.Name() + ".broken")
 			if bferr != nil {
 				plog.Errorf("could not repair %v, failed to create backup file", f.Name())
@@ -90,7 +90,7 @@ func Repair(dirpath string) bool {
 
 // openLast opens the last wal file for read and write.
 func openLast(dirpath string) (*fileutil.LockedFile, error) {
-	names, err := readWalNames(dirpath)
+	names, err := readWALNames(dirpath)
 	if err != nil {
 		return nil, err
 	}

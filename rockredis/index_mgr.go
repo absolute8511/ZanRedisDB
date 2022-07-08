@@ -5,8 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/gorocksdb"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var (
@@ -432,12 +431,12 @@ func (im *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 					}
 					pkList = pkList[:0]
 					var err error
-					pkList, err = db.ScanWithBuffer(common.HASH, cursor, buildIndexBlock, "", pkList)
+					pkList, err = db.ScanWithBuffer(common.HASH, cursor, buildIndexBlock, "", pkList, false)
 					if err != nil {
 						dbLog.Infof("rebuild index for table %v error %v", buildTable, err)
 						return true, err
 					}
-					wb := gorocksdb.NewWriteBatch()
+					wb := db.rockEng.NewWriteBatch()
 					defer wb.Destroy()
 					for _, pk := range pkList {
 						if !bytes.HasPrefix(pk, origPrefix) {
@@ -464,7 +463,7 @@ func (im *IndexMgr) dobuildIndexes(db *RockDB, stopChan chan struct{}) {
 					if len(pkList) < buildIndexBlock {
 						cursor = nil
 					}
-					db.eng.Write(db.defaultWriteOpts, wb)
+					db.rockEng.Write(wb)
 					if len(cursor) == 0 {
 						return true, nil
 					} else {

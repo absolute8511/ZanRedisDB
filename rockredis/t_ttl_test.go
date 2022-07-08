@@ -7,11 +7,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
+func getTestDBWithCompactTTL(t *testing.T) *RockDB {
+	cfg := NewRockRedisDBConfig()
+	cfg.ExpirationPolicy = common.WaitCompact
+	cfg.EnableTableCounter = true
+	cfg.DataVersion = common.ValueHeaderV1
+
+	var err error
+	cfg.DataDir, err = ioutil.TempDir("", fmt.Sprintf("rockredis-test-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testDB, err := OpenRockDB(cfg)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	return testDB
+}
+
 func getTestDBWithExpirationPolicy(t *testing.T, ePolicy common.ExpirationPolicy) *RockDB {
-	cfg := NewRockConfig()
+	cfg := NewRockRedisDBConfig()
 	cfg.ExpirationPolicy = ePolicy
 	cfg.EnableTableCounter = true
 

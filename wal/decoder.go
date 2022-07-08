@@ -21,10 +21,10 @@ import (
 	"io"
 	"sync"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/crc"
-	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/pkg/crc"
+	"github.com/youzan/ZanRedisDB/pkg/pbutil"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 const minSectorSize = 512
@@ -59,6 +59,11 @@ func (d *decoder) decode(rec *walpb.Record) error {
 	return d.decodeRecord(rec)
 }
 
+// raft max message size is set to 1 MB in etcd server
+// assume projects set reasonable message size limit,
+// thus entry size should never exceed 100 MB
+const maxWALEntrySizeLimit = int64(100 * 1024 * 1024)
+
 func (d *decoder) decodeRecord(rec *walpb.Record) error {
 	if len(d.brs) == 0 {
 		return io.EOF
@@ -79,6 +84,9 @@ func (d *decoder) decodeRecord(rec *walpb.Record) error {
 	}
 
 	recBytes, padBytes := decodeFrameSize(l)
+	if recBytes >= maxWALEntrySizeLimit-padBytes {
+		return ErrMaxWALEntrySizeLimitExceeded
+	}
 
 	data := make([]byte, recBytes+padBytes)
 	if _, err = io.ReadFull(d.brs[0], data); err != nil {

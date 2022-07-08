@@ -44,7 +44,7 @@ type Logger interface {
 func SetLogger(l Logger) { raftLogger = l }
 
 var (
-	defaultLogger = &DefaultLogger{Logger: log.New(os.Stderr, "raft", log.LstdFlags|log.Lshortfile)}
+	defaultLogger = &DefaultLogger{Logger: log.New(os.Stdout, "raft", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)}
 	discardLogger = &DefaultLogger{Logger: log.New(ioutil.Discard, "", 0)}
 	raftLogger    = Logger(defaultLogger)
 )
@@ -114,7 +114,7 @@ func (l *DefaultLogger) Fatalf(format string, v ...interface{}) {
 }
 
 func (l *DefaultLogger) Panic(v ...interface{}) {
-	l.Logger.Panic(v)
+	l.Logger.Panic(v...)
 }
 
 func (l *DefaultLogger) Panicf(format string, v ...interface{}) {

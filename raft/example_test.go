@@ -15,7 +15,7 @@
 package raft
 
 import (
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 func applyToStore(ents []pb.Entry)    {}
@@ -34,7 +34,11 @@ func ExampleNode() {
 	var prev pb.HardState
 	for {
 		// Ready blocks until there is new state ready.
-		rd := <-n.Ready()
+		<-n.EventNotifyCh()
+		rd, hasEvent := n.StepNode(true, false)
+		if !hasEvent {
+			continue
+		}
 		if !isHardStateEqual(prev, rd.HardState) {
 			saveStateToDisk(rd.HardState)
 			prev = rd.HardState

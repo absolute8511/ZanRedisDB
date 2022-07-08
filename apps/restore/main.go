@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/absolute8511/go-zanredisdb"
 	"github.com/absolute8511/redigo/redis"
+	sdk "github.com/youzan/go-zanredisdb"
 )
 
 var (
@@ -350,7 +350,10 @@ func restore() {
 		Namespace:    oriNS,
 		Password:     *pass,
 	}
-	client := sdk.NewZanRedisClient(conf)
+	client, err := sdk.NewZanRedisClient(conf)
+	if err != nil {
+		panic(err)
+	}
 	client.Start()
 	defer client.Stop()
 

@@ -21,6 +21,10 @@ const (
 	LearnerRoleSearcher  = "role_searcher"
 )
 
+func IsRoleLogSyncer(role string) bool {
+	return strings.HasPrefix(role, LearnerRoleLogSyncer)
+}
+
 var (
 	SCAN_CURSOR_SEP = []byte(";")
 	SCAN_NODE_SEP   = []byte(":")
@@ -31,6 +35,7 @@ var (
 	ErrStopped           = errors.New("the node stopped")
 	ErrQueueTimeout      = errors.New("queue request timeout")
 	ErrInvalidArgs       = errors.New("invalid arguments")
+	ErrInvalidTTL        = errors.New("invalid expire time")
 	ErrInvalidRedisKey   = errors.New("invalid redis key")
 	ErrInvalidScanType   = errors.New("invalid scan type")
 	ErrEpochMismatch     = errors.New("epoch mismatch")
@@ -91,30 +96,62 @@ const (
 	// do not need to care about the data expiration. Every node in the cluster should start the 'TTLChecker' of the storage system
 	// with this policy.
 	LocalDeletion ExpirationPolicy = iota
-
-	// ConsistencyDeletion indicates all the expired data should be deleted through Raft, the underlying storage system should
-	// not delete any data and all the expired keys should be sent to the expired channel. Only the leader should starts
-	// the 'TTLChecker' with this policy.
-	ConsistencyDeletion
-
 	//
 	PeriodicalRotation
+
+	// WaitCompact indicates that all ttl will be stored in the values and will be checked while compacting and reading
+	WaitCompact
 
 	UnknownPolicy
 )
 
 const (
-	DefaultExpirationPolicy = "local_deletion"
+	DefaultExpirationPolicy     = "local_deletion"
+	WaitCompactExpirationPolicy = "wait_compact"
+)
+
+var (
+	DefaultSnapCount   = 600000
+	DefaultSnapCatchup = 500000
 )
 
 func StringToExpirationPolicy(s string) (ExpirationPolicy, error) {
 	switch s {
-	case "local_deletion":
+	case DefaultExpirationPolicy:
 		return LocalDeletion, nil
-	case "consistency_deletion":
-		return ConsistencyDeletion, nil
+	case WaitCompactExpirationPolicy:
+		return WaitCompact, nil
 	default:
 		return UnknownPolicy, errors.New("unknown policy")
+	}
+}
+
+type DataVersionT int
+
+const (
+	DefaultDataVer DataVersionT = iota
+
+	//ValueHeaderV1 will add header to kv values to store ttl or other header data
+	ValueHeaderV1
+
+	UnknownDataType
+)
+
+const (
+	ValueHeaderV1Str      = "value_header_v1"
+	ValueHeaderDefaultStr = "default"
+)
+
+func StringToDataVersionType(s string) (DataVersionT, error) {
+	switch s {
+	case "":
+		return DefaultDataVer, nil
+	case ValueHeaderDefaultStr:
+		return DefaultDataVer, nil
+	case ValueHeaderV1Str:
+		return ValueHeaderV1, nil
+	default:
+		return UnknownDataType, errors.New("unknown data version type")
 	}
 }
 
@@ -174,14 +211,15 @@ type ScorePair struct {
 	Member []byte
 }
 
+type WriteCommandFunc func(redcon.Command) (interface{}, error)
 type CommandFunc func(redcon.Conn, redcon.Command)
-type CommandRspFunc func(redcon.Conn, redcon.Command, interface{})
+type CommandRspFunc func(redcon.Command, interface{}) (interface{}, error)
 type InternalCommandFunc func(redcon.Command, int64) (interface{}, error)
 type MergeCommandFunc func(redcon.Command) (interface{}, error)
 type MergeWriteCommandFunc func(redcon.Command, interface{}) (interface{}, error)
 
 type CmdRouter struct {
-	wcmds          map[string]CommandFunc
+	wcmds          map[string]WriteCommandFunc
 	rcmds          map[string]CommandFunc
 	mergeCmds      map[string]MergeCommandFunc
 	mergeWriteCmds map[string]MergeCommandFunc
@@ -189,18 +227,23 @@ type CmdRouter struct {
 
 func NewCmdRouter() *CmdRouter {
 	return &CmdRouter{
-		wcmds:          make(map[string]CommandFunc),
+		wcmds:          make(map[string]WriteCommandFunc),
 		rcmds:          make(map[string]CommandFunc),
 		mergeCmds:      make(map[string]MergeCommandFunc),
 		mergeWriteCmds: make(map[string]MergeCommandFunc),
 	}
 }
 
-func (r *CmdRouter) Register(isWrite bool, name string, f CommandFunc) bool {
-	cmds := r.wcmds
-	if !isWrite {
-		cmds = r.rcmds
+func (r *CmdRouter) RegisterWrite(name string, f WriteCommandFunc) bool {
+	if _, ok := r.wcmds[strings.ToLower(name)]; ok {
+		return false
 	}
+	r.wcmds[name] = f
+	return true
+}
+
+func (r *CmdRouter) RegisterRead(name string, f CommandFunc) bool {
+	cmds := r.rcmds
 	if _, ok := cmds[strings.ToLower(name)]; ok {
 		return false
 	}
@@ -208,13 +251,14 @@ func (r *CmdRouter) Register(isWrite bool, name string, f CommandFunc) bool {
 	return true
 }
 
-func (r *CmdRouter) GetCmdHandler(name string) (CommandFunc, bool, bool) {
+func (r *CmdRouter) GetWCmdHandler(name string) (WriteCommandFunc, bool) {
+	v, ok := r.wcmds[strings.ToLower(name)]
+	return v, ok
+}
+
+func (r *CmdRouter) GetCmdHandler(name string) (CommandFunc, bool) {
 	v, ok := r.rcmds[strings.ToLower(name)]
-	if ok {
-		return v, false, ok
-	}
-	v, ok = r.wcmds[strings.ToLower(name)]
-	return v, true, ok
+	return v, ok
 }
 
 func (r *CmdRouter) RegisterMerge(name string, f MergeCommandFunc) bool {

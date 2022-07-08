@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/pkg/types"
 )
 
 type failureType struct {

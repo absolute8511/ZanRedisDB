@@ -17,16 +17,17 @@ package rafthttp
 import (
 	"bytes"
 	"errors"
-	"golang.org/x/net/context"
 	"io/ioutil"
 	"sync"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/stats"
+	"golang.org/x/net/context"
+
+	"github.com/youzan/ZanRedisDB/pkg/pbutil"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/stats"
 )
 
 const (

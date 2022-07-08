@@ -18,7 +18,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/fileutil"
+	"github.com/youzan/ZanRedisDB/pkg/fileutil"
 )
 
 // WriteAndSyncFile behaves just like ioutil.WriteFile in the standard library,

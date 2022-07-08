@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 var (
@@ -18,22 +19,24 @@ var (
 )
 
 func GetIPv4ForInterfaceName(ifname string) string {
-	interfaces, _ := net.Interfaces()
-	for _, inter := range interfaces {
-		//log.Printf("found interface: %s\n", inter.Name)
-		if inter.Name == ifname {
-			if addrs, err := inter.Addrs(); err == nil {
-				for _, addr := range addrs {
-					switch ip := addr.(type) {
-					case *net.IPNet:
-						if ip.IP.DefaultMask() != nil {
-							return ip.IP.String()
-						}
-					}
-				}
+	inter, err := net.InterfaceByName(ifname)
+	if err != nil {
+		return ""
+	}
+
+	addrs, err := inter.Addrs()
+	if err != nil {
+		return ""
+	}
+
+	for _, addr := range addrs {
+		if ip, ok := addr.(*net.IPNet); ok {
+			if ip.IP.DefaultMask() != nil {
+				return ip.IP.String()
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -76,31 +79,9 @@ func pipelineCommand(conn redcon.Conn, cmd redcon.Command) (int, redcon.Command,
 	ncmd := buildCommand(args)
 	return len(pcmds) + 1, ncmd, nil
 }
+
 func buildCommand(args [][]byte) redcon.Command {
-	// build a pipeline command
-	buf := make([]byte, 0, 128)
-	buf = append(buf, '*')
-	buf = append(buf, strconv.FormatInt(int64(len(args)), 10)...)
-	buf = append(buf, '\r', '\n')
-
-	poss := make([]int, 0, len(args)*2)
-	for _, arg := range args {
-		buf = append(buf, '$')
-		buf = append(buf, strconv.FormatInt(int64(len(arg)), 10)...)
-		buf = append(buf, '\r', '\n')
-		poss = append(poss, len(buf), len(buf)+len(arg))
-		buf = append(buf, arg...)
-		buf = append(buf, '\r', '\n')
-	}
-
-	// reformat a new command
-	var ncmd redcon.Command
-	ncmd.Raw = buf
-	ncmd.Args = make([][]byte, len(poss)/2)
-	for i, j := 0, 0; i < len(poss); i, j = i+2, j+1 {
-		ncmd.Args[j] = ncmd.Raw[poss[i]:poss[i+1]]
-	}
-	return ncmd
+	return common.BuildCommand(args)
 }
 
 func parseCommand(raw []byte) (redcon.Command, error) {

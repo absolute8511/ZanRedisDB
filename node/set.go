@@ -1,9 +1,12 @@
 package node
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func (nd *KVNode) scardCommand(conn redcon.Conn, cmd redcon.Command) {
@@ -38,22 +41,17 @@ func (nd *KVNode) smembersCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) saddCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) spopCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) srandmembersCommand(conn redcon.Conn, cmd redcon.Command) {
 	if len(cmd.Args) != 2 && len(cmd.Args) != 3 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		conn.WriteError(err.Error())
 		return
 	}
 	hasCount := len(cmd.Args) == 3
+	cnt := 1
+	var err error
 	if hasCount {
-		cnt, err := strconv.Atoi(string(cmd.Args[2]))
+		cnt, err = strconv.Atoi(string(cmd.Args[2]))
 		if err != nil {
 			conn.WriteError(err.Error())
 			return
@@ -63,60 +61,128 @@ func (nd *KVNode) spopCommand(conn redcon.Conn, cmd redcon.Command) {
 			return
 		}
 	}
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
+	v, err := nd.store.SRandMembers(cmd.Args[1], int64(cnt))
+	if err != nil {
+		conn.WriteError(err.Error())
 		return
 	}
 
-	// without the count argument, it is bulk string
-	if !hasCount {
-		if v == nil {
-			conn.WriteNull()
-			return
-		}
-		if rsp, ok := v.(string); ok {
-			conn.WriteBulkString(string(rsp[0]))
-			return
-		}
-		if !ok {
-			conn.WriteError("Invalid response type")
-			return
-		}
-	} else {
-		rsp, ok := v.([][]byte)
-		if !ok {
-			conn.WriteError("Invalid response type")
-			return
-		}
-		conn.WriteArray(len(rsp))
-		for _, d := range rsp {
-			conn.WriteBulk(d)
-		}
+	conn.WriteArray(len(v))
+	for _, vv := range v {
+		conn.WriteBulk(vv)
 	}
 }
 
-func (nd *KVNode) sremCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
+func (nd *KVNode) saddCommand(cmd redcon.Command) (interface{}, error) {
+	// optimize the sadd to check before propose to raft
+	if len(cmd.Args) < 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	needChange := false
+	for _, m := range cmd.Args[2:] {
+		if err := common.CheckKeySubKey(key, m); err != nil {
+			return nil, err
+		}
+		n, _ := nd.store.SIsMember(key, m)
+		if n == 0 {
+			// found a new member not exist, we need do raft proposal
+			needChange = true
+			break
+		}
+	}
+	if !needChange {
+		return int64(0), nil
+	}
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	return rsp, err
 }
 
-func (nd *KVNode) sclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
+func (nd *KVNode) sremCommand(cmd redcon.Command) (interface{}, error) {
+	// optimize the srem to check before propose to raft
+	if len(cmd.Args) < 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	needChange := false
+	for _, m := range cmd.Args[2:] {
+		n, _ := nd.store.SIsMember(key, m)
+		if n != 0 {
+			// found a new member, we need do raft proposal
+			needChange = true
+			break
+		}
+	}
+	if !needChange {
+		return int64(0), nil
+	}
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	return rsp, err
 }
 
-func (nd *KVNode) smclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	if rsp, ok := v.(int64); ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
+func (nd *KVNode) spopCommand(cmd redcon.Command) (interface{}, error) {
+	if len(cmd.Args) != 2 && len(cmd.Args) != 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
+	hasCount := len(cmd.Args) == 3
+	if hasCount {
+		cnt, err := strconv.Atoi(string(cmd.Args[2]))
+		if err != nil {
+			return nil, err
+		}
+		if cnt < 1 {
+			return nil, errors.New("Invalid count")
+		}
+	}
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	n, err := nd.store.SCard(key)
+	if err != nil {
+		return nil, err
+	}
+	// check if empty set
+	if n == 0 {
+		if !hasCount {
+			return nil, nil
+		} else {
+			return [][]byte{}, nil
+		}
+	}
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+		// without the count argument, it is bulk string
+		if !hasCount {
+			if r == nil {
+				return nil, nil
+			}
+			if rsp, ok := r.([]byte); ok {
+				return rsp, nil
+			}
+			return nil, errInvalidResponse
+		} else {
+			rsp, ok := r.([][]byte)
+			if !ok {
+				return nil, errInvalidResponse
+			}
+			return rsp, nil
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (kvsm *kvStoreSM) localSadd(cmd redcon.Command, ts int64) (interface{}, error) {
@@ -140,13 +206,13 @@ func (kvsm *kvStoreSM) localSpop(cmd redcon.Command, ts int64) (interface{}, err
 		return vals, nil
 	}
 	if len(vals) > 0 {
-		return string(vals[0]), nil
+		return vals[0], nil
 	}
 	return nil, nil
 }
 
 func (kvsm *kvStoreSM) localSclear(cmd redcon.Command, ts int64) (interface{}, error) {
-	return kvsm.store.SClear(cmd.Args[1])
+	return kvsm.store.SClear(ts, cmd.Args[1])
 }
 func (kvsm *kvStoreSM) localSmclear(cmd redcon.Command, ts int64) (interface{}, error) {
 	return kvsm.store.SMclear(cmd.Args[1:]...)

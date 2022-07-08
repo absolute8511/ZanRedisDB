@@ -17,7 +17,7 @@ package raft
 import (
 	"testing"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // TestMsgAppFlowControlFull ensures:
@@ -25,6 +25,7 @@ import (
 // 2. when the window is full, no more msgApp can be sent.
 func TestMsgAppFlowControlFull(t *testing.T) {
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
+	defer closeAndFreeRaft(r)
 	r.becomeCandidate()
 	r.becomeLeader()
 
@@ -61,6 +62,7 @@ func TestMsgAppFlowControlFull(t *testing.T) {
 // 2. out-of-dated msgAppResp has no effect on the sliding window.
 func TestMsgAppFlowControlMoveForward(t *testing.T) {
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
+	defer closeAndFreeRaft(r)
 	r.becomeCandidate()
 	r.becomeLeader()
 
@@ -106,6 +108,7 @@ func TestMsgAppFlowControlMoveForward(t *testing.T) {
 // frees one slot if the window is full.
 func TestMsgAppFlowControlRecvHeartbeat(t *testing.T) {
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
+	defer closeAndFreeRaft(r)
 	r.becomeCandidate()
 	r.becomeLeader()
 

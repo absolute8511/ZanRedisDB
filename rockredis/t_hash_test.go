@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 func TestHashCodec(t *testing.T) {
@@ -41,13 +41,33 @@ func TestDBHash(t *testing.T) {
 
 	key := []byte("test:testdb_hash_a")
 
-	if n, err := db.HSet(0, false, key, []byte("a"), []byte("hello world 1")); err != nil {
-		t.Fatal(err)
-	} else if n != 1 {
-		t.Fatal(n)
+	tn := time.Now().UnixNano()
+	r1 := common.KVRecord{
+		Key:   []byte("a"),
+		Value: []byte("hello world 1"),
 	}
+	r2 := common.KVRecord{
+		Key:   []byte("b"),
+		Value: []byte("hello world 2"),
+	}
+	// test hget on not exist
+	n, err := db.HGetVer(key, []byte("a"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
 
-	if n, err := db.HSet(0, false, key, []byte("b"), []byte("hello world 2")); err != nil {
+	n, vals, err := db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(vals))
+	n, vals, err = db.HGetAllExpired(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, 0, len(vals))
+
+	err = db.HMset(tn, key, r1, r2)
+	assert.Nil(t, err)
+
+	if n, err := db.HSet(tn, false, key, []byte("d"), []byte("hello world 2")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -70,19 +90,30 @@ func TestDBHash(t *testing.T) {
 	if string(v2) != string(ay[1]) {
 		t.Error(ay[1])
 	}
+	n, err = db.HGetVer(key, []byte("a"))
+	assert.Nil(t, err)
+	assert.Equal(t, int64(tn), n)
 
-	len, err := db.HLen(key)
+	n, vals, err = db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+	assert.Equal(t, 3, len(vals))
+	n, vals2, err := db.HGetAllExpired(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(3), n)
+	assert.Equal(t, 3, len(vals2))
+	assert.Equal(t, vals, vals2)
+
+	length, err := db.HLen(key)
 	if err != nil {
 		t.Error(err)
 	}
-	if len != 2 {
-		t.Errorf("length should be 2: %v", len)
+	if length != 3 {
+		t.Errorf("length should be 2: %v", length)
 	}
-	_, ch, _ := db.HGetAll(key)
-	results := make([]common.KVRecordRet, 0)
-	for r := range ch {
-		results = append(results, r)
-	}
+	n, results, _ := db.HGetAll(key)
+	time.Sleep(time.Second)
+	assert.Equal(t, int(n), len(results))
 	if string(results[0].Rec.Key) != "a" {
 		t.Error(results)
 	}
@@ -97,22 +128,16 @@ func TestDBHash(t *testing.T) {
 		t.Error(results)
 	}
 
-	_, ch, _ = db.HKeys(key)
-	results = make([]common.KVRecordRet, 0)
-	for r := range ch {
-		results = append(results, r)
-	}
+	n, results, _ = db.HKeys(key)
+	assert.Equal(t, int(n), len(results))
+
 	if string(results[0].Rec.Key) != "a" {
 		t.Error(results)
 	}
 	if string(results[1].Rec.Key) != "b" {
 		t.Error(results)
 	}
-	_, ch, _ = db.HValues(key)
-	results = make([]common.KVRecordRet, 0)
-	for r := range ch {
-		results = append(results, r)
-	}
+	n, results, _ = db.HValues(key)
 	if string(results[0].Rec.Value) != "hello world 1" {
 		t.Error(results)
 	}
@@ -120,7 +145,7 @@ func TestDBHash(t *testing.T) {
 		t.Error(results)
 	}
 
-	if n, err := db.HSet(0, true, key, []byte("b"), []byte("hello world changed nx")); err != nil {
+	if n, err := db.HSet(tn, true, key, []byte("b"), []byte("hello world changed nx")); err != nil {
 		t.Fatal(err)
 	} else if n != 0 {
 		t.Fatal(n)
@@ -130,7 +155,7 @@ func TestDBHash(t *testing.T) {
 		t.Error(v2)
 	}
 
-	if n, err := db.HSet(0, true, key, []byte("c"), []byte("hello world c")); err != nil {
+	if n, err := db.HSet(tn, true, key, []byte("c"), []byte("hello world c")); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal(n)
@@ -169,7 +194,7 @@ func TestHashKeyExists(t *testing.T) {
 	if _, err := db.HSet(0, false, key, []byte("hello2"), []byte("world2")); err != nil {
 		t.Fatal(err.Error())
 	}
-	db.HDel(key, []byte("hello"))
+	db.HDel(0, key, []byte("hello"))
 	v, err = db.HKeyExists(key)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -177,7 +202,7 @@ func TestHashKeyExists(t *testing.T) {
 	if v != 1 {
 		t.Fatal("invalid value ", v)
 	}
-	db.HClear(key)
+	db.HClear(0, key)
 	v, err = db.HKeyExists(key)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -444,12 +469,11 @@ func TestHashIndexStringV(t *testing.T) {
 	for i := 0; i < pkCnt; i++ {
 		inputPKList = append(inputPKList, []byte("test:key"+strconv.Itoa(i)))
 	}
-	db.wb.Clear()
 	for i, pk := range inputPKList {
 		err = db.hsetIndexAddRec(pk, hindex.IndexField, inputFVList[i], db.wb)
 		assert.Nil(t, err)
 	}
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.CommitBatchWrite()
 	condAll := &IndexCondition{
 		StartKey:     nil,
 		IncludeStart: false,
@@ -582,9 +606,8 @@ func TestHashIndexStringV(t *testing.T) {
 		assert.True(t, comp == -1 || comp == 0)
 	}
 
-	db.wb.Clear()
 	db.hsetIndexRemoveRec(inputPKList[0], hindex.IndexField, inputFVList[0], db.wb)
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.CommitBatchWrite()
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condEqual, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
@@ -656,7 +679,7 @@ func TestHashIndexInt64V(t *testing.T) {
 	for i, pk := range inputPKList {
 		db.hsetIndexAddRec(pk, hindex.IndexField, inputFVList[i], db.wb)
 	}
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.rockEng.Write(db.wb)
 	condAll := &IndexCondition{
 		StartKey:     nil,
 		IncludeStart: false,
@@ -783,7 +806,7 @@ func TestHashIndexInt64V(t *testing.T) {
 
 	db.wb.Clear()
 	db.hsetIndexRemoveRec(inputPKList[0], hindex.IndexField, inputFVList[0], db.wb)
-	db.eng.Write(db.defaultWriteOpts, db.wb)
+	db.rockEng.Write(db.wb)
 	_, cnt, pkList, err = db.HsetIndexSearch(hindex.Table, hindex.IndexField, condEqual, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
@@ -934,7 +957,6 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	inputFVList = append(inputFVList, []byte("fv1"))
 	inputFVList = append(inputFVList, []byte("fv2"))
 	inputFVList = append(inputFVList, []byte("fv3"))
-	db.wb.Clear()
 	for i, pk := range inputPKList {
 		err = db.HMset(0, pk, common.KVRecord{stringIndex.IndexField, inputFVList[i]})
 		assert.Nil(t, err)
@@ -959,7 +981,7 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Equal(t, 1, len(pkList))
 	assert.Equal(t, inputPKList[0], pkList[0].PKey)
 
-	db.HDel(inputPKList[0], stringIndex.IndexField)
+	db.HDel(0, inputPKList[0], stringIndex.IndexField)
 	_, cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condEqual0, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, int(cnt))
@@ -968,7 +990,7 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-1, int(cnt))
 
-	db.HClear(inputPKList[1])
+	db.HClear(0, inputPKList[1])
 
 	_, cnt, _, err = db.HsetIndexSearch(intIndex.Table, intIndex.IndexField, condAll, false)
 	assert.Nil(t, err)
@@ -977,4 +999,93 @@ func TestHashUpdateWithIndex(t *testing.T) {
 	_, cnt, _, err = db.HsetIndexSearch(stringIndex.Table, stringIndex.IndexField, condAll, false)
 	assert.Nil(t, err)
 	assert.Equal(t, len(inputPKList)-2, int(cnt))
+}
+
+func TestDBHashClearInCompactTTL(t *testing.T) {
+	db := getTestDBWithCompactTTL(t)
+	defer os.RemoveAll(db.cfg.DataDir)
+	defer db.Close()
+
+	key := []byte("test:testdb_hash_clear_compact_a")
+	member := []byte("member")
+	memberNew := []byte("memberNew")
+
+	ts := time.Now().UnixNano()
+	db.HSet(ts, false, key, member, member)
+
+	n, err := db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	ts = time.Now().UnixNano()
+	n, err = db.HClear(ts, key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+
+	v, err := db.HGet(key, member)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+
+	vlist, err := db.HMget(key, member)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(vlist))
+	assert.Nil(t, vlist[0])
+
+	n, rets, err := db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int(n), len(rets))
+	assert.Equal(t, int(0), len(rets))
+
+	n, err = db.HKeyExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	n, rets, err = db.HKeys(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, int(0), len(rets))
+	n, rets, err = db.HValues(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.Equal(t, int(0), len(rets))
+
+	// renew
+	ts = time.Now().UnixNano()
+	db.HSet(ts, false, key, memberNew, memberNew)
+
+	n, err = db.HLen(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+
+	v, err = db.HGet(key, member)
+	assert.Nil(t, err)
+	assert.Nil(t, v)
+	v, err = db.HGet(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, memberNew, v)
+
+	vlist, err = db.HMget(key, memberNew)
+	assert.Nil(t, err)
+	assert.Equal(t, int(n), len(vlist))
+	assert.Equal(t, memberNew, vlist[0])
+
+	n, rets, err = db.HGetAll(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int(n), len(rets))
+	assert.Equal(t, int(1), len(rets))
+
+	n, err = db.HKeyExists(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	n, rets, err = db.HKeys(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.Equal(t, int(1), len(rets))
+	n, rets, err = db.HValues(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.Equal(t, int(1), len(rets))
 }

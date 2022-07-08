@@ -16,14 +16,14 @@ package rafthttp
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/absolute8511/ZanRedisDB/stats"
-	"golang.org/x/net/context"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/snap"
+	"github.com/youzan/ZanRedisDB/stats"
 )
 
 const (
@@ -109,14 +109,10 @@ type peer struct {
 	msgAppV2Reader *streamReader
 	msgAppReader   *streamReader
 
-	recvc chan raftpb.Message
-	propc chan raftpb.Message
-
 	mu     sync.Mutex
-	paused bool
+	paused int32
 
-	cancel context.CancelFunc // cancel pending works in go routine created by peer.
-	stopc  chan struct{}
+	stopc chan struct{}
 }
 
 func startPeer(transport *Transport, urls types.URLs, peerID types.ID, ps *stats.PeerStats) *peer {
@@ -147,72 +143,18 @@ func startPeer(transport *Transport, urls types.URLs, peerID types.ID, ps *stats
 		writer:         startStreamWriter(peerID, status, ps, r),
 		pipeline:       pipeline,
 		snapSender:     newSnapshotSender(transport, picker, peerID, status),
-		recvc:          make(chan raftpb.Message, recvBufSize),
-		propc:          make(chan raftpb.Message, maxPendingProposals),
 		stopc:          make(chan struct{}),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancel = cancel
-	go func() {
-		for {
-			select {
-			case mm := <-p.recvc:
-				if err := r.Process(ctx, mm); err != nil {
-					plog.Warningf("failed to process raft message (%v)", err)
-				}
-			case <-p.stopc:
-				return
-			}
-		}
-	}()
-
-	// r.Process might block for processing proposal when there is no leader.
-	// Thus propc must be put into a separate routine with recvc to avoid blocking
-	// processing other raft messages.
-	go func() {
-		for {
-			select {
-			case mm := <-p.propc:
-				if err := r.Process(ctx, mm); err != nil {
-					plog.Warningf("failed to process raft message (%v)", err)
-				}
-			case <-p.stopc:
-				return
-			}
-		}
-	}()
-
-	p.msgAppV2Reader = &streamReader{
-		peerID: peerID,
-		typ:    streamTypeMsgAppV2,
-		tr:     transport,
-		picker: picker,
-		status: status,
-		recvc:  p.recvc,
-		propc:  p.propc,
-	}
-	p.msgAppReader = &streamReader{
-		peerID: peerID,
-		typ:    streamTypeMessage,
-		tr:     transport,
-		picker: picker,
-		status: status,
-		recvc:  p.recvc,
-		propc:  p.propc,
-	}
-	p.msgAppV2Reader.start()
-	p.msgAppReader.start()
+	p.msgAppV2Reader = startStreamReader(peerID, streamTypeMsgAppV2, transport, picker, status, r)
+	p.msgAppReader = startStreamReader(peerID, streamTypeMessage, transport, picker, status, r)
 
 	return p
 }
 
 func (p *peer) send(m raftpb.Message) {
-	p.mu.Lock()
-	paused := p.paused
-	p.mu.Unlock()
-
-	if paused {
+	paused := atomic.LoadInt32(&p.paused)
+	if paused == 1 {
 		return
 	}
 
@@ -261,7 +203,7 @@ func (p *peer) activeSince() time.Time { return p.status.activeSince() }
 func (p *peer) Pause() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.paused = true
+	atomic.StoreInt32(&p.paused, 1)
 	p.msgAppReader.pause()
 	p.msgAppV2Reader.pause()
 }
@@ -270,7 +212,7 @@ func (p *peer) Pause() {
 func (p *peer) Resume() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.paused = false
+	atomic.StoreInt32(&p.paused, 0)
 	p.msgAppReader.resume()
 	p.msgAppV2Reader.resume()
 }
@@ -280,7 +222,6 @@ func (p *peer) stop() {
 	defer plog.Infof("stopped peer %s", p.id)
 
 	close(p.stopc)
-	p.cancel()
 	p.msgAppV2Writer.stop()
 	p.writer.stop()
 	p.pipeline.stop()

@@ -2,28 +2,30 @@ package rockredis
 
 import (
 	"errors"
+	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/gobwas/glob"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 var errDataType = errors.New("error data type")
 var errMetaKey = errors.New("error meta key")
 
-func (db *RockDB) Scan(dataType common.DataType, cursor []byte, count int, match string) ([][]byte, error) {
+func (db *RockDB) Scan(dataType common.DataType, cursor []byte, count int, match string, reverse bool) ([][]byte, error) {
 	storeDataType, err := getDataStoreType(dataType)
 	if err != nil {
 		return nil, err
 	}
-	return db.scanGeneric(storeDataType, cursor, count, match)
+	return db.scanGeneric(storeDataType, cursor, count, match, reverse)
 }
 
-func (db *RockDB) ScanWithBuffer(dataType common.DataType, cursor []byte, count int, match string, buffer [][]byte) ([][]byte, error) {
+func (db *RockDB) ScanWithBuffer(dataType common.DataType, cursor []byte, count int, match string, buffer [][]byte, reverse bool) ([][]byte, error) {
 	storeDataType, err := getDataStoreType(dataType)
 	if err != nil {
 		return nil, err
 	}
-	return db.scanGenericUseBuffer(storeDataType, cursor, count, match, buffer)
+	return db.scanGenericUseBuffer(storeDataType, cursor, count, match, buffer, reverse)
 }
 
 func getDataStoreType(dataType common.DataType) (byte, error) {
@@ -65,6 +67,7 @@ func getCommonDataType(dataType byte) (common.DataType, error) {
 	}
 	return commonDataType, nil
 }
+
 func buildMatchRegexp(match string) (glob.Glob, error) {
 	var err error
 	var r glob.Glob
@@ -78,17 +81,27 @@ func buildMatchRegexp(match string) (glob.Glob, error) {
 	return r, nil
 }
 
-func (db *RockDB) buildScanIterator(minKey []byte, maxKey []byte) (*RangeLimitedIterator, error) {
+func (db *RockDB) buildScanIterator(minKey []byte, maxKey []byte, reverse bool) (*engine.RangeLimitedIterator, error) {
 	tp := common.RangeOpen
-	return NewDBRangeIterator(db.eng, minKey, maxKey, tp, false)
+	return db.NewDBRangeIterator(minKey, maxKey, tp, reverse)
 }
 
-func buildScanKeyRange(storeDataType byte, key []byte) (minKey []byte, maxKey []byte, err error) {
-	if minKey, err = encodeScanMinKey(storeDataType, key); err != nil {
-		return
-	}
-	if maxKey, err = encodeScanMaxKey(storeDataType, nil); err != nil {
-		return
+func buildScanKeyRange(storeDataType byte, key []byte, reverse bool) (minKey []byte, maxKey []byte, err error) {
+	if reverse {
+		// reverse we should make current key as end if key is nil
+		if maxKey, err = encodeScanKey(storeDataType, key); err != nil {
+			return
+		}
+		if minKey, err = encodeScanMinKey(storeDataType, nil); err != nil {
+			return
+		}
+	} else {
+		if minKey, err = encodeScanMinKey(storeDataType, key); err != nil {
+			return
+		}
+		if maxKey, err = encodeScanMaxKey(storeDataType, nil); err != nil {
+			return
+		}
 	}
 	return
 }
@@ -120,20 +133,7 @@ func encodeScanKeyTableEnd(storeDataType byte, key []byte) ([]byte, error) {
 }
 
 func encodeScanKey(storeDataType byte, key []byte) ([]byte, error) {
-	switch storeDataType {
-	case KVType:
-		return encodeKVKey(key), nil
-	case LMetaType:
-		return lEncodeMetaKey(key), nil
-	case HSizeType:
-		return hEncodeSizeKey(key), nil
-	case ZSizeType:
-		return zEncodeSizeKey(key), nil
-	case SSizeType:
-		return sEncodeSizeKey(key), nil
-	default:
-		return nil, errDataType
-	}
+	return encodeMetaKey(storeDataType, key)
 }
 
 func decodeScanKey(storeDataType byte, ek []byte) (key []byte, err error) {
@@ -166,23 +166,24 @@ func checkScanCount(count int) int {
 
 // note: this scan will not stop while cross table, it will scan begin from key until count or no more in db.
 func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int,
-	match string, inputBuffer [][]byte) ([][]byte, error) {
+	match string, inputBuffer [][]byte, reverse bool) ([][]byte, error) {
 	r, err := buildMatchRegexp(match)
 	if err != nil {
 		return nil, err
 	}
 
-	minKey, maxKey, err := buildScanKeyRange(storeDataType, key)
+	minKey, maxKey, err := buildScanKeyRange(storeDataType, key, reverse)
 	if err != nil {
 		return nil, err
 	}
 	dbLog.Debugf("scan range: %v, %v", minKey, maxKey)
 	count = checkScanCount(count)
 
-	it, err := db.buildScanIterator(minKey, maxKey)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 	if err != nil {
 		return nil, err
 	}
+	defer it.Close()
 
 	var v [][]byte
 	if inputBuffer != nil {
@@ -201,38 +202,47 @@ func (db *RockDB) scanGenericUseBuffer(storeDataType byte, key []byte, count int
 			i++
 		}
 	}
-	it.Close()
 	return v, nil
 
 }
 
 func (db *RockDB) scanGeneric(storeDataType byte, key []byte, count int,
-	match string) ([][]byte, error) {
+	match string, reverse bool) ([][]byte, error) {
 
-	return db.scanGenericUseBuffer(storeDataType, key, count, match, nil)
+	return db.scanGenericUseBuffer(storeDataType, key, count, match, nil, reverse)
 }
 
 // for special data scan
-func buildSpecificDataScanKeyRange(storeDataType byte, key []byte, cursor []byte) (minKey []byte, maxKey []byte, err error) {
-	if minKey, err = encodeSpecificDataScanMinKey(storeDataType, key, cursor); err != nil {
-		return
-	}
-	if maxKey, err = encodeSpecificDataScanMaxKey(storeDataType, key, nil); err != nil {
-		return
+func buildSpecificDataScanKeyRange(storeDataType byte, table []byte, key []byte, cursor []byte, reverse bool) (minKey []byte, maxKey []byte, err error) {
+	if reverse {
+		// for reverse, we need use current cursor as the end if cursor is nil
+		if maxKey, err = encodeSpecificDataScanKey(storeDataType, table, key, cursor); err != nil {
+			return
+		}
+		if minKey, err = encodeSpecificDataScanMinKey(storeDataType, table, key, nil); err != nil {
+			return
+		}
+	} else {
+		if minKey, err = encodeSpecificDataScanMinKey(storeDataType, table, key, cursor); err != nil {
+			return
+		}
+		if maxKey, err = encodeSpecificDataScanMaxKey(storeDataType, table, key, nil); err != nil {
+			return
+		}
 	}
 	return
 }
 
-func encodeSpecificDataScanMinKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
-	return encodeSpecificDataScanKey(storeDataType, key, cursor)
+func encodeSpecificDataScanMinKey(storeDataType byte, table []byte, key []byte, cursor []byte) ([]byte, error) {
+	return encodeSpecificDataScanKey(storeDataType, table, key, cursor)
 }
 
-func encodeSpecificDataScanMaxKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
+func encodeSpecificDataScanMaxKey(storeDataType byte, table []byte, key []byte, cursor []byte) ([]byte, error) {
 	if len(cursor) > 0 {
-		return encodeSpecificDataScanKey(storeDataType, key, cursor)
+		return encodeSpecificDataScanKey(storeDataType, table, key, cursor)
 	}
 
-	k, err := encodeSpecificDataScanKey(storeDataType, key, nil)
+	k, err := encodeSpecificDataScanKey(storeDataType, table, key, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -241,11 +251,7 @@ func encodeSpecificDataScanMaxKey(storeDataType byte, key []byte, cursor []byte)
 	return k, nil
 }
 
-func encodeSpecificDataScanKey(storeDataType byte, key []byte, cursor []byte) ([]byte, error) {
-	table, rk, err := extractTableFromRedisKey(key)
-	if err != nil {
-		return nil, err
-	}
+func encodeSpecificDataScanKey(storeDataType byte, table []byte, rk []byte, cursor []byte) ([]byte, error) {
 
 	switch storeDataType {
 	case HashType:
@@ -260,19 +266,20 @@ func encodeSpecificDataScanKey(storeDataType byte, key []byte, cursor []byte) ([
 }
 
 func (db *RockDB) buildSpecificDataScanIterator(storeDataType byte,
-	key []byte, cursor []byte,
-	count int) (*RangeLimitedIterator, error) {
+	table []byte, key []byte, cursor []byte,
+	count int, reverse bool) (*engine.RangeLimitedIterator, error) {
 
 	if err := checkKeySize(key); err != nil {
 		return nil, err
 	}
 
-	minKey, maxKey, err := buildSpecificDataScanKeyRange(storeDataType, key, cursor)
+	minKey, maxKey, err := buildSpecificDataScanKeyRange(storeDataType, table, key, cursor, reverse)
 	if err != nil {
 		return nil, err
 	}
 
-	it, err := db.buildScanIterator(minKey, maxKey)
+	dbLog.Debugf("scan data %v range: %v, %v, %v", storeDataType, minKey, maxKey, reverse)
+	it, err := db.buildScanIterator(minKey, maxKey, reverse)
 
 	if err != nil {
 		return nil, err
@@ -280,16 +287,24 @@ func (db *RockDB) buildSpecificDataScanIterator(storeDataType byte,
 	return it, nil
 }
 
-func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match string) ([]common.KVRecord, error) {
+func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match string, reverse bool) ([]common.KVRecord, error) {
 	count = checkScanCount(count)
 	r, err := buildMatchRegexp(match)
 	if err != nil {
 		return nil, err
 	}
-
 	v := make([]common.KVRecord, 0, count)
 
-	it, err := db.buildSpecificDataScanIterator(HashType, key, cursor, count)
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.GetCollVersionKey(tn, HashType, key, true)
+	if err != nil {
+		return nil, err
+	}
+	if keyInfo.IsNotExistOrExpired() {
+		return v, nil
+	}
+
+	it, err := db.buildSpecificDataScanIterator(HashType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -309,19 +324,29 @@ func (db *RockDB) hScanGeneric(key []byte, cursor []byte, count int, match strin
 	return v, nil
 }
 
-func (db *RockDB) HScan(key []byte, cursor []byte, count int, match string) ([]common.KVRecord, error) {
-	return db.hScanGeneric(key, cursor, count, match)
+func (db *RockDB) HScan(key []byte, cursor []byte, count int, match string, reverse bool) ([]common.KVRecord, error) {
+	return db.hScanGeneric(key, cursor, count, match, reverse)
 }
 
-func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match string) ([][]byte, error) {
+func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match string, reverse bool) ([][]byte, error) {
 	count = checkScanCount(count)
 	r, err := buildMatchRegexp(match)
 	if err != nil {
 		return nil, err
 	}
-	v := make([][]byte, 0, count)
 
-	it, err := db.buildSpecificDataScanIterator(SetType, key, cursor, count)
+	// TODO: use pool for large alloc
+	v := make([][]byte, 0, count)
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.GetCollVersionKey(tn, SetType, key, true)
+	if err != nil {
+		return nil, err
+	}
+	if keyInfo.IsNotExistOrExpired() {
+		return v, nil
+	}
+
+	it, err := db.buildSpecificDataScanIterator(SetType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -341,11 +366,11 @@ func (db *RockDB) sScanGeneric(key []byte, cursor []byte, count int, match strin
 	return v, nil
 }
 
-func (db *RockDB) SScan(key []byte, cursor []byte, count int, match string) ([][]byte, error) {
-	return db.sScanGeneric(key, cursor, count, match)
+func (db *RockDB) SScan(key []byte, cursor []byte, count int, match string, reverse bool) ([][]byte, error) {
+	return db.sScanGeneric(key, cursor, count, match, reverse)
 }
 
-func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match string) ([]common.ScorePair, error) {
+func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match string, reverse bool) ([]common.ScorePair, error) {
 	count = checkScanCount(count)
 
 	r, err := buildMatchRegexp(match)
@@ -353,9 +378,18 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 		return nil, err
 	}
 
+	tn := time.Now().UnixNano()
+	keyInfo, err := db.GetCollVersionKey(tn, ZSetType, key, true)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: use pool for large alloc
 	v := make([]common.ScorePair, 0, count)
+	if keyInfo.IsNotExistOrExpired() {
+		return v, nil
+	}
 
-	it, err := db.buildSpecificDataScanIterator(ZSetType, key, cursor, count)
+	it, err := db.buildSpecificDataScanIterator(ZSetType, keyInfo.Table, keyInfo.VerKey, cursor, count, reverse)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +403,7 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 			continue
 		}
 
-		score, err := Float64(it.Value(), nil)
+		score, err := Float64(it.RefValue(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -380,6 +414,6 @@ func (db *RockDB) zScanGeneric(key []byte, cursor []byte, count int, match strin
 	return v, nil
 }
 
-func (db *RockDB) ZScan(key []byte, cursor []byte, count int, match string) ([]common.ScorePair, error) {
-	return db.zScanGeneric(key, cursor, count, match)
+func (db *RockDB) ZScan(key []byte, cursor []byte, count int, match string, reverse bool) ([]common.ScorePair, error) {
+	return db.zScanGeneric(key, cursor, count, match, reverse)
 }

@@ -2,6 +2,8 @@ package rockredis
 
 import (
 	"errors"
+
+	"github.com/youzan/ZanRedisDB/common"
 )
 
 const (
@@ -36,7 +38,9 @@ const (
 	SetType    byte = 29
 	SSizeType  byte = 30
 
-	JSONType byte = 31
+	JSONType       byte = 31
+	BitmapType     byte = 32
+	BitmapMetaType byte = 33
 
 	ColumnType byte = 38 // used for column store for OLAP
 
@@ -79,11 +83,10 @@ var (
 const (
 	defaultScanCount int = 100
 	MAX_BATCH_NUM        = 5000
-	RangeDeleteNum       = 500
+	RangeDeleteNum       = 5000
 )
 
 var (
-	errKeySize          = errors.New("invalid key size")
 	errValueSize        = errors.New("invalid value size")
 	errZSetMemberSize   = errors.New("invalid zset member size")
 	errTooMuchBatchSize = errors.New("the batch size exceed the limit")
@@ -98,19 +101,13 @@ const (
 	MaxTableNameLen int = 255
 	MaxColumnLen    int = 255
 	//max key size
-	MaxKeySize int = 10240
+	MaxKeySize int = common.MaxKeySize
 
-	//max hash field size
-	MaxHashFieldSize int = 10240
-
-	//max zset member size
-	MaxZSetMemberSize int = 10240
-
-	//max set member size
-	MaxSetMemberSize int = 10240
+	// subkey length for hash/set/zset
+	MaxSubKeyLen int = common.MaxSubKeyLen
 
 	//max value size
-	MaxValueSize int = 1024 * 1024 * 8
+	MaxValueSize int = common.MaxValueSize
 )
 
 var (

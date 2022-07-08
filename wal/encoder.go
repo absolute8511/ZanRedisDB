@@ -21,9 +21,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/crc"
-	"github.com/absolute8511/ZanRedisDB/pkg/ioutil"
-	"github.com/absolute8511/ZanRedisDB/wal/walpb"
+	"github.com/youzan/ZanRedisDB/pkg/crc"
+	"github.com/youzan/ZanRedisDB/pkg/ioutil"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 )
 
 // walPageBytes is the alignment for flushing records to the backing Writer.

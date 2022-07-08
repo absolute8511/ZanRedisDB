@@ -19,7 +19,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 func BenchmarkWrite100EntryWithoutBatch(b *testing.B) { benchmarkWriteEntry(b, 100, 0) }

@@ -25,12 +25,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/go-semver/semver"
+	"github.com/youzan/ZanRedisDB/pkg/testutil"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/stats"
 )
 
 // TestStreamWriterAttachOutgoingConn tests that outgoingConn can be attached
@@ -258,8 +258,6 @@ func TestStreamReaderDialDetectUnsupport(t *testing.T) {
 // TestStream tests that streamReader and streamWriter can build stream to
 // send messages between each other.
 func TestStream(t *testing.T) {
-	recvc := make(chan raftpb.Message, streamBufSize)
-	propc := make(chan raftpb.Message, streamBufSize)
 	msgapp := raftpb.Message{
 		Type:    raftpb.MsgApp,
 		From:    2,
@@ -270,6 +268,8 @@ func TestStream(t *testing.T) {
 		Entries: []raftpb.Entry{{Term: 1, Index: 4}},
 	}
 
+	recvc := make(chan raftpb.Message, streamBufSize)
+	readerFakeRaft := &fakeRaft{recvc: recvc}
 	tests := []struct {
 		t  streamType
 		m  raftpb.Message
@@ -278,7 +278,7 @@ func TestStream(t *testing.T) {
 		{
 			streamTypeMessage,
 			raftpb.Message{Type: raftpb.MsgProp, To: 2},
-			propc,
+			recvc,
 		},
 		{
 			streamTypeMessage,
@@ -303,16 +303,7 @@ func TestStream(t *testing.T) {
 		picker := mustNewURLPicker(t, []string{srv.URL})
 		tr := &Transport{streamRt: &http.Transport{}, ClusterID: "1"}
 
-		sr := &streamReader{
-			peerID: types.ID(2),
-			typ:    tt.t,
-			tr:     tr,
-			picker: picker,
-			status: newPeerStatus(types.ID(2)),
-			recvc:  recvc,
-			propc:  propc,
-		}
-		sr.start()
+		sr := startStreamReader(types.ID(2), tt.t, tr, picker, newPeerStatus(types.ID(2)), readerFakeRaft)
 
 		// wait for stream to work
 		var writec chan<- raftpb.Message

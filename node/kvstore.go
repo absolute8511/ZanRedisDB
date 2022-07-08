@@ -4,8 +4,9 @@ import (
 	"errors"
 	"os"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/rockredis"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
+	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 // a key-value store
@@ -16,10 +17,12 @@ type KVStore struct {
 
 type KVOptions struct {
 	DataDir          string
+	KeepBackup       int
 	EngType          string
 	ExpirationPolicy common.ExpirationPolicy
-	RockOpts         rockredis.RockOptions
-	SharedConfig     *rockredis.SharedRockConfig
+	DataVersion      common.DataVersionT
+	RockOpts         engine.RockOptions
+	SharedConfig     engine.SharedRockConfig
 }
 
 func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
@@ -37,14 +40,16 @@ func NewKVStore(kvopts *KVOptions) (*KVStore, error) {
 func (s *KVStore) openDB() error {
 	var err error
 	if s.opts.EngType == rockredis.EngType {
-		cfg := rockredis.NewRockConfig()
+		cfg := rockredis.NewRockRedisDBConfig()
 		cfg.DataDir = s.opts.DataDir
 		cfg.RockOptions = s.opts.RockOpts
 		cfg.ExpirationPolicy = s.opts.ExpirationPolicy
+		cfg.DataVersion = s.opts.DataVersion
 		cfg.SharedConfig = s.opts.SharedConfig
+		cfg.KeepBackup = s.opts.KeepBackup
 		s.RockDB, err = rockredis.OpenRockDB(cfg)
 		if err != nil {
-			nodeLog.Warningf("failed to open rocksdb: %v", err)
+			nodeLog.Warningf("failed to open rocksdb: %v, %v", err, cfg.DataDir)
 		}
 	} else {
 		return errors.New("Not recognized engine type:" + s.opts.EngType)
@@ -75,16 +80,12 @@ func (s *KVStore) Destroy() error {
 		return os.RemoveAll(dataPath)
 	} else {
 		if s.opts.EngType == rockredis.EngType {
-			f := rockredis.GetDataDirFromBase(s.opts.DataDir)
+			f, err := engine.GetDataDirFromBase(s.opts.RockOpts.EngineType, s.opts.DataDir)
+			if err != nil {
+				return err
+			}
 			return os.RemoveAll(f)
 		}
-	}
-	return nil
-}
-
-func (s *KVStore) CheckExpiredData(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
-	if s.opts.EngType == rockredis.EngType {
-		return s.RockDB.CheckExpiredData(buffer, stop)
 	}
 	return nil
 }
@@ -95,7 +96,7 @@ func (s *KVStore) LocalLookup(key []byte) ([]byte, error) {
 }
 
 func (s *KVStore) LocalDelete(key []byte) (int64, error) {
-	return s.KVDel(key)
+	return s.DelKeys(key)
 }
 
 func (s *KVStore) LocalPut(ts int64, key []byte, value []byte) error {
@@ -128,5 +129,11 @@ func (s *KVStore) CommitBatchWrite() error {
 		return s.RockDB.CommitBatchWrite()
 	} else {
 		return nil
+	}
+}
+
+func (s *KVStore) AbortBatch() {
+	if s.opts.EngType == rockredis.EngType {
+		s.RockDB.AbortBatch()
 	}
 }

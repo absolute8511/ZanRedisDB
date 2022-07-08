@@ -19,21 +19,27 @@ import (
 	"sync"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/snap"
-	"github.com/absolute8511/ZanRedisDB/stats"
-	//"github.com/absolute8511/ZanRedisDB/pkg/logutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/transport"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/snap"
+	"github.com/youzan/ZanRedisDB/stats"
+
+	//"github.com/youzan/ZanRedisDB/pkg/logutil"
+	"github.com/youzan/ZanRedisDB/pkg/transport"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+
 	//"github.com/coreos/pkg/capnslog"
 	"github.com/xiang90/probing"
 	"golang.org/x/net/context"
 )
 
-//var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/absolute8511/ZanRedisDB", "transport/rafthttp"))
-var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewDefaultLogger("transport/rafthttp")))
+var plog = common.NewMergeLogger(common.NewLevelLogger(common.LOG_INFO, common.NewLogger()))
+
+func SetLogger(level int32, logger common.Logger) {
+	plog.Logger = logger
+	plog.SetLevel(int32(level))
+}
 
 func SetLogLevel(level int) {
 	plog.SetLevel(int32(level))
@@ -159,6 +165,7 @@ func (t *Transport) Handler() http.Handler {
 	mux.Handle(RaftPrefix, pipelineHandler)
 	mux.Handle(RaftStreamPrefix+"/", streamHandler)
 	mux.Handle(RaftSnapshotPrefix, snapHandler)
+	mux.Handle(RaftSnapshotCheckPrefix, snapHandler)
 	mux.Handle(ProbingPrefix, probing.NewHandler())
 	return mux
 }
@@ -183,9 +190,9 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 		t.mu.RUnlock()
 
 		if pok {
-			if m.Type == raftpb.MsgApp {
-				t.TrStats.SendAppendReq(m.Size())
-			}
+			//if m.Type == raftpb.MsgApp {
+			//	t.TrStats.SendAppendReq(m.Size())
+			//}
 			p.send(m)
 			continue
 		}
@@ -383,12 +390,16 @@ type Pausable interface {
 }
 
 func (t *Transport) Pause() {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	for _, p := range t.peers {
 		p.(Pausable).Pause()
 	}
 }
 
 func (t *Transport) Resume() {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	for _, p := range t.peers {
 		p.(Pausable).Resume()
 	}

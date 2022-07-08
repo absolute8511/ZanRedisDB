@@ -17,7 +17,7 @@ package raft
 import (
 	"errors"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // ErrStepLocalMsg is returned when try to step a local raft message
@@ -36,43 +36,14 @@ type RawNode struct {
 	prevHardSt pb.HardState
 }
 
-func (rn *RawNode) newReady() Ready {
-	return newReady(rn.raft, rn.prevSoftSt, rn.prevHardSt)
-}
-
-func (rn *RawNode) commitReady(rd Ready) {
-	if rd.SoftState != nil {
-		rn.prevSoftSt = rd.SoftState
-	}
-	if !IsEmptyHardState(rd.HardState) {
-		rn.prevHardSt = rd.HardState
-	}
-	if rn.prevHardSt.Commit != 0 {
-		// In most cases, prevHardSt and rd.HardState will be the same
-		// because when there are new entries to apply we just sent a
-		// HardState with an updated Commit value. However, on initial
-		// startup the two are different because we don't send a HardState
-		// until something changes, but we do send any un-applied but
-		// committed entries (and previously-committed entries may be
-		// incorporated into the snapshot, even if rd.CommittedEntries is
-		// empty). Therefore we mark all committed entries as applied
-		// whether they were included in rd.HardState or not.
-		rn.raft.raftLog.appliedTo(rn.prevHardSt.Commit)
-	}
-	if len(rd.Entries) > 0 {
-		e := rd.Entries[len(rd.Entries)-1]
-		rn.raft.raftLog.stableTo(e.Index, e.Term)
-	}
-	if !IsEmptySnap(rd.Snapshot) {
-		rn.raft.raftLog.stableSnapTo(rd.Snapshot.Metadata.Index)
-	}
-	if len(rd.ReadStates) != 0 {
-		rn.raft.readStates = nil
-	}
-}
-
-// NewRawNode returns a new RawNode given configuration and a list of raft peers.
-func NewRawNode(config *Config, peers []Peer) (*RawNode, error) {
+// NewRawNode instantiates a RawNode from the given configuration.
+//
+// See Bootstrap() for bootstrapping an initial state; this replaces the former
+// 'peers' argument to this method (with identical behavior). However, It is
+// recommended that instead of calling Bootstrap, applications bootstrap their
+// state manually by setting up a Storage that has a first index > 1 and which
+// stores the desired ConfState as its InitialState.
+func NewRawNode(config *Config) (*RawNode, error) {
 	if config.ID == 0 {
 		panic("config.ID must not be zero")
 	}
@@ -80,44 +51,10 @@ func NewRawNode(config *Config, peers []Peer) (*RawNode, error) {
 	rn := &RawNode{
 		raft: r,
 	}
-	lastIndex, err := config.Storage.LastIndex()
-	if err != nil {
-		panic(err) // TODO(bdarnell)
-	}
-	// If the log is empty, this is a new RawNode (like StartNode); otherwise it's
-	// restoring an existing RawNode (like RestartNode).
-	// TODO(bdarnell): rethink RawNode initialization and whether the application needs
-	// to be able to tell us when it expects the RawNode to exist.
-	if lastIndex == 0 {
-		r.becomeFollower(1, None)
-		ents := make([]pb.Entry, len(peers))
-		for i, peer := range peers {
-			cc := pb.ConfChange{Type: pb.ConfChangeAddNode,
-				ReplicaID: peer.ReplicaID,
-				NodeGroup: pb.Group{NodeId: peer.NodeID, GroupId: r.group.GroupId, RaftReplicaId: peer.ReplicaID},
-				Context:   peer.Context}
-			data, err := cc.Marshal()
-			if err != nil {
-				panic("unexpected marshal error")
-			}
-
-			ents[i] = pb.Entry{Type: pb.EntryConfChange, Term: 1, Index: uint64(i + 1), Data: data}
-		}
-		r.raftLog.append(ents...)
-		r.raftLog.committed = uint64(len(ents))
-		for _, peer := range peers {
-			r.addNode(peer.ReplicaID,
-				pb.Group{NodeId: peer.NodeID, GroupId: r.group.GroupId, RaftReplicaId: peer.ReplicaID})
-		}
-	}
 
 	// Set the initial hard and soft states after performing all initialization.
 	rn.prevSoftSt = r.softState()
-	if lastIndex == 0 {
-		rn.prevHardSt = emptyState
-	} else {
-		rn.prevHardSt = r.hardState()
-	}
+	rn.prevHardSt = r.hardState()
 
 	return rn, nil
 }
@@ -205,11 +142,33 @@ func (rn *RawNode) Step(m pb.Message) error {
 	return ErrStepPeerNotFound
 }
 
-// Ready returns the current point-in-time state of this RawNode.
-func (rn *RawNode) Ready() Ready {
-	rd := rn.newReady()
-	rn.raft.msgs = nil
+// Ready returns the outstanding work that the application needs to handle. This
+// includes appending and applying entries or a snapshot, updating the HardState,
+// and sending messages. The returned Ready() *must* be handled and subsequently
+// passed back via Advance().
+func (rn *RawNode) Ready(moreEntriesToApply bool) Ready {
+	rd := rn.readyWithoutAccept(moreEntriesToApply)
+	rn.acceptReady(rd)
 	return rd
+}
+
+// readyWithoutAccept returns a Ready. This is a read-only operation, i.e. there
+// is no obligation that the Ready must be handled.
+func (rn *RawNode) readyWithoutAccept(moreEntriesToApply bool) Ready {
+	return newReady(rn.raft, rn.prevSoftSt, rn.prevHardSt, moreEntriesToApply)
+}
+
+// acceptReady is called when the consumer of the RawNode has decided to go
+// ahead and handle a Ready. Nothing must alter the state of the RawNode between
+// this call and the prior call to Ready().
+func (rn *RawNode) acceptReady(rd Ready) {
+	if rd.SoftState != nil {
+		rn.prevSoftSt = rd.SoftState
+	}
+	if len(rd.ReadStates) != 0 {
+		rn.raft.readStates = nil
+	}
+	rn.raft.msgs = nil
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.
@@ -222,7 +181,7 @@ func (rn *RawNode) HasReady() bool {
 	if hardSt := r.hardState(); !IsEmptyHardState(hardSt) && !isHardStateEqual(hardSt, rn.prevHardSt) {
 		return true
 	}
-	if r.raftLog.unstable.snapshot != nil && !IsEmptySnap(*r.raftLog.unstable.snapshot) {
+	if r.raftLog.hasPendingSnapshot() {
 		return true
 	}
 	if len(r.msgs) > 0 || len(r.raftLog.unstableEntries()) > 0 || r.raftLog.hasNextEnts() {
@@ -237,13 +196,49 @@ func (rn *RawNode) HasReady() bool {
 // Advance notifies the RawNode that the application has applied and saved progress in the
 // last Ready results.
 func (rn *RawNode) Advance(rd Ready) {
-	rn.commitReady(rd)
+	if !IsEmptyHardState(rd.HardState) {
+		rn.prevHardSt = rd.HardState
+	}
+	rn.raft.advance(rd)
 }
 
 // Status returns the current status of the given group.
 func (rn *RawNode) Status() *Status {
 	status := getStatus(rn.raft)
 	return &status
+}
+
+// StatusWithoutProgress returns a Status without populating the Progress field
+// (and returns the Status as a value to avoid forcing it onto the heap). This
+// is more performant if the Progress is not required. See WithProgress for an
+// allocation-free way to introspect the Progress.
+func (rn *RawNode) StatusWithoutProgress() Status {
+	return getStatusWithoutProgress(rn.raft)
+}
+
+// ProgressType indicates the type of replica a Progress corresponds to.
+type ProgressType byte
+
+const (
+	// ProgressTypePeer accompanies a Progress for a regular peer replica.
+	ProgressTypePeer ProgressType = iota
+	// ProgressTypeLearner accompanies a Progress for a learner replica.
+	ProgressTypeLearner
+)
+
+// WithProgress is a helper to introspect the Progress for this node and its
+// peers.
+func (rn *RawNode) WithProgress(visitor func(id uint64, typ ProgressType, pr Progress)) {
+	for id, pr := range rn.raft.prs {
+		pr := *pr
+		pr.ins = nil
+		visitor(id, ProgressTypePeer, pr)
+	}
+	for id, pr := range rn.raft.learnerPrs {
+		pr := *pr
+		pr.ins = nil
+		visitor(id, ProgressTypeLearner, pr)
+	}
 }
 
 // ReportUnreachable reports the given node is not reachable for the last send.

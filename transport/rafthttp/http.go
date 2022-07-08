@@ -22,11 +22,13 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
+	"time"
 
-	pioutil "github.com/absolute8511/ZanRedisDB/pkg/ioutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
 	"github.com/coreos/etcd/version"
+	pioutil "github.com/youzan/ZanRedisDB/pkg/ioutil"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
 	"golang.org/x/net/context"
 )
 
@@ -41,10 +43,11 @@ const (
 )
 
 var (
-	RaftPrefix         = "/raft"
-	ProbingPrefix      = path.Join(RaftPrefix, "probing")
-	RaftStreamPrefix   = path.Join(RaftPrefix, "stream")
-	RaftSnapshotPrefix = path.Join(RaftPrefix, "snapshot")
+	RaftPrefix              = "/raft"
+	ProbingPrefix           = path.Join(RaftPrefix, "probing")
+	RaftStreamPrefix        = path.Join(RaftPrefix, "stream")
+	RaftSnapshotPrefix      = path.Join(RaftPrefix, "snapshot")
+	RaftSnapshotCheckPrefix = path.Join(RaftPrefix, "snapshot_check")
 
 	errIncompatibleVersion = errors.New("incompatible version")
 	errClusterIDMismatch   = errors.New("cluster ID mismatch")
@@ -141,6 +144,8 @@ type snapshotHandler struct {
 	r           Raft
 	snapshotter ISnapSaver
 	cid         string
+	m           sync.Mutex
+	snapStatus  map[uint64]raftpb.Message
 }
 
 func newSnapshotHandler(tr Transporter, r Raft, snapshotter ISnapSaver, cid string) http.Handler {
@@ -149,6 +154,7 @@ func newSnapshotHandler(tr Transporter, r Raft, snapshotter ISnapSaver, cid stri
 		r:           r,
 		snapshotter: snapshotter,
 		cid:         cid,
+		snapStatus:  make(map[uint64]raftpb.Message),
 	}
 }
 
@@ -177,6 +183,11 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	addRemoteFromRequest(h.tr, r)
 
+	if r.URL.Path == RaftSnapshotCheckPrefix {
+		h.handleSnapshotCheck(w, r)
+		return
+	}
+
 	dec := &messageDecoder{r: r.Body}
 	m, err := dec.decode()
 	if err != nil {
@@ -196,33 +207,89 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plog.Infof("receiving database snapshot [index:%d, from %s] ...", m.Snapshot.Metadata.Index, types.ID(m.From))
+	if !h.insertSnapshotState(m) {
+		http.Error(w, "already running another snapshot", http.StatusBadRequest)
+		// fixme: old version may send multi snapshot, so we need ignore for low version
+		return
+	}
+
 	// save incoming database snapshot.
 	n, err := h.snapshotter.SaveDBFrom(r.Body, m)
 	if err != nil {
 		msg := fmt.Sprintf("failed to save KV snapshot (%v)", err)
 		plog.Error(msg)
 		http.Error(w, msg, http.StatusInternalServerError)
+		h.removeSnapshotState(m)
 		return
 	}
 	receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(n))
-	plog.Infof("received and saved database snapshot [index: %d, from: %s] successfully", m.Snapshot.Metadata.Index, types.ID(m.From))
-
-	if err := h.r.Process(context.TODO(), m); err != nil {
-		switch v := err.(type) {
-		// Process may return writerToResponse error when doing some
-		// additional checks before calling raft.Node.Step.
-		case writerToResponse:
-			v.WriteTo(w)
-		default:
+	go func() {
+		defer h.removeSnapshotState(m)
+		if err := h.r.Process(context.TODO(), m); err != nil {
 			msg := fmt.Sprintf("failed to process raft message (%v)", err)
 			plog.Warningf(msg)
-			http.Error(w, msg, http.StatusInternalServerError)
 		}
-		return
-	}
+		plog.Infof("received and saved database snapshot [index: %d, from: %s] successfully", m.Snapshot.Metadata.Index, types.ID(m.From))
+	}()
+	// in old version, the sender will report snapshot finish when we response ok.
+	// Here we wait snapshot transfer state changed, so we will not
+	// send msgapp resp to leader to avoid send another snapshot from sender
+	time.Sleep(time.Second)
+
 	// Write StatusNoContent header after the message has been processed by
 	// raft, which facilitates the client to report MsgSnap status.
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *snapshotHandler) insertSnapshotState(m raftpb.Message) bool {
+	h.m.Lock()
+	defer h.m.Unlock()
+	_, ok := h.snapStatus[m.ToGroup.GroupId]
+	if ok {
+		return false
+	}
+	h.snapStatus[m.ToGroup.GroupId] = m
+	return true
+}
+
+func (h *snapshotHandler) removeSnapshotState(m raftpb.Message) {
+	h.m.Lock()
+	defer h.m.Unlock()
+	delete(h.snapStatus, m.ToGroup.GroupId)
+}
+
+func (h *snapshotHandler) checkSnapshotState(m raftpb.Message) bool {
+	h.m.Lock()
+	defer h.m.Unlock()
+	_, ok := h.snapStatus[m.ToGroup.GroupId]
+	return ok
+}
+
+func (h *snapshotHandler) handleSnapshotCheck(w http.ResponseWriter, r *http.Request) {
+	dec := &messageDecoder{r: r.Body}
+	m, err := dec.decode()
+	if err != nil {
+		msg := fmt.Sprintf("failed to decode raft message (%v)", err)
+		plog.Errorf(msg)
+		http.Error(w, msg, http.StatusBadRequest)
+		recvFailures.WithLabelValues(r.RemoteAddr).Inc()
+		return
+	}
+	receivedBytes.WithLabelValues(m.FromGroup.String()).Add(float64(m.Size()))
+
+	if m.Type != raftpb.MsgSnap {
+		plog.Errorf("unexpected raft message type %s on snapshot path", m.Type)
+		http.Error(w, "wrong raft message type", http.StatusBadRequest)
+		return
+	}
+	running := h.checkSnapshotState(m)
+	if running {
+		plog.Infof("snapshot check for [index: %d, from: %s-%v] still waiting transfer", m.Snapshot.Metadata.Index, types.ID(m.From), m.ToGroup)
+		http.Error(w, "snapshot transfer still running", http.StatusAlreadyReported)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+	plog.Infof("snapshot check for [index: %d, from: %s-%v] success", m.Snapshot.Metadata.Index, types.ID(m.From), m.ToGroup)
 }
 
 type streamHandler struct {

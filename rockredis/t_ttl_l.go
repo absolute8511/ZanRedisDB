@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/gorocksdb"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 var localExpCheckInterval = 300
@@ -21,57 +21,89 @@ const (
 var (
 	ErrLocalBatchFullToCommit = errors.New("batched is fully filled and should commit right now")
 	ErrLocalBatchedBuffFull   = errors.New("the local batched buffer is fully filled")
+	errTTLCheckTooLong        = errors.New("the local ttl scan take too long")
+	errChangeTTLNotSupported  = errors.New("change ttl is not supported in current expire policy")
 )
 
 type localExpiration struct {
 	*TTLChecker
-	db          *RockDB
-	stopCh      chan struct{}
-	wg          sync.WaitGroup
-	localBuffer *localBatchedBuffer
-	running     int32
+	db      *RockDB
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
+	running int32
 }
 
 func newLocalExpiration(db *RockDB) *localExpiration {
 	exp := &localExpiration{
-		db:          db,
-		TTLChecker:  newTTLChecker(db),
-		localBuffer: newLocalBatchedBuffer(db, localBatchedBufSize),
+		db:         db,
+		TTLChecker: newTTLChecker(db),
 	}
 
 	return exp
 }
 
-func (exp *localExpiration) expireAt(dataType byte, key []byte, when int64) error {
-	wb := exp.db.wb
-	wb.Clear()
+func (exp *localExpiration) encodeToVersionKey(dt byte, h *headerMetaValue, key []byte) []byte {
+	return key
+}
 
-	tk := expEncodeTimeKey(dataType, key, when)
-	mk := expEncodeMetaKey(dataType, key)
+func (exp *localExpiration) decodeFromVersionKey(dt byte, key []byte) ([]byte, int64, error) {
+	return key, 0, nil
+}
 
-	wb.Put(tk, mk)
+func (exp *localExpiration) encodeToRawValue(dataType byte, h *headerMetaValue) []byte {
+	return h.UserData
+}
 
-	if err := exp.db.eng.Write(exp.db.defaultWriteOpts, wb); err != nil {
-		return err
-	} else {
-		exp.setNextCheckTime(when, false)
-		return nil
+func (exp *localExpiration) decodeRawValue(dataType byte, rawValue []byte) (*headerMetaValue, error) {
+	var h headerMetaValue
+	h.UserData = rawValue
+	return &h, nil
+}
+
+func (exp *localExpiration) getRawValueForHeader(ts int64, dataType byte, key []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (exp *localExpiration) isExpired(ts int64, dataType byte, key []byte, rawValue []byte, useLock bool) (bool, error) {
+	return false, nil
+}
+
+func (exp *localExpiration) ExpireAt(dataType byte, key []byte, rawValue []byte, when int64) (int64, error) {
+	if when == 0 {
+		return 0, errChangeTTLNotSupported
 	}
+	wb := exp.db.wb
+	defer wb.Clear()
+	_, err := exp.rawExpireAt(dataType, key, rawValue, when, wb)
+	if err != nil {
+		return 0, err
+	}
+	if err := exp.db.rockEng.Write(wb); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
-func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, when int64, wb *gorocksdb.WriteBatch) error {
+func (exp *localExpiration) rawExpireAt(dataType byte, key []byte, rawValue []byte, when int64, wb engine.WriteBatch) ([]byte, error) {
 	tk := expEncodeTimeKey(dataType, key, when)
 	mk := expEncodeMetaKey(dataType, key)
 	wb.Put(tk, mk)
-	return nil
+	exp.setNextCheckTime(when, false)
+	return rawValue, nil
 }
 
-func (exp *localExpiration) ttl(byte, []byte) (int64, error) {
+func (exp *localExpiration) ttl(int64, byte, []byte, []byte) (int64, error) {
 	return -1, nil
 }
 
-func (exp *localExpiration) delExpire(byte, []byte, *gorocksdb.WriteBatch) error {
-	return nil
+func (exp *localExpiration) renewOnExpired(ts int64, dataType byte, key []byte, oldh *headerMetaValue) {
+	// local expire should not renew on expired data, since it will be checked by expire handler
+	// and it will clean ttl and all the sub data
+	return
+}
+
+func (exp *localExpiration) delExpire(dt byte, key []byte, rawv []byte, keepV bool, wb engine.WriteBatch) ([]byte, error) {
+	return rawv, nil
 }
 
 func (exp *localExpiration) check(buffer common.ExpiredDataBuffer, stop chan struct{}) error {
@@ -97,22 +129,28 @@ func (exp *localExpiration) applyExpiration(stop chan struct{}) {
 	defer t.Stop()
 
 	checker := exp.TTLChecker
-
+	localBuffer := newLocalBatchedBuffer(exp.db, localBatchedBufSize)
+	defer localBuffer.Destroy()
 	for {
 		select {
 		case <-t.C:
 			for {
-				err := checker.check(exp.localBuffer, stop)
+				err := checker.check(localBuffer, stop)
 				select {
 				case <-stop:
-					exp.localBuffer.Clear()
+					localBuffer.Clear()
 					return
 				default:
-					exp.localBuffer.commit()
+					localBuffer.commit()
 				}
 				//start the next check immediately if the last check is stopped because of the buffer is fully filled
 				if err == ErrLocalBatchedBuffFull {
+					// avoid 100% cpu
+					time.Sleep(time.Millisecond)
 					continue
+				} else if err == errTTLCheckTooLong {
+					// do not do manual compact ttl here, it may cause write stall
+					//
 				} else if err != nil {
 					dbLog.Errorf("check expired data failed at applying expiration, err:%s", err.Error())
 				}
@@ -182,7 +220,10 @@ func (self *localBatchedBuffer) commit() {
 	for _, v := range self.buff {
 		dt, key, _, err := expDecodeTimeKey(v.timeKey)
 		if err != nil || dataType2CommonType(dt) == common.NONE {
-			dbLog.Errorf("decode time-key failed, bad data encounter, err:%s", err.Error())
+			// currently the bitmap/json type is not supported
+			if err != nil {
+				dbLog.Errorf("decode time-key failed, bad data encounter, err:%s, %v", err, dt)
+			}
 			continue
 		}
 
@@ -214,18 +255,14 @@ func (exp *localExpiration) Stop() {
 	if atomic.CompareAndSwapInt32(&exp.running, 1, 0) {
 		close(exp.stopCh)
 		exp.wg.Wait()
-		exp.localBuffer.Clear()
 	}
 }
 
 func (exp *localExpiration) Destroy() {
 	exp.Stop()
-	if exp.localBuffer != nil {
-		exp.localBuffer.Destroy()
-	}
 }
 
-func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch) func(keys [][]byte) error {
+func createLocalDelFunc(dt common.DataType, db *RockDB, wb engine.WriteBatch) func(keys [][]byte) error {
 	switch dt {
 	case common.KV:
 		return func(keys [][]byte) error {
@@ -233,7 +270,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			for _, k := range keys {
 				db.KVDelWithBatch(k, wb)
 			}
-			err := db.eng.Write(db.defaultWriteOpts, wb)
+			err := db.rockEng.Write(wb)
 			if err != nil {
 				return err
 			}
@@ -250,7 +287,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 					return err
 				}
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	case common.LIST:
 		return func(keys [][]byte) error {
@@ -258,7 +295,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			if err := db.lMclearWithBatch(wb, keys...); err != nil {
 				return err
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	case common.SET:
 		return func(keys [][]byte) error {
@@ -266,7 +303,7 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			if err := db.sMclearWithBatch(wb, keys...); err != nil {
 				return err
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	case common.ZSET:
 		return func(keys [][]byte) error {
@@ -274,9 +311,10 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 			if err := db.zMclearWithBatch(wb, keys...); err != nil {
 				return err
 			}
-			return db.eng.Write(db.defaultWriteOpts, wb)
+			return db.rockEng.Write(wb)
 		}
 	default:
+		// TODO: currently bitmap/json is not handled
 		return nil
 	}
 }
@@ -284,14 +322,14 @@ func createLocalDelFunc(dt common.DataType, db *RockDB, wb *gorocksdb.WriteBatch
 type localBatch struct {
 	keys       [][]byte
 	dt         common.DataType
-	wb         *gorocksdb.WriteBatch
+	wb         engine.WriteBatch
 	localDelFn func([][]byte) error
 }
 
 func newLocalBatch(db *RockDB, dt common.DataType) *localBatch {
 	batch := &localBatch{
 		dt:   dt,
-		wb:   gorocksdb.NewWriteBatch(),
+		wb:   db.rockEng.NewWriteBatch(),
 		keys: make([][]byte, 0, localBatchedMaxKeysNum),
 	}
 	batch.localDelFn = createLocalDelFunc(dt, db, batch.wb)

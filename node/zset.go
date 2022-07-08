@@ -3,11 +3,13 @@ package node
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/absolute8511/ZanRedisDB/common"
 	"github.com/absolute8511/redcon"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/rockredis"
 )
 
 var (
@@ -351,147 +353,134 @@ func (nd *KVNode) zrevrankCommand(conn redcon.Conn, cmd redcon.Command) {
 	}
 }
 
-func (nd *KVNode) zaddCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) zaddCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) < 4 || len(cmd.Args)%2 != 0 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
-	_, err := getScorePairs(cmd.Args[2:])
+	key := cmd.Args[1]
+	args, err := getScorePairs(cmd.Args[2:])
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return nil, err
 	}
+	for i := 0; i < len(args); i++ {
+		err := common.CheckKeySubKey(key, args[i].Member)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// TODO: optimize check exist before propose to raft if we later support nx/xx options
 
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	if err != nil {
+		return nil, err
 	}
-	rsp, ok := v.(int64)
-	if ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
+	return v, nil
 }
 
-func (nd *KVNode) zincrbyCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) zremCommand(cmd redcon.Command) (interface{}, error) {
+	if len(cmd.Args) < 3 {
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
+	}
+	// optimize check exist before propose to raft
+	key, err := common.CutNamesapce(cmd.Args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	needChange := false
+	for _, m := range cmd.Args[2:] {
+		_, err := nd.store.ZScore(key, m)
+		if !rockredis.IsMemberNotExist(err) {
+			// found a member, we need do raft proposal
+			needChange = true
+			break
+		}
+	}
+	if !needChange {
+		return int64(0), nil
+	}
+	rsp, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	return rsp, err
+}
+
+func (nd *KVNode) zincrbyCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 	_, err := strconv.ParseFloat(string(cmd.Args[2]), 64)
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return nil, err
 	}
 
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, func(cmd redcon.Command, r interface{}) (interface{}, error) {
+		rsp, ok := r.(float64)
+		if ok {
+			return []byte(strconv.FormatFloat(rsp, 'g', -1, 64)), nil
+		}
+		return nil, errInvalidResponse
+	})
+	if err != nil {
+		return nil, err
 	}
-	rsp, ok := v.(float64)
-	if ok {
-		conn.WriteBulkString(strconv.FormatFloat(rsp, 'g', -1, 64))
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
+	return v, nil
 }
 
-func (nd *KVNode) zremCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) zremrangebyrankCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) zremrangebyrankCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 	_, err := strconv.ParseInt(string(cmd.Args[2]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid index: " + err.Error())
-		return
+		return nil, err
 	}
 	_, err = strconv.ParseInt(string(cmd.Args[3]), 10, 64)
 	if err != nil {
-		conn.WriteError("Invalid index: " + err.Error())
-		return
+		return nil, err
 	}
 
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	if err != nil {
+		return nil, err
 	}
-	rsp, ok := v.(int64)
-	if ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
+	return v, nil
 }
 
-func (nd *KVNode) zremrangebyscoreCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) zremrangebyscoreCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 
 	_, _, err := getScoreRange(cmd.Args[2], cmd.Args[3])
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return nil, err
 	}
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	if err != nil {
+		return nil, err
 	}
-	rsp, ok := v.(int64)
-	if ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-
+	return v, nil
 }
 
-func (nd *KVNode) zremrangebylexCommand(conn redcon.Conn, cmd redcon.Command) {
+func (nd *KVNode) zremrangebylexCommand(cmd redcon.Command) (interface{}, error) {
 	if len(cmd.Args) != 4 {
-		conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-		return
+		err := fmt.Errorf("ERR wrong number arguments for '%v' command", string(cmd.Args[0]))
+		return nil, err
 	}
 
 	_, _, _, err := getLexRange(cmd.Args[2], cmd.Args[3])
 	if err != nil {
-		conn.WriteError(err.Error())
-		return
+		return nil, err
 	}
-	_, v, ok := rebuildFirstKeyAndPropose(nd, conn, cmd)
-	if !ok {
-		return
+	v, err := rebuildFirstKeyAndPropose(nd, cmd, checkAndRewriteIntRsp)
+	if err != nil {
+		return nil, err
 	}
-	rsp, ok := v.(int64)
-	if ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) zclearCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	rsp, ok := v.(int64)
-	if ok {
-		conn.WriteInt64(rsp)
-	} else {
-		conn.WriteError(errInvalidResponse.Error())
-	}
-}
-
-func (nd *KVNode) zfixkeyCommand(conn redcon.Conn, cmd redcon.Command, v interface{}) {
-	conn.WriteString("OK")
+	return v, nil
 }
 
 func getScorePairs(args [][]byte) ([]common.ScorePair, error) {
@@ -568,13 +557,13 @@ func (kvsm *kvStoreSM) localZclearCommand(cmd redcon.Command, ts int64) (interfa
 	if len(cmd.Args) != 2 {
 		return nil, common.ErrInvalidArgs
 	}
-	return kvsm.store.ZClear(cmd.Args[1])
+	return kvsm.store.ZClear(ts, cmd.Args[1])
 }
 
 func (kvsm *kvStoreSM) localZMClearCommand(cmd redcon.Command, ts int64) (interface{}, error) {
 	var count int64
 	for _, zkey := range cmd.Args[1:] {
-		if _, err := kvsm.store.ZClear(zkey); err != nil {
+		if _, err := kvsm.store.ZClear(ts, zkey); err != nil {
 			return count, err
 		} else {
 			count++

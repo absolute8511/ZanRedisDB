@@ -36,6 +36,10 @@ func TestKVNode_hashCommand(t *testing.T) {
 		{"hkeys", buildCommand([][]byte{[]byte("hkeys"), testKey})},
 		{"hexists", buildCommand([][]byte{[]byte("hexists"), testKey, testField})},
 		{"hlen", buildCommand([][]byte{[]byte("hlen"), testKey})},
+		{"httl", buildCommand([][]byte{[]byte("httl"), testKey})},
+		{"hkeyexist", buildCommand([][]byte{[]byte("hkeyexist"), testKey})},
+		{"hexpire", buildCommand([][]byte{[]byte("hexpire"), testKey, []byte("10")})},
+		{"hpersist", buildCommand([][]byte{[]byte("hpersist"), testKey})},
 		{"hclear", buildCommand([][]byte{[]byte("hclear"), testKey})},
 	}
 	defer os.RemoveAll(dataDir)
@@ -44,8 +48,18 @@ func TestKVNode_hashCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	for _, cmd := range tests {
 		c.Reset()
-		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
-		handler(c, cmd.args)
-		assert.Nil(t, c.GetError())
+		origCmd := append([]byte{}, cmd.args.Raw...)
+		handler, ok := nd.router.GetCmdHandler(cmd.name)
+		if ok {
+			handler(c, cmd.args)
+			assert.Nil(t, c.GetError())
+		} else {
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			rsp, err := whandler(cmd.args)
+			assert.Nil(t, err)
+			_, ok := rsp.(error)
+			assert.True(t, !ok)
+		}
+		assert.Equal(t, origCmd, cmd.args.Raw)
 	}
 }

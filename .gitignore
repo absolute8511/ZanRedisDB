@@ -3,3 +3,5 @@
 .DS_Store
 .vscode
 build/*
+vendor/github.com
+vendor/gopkg.in

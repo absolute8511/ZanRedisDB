@@ -52,6 +52,10 @@ func TestKVNode_zsetCommand(t *testing.T) {
 		{"zremrangebyrank", buildCommand([][]byte{[]byte("zremrangebyrank"), testKey, []byte("0"), []byte("1")})},
 		{"zremrangebyscore", buildCommand([][]byte{[]byte("zremrangebyscore"), testKey, testLrange, testRrange})},
 		{"zremrangebylex", buildCommand([][]byte{[]byte("zremrangebylex"), testKey, testLexLrange, testLexRrange})},
+		{"zttl", buildCommand([][]byte{[]byte("zttl"), testKey})},
+		{"zkeyexist", buildCommand([][]byte{[]byte("zkeyexist"), testKey})},
+		{"zexpire", buildCommand([][]byte{[]byte("zexpire"), testKey, []byte("10")})},
+		{"zpersist", buildCommand([][]byte{[]byte("zpersist"), testKey})},
 		{"zclear", buildCommand([][]byte{[]byte("zclear"), testKey})},
 	}
 	defer os.RemoveAll(dataDir)
@@ -60,8 +64,18 @@ func TestKVNode_zsetCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	for _, cmd := range tests {
 		c.Reset()
-		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
-		handler(c, cmd.args)
-		assert.Nil(t, c.GetError(), cmd.name)
+		origCmd := append([]byte{}, cmd.args.Raw...)
+		handler, ok := nd.router.GetCmdHandler(cmd.name)
+		if ok {
+			handler(c, cmd.args)
+			assert.Nil(t, c.GetError(), cmd.name)
+		} else {
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			rsp, err := whandler(cmd.args)
+			assert.Nil(t, err)
+			_, ok := rsp.(error)
+			assert.True(t, !ok)
+		}
+		assert.Equal(t, origCmd, cmd.args.Raw)
 	}
 }

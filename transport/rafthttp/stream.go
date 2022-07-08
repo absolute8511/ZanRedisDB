@@ -26,20 +26,20 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/httputil"
-	"github.com/absolute8511/ZanRedisDB/pkg/transport"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/stats"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/go-semver/semver"
+	"github.com/youzan/ZanRedisDB/pkg/httputil"
+	"github.com/youzan/ZanRedisDB/pkg/transport"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/stats"
 )
 
 const (
 	streamTypeMessage  streamType = "message"
 	streamTypeMsgAppV2 streamType = "msgappv2"
 
-	streamBufSize = 4096
+	streamBufSize = 1024 * 16
 )
 
 var (
@@ -171,18 +171,30 @@ func (cw *streamWriter) run() {
 			heartbeatc, msgc = nil, nil
 
 		case m := <-msgc:
-			err := enc.encode(&m)
-			if err == nil {
+			var err error
+			for done := false; !done; {
+				err = enc.encode(&m)
 				unflushed += m.Size()
-
-				if len(msgc) == 0 || batched > streamBufSize/2 {
-					flusher.Flush()
-					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
-					unflushed = 0
-					batched = 0
-				} else {
-					batched++
+				batched++
+				m.Entries = nil
+				if err != nil {
+					break
 				}
+				if batched > streamBufSize/2 {
+					done = true
+					break
+				}
+				select {
+				case m = <-msgc:
+				default:
+					done = true
+				}
+			}
+			if err == nil {
+				flusher.Flush()
+				sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
+				unflushed = 0
+				batched = 0
 
 				continue
 			}
@@ -277,18 +289,32 @@ type streamReader struct {
 	tr     *Transport
 	picker *urlPicker
 	status *peerStatus
-	recvc  chan<- raftpb.Message
-	propc  chan<- raftpb.Message
 
 	errorc chan<- error
 
-	mu     sync.Mutex
-	paused bool
-	cancel func()
-	closer io.Closer
+	mu            sync.Mutex
+	paused        bool
+	cancel        func()
+	processCancel func()
+	closer        io.Closer
+	r             Raft
 
 	stopc chan struct{}
 	done  chan struct{}
+}
+
+func startStreamReader(peerID types.ID, typ streamType, tr *Transport,
+	picker *urlPicker, status *peerStatus, r Raft) *streamReader {
+	reader := &streamReader{
+		peerID: peerID,
+		typ:    typ,
+		tr:     tr,
+		picker: picker,
+		status: status,
+		r:      r,
+	}
+	reader.start()
+	return reader
 }
 
 func (r *streamReader) start() {
@@ -350,7 +376,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	case streamTypeMsgAppV2:
 		dec = newMsgAppV2Decoder(rc, cr.tr.ID, cr.peerID)
 	case streamTypeMessage:
-		dec = &messageDecoder{r: rc}
+		dec = newMessageDecoder(rc)
 	default:
 		plog.Panicf("unhandled stream type %s", t)
 	}
@@ -364,6 +390,8 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	default:
 		cr.closer = rc
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cr.processCancel = cancel
 	cr.mu.Unlock()
 
 	for {
@@ -396,18 +424,13 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			plog.Errorf("receive message not group: %v", m.String())
 		}
 
-		recvc := cr.recvc
-		if m.Type == raftpb.MsgProp {
-			recvc = cr.propc
-		}
-
-		select {
-		case recvc <- m:
-		default:
+		err = cr.r.Process(ctx, m)
+		if err != nil {
 			if cr.status.isActive() {
-				plog.MergeWarningf("dropped internal raft message from %s since receiving buffer is full (overloaded network)", types.ID(m.From))
+				plog.MergeWarningf("error process raft message from %s, err %v", types.ID(m.From), err.Error())
+			} else {
+				plog.Debugf("dropped %s from %s since err %v", m.Type, types.ID(m.From), err.Error())
 			}
-			plog.Debugf("dropped %s from %s since receiving buffer is full", m.Type, types.ID(m.From))
 			recvFailures.WithLabelValues(m.FromGroup.Name).Inc()
 		}
 	}
@@ -420,6 +443,9 @@ func (cr *streamReader) stop() {
 		cr.cancel()
 	}
 	cr.close()
+	if cr.processCancel != nil {
+		cr.processCancel()
+	}
 	cr.mu.Unlock()
 	<-cr.done
 }

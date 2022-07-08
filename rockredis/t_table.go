@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/gorocksdb"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/engine"
 )
 
 // Note: since different data structure has different prefix,
@@ -54,8 +54,7 @@ func extractTableFromRedisKey(key []byte) ([]byte, []byte, error) {
 }
 
 func packRedisKey(table, key []byte) []byte {
-	var newKey []byte
-
+	newKey := make([]byte, 0, len(table)+len(key)+1)
 	newKey = append(newKey, table...)
 	newKey = append(newKey, tableStartSep)
 	newKey = append(newKey, key...)
@@ -168,7 +167,7 @@ func (db *RockDB) GetTables() [][]byte {
 	ch := make([][]byte, 0, 100)
 	s := encodeTableMetaStartKey()
 	e := encodeTableMetaStopKey()
-	it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+	it, err := db.NewDBRangeIterator(s, e, common.RangeOpen, false)
 	if err != nil {
 		return nil
 	}
@@ -184,7 +183,7 @@ func (db *RockDB) GetTables() [][]byte {
 	return ch
 }
 
-func (db *RockDB) DelTableKeyCount(table []byte, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) DelTableKeyCount(table []byte, wb engine.WriteBatch) error {
 	if !db.cfg.EnableTableCounter {
 		return nil
 	}
@@ -193,7 +192,7 @@ func (db *RockDB) DelTableKeyCount(table []byte, wb *gorocksdb.WriteBatch) error
 	return nil
 }
 
-func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb *gorocksdb.WriteBatch) error {
+func (db *RockDB) IncrTableKeyCount(table []byte, delta int64, wb engine.WriteBatch) error {
 	if !db.cfg.EnableTableCounter {
 		return nil
 	}
@@ -206,7 +205,7 @@ func (db *RockDB) GetTableKeyCount(table []byte) (int64, error) {
 	tm := encodeTableMetaKey(table)
 	var err error
 	var size uint64
-	if size, err = GetRocksdbUint64(db.eng.GetBytes(db.defaultReadOpts, tm)); err != nil {
+	if size, err = GetRocksdbUint64(db.GetBytes(tm)); err != nil {
 	}
 	return int64(size), err
 }
@@ -250,7 +249,7 @@ func (db *RockDB) GetHsetIndexTables() [][]byte {
 	ch := make([][]byte, 0, 100)
 	s := encodeTableIndexMetaStartKey(hsetIndexMeta)
 	e := encodeTableIndexMetaStopKey(hsetIndexMeta)
-	it, err := NewDBRangeIterator(db.eng, s, e, common.RangeOpen, false)
+	it, err := db.NewDBRangeIterator(s, e, common.RangeOpen, false)
 	if err != nil {
 		return nil
 	}
@@ -270,15 +269,15 @@ func (db *RockDB) GetHsetIndexTables() [][]byte {
 
 func (db *RockDB) GetTableHsetIndexValue(table []byte) ([]byte, error) {
 	key := encodeTableIndexMetaKey(table, hsetIndexMeta)
-	return db.eng.GetBytes(db.defaultReadOpts, key)
+	return db.GetBytes(key)
 }
 
 func (db *RockDB) SetTableHsetIndexValue(table []byte, value []byte) error {
 	// this may not run in raft loop
 	// so we should use new db write batch here
 	key := encodeTableIndexMetaKey(table, hsetIndexMeta)
-	wb := gorocksdb.NewWriteBatch()
+	wb := db.rockEng.NewWriteBatch()
 	defer wb.Destroy()
 	wb.Put(key, value)
-	return db.eng.Write(db.defaultWriteOpts, wb)
+	return db.rockEng.Write(wb)
 }

@@ -33,6 +33,10 @@ func TestKVNode_listCommand(t *testing.T) {
 		{"lfixkey", buildCommand([][]byte{[]byte("lfixkey"), testKey})},
 		{"rpop", buildCommand([][]byte{[]byte("rpop"), testKey})},
 		{"rpush", buildCommand([][]byte{[]byte("rpush"), testKey, testKeyValue})},
+		{"lttl", buildCommand([][]byte{[]byte("lttl"), testKey})},
+		{"lkeyexist", buildCommand([][]byte{[]byte("lkeyexist"), testKey})},
+		{"lexpire", buildCommand([][]byte{[]byte("lexpire"), testKey, []byte("10")})},
+		{"lpersist", buildCommand([][]byte{[]byte("lpersist"), testKey})},
 		{"lclear", buildCommand([][]byte{[]byte("lclear"), testKey})},
 	}
 	defer os.RemoveAll(dataDir)
@@ -41,8 +45,18 @@ func TestKVNode_listCommand(t *testing.T) {
 	c := &fakeRedisConn{}
 	for _, cmd := range tests {
 		c.Reset()
-		handler, _, _ := nd.router.GetCmdHandler(cmd.name)
-		handler(c, cmd.args)
-		assert.Nil(t, c.GetError())
+		origCmd := append([]byte{}, cmd.args.Raw...)
+		handler, ok := nd.router.GetCmdHandler(cmd.name)
+		if ok {
+			handler(c, cmd.args)
+			assert.Nil(t, c.GetError())
+		} else {
+			whandler, _ := nd.router.GetWCmdHandler(cmd.name)
+			rsp, err := whandler(cmd.args)
+			assert.Nil(t, err)
+			_, ok := rsp.(error)
+			assert.True(t, !ok)
+		}
+		assert.Equal(t, origCmd, cmd.args.Raw)
 	}
 }

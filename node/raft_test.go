@@ -21,12 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/common"
-	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/testutil"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
-	"github.com/absolute8511/ZanRedisDB/transport/rafthttp"
+	"github.com/youzan/ZanRedisDB/common"
+	"github.com/youzan/ZanRedisDB/pkg/pbutil"
+	"github.com/youzan/ZanRedisDB/pkg/testutil"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/transport/rafthttp"
+	"github.com/youzan/ZanRedisDB/wal/walpb"
 	"golang.org/x/net/context"
 )
 
@@ -36,7 +37,10 @@ func newNodeRecorder() *nodeRecorder       { return &nodeRecorder{&testutil.Reco
 func newNodeRecorderStream() *nodeRecorder { return &nodeRecorder{testutil.NewRecorderStream()} }
 func newNodeNop() raft.Node                { return newNodeRecorder() }
 
-func (n *nodeRecorder) Tick() { n.Record(testutil.Action{Name: "Tick"}) }
+func (n *nodeRecorder) Tick() bool {
+	n.Record(testutil.Action{Name: "Tick"})
+	return true
+}
 func (n *nodeRecorder) Campaign(ctx context.Context) error {
 	n.Record(testutil.Action{Name: "Campaign"})
 	return nil
@@ -51,6 +55,11 @@ func (n *nodeRecorder) ProposeWithDrop(ctx context.Context, data []byte, cancel 
 	return nil
 }
 
+func (n *nodeRecorder) ProposeEntryWithDrop(ctx context.Context, e raftpb.Entry, cancel context.CancelFunc) error {
+	n.Record(testutil.Action{Name: "Propose", Params: []interface{}{e.Data}})
+	return nil
+}
+
 func (n *nodeRecorder) ProposeConfChange(ctx context.Context, conf raftpb.ConfChange) error {
 	n.Record(testutil.Action{Name: "ProposeConfChange"})
 	return nil
@@ -59,11 +68,16 @@ func (n *nodeRecorder) Step(ctx context.Context, msg raftpb.Message) error {
 	n.Record(testutil.Action{Name: "Step"})
 	return nil
 }
+func (n *nodeRecorder) ConfChangedCh() <-chan raftpb.ConfChange                         { return nil }
+func (n *nodeRecorder) HandleConfChanged(cc raftpb.ConfChange)                          { return }
+func (n *nodeRecorder) EventNotifyCh() chan bool                                        { return nil }
+func (n *nodeRecorder) NotifyEventCh()                                                  { return }
+func (n *nodeRecorder) StepNode(bool, bool) (raft.Ready, bool)                          { return raft.Ready{}, true }
 func (n *nodeRecorder) Status() raft.Status                                             { return raft.Status{} }
 func (n *nodeRecorder) Ready() <-chan raft.Ready                                        { return nil }
 func (n *nodeRecorder) TransferLeadership(ctx context.Context, lead, transferee uint64) {}
 func (n *nodeRecorder) ReadIndex(ctx context.Context, rctx []byte) error                { return nil }
-func (n *nodeRecorder) Advance()                                                        {}
+func (n *nodeRecorder) Advance(rd raft.Ready)                                           {}
 func (n *nodeRecorder) ApplyConfChange(conf raftpb.ConfChange) *raftpb.ConfState {
 	n.Record(testutil.Action{Name: "ApplyConfChange", Params: []interface{}{conf}})
 	return &raftpb.ConfState{}
@@ -72,6 +86,7 @@ func (n *nodeRecorder) ApplyConfChange(conf raftpb.ConfChange) *raftpb.ConfState
 func (n *nodeRecorder) Stop() {
 	n.Record(testutil.Action{Name: "Stop"})
 }
+func (n *nodeRecorder) DebugString() string { return "" }
 
 func (n *nodeRecorder) ReportUnreachable(id uint64, g raftpb.Group) {}
 
@@ -85,18 +100,40 @@ func (n *nodeRecorder) Compact(index uint64, nodes []uint64, d []byte) {
 type readyNode struct {
 	nodeRecorder
 	readyc chan raft.Ready
+	c      chan bool
 }
 
 func newReadyNode() *readyNode {
 	return &readyNode{
-		nodeRecorder{testutil.NewRecorderStream()},
-		make(chan raft.Ready, 1)}
-}
-func newNopReadyNode() *readyNode {
-	return &readyNode{*newNodeRecorder(), make(chan raft.Ready, 1)}
+		nodeRecorder: nodeRecorder{testutil.NewRecorderStream()},
+		c:            make(chan bool, 1),
+		readyc:       make(chan raft.Ready, 1)}
 }
 
-func (n *readyNode) Ready() <-chan raft.Ready { return n.readyc }
+func newNopReadyNode() *readyNode {
+	return &readyNode{*newNodeRecorder(), make(chan raft.Ready, 1), make(chan bool, 1)}
+}
+
+func (n *readyNode) EventNotifyCh() chan bool { return n.c }
+
+func (n *readyNode) pushReady(rd raft.Ready) {
+	select {
+	case n.readyc <- rd:
+	}
+	select {
+	case n.c <- true:
+	default:
+	}
+}
+
+func (n *readyNode) StepNode(bool, bool) (raft.Ready, bool) {
+	select {
+	case rd := <-n.readyc:
+		return rd, true
+	default:
+	}
+	return raft.Ready{}, false
+}
 
 type storageRecorder struct {
 	testutil.Recorder
@@ -116,15 +153,32 @@ func (p *storageRecorder) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	return nil
 }
 
-func (p *storageRecorder) Load() (*raftpb.Snapshot, string, error) {
+func (p *storageRecorder) Load() (*raftpb.Snapshot, error) {
 	p.Record(testutil.Action{Name: "Load"})
-	return nil, "", nil
+	return nil, nil
+}
+
+func (p *storageRecorder) LoadNewestAvailable(walSnaps []walpb.Snapshot) (*raftpb.Snapshot, error) {
+	p.Record(testutil.Action{Name: "LoadNewestAvailable"})
+	return nil, nil
 }
 
 func (p *storageRecorder) SaveSnap(st raftpb.Snapshot) error {
 	if !raft.IsEmptySnap(st) {
 		p.Record(testutil.Action{Name: "SaveSnap"})
 	}
+	return nil
+}
+
+func (p *storageRecorder) Release(st raftpb.Snapshot) error {
+	if !raft.IsEmptySnap(st) {
+		p.Record(testutil.Action{Name: "Release"})
+	}
+	return nil
+}
+
+func (p *storageRecorder) Sync() error {
+	p.Record(testutil.Action{Name: "Sync"})
 	return nil
 }
 
@@ -357,7 +411,14 @@ func TestStopRaftWhenWaitingForApplyDone(t *testing.T) {
 		r.serveChannels()
 		close(done)
 	}()
-	n.readyc <- raft.Ready{}
+	n.pushReady(raft.Ready{
+		Snapshot: raftpb.Snapshot{
+			Metadata: raftpb.SnapshotMetadata{
+				Term:  1,
+				Index: 1,
+			},
+		},
+	})
 	select {
 	case <-commitC:
 	case <-time.After(time.Second):
@@ -398,10 +459,10 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 	}()
 	defer close(r.stopc)
 
-	n.readyc <- raft.Ready{
+	n.pushReady(raft.Ready{
 		SoftState:        &raft.SoftState{RaftState: raft.StateFollower},
 		CommittedEntries: []raftpb.Entry{{Type: raftpb.EntryConfChange}},
-	}
+	})
 	blockingEnt := <-commitC
 	if blockingEnt.applyWaitDone == nil {
 		t.Fatalf("unexpected nil chan, should init wait channel for waiting apply conf change event")
@@ -409,7 +470,14 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 
 	continueC := make(chan struct{})
 	go func() {
-		n.readyc <- raft.Ready{}
+		n.pushReady(raft.Ready{
+			Snapshot: raftpb.Snapshot{
+				Metadata: raftpb.SnapshotMetadata{
+					Term:  1,
+					Index: 2,
+				},
+			},
+		})
 		<-commitC
 		close(continueC)
 	}()
@@ -428,4 +496,108 @@ func TestConfgChangeBlocksApply(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("unexpected blocking on execution")
 	}
+}
+
+type fakeDataStorage struct {
+}
+
+func (*fakeDataStorage) CleanData() error                                        { return nil }
+func (*fakeDataStorage) RestoreFromSnapshot(raftpb.Snapshot) error               { return nil }
+func (*fakeDataStorage) PrepareSnapshot(raftpb.Snapshot) error                   { return nil }
+func (*fakeDataStorage) GetSnapshot(term uint64, index uint64) (Snapshot, error) { return nil, nil }
+func (*fakeDataStorage) UpdateSnapshotState(term uint64, index uint64)           {}
+func (*fakeDataStorage) Stop()                                                   {}
+func TestSnapshotApplyingShouldBlock(t *testing.T) {
+	// TODO: apply slow snapshot should not become leader for compaign
+	n := newNopReadyNode()
+	config := &RaftConfig{
+		GroupID:   1,
+		GroupName: "testgroup",
+		ID:        1,
+		RaftAddr:  "127.0.0.1:1239",
+	}
+	commitC := make(chan applyInfo, 10)
+	r := &raftNode{
+		ds:             &fakeDataStorage{},
+		config:         config,
+		commitC:        commitC,
+		node:           n,
+		persistStorage: NewStorageRecorder(""),
+		raftStorage:    raft.NewMemoryStorage(),
+		transport:      rafthttp.NewNopTransporter(),
+		stopc:          make(chan struct{}),
+	}
+
+	go func() {
+		r.serveChannels()
+	}()
+	defer close(r.stopc)
+
+	n.pushReady(raft.Ready{
+		SoftState: &raft.SoftState{RaftState: raft.StateFollower},
+		Snapshot: raftpb.Snapshot{
+			Metadata: raftpb.SnapshotMetadata{
+				Term:  1,
+				Index: 2,
+			},
+		},
+	})
+	blockingEnt := <-commitC
+	if blockingEnt.applyWaitDone == nil {
+		t.Fatalf("unexpected nil chan, should init wait channel for waiting apply snapshot event")
+	}
+	if blockingEnt.applySnapshotResult == nil {
+		t.Fatalf("unexpected nil chan, should init wait channel for waiting apply snapshot event")
+	}
+	continueC := make(chan struct{})
+	go func() {
+		n.pushReady(raft.Ready{
+			Snapshot: raftpb.Snapshot{
+				Metadata: raftpb.SnapshotMetadata{
+					Term:  1,
+					Index: 3,
+				},
+			},
+		})
+		select {
+		case blockingEnt2 := <-commitC:
+			if blockingEnt2.applyWaitDone == nil {
+				t.Fatalf("unexpected nil chan, should init wait channel for waiting apply conf change event")
+			}
+			// finish apply, unblock raft routine
+			blockingEnt2.applySnapshotResult <- nil
+			<-blockingEnt2.raftDone
+			close(blockingEnt2.applyWaitDone)
+		case <-time.After(time.Second * 3):
+			t.Fatalf("unexpected blocking on execution")
+		}
+
+		close(continueC)
+	}()
+
+	select {
+	case <-continueC:
+		t.Fatalf("unexpected execution: raft routine should block waiting for apply")
+	case <-time.After(time.Second):
+	}
+
+	// finish apply, unblock raft routine
+	blockingEnt.applySnapshotResult <- nil
+	<-blockingEnt.raftDone
+	<-blockingEnt.raftDone
+	close(blockingEnt.applyWaitDone)
+
+	select {
+	case <-continueC:
+	case <-time.After(time.Second * 4):
+		t.Fatalf("unexpected blocking on execution")
+	}
+}
+
+func TestSnapshotPreTransferRetryOnFail(t *testing.T) {
+	// TODO: a failed snapshot receive should retry after report failed
+}
+
+func TestSlowApplyingShouldPauseRaftStep(t *testing.T) {
+	// TODO: slow in state machine should pause raft step to avoid too much memory for raft logs
 }

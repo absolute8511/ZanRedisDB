@@ -7,25 +7,8 @@
 #sudo yum install devtoolset-3-gcc devtoolset-3-gcc-c++ devtoolset-3-gdb
 
 echo `pwd`
-GoDep=`go env GOPATH`/src/golang.org/x
-mkdir -p $GoDep
-if [ ! -d "$GoDep/net" ]; then
-  pushd $GoDep && git clone https://github.com/golang/net.git && popd
-fi
-if [ ! -d "$GoDep/sys" ]; then
-  pushd $GoDep && git clone https://github.com/golang/sys.git && popd
-fi
 
-googleDep=`go env GOPATH`/src/google.golang.org
-mkdir -p $googleDep
-if [ ! -d "$googleDep/grpc" ]; then
-  pushd $googleDep && git clone https://github.com/grpc/grpc-go.git grpc && popd
-fi
-if [ ! -d "$googleDep/genproto" ]; then
-  pushd $googleDep && git https://github.com/google/go-genproto clone genproto && popd
-fi
-
-go get -d github.com/absolute8511/ZanRedisDB/...
+go get -d github.com/youzan/ZanRedisDB/...
 arch=$(go env GOARCH)
 os=$(go env GOOS)
 goversion=$(go version | awk '{print $3}')
@@ -35,30 +18,29 @@ etcdurl=$ETCD_URL
 
 scl enable devtoolset-3 bash
 
-rocksdb=`pwd`/rocksdb
+rocksdb=$(pwd)/rocksdb
 if [ ! -f "$rocksdb/Makefile" ]; then
   rm -rf $rocksdb
   git clone https://github.com/absolute8511/rocksdb.git $rocksdb
 fi
 pushd $rocksdb
 git pull
-git checkout v5.8.8-share-rate-limiter
-CC=/opt/rh/devtoolset-3/root/usr/bin/gcc CXX=/opt/rh/devtoolset-3/root/usr/bin/g++ LD=/opt/rh/devtoolset-3/root/usr/bin/ld USE_SSE=1 make static_lib
+git checkout v6.4.6-patched
+PORTABLE=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 popd
 
-LD=/opt/rh/devtoolset-3/root/usr/bin/ld CGO_CFLAGS="-I$rocksdb/include" CGO_LDFLAGS="-L/opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2 -L$rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -lz -lbz2" go get -u github.com/absolute8511/gorocksdb
+export PATH=$(pwd):$PATH
 
-wget -c https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm
-export PATH=`pwd`:$PATH
-
-echo `pwd`
-pushd `go env GOPATH`/src/github.com/absolute8511/ZanRedisDB/
+echo $(pwd)
+pushd $(go env GOPATH)/src/github.com/youzan/ZanRedisDB/
 git pull
 ./pre-dist.sh || true
-./dist.sh
+## we also use gpm in ci because some dep can not be pulled since gfw.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROCKSDB=$rocksdb ./dist.sh
 popd
 
-if [ ! -f "`pwd`/etcd-v2.3.8-linux-amd64/etcd" ] && [ -z "$etcdurl" ]; then
+if [ ! -f "$(pwd)/etcd-v2.3.8-linux-amd64/etcd" ] && [ -z "$etcdurl" ]; then
   rm -rf etcd-v2.3.8-linux-amd64
   wget -c https://github.com/coreos/etcd/releases/download/v2.3.8/etcd-v2.3.8-linux-amd64.tar.gz
   tar -xvzf etcd-v2.3.8-linux-amd64.tar.gz 
@@ -71,7 +53,7 @@ fi
 echo $etcdurl
 echo $ETCD_URL
 
-cp -fp `go env GOPATH`/src/github.com/absolute8511/ZanRedisDB/dist/$LATEST.tar.gz .
+cp -fp $(go env GOPATH)/src/github.com/youzan/ZanRedisDB/dist/$LATEST.tar.gz .
 killall zankv || true
 killall placedriver || true
 killall etcd || true

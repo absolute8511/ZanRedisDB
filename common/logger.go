@@ -8,13 +8,37 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/absolute8511/glog"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
+
+var inTestLog bool
+
+func init() {
+	conf := zap.NewProductionConfig()
+	conf.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	conf.DisableStacktrace = true
+	conf.OutputPaths = []string{"stdout"}
+	l, err := conf.Build(zap.AddCallerSkip(2), zap.AddCaller())
+	if err != nil {
+		panic(err)
+	}
+
+	zapLog = l
+}
 
 type Logger interface {
 	Output(maxdepth int, s string) error
 	OutputErr(maxdepth int, s string) error
 	OutputWarning(maxdepth int, s string) error
+}
+
+func NewLogger() Logger {
+	if inTestLog {
+		return NewDefaultLogger("test")
+	}
+	return newZapLogger("")
 }
 
 type defaultLogger struct {
@@ -43,24 +67,6 @@ func (dl *defaultLogger) OutputErr(maxdepth int, s string) error {
 
 func (dl *defaultLogger) OutputWarning(maxdepth int, s string) error {
 	dl.logger.Output(maxdepth+1, header("WARN", s))
-	return nil
-}
-
-type GLogger struct {
-}
-
-func (gl *GLogger) Output(maxdepth int, s string) error {
-	glog.InfoDepth(maxdepth, s)
-	return nil
-}
-
-func (gl *GLogger) OutputErr(maxdepth int, s string) error {
-	glog.ErrorDepth(maxdepth, s)
-	return nil
-}
-
-func (gl *GLogger) OutputWarning(maxdepth int, s string) error {
-	glog.WarningDepth(maxdepth, s)
 	return nil
 }
 
@@ -357,4 +363,129 @@ func (l *MergeLogger) outputLoop() {
 			}
 		}
 	}
+}
+
+var zapLog *zap.Logger
+
+func FlushZapDefault() {
+	if zapLog != nil {
+		zapLog.Sync()
+	}
+}
+
+func SetZapRotateOptions(alsoLogToStdout bool, alsoLogErrToStdErr bool, logfile string, maxMB int, maxBackup int, maxAgeDay int) {
+	stdOut := zapcore.Lock(os.Stdout)
+	stdErr := zapcore.Lock(os.Stderr)
+	errPri := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		return lvl >= zapcore.ErrorLevel
+	})
+	nonErrPri := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		return lvl < zapcore.ErrorLevel
+	})
+	encConf := zap.NewProductionEncoderConfig()
+	encConf.EncodeTime = zapcore.ISO8601TimeEncoder
+	enc := zapcore.NewJSONEncoder(encConf)
+	fmt.Printf("zap logger option: %v, %v, %v, %v\n", alsoLogToStdout, alsoLogErrToStdErr, logfile, maxAgeDay)
+	if logfile == "" {
+		wrap := zap.WrapCore(func(c zapcore.Core) zapcore.Core {
+			return zapcore.NewTee(
+				zapcore.NewCore(enc, stdErr, errPri),
+				zapcore.NewCore(enc, stdOut, nonErrPri),
+			)
+		})
+		zapLog = zapLog.WithOptions(wrap)
+		return
+	}
+	rotateLog := &lumberjack.Logger{
+		Filename: logfile,
+		MaxSize:  200,
+		MaxAge:   30,
+	}
+	if maxMB > 0 {
+		rotateLog.MaxSize = maxMB
+	}
+	if maxBackup > 0 {
+		rotateLog.MaxBackups = maxBackup
+	}
+	if maxAgeDay > 0 {
+		rotateLog.MaxAge = maxAgeDay
+	}
+	wrap := zap.WrapCore(func(c zapcore.Core) zapcore.Core {
+		w := zapcore.AddSync(rotateLog)
+		rotateCore := zapcore.NewCore(enc, w, zap.DebugLevel)
+		if alsoLogToStdout && alsoLogErrToStdErr {
+			return zapcore.NewTee(
+				zapcore.NewCore(enc, stdOut, nonErrPri),
+				zapcore.NewCore(enc, stdErr, errPri),
+				rotateCore,
+			)
+		} else if alsoLogToStdout {
+			return zapcore.NewTee(
+				zapcore.NewCore(enc, stdOut, nonErrPri),
+				rotateCore,
+			)
+		} else if alsoLogErrToStdErr {
+			return zapcore.NewTee(
+				zapcore.NewCore(enc, stdErr, errPri),
+				rotateCore,
+			)
+		}
+		return zapcore.NewTee(rotateCore)
+	})
+	zapLog = zapLog.WithOptions(wrap)
+}
+
+type zapLogger struct {
+	module string
+}
+
+// note: currently, the zap logger do not support buffer writer by default, so we need merge new code after the zap new
+// release published.
+func newZapLogger(module string) *zapLogger {
+	return &zapLogger{
+		module: module,
+	}
+}
+
+func (zl *zapLogger) Output(maxdepth int, s string) error {
+	if zapLog == nil {
+		return nil
+	}
+	if maxdepth <= 2 {
+		zapLog.Named(zl.module).Info(s)
+	} else {
+		zapLog.Named(zl.module).WithOptions(zap.AddCallerSkip(maxdepth - 2)).Info(s)
+	}
+	return nil
+}
+
+func (zl *zapLogger) OutputWarning(maxdepth int, s string) error {
+	if zapLog == nil {
+		return nil
+	}
+	if maxdepth == 2 {
+		zapLog.Named(zl.module).Warn(s)
+	} else {
+		zapLog.Named(zl.module).WithOptions(zap.AddCallerSkip(maxdepth - 2)).Warn(s)
+	}
+	return nil
+}
+
+func (zl *zapLogger) OutputErr(maxdepth int, s string) error {
+	if zapLog == nil {
+		return nil
+	}
+	if maxdepth == 2 {
+		zapLog.Named(zl.module).Error(s)
+	} else {
+		zapLog.Named(zl.module).WithOptions(zap.AddCallerSkip(maxdepth - 2)).Error(s)
+	}
+	return nil
+}
+
+func (zl *zapLogger) Flush() {
+	if zapLog == nil {
+		return
+	}
+	zapLog.Sync()
 }

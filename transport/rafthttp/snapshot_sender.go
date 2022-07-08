@@ -16,22 +16,26 @@ package rafthttp
 
 import (
 	"bytes"
-	"golang.org/x/net/context"
+	"errors"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"time"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/httputil"
-	pioutil "github.com/absolute8511/ZanRedisDB/pkg/ioutil"
-	"github.com/absolute8511/ZanRedisDB/pkg/types"
-	"github.com/absolute8511/ZanRedisDB/raft"
-	"github.com/absolute8511/ZanRedisDB/snap"
+	"golang.org/x/net/context"
+
+	"github.com/youzan/ZanRedisDB/pkg/httputil"
+	pioutil "github.com/youzan/ZanRedisDB/pkg/ioutil"
+	"github.com/youzan/ZanRedisDB/pkg/types"
+	"github.com/youzan/ZanRedisDB/raft"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/snap"
 )
 
 var (
 	// timeout for reading snapshot response body
-	snapResponseReadTimeout = 5 * time.Second
+	snapResponseReadTimeout   = 5 * time.Second
+	snapTransferCheckInterval = 5 * time.Second
 )
 
 type snapshotSender struct {
@@ -61,7 +65,9 @@ func newSnapshotSender(tr *Transport, picker *urlPicker, to types.ID, status *pe
 	}
 }
 
-func (s *snapshotSender) stop() { close(s.stopc) }
+func (s *snapshotSender) stop() {
+	close(s.stopc)
+}
 
 func (s *snapshotSender) send(merged snap.Message) {
 	m := merged.Message
@@ -97,12 +103,72 @@ func (s *snapshotSender) send(merged snap.Message) {
 		sentFailures.WithLabelValues(m.ToGroup.String()).Inc()
 		return
 	}
-	s.status.activate()
-	s.r.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFinish)
-	plog.Infof("database snapshot [index: %d, to: %s] sent out successfully",
-		m.Snapshot.Metadata.Index, m.ToGroup.String())
-
 	sentBytes.WithLabelValues(m.ToGroup.String()).Add(float64(merged.TotalSize))
+	// send health check until all snapshot data is done
+
+	s.status.activate()
+	go func() {
+		tk := time.NewTicker(snapTransferCheckInterval)
+		defer tk.Stop()
+		done := false
+		var err error
+		for !done {
+			select {
+			case <-s.stopc:
+				s.r.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
+				return
+			case <-tk.C:
+				// check snapshot status, consider status code 404/400 as old and skip
+				done, err = s.checkSnapshotStatus(m)
+				if err != nil {
+					plog.Infof("database snapshot [index: %d, to: %s] sent check failed: %v",
+						m.Snapshot.Metadata.Index, m.ToGroup.String(), err.Error())
+					s.r.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFailure)
+					return
+				}
+				if !done {
+					plog.Infof("database snapshot [index: %d, to: %s] sent still transferring",
+						m.Snapshot.Metadata.Index, m.ToGroup.String())
+				}
+			}
+		}
+		s.r.ReportSnapshot(m.To, m.ToGroup, raft.SnapshotFinish)
+		plog.Infof("database snapshot [index: %d, to: %s] sent out successfully",
+			m.Snapshot.Metadata.Index, m.ToGroup.String())
+	}()
+}
+
+func (s *snapshotSender) checkSnapshotStatus(m raftpb.Message) (bool, error) {
+	buf := &bytes.Buffer{}
+	enc := &messageEncoder{w: buf}
+	// encode raft message
+	if err := enc.encode(&m); err != nil {
+		return false, err
+	}
+	u := s.picker.pick()
+	req := createPostRequest(u, RaftSnapshotCheckPrefix, buf, "application/octet-stream", s.tr.URLs, s.from, s.cid)
+
+	ctx, cancel := context.WithTimeout(context.Background(), snapTransferCheckInterval)
+	req = req.WithContext(ctx)
+	defer cancel()
+	resp, err := s.tr.pipelineRt.RoundTrip(req)
+	if err != nil {
+		return false, err
+	}
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		// snapshot transfer finished
+		return true, nil
+	case http.StatusAlreadyReported:
+		// waiting snapshot transfer
+		return false, nil
+	case http.StatusNotFound, http.StatusForbidden, http.StatusMethodNotAllowed, http.StatusBadRequest:
+		// old version, no waiting
+		return true, nil
+	default:
+		plog.Infof("not expected response while check snapshot: %v", resp.Status)
+		return false, errors.New(resp.Status)
+	}
 }
 
 // post posts the given request.

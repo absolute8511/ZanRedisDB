@@ -19,8 +19,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/absolute8511/ZanRedisDB/pkg/pbutil"
-	"github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	"github.com/youzan/ZanRedisDB/pkg/pbutil"
+	"github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 // messageEncoder is a encoder that can encode all kinds of messages.
@@ -39,7 +39,8 @@ func (enc *messageEncoder) encode(m *raftpb.Message) error {
 
 // messageDecoder is a decoder that can decode all kinds of messages.
 type messageDecoder struct {
-	r io.Reader
+	r   io.Reader
+	buf []byte
 }
 
 var (
@@ -47,6 +48,12 @@ var (
 	ErrExceedSizeLimit        = errors.New("rafthttp: error limit exceeded")
 )
 
+func newMessageDecoder(r io.Reader) *messageDecoder {
+	return &messageDecoder{
+		r:   r,
+		buf: make([]byte, msgAppV2BufSize),
+	}
+}
 func (dec *messageDecoder) decode() (raftpb.Message, error) {
 	var m raftpb.Message
 	var l uint64
@@ -56,7 +63,12 @@ func (dec *messageDecoder) decode() (raftpb.Message, error) {
 	if l > readBytesLimit {
 		return m, ErrExceedSizeLimit
 	}
-	buf := make([]byte, int(l))
+	var buf []byte
+	if l < uint64(len(dec.buf)) {
+		buf = dec.buf[:l]
+	} else {
+		buf = make([]byte, int(l))
+	}
 	if _, err := io.ReadFull(dec.r, buf); err != nil {
 		return m, err
 	}

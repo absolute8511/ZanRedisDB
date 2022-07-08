@@ -18,7 +18,7 @@ import (
 	"reflect"
 	"testing"
 
-	pb "github.com/absolute8511/ZanRedisDB/raft/raftpb"
+	pb "github.com/youzan/ZanRedisDB/raft/raftpb"
 )
 
 func TestFindConflict(t *testing.T) {
@@ -46,6 +46,7 @@ func TestFindConflict(t *testing.T) {
 
 	for i, tt := range tests {
 		raftLog := newLog(NewMemoryStorage(), raftLogger)
+		defer raftLog.storage.(IExtRaftStorage).Close()
 		raftLog.append(previousEnts...)
 
 		gconflict := raftLog.findConflict(tt.ents)
@@ -58,6 +59,7 @@ func TestFindConflict(t *testing.T) {
 func TestIsUpToDate(t *testing.T) {
 	previousEnts := []pb.Entry{{Index: 1, Term: 1}, {Index: 2, Term: 2}, {Index: 3, Term: 3}}
 	raftLog := newLog(NewMemoryStorage(), raftLogger)
+	defer raftLog.storage.(IExtRaftStorage).Close()
 	raftLog.append(previousEnts...)
 	tests := []struct {
 		lastIndex uint64
@@ -124,6 +126,7 @@ func TestAppend(t *testing.T) {
 
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
+		defer storage.Close()
 		storage.Append(previousEnts)
 		raftLog := newLog(storage, raftLogger)
 
@@ -237,6 +240,7 @@ func TestLogMaybeAppend(t *testing.T) {
 
 	for i, tt := range tests {
 		raftLog := newLog(NewMemoryStorage(), raftLogger)
+		defer raftLog.storage.(IExtRaftStorage).Close()
 		raftLog.append(previousEnts...)
 		raftLog.committed = commit
 		func() {
@@ -281,6 +285,7 @@ func TestCompactionSideEffects(t *testing.T) {
 	unstableIndex := uint64(750)
 	lastTerm := lastIndex
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	for i = 1; i <= unstableIndex; i++ {
 		storage.Append([]pb.Entry{{Term: uint64(i), Index: uint64(i)}})
 	}
@@ -357,6 +362,7 @@ func TestHasNextEnts(t *testing.T) {
 	}
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
+		defer storage.Close()
 		storage.ApplySnapshot(snap)
 		raftLog := newLog(storage, raftLogger)
 		raftLog.append(ents...)
@@ -390,6 +396,7 @@ func TestNextEnts(t *testing.T) {
 	}
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
+		defer storage.Close()
 		storage.ApplySnapshot(snap)
 		raftLog := newLog(storage, raftLogger)
 		raftLog.append(ents...)
@@ -418,6 +425,7 @@ func TestUnstableEnts(t *testing.T) {
 	for i, tt := range tests {
 		// append stable entries to storage
 		storage := NewMemoryStorage()
+		defer storage.Close()
 		storage.Append(previousEnts[:tt.unstable-1])
 
 		// append unstable entries to raftlog
@@ -460,6 +468,7 @@ func TestCommitTo(t *testing.T) {
 				}
 			}()
 			raftLog := newLog(NewMemoryStorage(), raftLogger)
+			defer raftLog.storage.(IExtRaftStorage).Close()
 			raftLog.append(previousEnts...)
 			raftLog.committed = commit
 			raftLog.commitTo(tt.commit)
@@ -483,6 +492,7 @@ func TestStableTo(t *testing.T) {
 	}
 	for i, tt := range tests {
 		raftLog := newLog(NewMemoryStorage(), raftLogger)
+		defer raftLog.storage.(IExtRaftStorage).Close()
 		raftLog.append([]pb.Entry{{Index: 1, Term: 1}, {Index: 2, Term: 2}}...)
 		raftLog.stableTo(tt.stablei, tt.stablet)
 		if raftLog.unstable.offset != tt.wunstable {
@@ -518,6 +528,7 @@ func TestStableToWithSnap(t *testing.T) {
 	}
 	for i, tt := range tests {
 		s := NewMemoryStorage()
+		defer s.Close()
 		s.ApplySnapshot(pb.Snapshot{Metadata: pb.SnapshotMetadata{Index: snapi, Term: snapt}})
 		raftLog := newLog(s, raftLogger)
 		raftLog.append(tt.newEnts...)
@@ -554,6 +565,7 @@ func TestCompaction(t *testing.T) {
 			}()
 
 			storage := NewMemoryStorage()
+			defer storage.Close()
 			for i := uint64(1); i <= tt.lastIndex; i++ {
 				storage.Append([]pb.Entry{{Index: i}})
 			}
@@ -582,6 +594,7 @@ func TestLogRestore(t *testing.T) {
 	term := uint64(1000)
 	snap := pb.SnapshotMetadata{Index: index, Term: term}
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.ApplySnapshot(pb.Snapshot{Metadata: snap})
 	raftLog := newLog(storage, raftLogger)
 
@@ -606,6 +619,7 @@ func TestIsOutOfBounds(t *testing.T) {
 	offset := uint64(100)
 	num := uint64(100)
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.ApplySnapshot(pb.Snapshot{Metadata: pb.SnapshotMetadata{Index: offset}})
 	l := newLog(storage, raftLogger)
 	for i := uint64(1); i <= num; i++ {
@@ -689,6 +703,7 @@ func TestTerm(t *testing.T) {
 	num := uint64(100)
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.ApplySnapshot(pb.Snapshot{Metadata: pb.SnapshotMetadata{Index: offset, Term: 1}})
 	l := newLog(storage, raftLogger)
 	for i = 1; i < num; i++ {
@@ -719,6 +734,7 @@ func TestTermWithUnstableSnapshot(t *testing.T) {
 	unstablesnapi := storagesnapi + 5
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.ApplySnapshot(pb.Snapshot{Metadata: pb.SnapshotMetadata{Index: storagesnapi, Term: 1}})
 	l := newLog(storage, raftLogger)
 	l.restore(pb.Snapshot{Metadata: pb.SnapshotMetadata{Index: unstablesnapi, Term: 1}})
@@ -753,6 +769,7 @@ func TestSlice(t *testing.T) {
 	halfe := pb.Entry{Index: half, Term: half}
 
 	storage := NewMemoryStorage()
+	defer storage.Close()
 	storage.ApplySnapshot(pb.Snapshot{Metadata: pb.SnapshotMetadata{Index: offset}})
 	for i = 1; i < num/2; i++ {
 		storage.Append([]pb.Entry{{Index: offset + i, Term: offset + i}})

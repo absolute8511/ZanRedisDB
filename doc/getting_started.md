@@ -9,37 +9,32 @@ apt-get install libsnappy1 libsnappy-dev (for Debian/Ubuntu)
 brew install snappy (for Mac)
 </pre>
 
-Build the rocksdb 
+Build the rocksdb with jemalloc
 <pre>
 git clone https://github.com/absolute8511/rocksdb.git
 cd rocksdb
-git checkout v5.8.8-share-rate-limiter
-make static_lib
+git checkout v6.4.6-patched
+PORTABLE=1 USE_SSE=1 USE_PCLMUL=1 WITH_JEMALLOC_FLAG=1 JEMALLOC=1 make static_lib
 </pre>
 
-Install the dependency:
+Install the dependency (for old go version only, if using go1.13+, it will be done in go modules):
 <pre>
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt" go get github.com/absolute8511/gorocksdb
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -lrt -ljemalloc" go get github.com/youzan/gorocksdb
 
-CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy" go get github.com/absolute8511/gorocksdb (for MacOS)
+CGO_CFLAGS="-I/path/to/rocksdb/include" CGO_LDFLAGS="-L/path/to/rocksdb -lrocksdb -lstdc++ -lm -lsnappy -ljemalloc" go get github.com/youzan/gorocksdb (for MacOS)
 </pre>
 
-use the `gpm` to install other dependencies
-<pre>
-wget https://raw.githubusercontent.com/pote/gpm/v1.4.0/bin/gpm && chmod +x gpm && sudo mv gpm /usr/local/bin
-gpm get
-</pre>
+use the `dep ensure` to install other dependencies, or use go modules for go1.13+ 
 
-
-Build zankv and placedriver from the source (only support go version 1.7.4+, gcc 4.9+ or xcode-command-line-tools on Mac):
+Build zankv and placedriver from the source (only support go version 1.10.8+, gcc 4.9+ or xcode-command-line-tools on Mac):
 <pre>
-make
+ROCKSDB=/path/to/rocksdb make
 </pre>
 
 If you want package the binary release run the scripts
 <pre>
 ./pre-dist.sh
-./dist.sh
+ROCKSDB=/path/to/rocksdb ./dist.sh
 </pre>
 
 ## Deploy
@@ -124,6 +119,12 @@ auto_balance_and_migrate = true
     }
 }
 ```
+You should at least 3 zankv nodes if you want make replicator=3.
+
+ * Init a namespace by sending the create the namespace API to placedriver
+ ```
+curl -X POST '127.0.0.1:13801/cluster/namespace/create?namespace=test_p4&partition_num=4&replicator=3'
+ ```
 
 ## API
 
@@ -134,7 +135,8 @@ placedriver has several HTTP APIs to manager the namespace
 - list the placedriver nodes: `GET /listpd`
 - query the namespace meta info: `GET /query/namespace_name`
 - create the namespace (handle only by leader) : `POST /cluster/namespace/create?namespace=test_p16&partition_num=16&replicator=3`
-- delete the namespace (handle only by leader): `POST /cluster/namespace/delete?namespace=test_p16&partition=**`
+- create the namespace with the new dynamic ttl support (handle only by leader) : `POST /cluster/namespace/create?namespace=test_p16&partition_num=16&replicator=3&data_version=value_header_v1&expiration_policy=wait_compact`
+- delete the namespace (handle only by leader): `DELETE /cluster/namespace/delete?namespace=test_p16&partition=**`
 
 storage server HTTP APIs for stats:
 
@@ -156,4 +158,4 @@ Golang client SDK : [client-sdk] , a redis proxy can be deployed
 based on this golang sdk if you want use the redis client in other language.
 
 
-[client-sdk]: https://github.com/absolute8511/go-zanredisdb
+[client-sdk]: https://github.com/youzan/go-zanredisdb
