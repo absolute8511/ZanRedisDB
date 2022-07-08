@@ -226,7 +226,7 @@ POST /kv/backup/:namespace
 触发指定namespace的快照备份
 
 POST --header "Content-Type: application/json" --data '{"start_from":"","end_to":"","delete_all":true, "dryrun":false}' /kv/delrange/:namespace/:table
-删除指定表的区间数据, 区间由start_from和end_to指定(注意这里需要将内容做base64编码传入), 如果要删除整个表, 需要指定delete_all=true
+删除指定表的区间数据, 区间由start_from和end_to指定(注意这里需要将内容做base64编码传入, 比如20200301传入MjAyMDAzMDE=), 如果要删除整个表, 需要指定delete_all=true
 
 POST /slowlog/set?loglevel=xx
 调整慢查日志的级别, 越大打印越多的慢查日志.
