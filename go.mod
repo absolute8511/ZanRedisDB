@@ -40,8 +40,7 @@ require (
 	github.com/shirou/gopsutil v0.0.0-20180427012116-c95755e4bcd7
 	github.com/siddontang/goredis v0.0.0-20180423163523-0b4019cbd7b7
 	github.com/stretchr/testify v1.4.0
-	github.com/tidwall/gjson v1.1.0
-	github.com/tidwall/match v1.0.1 // indirect
+	github.com/tidwall/gjson v1.9.3
 	github.com/tidwall/sjson v1.0.0
 	github.com/twmb/murmur3 v1.1.5
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
