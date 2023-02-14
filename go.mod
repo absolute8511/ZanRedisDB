@@ -24,7 +24,7 @@ require (
 	github.com/emirpasic/gods v1.12.0
 	github.com/go-ole/go-ole v1.2.1 // indirect
 	github.com/gobwas/glob v0.2.3
-	github.com/gogo/protobuf v1.3.1
+	github.com/gogo/protobuf v1.3.2
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b // indirect
 	github.com/golang/snappy v0.0.2-0.20190904063534-ff6b7dc882cf
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
@@ -50,7 +50,7 @@ require (
 	github.com/youzan/gorocksdb v0.0.0-20201201080653-1a9b5c65c962
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	go.uber.org/zap v1.16.0
-	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
+	golang.org/x/net v0.0.0-20201021035429-f5854403a974
 	google.golang.org/genproto v0.0.0-20180518175338-11a468237815 // indirect
 	google.golang.org/grpc v1.9.2
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
