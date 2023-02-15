@@ -31,12 +31,12 @@ require (
 	github.com/hashicorp/go-immutable-radix v1.3.0
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/judwhite/go-svc v1.0.0
-	github.com/julienschmidt/httprouter v1.2.0
+	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mailru/easyjson v0.7.0 // indirect
 	github.com/mreiferson/go-options v0.0.0-20161229190002-77551d20752b
 	github.com/pquerna/ffjson v0.0.0-20190930134022-aa0246cd15f7 // indirect
-	github.com/prometheus/client_golang v1.3.0
-	github.com/prometheus/client_model v0.1.0
+	github.com/prometheus/client_golang v1.11.1
+	github.com/prometheus/client_model v0.2.0
 	github.com/shirou/gopsutil v0.0.0-20180427012116-c95755e4bcd7
 	github.com/siddontang/goredis v0.0.0-20180423163523-0b4019cbd7b7
 	github.com/stretchr/testify v1.4.0
@@ -50,7 +50,7 @@ require (
 	github.com/youzan/gorocksdb v0.0.0-20201201080653-1a9b5c65c962
 	github.com/yuin/gopher-lua v0.0.0-20190514113301-1cd887cd7036 // indirect
 	go.uber.org/zap v1.16.0
-	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
+	golang.org/x/net v0.0.0-20200625001655-4c5254603344
 	google.golang.org/genproto v0.0.0-20180518175338-11a468237815 // indirect
 	google.golang.org/grpc v1.9.2
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
