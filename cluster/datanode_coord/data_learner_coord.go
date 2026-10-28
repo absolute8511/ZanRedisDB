@@ -166,6 +166,10 @@ func (dc *DataCoordinator) ensureJoinNamespaceGroupForLearner(nsInfo cluster.Par
 			if len(isr) == 0 {
 				isr = nsInfo.RaftNodes
 			}
+			if len(isr) == 0 {
+				cluster.CoordLog().Warningf("no isr or raft nodes available for %v, skip join", nsInfo.GetDesp())
+				return cluster.ErrNamespaceConfInvalid
+			}
 			for cnt <= len(isr) {
 				remote = isr[retry%len(isr)]
 				retry++
